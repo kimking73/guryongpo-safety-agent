@@ -142,7 +142,14 @@ _NEW_TURN_RESET = {
 
 
 def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_classify) -> Node:
-    """관리자 agent를 만든다. classify가 예외를 내면 fallback_classify로 대체한다."""
+    """관리자 agent를 만든다. classify가 예외를 내면 fallback_classify로 대체한다.
+
+    왜 함수를 반환하는가 (공장 함수):
+        LangGraph 노드는 state 하나만 받는 함수여야 한다. 그런데 manager는 "어떤 분류기를 쓸지"도
+        알아야 한다. 그래서 바깥 함수가 분류기를 받아 두고, 안쪽 manager가 그것을 기억해서 쓴다(클로저).
+        - 테스트·기본값: make_manager(keyword_classify)          → 이 함수 바로 아래 `manager = ...`
+        - 서비스:       make_manager(GeminiClassifier())         → service.py
+    """
 
     def manager(state: GuardianState) -> dict:
         """관리자 agent: 재난 단계를 정하고, 호출할 전문 agent를 고른다.
@@ -150,31 +157,58 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
         - chat 모드: 분류기가 질문을 보고 고른다. 재시도면 분류기가 manager_feedback을 참고한다.
         - alert 모드: Risk engine 경고(risk_event)의 재난 종류로 규칙에 따라 고른다.
         """
+        # ── 1) 새 질문인가, 재시도인가 ──────────────────────────────────────
+        # manager로 들어오는 길은 두 가지다: START(새 질문) 또는 verify_gate(검증 실패 → 재시도).
         # verdict가 "retry"인 것은 verify_gate에서 되돌아온 경우뿐이다. 그 외에는 새 질문이다.
         is_retry = state.get("verdict") == "retry"
-        turn = {} if is_retry else dict(_NEW_TURN_RESET)
-        view = {**state, **turn}   # 분류기는 초기화된 상태를 본다 (이전 질문의 feedback 차단)
 
+        # turn: state에서 "비울 값들".
+        # - 새 질문: 이전 턴의 재시도 횟수·feedback·초안을 0/빈 값으로 (checkpointer가 state를 턴 사이에 유지하므로)
+        # - 재시도: 비우지 않는다. retry_count(한도 계산)와 manager_feedback(실패 사유)이 남아 있어야 한다.
+        turn = {} if is_retry else dict(_NEW_TURN_RESET)
+
+        # view: 분류기에게 보여 줄 state 사본.
+        # turn은 이 함수가 return해야 실제 state에 반영된다. 그 전에 분류기를 부르므로
+        # 초기화를 미리 합친 사본을 넘긴다. 이게 없으면 새 질문인데도 분류기가
+        # 이전 질문의 manager_feedback("재검증 실패 사유")을 보고 엉뚱하게 고를 수 있다.
+        view = {**state, **turn}
+
+        # ── 2) 전문 agent 선택 ───────────────────────────────────────────────
+        # how: 어떤 방법으로 골랐는지. 아래 로그에만 쓴다.
         if state.get("mode") == "alert" and state.get("risk_event"):
+            # alert 모드: 사용자 질문이 없다 → LLM 없이 규칙표(ALERT_AGENT)로 고른다.
             selected, how = alert_agents(state["risk_event"]), "alert 규칙"
         else:
+            # chat 모드: 분류기(서비스에서는 Gemini)가 질문을 읽고 고른다.
             try:
                 selected, how = classify(view), "분류기"
             except Exception:
+                # Gemini 시간 초과·키 오류·응답 형식 오류 등 무엇이든 → 키워드 분류로 대체.
+                # LLM이 죽어도 답변은 나가야 하므로 예외를 위로 올리지 않는다.
                 logger.exception("질문 분류 실패, 키워드 분류로 대체")
                 selected, how = fallback_classify(view), "키워드 대체"
-        # 질문마다 한 줄: `docker compose logs -f ai`로 라우팅 결과를 볼 수 있다
+
+        # ── 3) 라우팅 로그 (질문마다 한 줄) ─────────────────────────────────
+        # `docker compose logs -f ai | grep 라우팅`으로 볼 수 있다.
+        # 예) 라우팅 [분류기] '비 많이 와요?' → ['rain_flood_agent'] (강수 관련 질문)
+        # reason: GeminiClassifier는 마지막 분류 결과를 .last에 저장한다(llm.py). 거기서 선택 이유를 꺼낸다.
+        #   getattr를 두 번 쓰는 이유: keyword_classify 같은 일반 함수에는 .last가 없고,
+        #   .last가 None일 수도 있다. 어느 경우든 오류 없이 ""가 되게 한다.
         reason = getattr(getattr(classify, "last", None), "reason", "") if how == "분류기" else ""
         logger.info("라우팅 [%s%s] %r → %s %s", how, " 재시도" if is_retry else "",
+                    # chat이면 질문 문장, alert면 재난 종류를 찍는다
                     state.get("question") or getattr(state.get("risk_event"), "disaster", ""),
                     [s.value for s in selected], f"({reason})" if reason else "")
 
+        # ── 4) state에서 바꿀 필드만 반환 ───────────────────────────────────
         return {
-            **turn,
+            **turn,                         # 새 질문이면 초기화 값들, 재시도면 아무것도 없음
             "phase": Phase.DURING,          # stub: 항상 "재난 중". B4에서 특보·위험 판정으로 계산
-            "selected_agents": selected,
+            "selected_agents": selected,    # 다음 route_specialists가 이 목록을 보고 병렬 실행한다
             # 재시도로 다시 들어온 경우를 대비해 이전 시도의 결과를 비운다.
             # (이걸 안 하면 1차 시도 결과와 2차 시도 결과가 섞여 쌓인다)
+            # 두 필드는 값을 "누적"하는 reducer 필드라 새 값을 넣는 것만으로는 안 비워진다
+            # → RESET 신호를 보내야 한다 (state.py의 merge_results / merge_checks).
             "specialist_results": RESET,
             "checks": RESET,
         }

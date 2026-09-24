@@ -60,7 +60,7 @@ Flutter app/web (teammate C). This lane (B) also owns GraphHopper routing and GC
 | Path | Purpose |
 | --- | --- |
 | `guardian_ai/state.py` | Enums, Pydantic domain models, reducers, `GuardianState` (state.py:175), retry limits (state.py:211) |
-| `guardian_ai/graph.py` | Node functions (stubs), routing functions, `build_graph()` (graph.py:296) |
+| `guardian_ai/graph.py` | Node functions (stubs), routing functions, `build_graph()` (graph.py:400) |
 | `guardian_ai/tools.py` | DB lookup tool specs with mock returns; per-agent tool allowlist `AGENT_TOOLS` (tools.py:143) |
 | `tests/` | Graph topology tests using stub-node overrides |
 | `docs/agent-design.md` | Team-facing design doc (Korean): graph, node I/O, decision tree, tool contract, open questions |

@@ -4,7 +4,7 @@ Patterns that recur across `guardian_ai/` and `tests/`. Follow them when replaci
 
 ## 1. Nodes return partial state updates
 Every node has the shape `Node = Callable[[GuardianState], dict]` (graph.py:78) and returns only the fields
-it changes, never the whole state. Examples: `make_manager` (graph.py:144), `verify_gate` (graph.py:229).
+it changes, never the whole state. Examples: `make_manager` (graph.py:144), `verify_gate` (graph.py:268).
 `GuardianState` is `TypedDict, total=False` (state.py:175), so always read with `state.get(key, default)`.
 
 ## 2. Reducers for parallel fan-in, with a RESET sentinel
@@ -12,26 +12,26 @@ Fields written by parallel nodes use `Annotated[..., reducer]`:
 - `specialist_results` → `merge_results` appends lists (state.py:151)
 - `checks` → `merge_checks` merges dicts keyed by check name (state.py:161)
 Both accept `RESET` (state.py:148) to clear accumulated values. `manager` sends `RESET` on entry
-(graph.py:173-174) so a retry does not mix results from earlier attempts.
-Consequence: specialist nodes must return a **list** (graph.py:193); parallel checks must write **distinct keys**
+(graph.py:212-213) so a retry does not mix results from earlier attempts.
+Consequence: specialist nodes must return a **list** (graph.py:232); parallel checks must write **distinct keys**
 (`"intent"`, `"hallucination"`).
 
 ## 3. Gate node + pure router
 Decisions with side effects are split in two:
-- a *gate node* writes a verdict and bumps counters — `verify_gate` (graph.py:229), `final_check_gate` (graph.py:263)
-- a *router* only reads the verdict and returns the next node — `route_verdict` (graph.py:343), `route_polish` (graph.py:352)
+- a *gate node* writes a verdict and bumps counters — `verify_gate` (graph.py:268), `final_check_gate` (graph.py:302)
+- a *router* only reads the verdict and returns the next node — `route_verdict` (graph.py:382), `route_polish` (graph.py:391)
 Routers never mutate state. Verdict values are typed `Literal`s in state.py (`verdict`, `polish_verdict`).
 
 ## 4. Bounded retry loops with safe degradation
 Loop limits are constants `MAX_RETRY`, `MAX_POLISH_RETRY` (state.py:211-212), checked in gate nodes.
-On exhaustion the graph degrades instead of looping: loop 1 → `fallback` (graph.py:287, `used_fallback=True`);
-loop 2 → `finalize` returns the already-verified `verified_draft` (graph.py:284).
+On exhaustion the graph degrades instead of looping: loop 1 → `fallback` (graph.py:326, `used_fallback=True`);
+loop 2 → `finalize` returns the already-verified `verified_draft` (graph.py:323).
 
 ## 5. Parallel dispatch via routers
-- Dynamic fan-out: `route_specialists` returns `Send(node, state)` per selected agent (graph.py:320, :329),
+- Dynamic fan-out: `route_specialists` returns `Send(node, state)` per selected agent (graph.py:359, :368),
   or a single node name when nothing is selected.
-- Static fan-out: `route_checks` returns a list of node names (graph.py:332); alert mode drops `intent_check`.
-All conditional edges declare their possible targets explicitly (graph.py:383, :389, :392, :397) so the
+- Static fan-out: `route_checks` returns a list of node names (graph.py:371); alert mode drops `intent_check`.
+All conditional edges declare their possible targets explicitly (graph.py:422, :428, :431, :436) so the
 mermaid export is complete.
 
 ## 6. Node-name constants + enum-backed identifiers
@@ -41,7 +41,7 @@ Node names are module constants (graph.py:62-71); specialist node names are the 
 so they serialize as plain strings.
 
 ## 7. Injectable nodes via `build_graph(overrides=...)`
-`DEFAULT_NODES` (graph.py:300) maps names to functions; `build_graph` merges `overrides` on top (graph.py:361).
+`DEFAULT_NODES` (graph.py:339) maps names to functions; `build_graph` merges `overrides` on top (graph.py:412).
 Used by tests to force failures (tests/test_graph_topology.py:60, :76, :88) and intended for incremental
 implementation (swap one stub for the real node at a time). Keep topology in `build_graph`, logic in nodes.
 
