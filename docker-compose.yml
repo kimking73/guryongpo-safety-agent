@@ -6,7 +6,7 @@
 #        → override를 빼서 DB가 외부에 열리지 않는다. (B10 VM, A9 배포)
 #
 # 환경마다 다른 값은 전부 루트 .env에서 읽는다. 값을 여기에 직접 쓰지 않는다.
-# ai, risk, collector, graphhopper, loader 서비스는 각 담당 작업에서 추가한다.
+# risk, collector, graphhopper, loader 서비스는 각 담당 작업에서 추가한다.
 
 # 폴더 이름(코드)이 한글이라 자동 이름이 비므로 직접 지정한다. 컨테이너·볼륨 이름 앞에 붙는다.
 name: guardian
@@ -43,6 +43,19 @@ services:
       - "${API_PORT:-8000}:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ai:
+    # LangGraph 멀티 agent + Gemini. 배포 시 Caddy가 /api/chat을 여기로 넘긴다 (B10).
+    build: ./ai
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${AI_PORT:-8001}:8001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/api/ai/health', timeout=3)"]
       interval: 10s
       timeout: 5s
       retries: 5

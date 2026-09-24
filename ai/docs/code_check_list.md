@@ -5,19 +5,21 @@ B1 코드(`guardian_ai/`)를 점검하며 찾은 결함. 2026-09-24 재현 확�
 
 | # | 결함 | 심각도 | 지금 드러나는가 | 고칠 시점 | 해결 |
 | --- | --- | --- | --- | --- | --- |
-| 1 | alert 모드에서 재난 7종 중 3종이 엉뚱한 agent로 감 | 높음 | 예 (스텁 단계부터) | B2 (manager 교체) | - |
-| 2 | 대화마다 초기화돼야 할 값이 다음 질문으로 넘어감 | 높음 | 아니요 (checkpointer를 붙이면 드러남) | B2 (`/chat`) | - |
+| 1 | alert 모드에서 재난 7종 중 3종이 엉뚱한 agent로 감 | 높음 | 예 (스텁 단계부터) | B2 (manager 교체) | ✅ 2026-09-24 `test_alert_routes_each_disaster_to_its_agent` |
+| 2 | 대화마다 초기화돼야 할 값이 다음 질문으로 넘어감 | 높음 | 아니요 (checkpointer를 붙이면 드러남) | B2 (`/chat`) | ✅ 2026-09-24 `test_conversation_turns_do_not_share_retry_state` |
 | 3 | 다듬기를 다시 할 때 실패 사유(`polish_feedback`)가 전달되지 않음 | 중간 | 아니요 (스텁은 항상 통과) | B5 (polish 구현) | - |
-| 4 | 대화 저장 시 Pydantic 타입 역직렬화 경고 | 낮음 (지금은 경고만) | checkpointer를 붙이면 드러남 | B2 | - |
+| 4 | 대화 저장 시 Pydantic 타입 역직렬화 경고 | 낮음 (지금은 경고만) | checkpointer를 붙이면 드러남 | B2 | ✅ 2026-09-24 `test_checkpointer_restores_state_types_without_warnings` |
 
 ---
 
 ## 1. alert 모드 라우팅 오류
 
-- [ ] 수정
-- [ ] 테스트 추가
+- [x] 수정
+- [x] 테스트 추가
 
-**위치**: `graph.py:101-103` (`manager`)
+**해결**: `graph.py`의 `ALERT_AGENT` 표와 `alert_agents()`. 위치·경로 agent는 경보(WARNING)이면서 대피가 필요한 재난일 때만 붙는다.
+
+**위치**: `graph.py:101-103` (`manager`) — 수정 전 기준
 
 **원인**: 재난 종류가 침수·호우인지 아닌지만 보고, 아니면 모두 강풍·태풍 agent로 보낸다.
 
@@ -43,10 +45,13 @@ B1 코드(`guardian_ai/`)를 점검하며 찾은 결함. 2026-09-24 재현 확�
 
 ## 2. 대화마다 초기화돼야 할 값이 넘어감
 
-- [ ] 수정
-- [ ] 테스트 추가
+- [x] 수정
+- [x] 테스트 추가
 
-**위치**: `graph.py:111-116` (`manager` 반환값)
+**해결**: `make_manager()`가 `verdict == "retry"`가 아니면 새 질문으로 보고 `_NEW_TURN_RESET`의 값을 초기화한다.
+분류기에도 초기화된 상태를 넘겨 이전 질문의 `manager_feedback`이 새 질문에 섞이지 않는다.
+
+**위치**: `graph.py:111-116` (`manager` 반환값) — 수정 전 기준
 
 **원인**: 대화 기록을 이어 가려고 checkpointer를 쓰면 같은 대화 스레드의 state가 저장된다. 그런데 manager는 새 질문이 와도
 `specialist_results`와 `checks`만 비우고, `retry_count`·`polish_retry_count`·`manager_feedback`은 이전 질문의 값을 그대로 둔다.
@@ -103,7 +108,7 @@ for q in ["비 와요?", "태풍 와요?", "미세먼지 어때요?"]:
 - [ ] 수정
 - [ ] 테스트 추가
 
-**위치**: `graph.py:192-212` (`final_hallucination_check`, `final_check_gate`)
+**위치**: `graph.py:254-276` (`final_hallucination_check`, `final_check_gate`)
 
 **원인**: state에 `polish_feedback`이 선언돼 있고(`state.py:202`) `polish`의 설명에도 "polish_feedback을 반영"한다고 적혀 있지만,
 이 필드에 값을 쓰는 노드가 없다.
@@ -120,7 +125,10 @@ for q in ["비 와요?", "태풍 와요?", "미세먼지 어때요?"]:
 
 ## 4. 대화 저장 시 Pydantic 타입 역직렬화 경고
 
-- [ ] 수정
+- [x] 수정
+
+**해결**: `service.py`의 `STATE_TYPES`를 `JsonPlusSerializer(allowed_msgpack_modules=...)`에 등록 (`make_checkpointer()`).
+확인: 등록 전 경고 7건 → 등록 후 0건. **state.py에 모델·enum을 추가하면 `STATE_TYPES`에도 추가할 것.**
 
 **위치**: checkpointer 설정 (B2에서 만들 부분)
 

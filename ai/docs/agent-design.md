@@ -62,6 +62,14 @@ flowchart TD
 
 환각 검증의 전제: **모든 전문 agent는 답변에 쓴 수치를 `Evidence`로 남긴다.** evidence에 없는 수치가 초안에 있으면 실패.
 
+관리자 agent 동작 (B2 구현):
+- chat 모드: Gemini가 질문·최근 대화·사용자 프로필(재시도면 실패 사유 포함)을 보고 전문 agent를 고른다 (`llm.py` `GeminiClassifier`).
+  Gemini가 실패하거나 10초 안에 답하지 않으면 **키워드 분류로 대체**한다. 재난 중 AI 장애로 답이 끊기지 않게 하기 위함.
+- alert 모드: LLM 없이 규칙으로 고른다. 산사태→산사태, 호우·침수→강수·침수, 강풍·태풍→강풍·태풍, 미세먼지·자외선→생활안전.
+  위치·경로 agent는 경보(WARNING) 단계이면서 대피가 필요한 재난(산사태·호우·침수·강풍·태풍)일 때만 붙는다.
+- 새 질문이 들어오면 이전 질문의 재시도 횟수·실패 사유를 초기화한다. 검증 실패로 되돌아온 경우(`verdict == "retry"`)만 이어 간다.
+- 재난 단계(phase) 판정은 아직 stub(항상 '재난 중'). B4에서 특보·위험 판정 규칙으로 구현.
+
 ## 3. 상태 (`GuardianState`)
 
 | 그룹 | 필드 | 비고 |
@@ -155,3 +163,34 @@ flowchart TD
 3. AI의 DB 직접 조회(읽기 전용) vs FastAPI 경유 — A와 결정
 4. 한 질문당 LLM 호출이 최소 5회. 음성 대화에서 지연이 크면 alert 모드처럼 의도 검증 생략, 또는 단순 질문은 다듬기 생략 검토 (B5에서 측정 후 결정)
 5. 대화 중 알게 된 사용자 정보(예: "다리가 불편해요")를 `users`에 저장하는 주체 — 관리자 agent가 tool로 쓰기? A와 결정
+
+## 8. 채팅 API (B2, 초안)
+
+AI는 별도 컨테이너(`ai`, 포트 8001)로 운영한다. 배포 시 Caddy가 `/api/chat`을 ai로, 나머지 `/api`는 A의 서버로 넘긴다.
+
+`POST /api/chat`
+
+```json
+// 요청
+{
+  "user_id": "firebase-uid",
+  "question": "비 오는데 지금 걸어서 집에 가도 되나요?",
+  "profile": { "user_id": "firebase-uid", "user_type": "resident", "age": 72, "walking_impaired": true },
+  "current_location": { "lat": 35.99, "lon": 129.556 },
+  "conversation_id": null
+}
+// 응답
+{
+  "conversation_id": "d85990ff…",
+  "answer": "…",
+  "selected_agents": ["rain_flood_agent", "location_route_agent"],
+  "phase": "during",
+  "used_fallback": false
+}
+```
+
+- `conversation_id`가 없으면 새 대화를 시작하고 응답에 id를 돌려준다. 같은 id를 보내면 이전 대화를 기억한다("거기는요?" 해석).
+- `profile`·`current_location`은 선택. 사용자 정보 저장 주체는 열린 질문 5번.
+- 대화 기억은 지금 메모리에 있어 ai 컨테이너를 재시작하면 사라진다. 필요하면 PostgreSQL 저장으로 바꾼다.
+- 목업의 카드형 답변(판정 제목·수치 칩·할 일·출처·버튼)은 B5 다듬기에서 응답에 필드를 추가한다. C와 형식 합의 필요.
+- `GET /api/ai/health` → `{"status":"ok"}`

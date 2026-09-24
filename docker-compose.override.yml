@@ -12,3 +12,9 @@ services:
     volumes:
       - ./server/app:/srv/app
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  ai:
+    # guardian_ai 코드를 고치면 컨테이너 재빌드 없이 자동 재시작
+    volumes:
+      - ./ai/guardian_ai:/srv/guardian_ai
+    command: ["uvicorn", "guardian_ai.api:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]

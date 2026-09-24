@@ -31,6 +31,7 @@ LangGraph 기본 개념
 
 from __future__ import annotations
 
+import logging
 from typing import Callable
 
 from langgraph.graph import END, START, StateGraph
@@ -42,12 +43,16 @@ from .state import (
     RESET,              # reducer에 보내면 누적된 값을 비우는 신호
     ActionPlan,
     CheckResult,
+    DisasterType,
     GuardianState,
     Phase,
+    RiskEvent,
     RiskLevel,
     Specialist,
     SpecialistResult,
 )
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # 노드 이름
@@ -78,8 +83,11 @@ Node = Callable[[GuardianState], dict]
 #    지금은 전부 stub. 흐름 검증을 위해 최소한의 값만 반환한다.
 # ===========================================================================
 
-# [stub 전용] 질문에 들어 있는 단어로 전문 agent를 고른다.
-# B2에서 Gemini가 질문을 이해해서 고르는 방식으로 바뀐다.
+# 질문 분류기의 형태: state를 받아 호출할 전문 agent 목록을 돌려준다.
+# 실제 서비스는 Gemini 분류기(llm.py)를, 테스트·장애 대비는 키워드 분류기를 쓴다.
+Classifier = Callable[[GuardianState], list[Specialist]]
+
+# 키워드 분류: Gemini가 없거나 실패했을 때 쓰는 대체 수단. 테스트의 기본 분류기이기도 하다.
 _KEYWORDS = {
     Specialist.LANDSLIDE: ["산사태", "산", "토사"],
     Specialist.RAIN_FLOOD: ["비", "호우", "침수", "물", "수위"],
@@ -89,31 +97,88 @@ _KEYWORDS = {
 }
 
 
-def manager(state: GuardianState) -> dict:
-    """관리자 agent: 재난 단계를 정하고, 호출할 전문 agent를 고른다.
+def keyword_classify(state: GuardianState) -> list[Specialist]:
+    """질문에 키워드가 들어 있는 agent만 고른다."""
+    q = state.get("question") or ""
+    return [s for s, kws in _KEYWORDS.items() if any(k in q for k in kws)]
 
-    - chat 모드: 사용자 질문을 보고 고른다.
-    - alert 모드: Risk engine이 보낸 경고(risk_event)의 재난 종류를 보고 고른다.
-    - 검증 실패로 되돌아온 경우 state["manager_feedback"]에 실패 사유가 있다 (B2에서 활용).
-    """
-    if state.get("mode") == "alert" and state.get("risk_event"):
-        # 경고 모드: 해당 재난 agent + 대피 경로 agent
-        disaster = state["risk_event"].disaster.value
-        selected = [Specialist.RAIN_FLOOD if disaster in ("flood", "heavy_rain") else Specialist.WIND_TYPHOON,
-                    Specialist.LOCATION_ROUTE]
-    else:
-        # 대화 모드: 질문에 키워드가 있는 agent만 선택 (stub)
-        q = state.get("question") or ""
-        selected = [s for s, kws in _KEYWORDS.items() if any(k in q for k in kws)]
 
-    return {
-        "phase": Phase.DURING,          # stub: 항상 "재난 중". B4에서 특보·위험 판정으로 계산
-        "selected_agents": selected,
-        # 재시도로 다시 들어온 경우를 대비해 이전 시도의 결과를 비운다.
-        # (이걸 안 하면 1차 시도 결과와 2차 시도 결과가 섞여 쌓인다)
-        "specialist_results": RESET,
-        "checks": RESET,
-    }
+# alert 모드: 경고 재난 종류 → 담당 전문 agent (규칙, LLM을 쓰지 않는다)
+ALERT_AGENT = {
+    DisasterType.LANDSLIDE: Specialist.LANDSLIDE,
+    DisasterType.HEAVY_RAIN: Specialist.RAIN_FLOOD,
+    DisasterType.FLOOD: Specialist.RAIN_FLOOD,
+    DisasterType.STRONG_WIND: Specialist.WIND_TYPHOON,
+    DisasterType.TYPHOON: Specialist.WIND_TYPHOON,
+    DisasterType.FINE_DUST: Specialist.LIFE_SAFETY,
+    DisasterType.UV: Specialist.LIFE_SAFETY,
+}
+# 대피 경로가 필요한 재난. 이 재난이 경보(WARNING) 단계일 때만 위치·경로 agent를 붙인다.
+EVACUATION_DISASTERS = {
+    DisasterType.LANDSLIDE, DisasterType.HEAVY_RAIN, DisasterType.FLOOD,
+    DisasterType.STRONG_WIND, DisasterType.TYPHOON,
+}
+
+
+def alert_agents(event: RiskEvent) -> list[Specialist]:
+    selected = [ALERT_AGENT[event.disaster]]
+    if event.level == RiskLevel.WARNING and event.disaster in EVACUATION_DISASTERS:
+        selected.append(Specialist.LOCATION_ROUTE)
+    return selected
+
+
+# 새 질문(또는 새 경고)이 들어오면 이전 질문의 흔적을 지운다.
+# checkpointer로 대화를 이어 가면 state가 턴 사이에 남기 때문이다 (code_check_list.md 2번).
+_NEW_TURN_RESET = {
+    "retry_count": 0,
+    "polish_retry_count": 0,
+    "manager_feedback": "",
+    "polish_feedback": "",
+    "verdict": None,
+    "polish_verdict": None,
+    "verified_draft": "",
+    "polished": "",
+}
+
+
+def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_classify) -> Node:
+    """관리자 agent를 만든다. classify가 예외를 내면 fallback_classify로 대체한다."""
+
+    def manager(state: GuardianState) -> dict:
+        """관리자 agent: 재난 단계를 정하고, 호출할 전문 agent를 고른다.
+
+        - chat 모드: 분류기가 질문을 보고 고른다. 재시도면 분류기가 manager_feedback을 참고한다.
+        - alert 모드: Risk engine 경고(risk_event)의 재난 종류로 규칙에 따라 고른다.
+        """
+        # verdict가 "retry"인 것은 verify_gate에서 되돌아온 경우뿐이다. 그 외에는 새 질문이다.
+        is_retry = state.get("verdict") == "retry"
+        turn = {} if is_retry else dict(_NEW_TURN_RESET)
+        view = {**state, **turn}   # 분류기는 초기화된 상태를 본다 (이전 질문의 feedback 차단)
+
+        if state.get("mode") == "alert" and state.get("risk_event"):
+            selected = alert_agents(state["risk_event"])
+        else:
+            try:
+                selected = classify(view)
+            except Exception:
+                logger.exception("질문 분류 실패, 키워드 분류로 대체")
+                selected = fallback_classify(view)
+
+        return {
+            **turn,
+            "phase": Phase.DURING,          # stub: 항상 "재난 중". B4에서 특보·위험 판정으로 계산
+            "selected_agents": selected,
+            # 재시도로 다시 들어온 경우를 대비해 이전 시도의 결과를 비운다.
+            # (이걸 안 하면 1차 시도 결과와 2차 시도 결과가 섞여 쌓인다)
+            "specialist_results": RESET,
+            "checks": RESET,
+        }
+
+    return manager
+
+
+# 기본 manager: 키워드 분류. 서비스는 service.py에서 Gemini 분류기를 넣은 manager로 바꿔 끼운다.
+manager = make_manager(keyword_classify)
 
 
 def _specialist_stub(agent: Specialist) -> Node:
@@ -293,12 +358,13 @@ def route_polish(state: GuardianState) -> str:
 # 3. 그래프 조립
 # ===========================================================================
 
-def build_graph(overrides: dict[str, Node] | None = None):
+def build_graph(overrides: dict[str, Node] | None = None, checkpointer=None):
     """노드와 연결을 조립해 실행 가능한 그래프를 만든다.
 
     overrides: 특정 노드만 다른 함수로 바꿔 끼울 때 사용.
         - 테스트: 검증 실패를 강제하는 가짜 노드 주입
         - 단계별 구현: B3에서 hallucination_check만 실제 구현으로 교체 등
+    checkpointer: 대화 기억. 주면 같은 thread_id끼리 state가 이어진다 (service.make_checkpointer).
     사용 예:
         app = build_graph()
         result = app.invoke({"mode": "chat", "user": user, "question": "지금 대피해야 하나요?"})
@@ -333,4 +399,4 @@ def build_graph(overrides: dict[str, Node] | None = None):
     # [종료] 정상 종료 또는 fallback 종료
     g.add_edge(FINALIZE, END)
     g.add_edge(FALLBACK, END)
-    return g.compile()
+    return g.compile(checkpointer=checkpointer)

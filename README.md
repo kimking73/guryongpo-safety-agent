@@ -51,10 +51,14 @@ docker compose up -d --build
 
 확인:
 ```bash
-docker compose ps                        # db, api 둘 다 (healthy)
+docker compose ps                        # db, api, ai 모두 (healthy)
 curl localhost:8000/api/health           # {"status":"ok","db":"ok"}
+curl localhost:8001/api/ai/health        # {"status":"ok"}
+curl -X POST localhost:8001/api/chat -H 'Content-Type: application/json' \
+     -d '{"user_id":"me","question":"비 오는데 걸어서 가도 돼요?"}'
 ```
-- API 문서: http://localhost:8000/docs
+- API 문서: http://localhost:8000/docs (서버), http://localhost:8001/docs (AI)
+- AI가 Gemini를 쓰려면 `.env`의 `GEMINI_API_KEY`가 필요하다. 없으면 키워드 분류로 동작한다.
 - DB 접속: `localhost:5433`, 사용자·비밀번호·DB 이름은 `.env`의 `DB_*`
   (5432는 로컬에 설치된 PostgreSQL과 겹칠 수 있어 5433을 쓴다)
 
@@ -67,7 +71,8 @@ docker compose down              # 중지 (DB 데이터는 유지)
 docker compose down -v           # 중지 + DB 데이터 삭제 (db/init SQL을 다시 실행하고 싶을 때)
 docker compose exec db psql -U guardian -d guardian   # DB 셸
 ```
-- `server/app/` 코드를 고치면 API가 자동으로 재시작된다 (재빌드 불필요).
+- `server/app/`, `ai/guardian_ai/` 코드를 고치면 해당 서버가 자동으로 재시작된다 (재빌드 불필요).
+- 배포 시 Caddy가 `/api/chat`은 ai(8001)로, 나머지 `/api`는 서버(8000)로 넘긴다 (B10).
 
 ## 환경 변수 규칙
 
@@ -75,11 +80,12 @@ docker compose exec db psql -U guardian -d guardian   # DB 셸
 - 새 키를 추가하면 **같은 커밋에서** `.env.example`에도 추가한다 (값은 비우거나 로컬 기본값).
 - 이름은 대문자 스네이크 + 영역 접두사: `DB_`, `API_`, `GCP_`, `FIREBASE_`, `GEMINI_`, `KMA_`, `POHANG_TWIN_`, `SAFETY24_`
 - 파일로 된 비밀은 `secrets/`에 두고 `.env`에는 경로만 쓴다.
+- 주석은 반드시 별도 줄에 쓴다. `KEY=  # 설명`처럼 값 뒤에 붙이면 docker가 주석까지 값으로 읽는다.
 - 실제 키 값은 팀 비공개 채널로만 공유한다. 저장소·이슈·PR·공개 채팅에 붙이지 않는다.
 
 ## 서비스 추가 규칙
 
-- 새 서비스(ai, risk, collector, graphhopper, loader)는 담당 작업에서 `docker-compose.yml`에 추가한다.
+- 새 서비스(risk, collector, graphhopper, loader)는 담당 작업에서 `docker-compose.yml`에 추가한다.
 - 모든 서비스에 `restart: unless-stopped`와 `healthcheck`를 둔다.
 - 로컬에서만 필요한 설정(포트 노출, 코드 마운트)은 `docker-compose.override.yml`에 둔다.
   서버에서는 `docker compose -f docker-compose.yml up -d`로 override 없이 실행한다.
