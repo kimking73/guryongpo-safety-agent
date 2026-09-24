@@ -1,0 +1,22 @@
+[project]
+name = "guardian-ai"
+version = "0.1.0"
+description = "구룡가디언 AI agent (LangGraph multi-agent)"
+requires-python = ">=3.11"
+dependencies = [
+    "langgraph>=0.6",
+    "pydantic>=2.7",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["guardian_ai"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
