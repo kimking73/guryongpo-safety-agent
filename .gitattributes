@@ -1,0 +1,6 @@
+# Windows 팀원이 있어도 저장소 안 줄바꿈은 LF로 통일
+* text=auto eol=lf
+*.sh text eol=lf
+*.bat text eol=crlf
+*.png binary
+*.jpg binary

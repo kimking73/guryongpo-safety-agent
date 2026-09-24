@@ -1,0 +1,28 @@
+# 비밀 값 (절대 커밋 금지)
+.env
+.env.*
+!.env.example
+secrets/*
+!secrets/.gitkeep
+
+# 기획서 등 문서 원본 (저장소 밖에서 관리)
+*.docx
+*.pptx
+*.pdf
+
+# OS·에디터
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Python
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+
+# GraphHopper 캐시·지도 원본 (B6에서 생성, 용량 큼)
+graphhopper/data/
+*.osm.pbf
