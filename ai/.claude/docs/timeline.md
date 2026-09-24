@@ -30,6 +30,29 @@ A 작업 중 B와 맞물리는 것: **A7**(Day 3–6, 정적 데이터 적재)�
 
 공동: J1 Day 7 침수 연동 · J2 Day 14 1차 통합 · J3 15–16 버그 수정 · J4 17–18 테스트 · J5 19 웹·UI · J6 20 리허설 · J7 21 예비일.
 
+## 다음 세션 시작점 — B3 침수 agent·환각 검증 (Day 5–6)
+완료 기준: **틀린 답을 일부러 넣으면 환각 검증이 걸러서 관리자로 되돌린다.**
+1. `rain_flood_agent` 실제 구현: stub(`graph.py` `_specialist_stub`)을 override로 교체.
+   tools(목업) `get_observations`(rain·water_level·tide), `get_weather_warnings`, `get_risk_at`, `get_hazard_zones(flood)`로
+   조회 → Gemini가 summary 작성, **모든 수치는 `Evidence`로 남김**(`SpecialistResult`, state.py:110).
+2. `hallucination_check` 실제 구현: 초안의 숫자를 규칙으로 뽑아 evidence와 대조 → 불일치면 `CheckResult(ok=False, feedback=…)`.
+   필요하면 LLM 보조. 실패 → `verify_gate`가 `manager_feedback`에 사유를 넣고 관리자로 재시도(이미 구현됨).
+3. `action_advisor`는 아직 stub(요약 이어 붙이기) — 행동 규칙은 B4. B3에서는 초안이 수치를 그대로 옮기게만.
+4. 테스트: 가짜 LLM으로 "수위 22cm evidence인데 초안에 30cm" 주입 → 검증 실패·재시도·fallback 경로 확인.
+5. 결정 필요: B3부터 질문당 Gemini 호출이 3회 이상 → **무료 한도(모델별 하루 20회)로는 개발이 막힘.**
+   유료 전환 또는 테스트는 가짜 LLM 위주로 할지 사용자에게 먼저 물을 것.
+- A3(침수 판단)과 같은 기간이라 tools는 목업으로 진행. A1 API 명세가 나오면 `docs/agent-design.md` 5절 키 이름 대조.
+
+## 이월 항목 (끝나면 지운다)
+- [ ] gemini-3.6-flash로 `pytest -m live` 재실행 (무료 한도 회복 또는 유료 전환 후). 지금까지 5/5
+- [ ] 시연 전 `.env`를 `GEMINI_MODEL=gemini-3.6-flash`, `GEMINI_TIMEOUT_MS=10000`으로 되돌리기 (지금 Lite·60초 임시)
+- [ ] Gemini API 하루 요청 한도(비용 차단) 설정 — 유료 전환 시 GCP 콘솔 Quotas에서
+- [ ] A와 DB 조회 방식 합의 (읽기 전용 직접 조회 vs FastAPI 경유, `agent-design.md` 7절 3번) — 미배정
+- [ ] C와 `/api/chat` 응답 형식 합의 — 목업의 카드형(판정·수치 칩·할 일·출처·버튼)은 B5에서 확장 (`agent-design.md` 8절)
+- [ ] 조위(만조) 데이터: 기획서·목업은 쓰지만 수집 목록에 없음 → A에게 제안 (tools에는 `tide` 종류만 있음)
+- [ ] 조하린 GCP·GitHub 권한, 팀원 로컬 실행 확인 — 사용자가 직접 진행
+- [ ] 대화 기억은 메모리 저장(ai 재시작 시 소실) — 필요해지면 PostgreSQL checkpointer로
+
 ## 일정 리스크 (B1 세션 분석)
 - B 과부하: Day 8–10에 B4+B6 동시, Day 11–13에 B5+B7+B10 동시. C는 같은 기간 한 개씩 → B10/B6 일부 이관 검토.
 - Day 13 병목: A9 1차 배포가 A5·B7 종료일(13)과 같은 날 → 하루 밀리면 J2 지연.
@@ -44,3 +67,4 @@ A 작업 중 B와 맞물리는 것: **A7**(Day 3–6, 정적 데이터 적재)�
 - 2026-09-24 B8 완료 처리(사용자 결정). 김다인: GitHub 협업자·GCP 편집자 완료. 조하린 초대와 팀원 로컬 실행 확인은 사용자가 직접 진행. 원본 타임라인 반영.
 - 2026-09-24 B2: manager Gemini 분류(실패 시 키워드 대체), alert 규칙 라우팅, 턴 간 초기화, checkpointer 타입 등록, ChatService·/api/chat(ai 컨테이너 8001), 테스트 26건 + live 13건. 무료 등급 한도(분당 5·하루 20, 모델별) 때문에 로컬은 임시로 gemini-3.5-flash-lite + 응답 제한 60초. .env 값 뒤 주석이 값으로 읽히던 문제 수정.
 - 2026-09-24 B2 완료 처리(사용자 결정). 3.6 Flash 전체 라우팅 확인은 무료 한도 회복·유료 전환 후 재실행 필요. 질문별 라우팅 로그 추가(`docker compose logs -f ai | grep 라우팅`). 원본 타임라인 반영.
+- 2026-09-24 세션 마무리: 루트 `CLAUDE.md`·`.claude/docs/architectural_patterns.md`(서비스 공통 패턴) 신설, `ai/CLAUDE.md` 세션 절차·현재 상태 재정리, 이 파일에 다음 세션 시작점(B3)·이월 항목 추가.

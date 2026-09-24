@@ -1,45 +1,34 @@
 # CLAUDE.md
 
 ## Session start (do this first)
-1. Read `.claude/docs/timeline.md` → current status and the next task (B-lane of the dev timeline).
-2. Run tests to confirm the baseline: `.venv/bin/python -m pytest -q` (expect 26 passed as of B2; `-m live` calls real Gemini).
-3. If the user mentions timeline changes, re-read the live timeline artifact
-   (https://claude.ai/artifact/S1CWwQbkt9mA7TpQbYbbgB, via Artifact tool `action: "read"`) and sync `timeline.md`.
-4. Check open questions in `docs/agent-design.md` section 7 — some block the next task.
-5. Check `docs/code_check_list.md` — known defects, each tagged with the task (B2/B5) where it must be fixed.
+1. Read `.claude/docs/timeline.md` → status table, "다음 세션 시작점", "이월 항목", work log.
+2. From `코드/`: `git pull` (teammates push to `main`), then `docker compose up -d` and `docker compose ps`
+   (db, api, ai all healthy). If `.env` changed since the ai container started: `docker compose up -d --force-recreate ai`.
+3. Baseline tests: `.venv/bin/python -m pytest -q` → **26 passed, 13 deselected** as of B2.
+   Don't run `-m live` casually — it spends Gemini free-tier quota (5/min, 20/day per model).
+4. If the user mentions timeline changes, re-read the live timeline artifact
+   (https://claude.ai/artifact/S1CWwQbkt9mA7TpQbYbbgB, Artifact tool `action: "read"`) and sync `timeline.md`.
+   Its downloaded file may come wrapped in an extra host `<html>` shell — strip it before republishing.
+5. Check `docs/agent-design.md` §7 (open questions) and `docs/code_check_list.md` (open: #3, target B5).
 
 ## Session end (do this before finishing)
-- Update the status column and append one line to "작업 기록" in `.claude/docs/timeline.md`.
-- If code moved, fix the file:line references in this file and `architectural_patterns.md`.
+- Update the status column, "다음 세션 시작점", and "이월 항목" in `.claude/docs/timeline.md`; append one line
+  to "작업 기록". If a task finished, mark it done in the live artifact too (only when the user says so).
+- If code moved, fix file:line references here, in `architectural_patterns.md`, and in `../CLAUDE.md`.
+- Commit; if `git push` is blocked for Claude, ask the user to run `! git push`.
 
-## Current status
-- **Done: B1 agent structure design** (2026-09-23) — graph topology, state schema, tool specs, 7 topology tests.
-  Node bodies are stubs (`graph.py`), tools return mocks (`tools.py`).
-- B1 marked complete 2026-09-24 with two items cut from its scope:
-  - DB access method with teammate A (direct read-only PostgreSQL vs via FastAPI; `docs/agent-design.md` §7 Q3)
-    — still unassigned, not done.
-  - Collecting 행동요령 source texts → moved to teammate A's **A7** (static data loader, Day 3–6) as the
-    `action_guides` table; B4 now depends on A7. Its format is `ActionGuide` (state.py:132).
-- **Done: B2** (2026-09-24) — `make_manager(classify)` (graph.py:144) with `GeminiClassifier` (llm.py), keyword
-  fallback on any LLM error/timeout, alert routing table, per-turn reset; `ChatService` + `POST /api/chat` in the
-  `ai` container (port 8001). Live routing check (`pytest -m live`): 13/13 on gemini-3.5-flash; gemini-3.6-flash
-  only 5/5 before the free quota ran out — rerun `-m live` on 3.6 when quota/billing allows.
-  Each question logs one line: `docker compose logs -f ai | grep 라우팅` ([분류기] / [키워드 대체] / [alert 규칙]).
-  - **Temporary model**: local `.env` uses `gemini-3.5-flash-lite` with `GEMINI_TIMEOUT_MS=60000` (free-tier Lite
-    answers in 17–39 s). Target is `gemini-3.6-flash` / 10 s (`.env.example`). Free tier = 5 req/min, 20 req/day
-    per model — pace live tests, don't loop them. Revert both values before demo or when billing is enabled.
-  - Never print `.env` values (a grep leaked the Gemini key once on 2026-09-24; user advised to rotate it).
-- **Next: B3 (Day 5–6)** — rain/flood agent + hallucination check; tools still mocks until A3.
-- **Done: B8 dev environment** (2026-09-24). Teammate 조하린's access and teammates' local verification are
-  handled by the user, not tracked here.
-  - Repo root is `코드/` (GitHub `kimking73/guryongpo-safety-agent`): `server/` (FastAPI, A), `app/` (Flutter, C),
-    `ai/` (this folder), `db/init/`, `secrets/` (gitignored). Setup/rules for the team: `../README.md`.
-  - `docker compose up -d --build` from `코드/` runs `db` (PostGIS, host port **5433**) and `api` (`/api/health`, port 8000).
-    Compose project name is fixed to `guardian` (Korean folder name breaks auto-naming).
-    Local-only settings live in `docker-compose.override.yml`; servers run `-f docker-compose.yml` without it.
-  - GCP project `guryong-guardian-0924` (asia-northeast3), billing account 01B546-5CB118-24C5BC, 0원 budget alert.
-    Firebase on the same project: anonymous auth + FCM on. Service account key for firebase-admin in
-    `../secrets/firebase-admin.json` (FCM send role only).
+## Current status (2026-09-24, end of Day 2 work)
+- **Done: B1, B8, B2.** Next: **B3** (Day 5–6). Details and carry-over items: `.claude/docs/timeline.md`.
+- AI path today: `POST /api/chat` (api.py:34) → `ChatService.chat` (service.py:60) → graph with
+  `make_manager(GeminiClassifier())` (graph.py:144, llm.py:109). Only the manager is real; specialists,
+  advisor, checks, polish are stubs (graph.py:223-265), tools return mocks sharing `_NOW` (tools.py:17).
+  So `answer` is placeholder text like "rain_flood_agent stub"; `selected_agents` is the real output.
+- Gemini: AI Studio key in `../.env` (project `guryong-guardian-0924`). **Temporary local model**
+  `gemini-3.5-flash-lite` + `GEMINI_TIMEOUT_MS=60000` (Lite free tier answers in 17–39 s, sometimes 504).
+  Target is `gemini-3.6-flash` / 10 s as in `../.env.example` — revert before demo or once billing is on.
+  Live routing check: 13/13 on gemini-3.5-flash; 3.6 only 5/5 before quota ran out (rerun pending).
+- Any LLM failure falls back to keyword routing and logs `라우팅 [키워드 대체]`; a fast (<1 s) answer means fallback.
+- Never print `.env` values (the Gemini key leaked once via grep on 2026-09-24; the user rotated it).
 
 ## Project overview
 구룡가디언 (구룡포 재난 지킴이) — AI part of a disaster-response service for 구룡포 (Pohang), built for the
@@ -51,8 +40,8 @@ Sibling parts (not in this folder): FastAPI server + PostgreSQL/PostGIS + risk e
 Flutter app/web (teammate C). This lane (B) also owns GraphHopper routing and GCP deployment.
 
 ## Tech stack
-- Python ≥3.11, LangGraph ≥0.6, Pydantic v2, pytest
-- LLM (planned): Gemini 3.6 Flash; voice: Google Cloud STT/TTS (fallback: gemini-3.1-live-preview)
+- Python ≥3.11 (container 3.12), LangGraph ≥1.0, Pydantic v2, google-genai, FastAPI + uvicorn, pytest (+httpx)
+- LLM: Gemini via AI Studio key (target gemini-3.6-flash); voice planned: Google Cloud STT/TTS (fallback: gemini-3.1-live-preview)
 - Routing (planned): GraphHopper + OSM + 국토지리정보원 DEM
 - Data behind the tools: 포항 디지털 트윈 API, 기상청 API, 재난안전24, 공공데이터포털, 생활안전지도
 
@@ -62,7 +51,11 @@ Flutter app/web (teammate C). This lane (B) also owns GraphHopper routing and GC
 | `guardian_ai/state.py` | Enums, Pydantic domain models, reducers, `GuardianState` (state.py:175), retry limits (state.py:211) |
 | `guardian_ai/graph.py` | Node functions (stubs), routing functions, `build_graph()` (graph.py:400) |
 | `guardian_ai/tools.py` | DB lookup tool specs with mock returns; per-agent tool allowlist `AGENT_TOOLS` (tools.py:143) |
-| `tests/` | Graph topology tests using stub-node overrides |
+| `guardian_ai/llm.py` | Gemini client, `GeminiClassifier` (llm.py:109), prompt (`SYSTEM_PROMPT` :50, `build_prompt` :88) |
+| `guardian_ai/service.py` | `ChatRequest`/`ChatResponse`, `ChatService` (service.py:49), checkpointer + `STATE_TYPES` allowlist |
+| `guardian_ai/api.py` | FastAPI app for the `ai` container: `/api/chat`, `/api/ai/health` |
+| `tests/` | Topology (stub overrides), manager/API (fakes, offline), `test_routing_live.py` (real Gemini, `live` marker) |
+| `Dockerfile` | `ai` container, port 8001 (service defined in `../docker-compose.yml`) |
 | `docs/agent-design.md` | Team-facing design doc (Korean): graph, node I/O, decision tree, tool contract, open questions |
 | `.claude/docs/` | Claude-facing notes: timeline/progress, architectural patterns |
 
@@ -70,7 +63,9 @@ Flutter app/web (teammate C). This lane (B) also owns GraphHopper routing and GC
 Run from this directory (`코드/ai`). A project-local venv is used; do not install into the global anaconda env.
 ```bash
 uv venv .venv && uv pip install -p .venv -e ".[dev]"   # setup (already done once)
-.venv/bin/python -m pytest -q                         # run all tests
+.venv/bin/python -m pytest -q                         # offline tests (live excluded by addopts)
+.venv/bin/python -m pytest -m live -q                 # real Gemini routing, ~3 min, uses 13 quota calls
+docker compose logs -f ai | grep 라우팅                # (from 코드/) per-question routing: [분류기]/[키워드 대체]/[alert 규칙]
 .venv/bin/python -c "from guardian_ai.graph import build_graph; print(build_graph().get_graph().draw_mermaid())"  # dump graph
 ```
 
@@ -85,7 +80,7 @@ Before debugging a failure, writing or running tests, or reviewing code, read `d
 - **After a fix**: tick the entry's checkboxes and fill the "해결" column (date + test name). Don't delete entries.
 - **New defect found** (in a test run, review, or while debugging) that isn't fixed immediately: add it
   in the same format — location, cause, repro, impact, fix direction, target task.
-- Tests pass ≠ defects gone: #2–#4 don't show in the current suite (fresh state per run, stub nodes).
+- Tests pass ≠ defects gone: #3 doesn't show while polish/final check are stubs. #1, #2, #4 are fixed (B2).
 
 ## Working rules
 - Graph topology or retry limits changed → update `docs/agent-design.md` (sections 1–3) in the same change.
@@ -99,8 +94,9 @@ Before debugging a failure, writing or running tests, or reviewing code, read `d
 
 ## Additional documentation
 Check these when relevant:
+- `../CLAUDE.md` and `../.claude/docs/architectural_patterns.md` — repo-wide setup, compose, env, and cross-service patterns
 - `.claude/docs/timeline.md` — dev timeline, B-lane tasks with dependencies/done criteria, schedule risks, work log
-- `.claude/docs/architectural_patterns.md` — node/reducer/routing/override patterns and conventions used across files
+- `.claude/docs/architectural_patterns.md` — node/reducer/routing/override/LLM-fallback patterns used across files
 - `docs/agent-design.md` — full agent design, node I/O, decision tree, tool contract, open questions
 - `docs/code_check_list.md` — known code defects with repro, fix direction, and target task; tick them off when fixed
 - Service proposal (source of requirements): `../[구룡가디언]구룡포 재난 지킴이-구룡포는구룡_최종 복사본.docx`
