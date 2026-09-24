@@ -20,9 +20,11 @@
     — still unassigned, not done.
   - Collecting 행동요령 source texts → moved to teammate A's **A7** (static data loader, Day 3–6) as the
     `action_guides` table; B4 now depends on A7. Its format is `ActionGuide` (state.py:132).
-- **B2 implemented (2026-09-24)** — `make_manager(classify)` (graph.py:144) with `GeminiClassifier` (llm.py), keyword
+- **Done: B2** (2026-09-24) — `make_manager(classify)` (graph.py:144) with `GeminiClassifier` (llm.py), keyword
   fallback on any LLM error/timeout, alert routing table, per-turn reset; `ChatService` + `POST /api/chat` in the
-  `ai` container (port 8001). Live routing check (`pytest -m live`): 13/13 on gemini-3.5-flash.
+  `ai` container (port 8001). Live routing check (`pytest -m live`): 13/13 on gemini-3.5-flash; gemini-3.6-flash
+  only 5/5 before the free quota ran out — rerun `-m live` on 3.6 when quota/billing allows.
+  Each question logs one line: `docker compose logs -f ai | grep 라우팅` ([분류기] / [키워드 대체] / [alert 규칙]).
   - **Temporary model**: local `.env` uses `gemini-3.5-flash-lite` with `GEMINI_TIMEOUT_MS=60000` (free-tier Lite
     answers in 17–39 s). Target is `gemini-3.6-flash` / 10 s (`.env.example`). Free tier = 5 req/min, 20 req/day
     per model — pace live tests, don't loop them. Revert both values before demo or when billing is enabled.
