@@ -24,7 +24,8 @@
   via LLM (replace keyword stub `_KEYWORDS`, graph.py:83), use `manager_feedback` on retry, expose a `/chat`
   interface. Done when each question type routes to the right agents. Swap nodes through
   `build_graph(overrides=...)`; keep topology unchanged.
-- **B8 dev environment — mostly done (2026-09-24)**, open: teammate GCP/GitHub access, one teammate verifying setup.
+- **Done: B8 dev environment** (2026-09-24). Teammate 조하린's access and teammates' local verification are
+  handled by the user, not tracked here.
   - Repo root is `코드/` (GitHub `kimking73/guryongpo-safety-agent`): `server/` (FastAPI, A), `app/` (Flutter, C),
     `ai/` (this folder), `db/init/`, `secrets/` (gitignored). Setup/rules for the team: `../README.md`.
   - `docker compose up -d --build` from `코드/` runs `db` (PostGIS, host port **5433**) and `api` (`/api/health`, port 8000).
