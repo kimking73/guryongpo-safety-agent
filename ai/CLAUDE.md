@@ -2,7 +2,7 @@
 
 ## Session start (do this first)
 1. Read `.claude/docs/timeline.md` → current status and the next task (B-lane of the dev timeline).
-2. Run tests to confirm the baseline: `.venv/bin/python -m pytest -q` (expect 7 passed as of B1).
+2. Run tests to confirm the baseline: `.venv/bin/python -m pytest -q` (expect 26 passed as of B2; `-m live` calls real Gemini).
 3. If the user mentions timeline changes, re-read the live timeline artifact
    (https://claude.ai/artifact/S1CWwQbkt9mA7TpQbYbbgB, via Artifact tool `action: "read"`) and sync `timeline.md`.
 4. Check open questions in `docs/agent-design.md` section 7 — some block the next task.
@@ -20,10 +20,14 @@
     — still unassigned, not done.
   - Collecting 행동요령 source texts → moved to teammate A's **A7** (static data loader, Day 3–6) as the
     `action_guides` table; B4 now depends on A7. Its format is `ActionGuide` (state.py:132).
-- **Next: B2 (Day 3–4)** — connect Gemini, make `manager` (graph.py:92) classify the question and pick specialists
-  via LLM (replace keyword stub `_KEYWORDS`, graph.py:83), use `manager_feedback` on retry, expose a `/chat`
-  interface. Done when each question type routes to the right agents. Swap nodes through
-  `build_graph(overrides=...)`; keep topology unchanged.
+- **B2 implemented (2026-09-24)** — `make_manager(classify)` (graph.py:144) with `GeminiClassifier` (llm.py), keyword
+  fallback on any LLM error/timeout, alert routing table, per-turn reset; `ChatService` + `POST /api/chat` in the
+  `ai` container (port 8001). Live routing check (`pytest -m live`): 13/13 on gemini-3.5-flash.
+  - **Temporary model**: local `.env` uses `gemini-3.5-flash-lite` with `GEMINI_TIMEOUT_MS=60000` (free-tier Lite
+    answers in 17–39 s). Target is `gemini-3.6-flash` / 10 s (`.env.example`). Free tier = 5 req/min, 20 req/day
+    per model — pace live tests, don't loop them. Revert both values before demo or when billing is enabled.
+  - Never print `.env` values (a grep leaked the Gemini key once on 2026-09-24; user advised to rotate it).
+- **Next: B3 (Day 5–6)** — rain/flood agent + hallucination check; tools still mocks until A3.
 - **Done: B8 dev environment** (2026-09-24). Teammate 조하린's access and teammates' local verification are
   handled by the user, not tracked here.
   - Repo root is `코드/` (GitHub `kimking73/guryongpo-safety-agent`): `server/` (FastAPI, A), `app/` (Flutter, C),

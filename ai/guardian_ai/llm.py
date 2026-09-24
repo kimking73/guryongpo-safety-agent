@@ -15,7 +15,8 @@ from pydantic import BaseModel, Field
 from .state import GuardianState, Specialist, UserProfile
 
 DEFAULT_MODEL = "gemini-3.6-flash"
-TIMEOUT_MS = 10_000        # 재난 상황에서 오래 기다리지 않는다. 넘으면 키워드 분류로 대체
+# 재난 상황에서 오래 기다리지 않는다. 넘으면 키워드 분류로 대체. 느린 모델로 테스트할 때만 GEMINI_TIMEOUT_MS로 늘린다.
+DEFAULT_TIMEOUT_MS = 10_000
 HISTORY_TURNS = 6          # 분류에 참고할 최근 대화 메시지 수
 
 
@@ -87,7 +88,8 @@ class GeminiClassifier:
             api_key = os.environ.get("GEMINI_API_KEY")
             if not api_key:
                 raise RuntimeError("GEMINI_API_KEY가 없습니다. 루트 .env에 AI Studio 키를 넣으세요.")
-            client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=TIMEOUT_MS))
+            timeout_ms = int(os.environ.get("GEMINI_TIMEOUT_MS") or DEFAULT_TIMEOUT_MS)
+            client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=timeout_ms))
         self.client = client
         self.model = model or os.environ.get("GEMINI_MODEL") or DEFAULT_MODEL
         self.last: Classification | None = None   # 디버깅·로그용 마지막 분류 결과
