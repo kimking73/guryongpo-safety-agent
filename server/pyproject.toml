@@ -1,0 +1,13 @@
+[project]
+name = "guardian-server"
+version = "0.1.0"
+description = "구룡가디언 FastAPI 서버"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "psycopg[binary]>=3.2",
+]
+
+[tool.setuptools]
+packages = ["app"]

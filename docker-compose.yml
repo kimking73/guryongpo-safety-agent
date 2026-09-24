@@ -1,0 +1,51 @@
+# 구룡가디언 서비스 구성 (로컬·서버 공통)
+#
+# 로컬:  docker compose up -d --build
+#        → docker-compose.override.yml이 자동으로 합쳐져 DB 포트 노출, 코드 자동 재시작이 켜진다.
+# 서버:  docker compose -f docker-compose.yml up -d --build
+#        → override를 빼서 DB가 외부에 열리지 않는다. (B10 VM, A9 배포)
+#
+# 환경마다 다른 값은 전부 루트 .env에서 읽는다. 값을 여기에 직접 쓰지 않는다.
+# ai, risk, collector, graphhopper, loader 서비스는 각 담당 작업에서 추가한다.
+
+# 폴더 이름(코드)이 한글이라 자동 이름이 비므로 직접 지정한다. 컨테이너·볼륨 이름 앞에 붙는다.
+name: guardian
+
+services:
+  db:
+    # 공식 postgis/postgis 이미지는 arm64(Apple Silicon)를 지원하지 않아 멀티 아키텍처 미러를 쓴다.
+    image: imresamu/postgis:17-3.5
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:?.env에 DB_USER가 필요합니다}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?.env에 DB_PASSWORD가 필요합니다}
+      POSTGRES_DB: ${DB_NAME:?.env에 DB_NAME이 필요합니다}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro   # 볼륨이 비어 있을 때 한 번만 실행
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ./server
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # 컨테이너끼리는 서비스 이름(db)과 내부 포트(5432)로 접속한다.
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  db-data:

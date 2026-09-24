@@ -1,0 +1,14 @@
+# 로컬 개발 전용 설정. `docker compose up` 시 자동으로 합쳐진다.
+# 서버에서는 `-f docker-compose.yml`로 이 파일을 빼고 실행한다.
+
+services:
+  db:
+    # 로컬에서 psql·DB 도구로 접속하기 위해 노출. 5432는 로컬 PostgreSQL과 겹칠 수 있어 기본 5433.
+    ports:
+      - "${DB_HOST_PORT:-5433}:5432"
+
+  api:
+    # server/app 코드를 고치면 컨테이너 재빌드 없이 자동 재시작
+    volumes:
+      - ./server/app:/srv/app
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

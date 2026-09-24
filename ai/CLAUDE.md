@@ -24,8 +24,15 @@
   via LLM (replace keyword stub `_KEYWORDS`, graph.py:83), use `manager_feedback` on retry, expose a `/chat`
   interface. Done when each question type routes to the right agents. Swap nodes through
   `build_graph(overrides=...)`; keep topology unchanged.
-- Also Day 1–2: **B8** dev environment (docker-compose, PostGIS, `.env` rules, GCP/Firebase) — not started.
-  Repo layout planned by B8: `server/`, `app/`, `ai/` (this folder). Not yet a git repo.
+- **B8 dev environment — mostly done (2026-09-24)**, open: teammate GCP/GitHub access, one teammate verifying setup.
+  - Repo root is `코드/` (GitHub `kimking73/guryongpo-safety-agent`): `server/` (FastAPI, A), `app/` (Flutter, C),
+    `ai/` (this folder), `db/init/`, `secrets/` (gitignored). Setup/rules for the team: `../README.md`.
+  - `docker compose up -d --build` from `코드/` runs `db` (PostGIS, host port **5433**) and `api` (`/api/health`, port 8000).
+    Compose project name is fixed to `guardian` (Korean folder name breaks auto-naming).
+    Local-only settings live in `docker-compose.override.yml`; servers run `-f docker-compose.yml` without it.
+  - GCP project `guryong-guardian-0924` (asia-northeast3), billing account 01B546-5CB118-24C5BC, 0원 budget alert.
+    Firebase on the same project: anonymous auth + FCM on. Service account key for firebase-admin in
+    `../secrets/firebase-admin.json` (FCM send role only).
 
 ## Project overview
 구룡가디언 (구룡포 재난 지킴이) — AI part of a disaster-response service for 구룡포 (Pohang), built for the
