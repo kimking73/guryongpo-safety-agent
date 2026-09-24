@@ -156,13 +156,18 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
         view = {**state, **turn}   # 분류기는 초기화된 상태를 본다 (이전 질문의 feedback 차단)
 
         if state.get("mode") == "alert" and state.get("risk_event"):
-            selected = alert_agents(state["risk_event"])
+            selected, how = alert_agents(state["risk_event"]), "alert 규칙"
         else:
             try:
-                selected = classify(view)
+                selected, how = classify(view), "분류기"
             except Exception:
                 logger.exception("질문 분류 실패, 키워드 분류로 대체")
-                selected = fallback_classify(view)
+                selected, how = fallback_classify(view), "키워드 대체"
+        # 질문마다 한 줄: `docker compose logs -f ai`로 라우팅 결과를 볼 수 있다
+        reason = getattr(getattr(classify, "last", None), "reason", "") if how == "분류기" else ""
+        logger.info("라우팅 [%s%s] %r → %s %s", how, " 재시도" if is_retry else "",
+                    state.get("question") or getattr(state.get("risk_event"), "disaster", ""),
+                    [s.value for s in selected], f"({reason})" if reason else "")
 
         return {
             **turn,

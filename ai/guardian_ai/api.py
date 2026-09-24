@@ -6,11 +6,16 @@ Firebase 토큰 검증은 A2에서 A가 정하는 방식에 맞춰 추가한다.
 
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 
 from fastapi import Depends, FastAPI
 
 from .service import ChatRequest, ChatResponse, ChatService
+
+# guardian_ai 로그(라우팅 결과 등)를 컨테이너 로그에 INFO부터 남긴다
+logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.getLogger("guardian_ai").setLevel(logging.INFO)
 
 app = FastAPI(title="구룡가디언 AI")
 
