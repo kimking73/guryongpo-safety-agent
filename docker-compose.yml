@@ -52,6 +52,9 @@ services:
     build: ./ai
     restart: unless-stopped
     env_file: .env
+    environment:
+      # request_route tool이 부르는 경로 안내 서버. 꺼져 있어도 ai는 뜨고, 경로만 "지금 안내 불가"로 답한다.
+      ROUTE_URL: http://route:8002
     ports:
       - "${AI_PORT:-8001}:8001"
     healthcheck:

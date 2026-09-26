@@ -4,13 +4,13 @@
 1. Read `.claude/docs/timeline.md` → status table, "다음 세션 시작점", "이월 항목", work log.
 2. From `코드/`: `git pull` (teammates push to `main`), then `docker compose up -d` and `docker compose ps`
    (db, api, ai all healthy). If `.env` changed since the ai container started: `docker compose up -d --force-recreate ai`.
-3. Baseline tests: `.venv/bin/python -m pytest -q` → **26 passed, 13 deselected** as of B2.
+3. Baseline tests: `.venv/bin/python -m pytest -q` → **30 passed, 13 deselected** as of B7.
    Don't run `-m live` casually — it spends Gemini free-tier quota (5/min, 20/day per model).
 4. If the user mentions timeline changes, re-read the live timeline artifact
    (https://claude.ai/artifact/S1CWwQbkt9mA7TpQbYbbgB, Artifact tool `action: "read"`) and sync `timeline.md`.
    Its downloaded file may come wrapped in an extra host `<html>` shell — strip it before republishing.
 5. Check `docs/agent-design.md` §7 (open questions) and `docs/code_check_list.md` (open: #3, target B5).
-6. Route work (B6·B7): `cd ../route && .venv/bin/python -m pytest -q` → **19 passed, 2 deselected**. Needs
+6. Route work (B6·B7): `cd ../route && .venv/bin/python -m pytest -q` → **32 passed, 4 deselected**. Needs
    `../graphhopper/data/guryongpo.osm.pbf` (`../graphhopper/fetch_osm.sh`).
 
 ## Session end (do this before finishing)
@@ -20,9 +20,12 @@
 - Commit; if `git push` is blocked for Claude, ask the user to run `! git push`.
 
 ## Current status (2026-09-26, Day 4)
-- **Done: B1, B8, B2, B6.** B6 was done ahead of B3 (B3 waits for A1·A3). B6: `../route/`
+- **Done: B1, B8, B2, B6.** **In progress: B7** (profile rules, `/api/route/check`, `request_route` wired, NGII DEM pending).
+  B3 waits for A1·A3. B6: `../route/`
   (`POST /api/route`, avoids mock flood/landslide zones + manholes, reports `avoided`/`still_inside`) + `../graphhopper/`.
-  Hazards are mock data until A7. Next task (B7 or B3) is the user's pick — see timeline "다음 세션 시작점".
+  Hazards are mock data until A7. `tools.request_route` is the only real tool: it calls the route service (`ROUTE_URL`,
+  compose sets http://route:8002) and returns `available: False` instead of raising; `tools.route_profile(user)` maps
+  UserProfile → adult/elderly/wheelchair for the location/route agent (B4).
   Details and carry-over items: `.claude/docs/timeline.md`.
 - AI path today: `POST /api/chat` (api.py:34) → `ChatService.chat` (service.py:60) → graph with
   `make_manager(GeminiClassifier())` (graph.py:144, llm.py:109). Only the manager is real; specialists,

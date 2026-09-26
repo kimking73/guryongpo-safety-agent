@@ -19,7 +19,7 @@ Lanes: **A** server/DB/data collection/risk engine (`server/`, `db/`) · **B** A
 - Python 3.12 containers (local venvs ≥3.11), FastAPI + uvicorn for every HTTP service
 - PostgreSQL 17 + PostGIS 3.5 (`imresamu/postgis`, multi-arch — official image lacks arm64)
 - AI: LangGraph ≥1.0, Pydantic v2, google-genai (Gemini); voice planned: Google Cloud STT/TTS
-- Routing (B6 in progress): GraphHopper 11 (Java 21, foot profile, flexible mode) + OSM; DEM planned (B7)
+- Routing (B6 done, B7 in progress): GraphHopper 11 (Java 21, foot profile, flexible mode) + OSM + elevation (SRTM 90m, or 국토지리정보원 DEM via `graphhopper/build_dem.sh`)
 - Client (planned, C2): Flutter; Firebase anonymous auth + FCM
 - Infra: Docker Compose (OrbStack on Mac, Docker Desktop + WSL2 on Windows); GCP project
   `guryong-guardian-0924` (asia-northeast3), deploy VM + Caddy planned in B10
@@ -31,8 +31,8 @@ Lanes: **A** server/DB/data collection/risk engine (`server/`, `db/`) · **B** A
 | `docker-compose.override.yml` | Local-only: DB host port 5433, graphhopper 8989, code mounts + `--reload` |
 | `server/` | FastAPI server (lane A). Only `/api/health` exists (server/app/main.py:15) |
 | `ai/` | LangGraph multi-agent + `POST /api/chat` (ai/guardian_ai/api.py:34). See `ai/CLAUDE.md` |
-| `route/` | Route server (lane B): `POST /api/route` → GraphHopper with hazard avoidance (route/guardian_route/api.py:41, service.py:55); mock hazards `route/data/hazards.sample.geojson`; tests in `route/tests/` |
-| `graphhopper/` | GraphHopper 11 image + `config.yml` (foot, no CH); `fetch_osm.sh` builds `data/guryongpo.osm.pbf` (gitignored) |
+| `route/` | Route server (lane B): `POST /api/route` (hazard avoidance + per-profile slope/steps rules, route/guardian_route/service.py:85, profiles.py), `POST /api/route/check` (reroute while moving, service.py:116); mock hazards `route/data/hazards.sample.geojson`; tests in `route/tests/` |
+| `graphhopper/` | GraphHopper 11 image + `config.yml` (foot, no CH); `fetch_osm.sh` builds `data/guryongpo.osm.pbf`; `build_dem.sh` turns 국토지리정보원 DEM in `dem/ngii/` into `data/dem-hgt/`; `entrypoint.sh` picks DEM (NGII if present, else SRTM) and rebuilds the graph when it changes (data/ and dem/ngii/ gitignored) |
 | `app/` | Flutter project placeholder (README only until C2) |
 | `db/init/` | SQL run once on an empty DB volume (PostGIS extension) |
 | `secrets/` | Credential files, gitignored except `.gitkeep` (e.g. `firebase-admin.json`) |
@@ -55,6 +55,7 @@ docker compose down [-v]                     # stop (-v also wipes DB data, re-r
 docker compose -f docker-compose.yml up -d   # server mode: no override, DB not exposed
 cd ai && .venv/bin/python -m pytest -q       # AI tests (offline); `-m live` calls real Gemini
 cd route && .venv/bin/python -m pytest -q    # route tests (fake GraphHopper); `-m live` needs graphhopper on :8989
+./graphhopper/build_dem.sh                   # after putting 국토지리정보원 DEM files in graphhopper/dem/ngii/; then restart graphhopper
 ```
 
 ## Working rules

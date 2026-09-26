@@ -22,7 +22,7 @@
 | B4 | 8–10 | 재난 agent 확장·행동 권고 (산사태·강풍태풍·생활안전·위치경로, 규칙 기반 판단 트리, 선제 경고 메시지 함수) | A4, B3, A7 | 재난별 시나리오에 규칙대로 응답 | 미착수 |
 | B6 | 8–10 | GraphHopper 구축 (OSM 도로망, 위험지역·맨홀 회피, /route) | A1, A3 | 위험 구역 우회 경로 반환 | **완료** (2026-09-26, 임시 위험지역 데이터) |
 | B5 | 11–13 | 의도 검증·다듬기·음성 (STT/TTS, /voice, 지연 측정 → 필요 시 gemini-3.1-live-preview) | B4 | 음성 왕복 동작, 지연 기록 | 미착수 |
-| B7 | 11–13 | 경로 가중치·DEM·재계산 (프로필별 가중치, /route/check) | B6, B4 | 프로필별 다른 경로 | 미착수 |
+| B7 | 11–13 | 경로 가중치·DEM·재계산 (프로필별 가중치, /route/check) | B6, B4 | 프로필별 다른 경로 | **진행 중** (규칙·/route/check·AI 연결 완료, 국토지리정보원 DEM 대기) |
 | B10 | 11–12 | GCP VM·도메인·HTTPS (Caddy, / → 웹, /api → FastAPI) | B8, B6 | 외부에서 /api/health 접속 | 미착수 |
 | B9 | 15–16 | 배포 안정화 (재시작 정책, 헬스체크, API 한도, Gemini 속도 제한, Uptime check) | A9 | 강제 종료 후 자동 복구 | 미착수 |
 
@@ -30,18 +30,17 @@ A 작업 중 B와 맞물리는 것: **A7**(Day 3–6, 정적 데이터 적재)�
 
 공동: J1 Day 7 침수 연동 · J2 Day 14 1차 통합 · J3 15–16 버그 수정 · J4 17–18 테스트 · J5 19 웹·UI · J6 20 리허설 · J7 21 예비일.
 
-## 다음 세션 시작점 — 다음 작업 고르기 (B6 완료)
-B6은 임시 위험지역으로 완료 기준(위험 구역 우회 경로 반환)을 충족해 완료 처리했다(2026-09-26, 사용자 결정, 라이브 타임라인 반영).
-- 지금 상태: `POST /api/route`가 `route/data/hazards.sample.geojson`(침수 2, 산사태 1, 맨홀 5, 모두 가짜)을 GraphHopper
-  `custom_model` areas(우선순위 ×0.01)로 피한다. `avoided`(피한 구역), `still_inside`(다른 길이 없어 지나는 구역).
-  GraphHopper를 요청당 두 번 부른다(회피 경로 + avoided 계산용 기본 경로).
-- 다음 후보 (사용자가 고른다):
-  1. **B7** 경로 가중치·DEM·재계산: profile별(노약자·휠체어) 오르막 회피. 지금 SRTM(90m)이 켜져 있어 바로 시작할 수 있다.
-     국토지리정보원 DEM 교체, `/api/route/check`(이동 중 재계산), AI `request_route` → route 서비스 HTTP 연결.
-  2. **B3** 침수 agent·환각 검증: A1·A3가 나왔는지 먼저 확인. Gemini 유료 전환 결정 필요.
-- A7이 hazard_zones·facilities 테이블을 적재하면 `hazards.py`에 PostGIS 읽기 클래스를 추가해 GeoJSON을 대체한다.
-  (조회 방식은 이월 항목 "A와 DB 조회 방식 합의"와 같이 정한다.)
-- 위험 구역은 지금 항상 피한다. 실제로는 Risk engine이 활성으로 판정한 구역만 피해야 한다 → A3·A4 판정과 연결할 때 처리.
+## 다음 세션 시작점 — B7 마무리: 국토지리정보원 DEM 적용, 규칙 조정
+완료 기준(B7): **같은 목적지에 프로필별로 다른 경로를 반환한다.** 규칙·재계산·AI 연결은 끝났다(2026-09-26). 남은 것:
+1. 사용자가 국토정보플랫폼(map.ngii.go.kr)에서 구룡포 일대 DEM(.img 등)을 받아 `graphhopper/dem/ngii/`에 넣는다.
+   → `./graphhopper/build_dem.sh` (육지 덮는 비율 출력, 90% 미만이면 도엽 추가) → `docker compose restart graphhopper`
+   (entrypoint.sh가 dem-hgt를 보고 그래프를 다시 만든다. 로그 "고도 데이터: 국토지리정보원 DEM").
+   파일에 좌표계가 없으면 `SRC_SRS=EPSG:5186`(또는 5187 동부원점) 지정. 5m를 1초(≈30m) 격자로 평균해 쓴다 — HGT 형식 한계.
+2. DEM 적용 후 adult/elderly/wheelchair 경로 비교(`route` live 테스트 `test_live_profiles_differ`), 필요하면
+   `route/guardian_route/profiles.py` 경사 기준(노약자 6·10%, 휠체어 5·8%) 조정. SRTM에서는 max_slope 31%처럼 튀는 값이 있다.
+3. 사용자 확인 후 B7 완료 처리(라이브 타임라인 포함).
+- 이후 후보: B3(A1·A3 확인, Gemini 유료 전환 결정) 또는 B4(재난 agent 확장 — 위치·경로 agent가 `request_route`·`route_profile` 사용).
+- 위험 구역은 지금 항상 피한다(Risk engine 활성 판정과 연결은 A3·A4 이후). A7 적재 후 `hazards.py`에 PostGIS 읽기 추가.
 
 ## 이월 항목 (끝나면 지운다)
 - [ ] gemini-3.6-flash로 `pytest -m live` 재실행 (무료 한도 회복 또는 유료 전환 후). 지금까지 5/5
@@ -72,3 +71,4 @@ B6은 임시 위험지역으로 완료 기준(위험 구역 우회 경로 반환
 - 2026-09-26 지도 화면(/maps/)에서 경로가 안 뜨던 문제: 화면이 항상 elevation=true로 요청 → 'Elevation not supported!'. config.yml에 SRTM 고도(graph.elevation.provider: srtm, /data/srtm) 추가로 해결. 설정은 이미지에 복사되므로 바꾸면 graph-cache 삭제 + 재빌드.
 - 2026-09-26 B6 2단계: 위험 구역·맨홀 회피. `hazards.py`(HazardSource 주입, GeoJSON, 맨홀 점 → 반경 5m 다각형), `polyline.py`, GraphHopper custom_model areas + priority ×0.01(출발지가 구역 안이어도 탈출 가능), 기본 경로와 비교해 `avoided`·`still_inside`, `GET /api/route/hazards`, 요청 `avoid_manholes`. 테스트 19건 + live 2건. 실측: 구룡포항→실내체육관 부근 987m → 1,324m로 flood-001·맨홀 2개 우회, 구역 안 출발 시 still_inside=[flood-001]. `agent-design.md` 5절과 tools.py 목업에 still_inside 추가.
 - 2026-09-26 B6 완료 처리(사용자 결정). 지도 화면(/maps/)에 회피 조건을 붙여 넣어 우회를 사용자가 직접 확인. 라이브 타임라인 반영(B6 체크).
+- 2026-09-26 B7(진행): `profiles.py`(노약자: 계단 ×0.3, 경사 ≥6% ×0.5·≥10% ×0.2, 속도 ×0.75 / 휠체어: 계단 ×0, 산길 ×0.1, 경사 ≥5% ×0.3·≥8% ×0.05, 속도 ×0.7), 응답에 ascend_m·descend_m·max_slope_pct, `POST /api/route/check`(30m 이탈·남은 경로 위험 구역 → 재계산, 피할 수 없는 구역은 경고만, 20m 안 도착). 휠체어가 급경사를 피하려 산사태 구역을 지나는 문제 → 위험 구역 배수 0.01→0.001. AI `tools.request_route`를 route 서비스 실제 호출로 교체(실패 시 available=False), `route_profile(user)`, compose ai에 ROUTE_URL. 국토지리정보원 DEM: 사용자 선택, `graphhopper/build_dem.sh`(GDAL 컨테이너, 5m → HGT 1초, 빈 곳 SRTM), `entrypoint.sh`(DEM 자동 선택·고도 바뀌면 그래프 재생성). 가짜 DEM으로 변환·전환 검증. 테스트 route 32+live 4, ai 30.

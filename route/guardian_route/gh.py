@@ -43,6 +43,7 @@ class GraphHopperClient:
             "points": [[lon, lat] for lat, lon in points],
             "points_encoded": True,    # geometry를 인코딩된 polyline 문자열로 받는다 (Google polyline 형식, 정밀도 1e5)
             "instructions": False,     # 회전 안내 문구는 아직 쓰지 않는다 (C5 경로 화면에서 필요하면 켠다)
+            "details": ["average_slope"],   # 구간별 경사 (max_slope_pct 계산용)
         }
         if custom_model:
             body["custom_model"] = custom_model

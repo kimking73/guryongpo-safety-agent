@@ -26,3 +26,6 @@ __pycache__/
 # GraphHopper 캐시·지도 원본 (B6에서 생성, 용량 큼)
 graphhopper/data/
 *.osm.pbf
+
+# 국토지리정보원 DEM 원본 (B7, 용량 큼). graphhopper/dem/README.md 참고
+graphhopper/dem/ngii/

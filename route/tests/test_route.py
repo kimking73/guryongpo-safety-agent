@@ -22,7 +22,8 @@ class NoHazards:
 
 # 구룡포항 → 구룡포 실내체육관 부근
 BODY = {"origin": {"lat": 35.9905, "lon": 129.5560}, "destination": {"lat": 35.9868, "lon": 129.5480}}
-PATH = {"distance": 986.218, "time": 710075, "points": "oktzEe|vuWl@p@BCpAhB"}
+PATH = {"distance": 986.218, "time": 710075, "points": "oktzEe|vuWl@p@BCpAhB", "ascend": 10.2, "descend": 2.0,
+        "details": {"average_slope": [[0, 2, 0.0], [2, 5, -7.6], [5, 9, 3.0]]}}
 
 
 def client(handler) -> tuple[TestClient, list[httpx.Request]]:
@@ -47,15 +48,17 @@ def ok(req: httpx.Request) -> httpx.Response:
 
 def test_route_converts_graphhopper_response():
     c, seen = client(ok)
-    res = c.post("/api/route", json={**BODY, "profile": "elderly"})
+    res = c.post("/api/route", json=BODY)
     assert res.status_code == 200
-    assert res.json() == {"profile": "elderly", "distance_m": 986, "duration_s": 710, "avoided": [],
-                          "still_inside": [], "geometry": PATH["points"], "source": "graphhopper"}
+    assert res.json() == {"profile": "adult", "distance_m": 986, "duration_s": 710,
+                          "ascend_m": 10, "descend_m": 2, "max_slope_pct": 8,   # 내리막 7.6%도 급경사로 본다
+                          "avoided": [], "still_inside": [], "geometry": PATH["points"], "source": "graphhopper"}
     # GraphHopper에는 [lon, lat] 순서, 도보 profile, 인코딩된 polyline으로 요청한다
     sent = json.loads(seen[0].content)
     assert sent["points"] == [[129.5560, 35.9905], [129.5480, 35.9868]]
     assert sent["profile"] == "foot" and sent["points_encoded"] is True
-    assert "custom_model" not in sent and len(seen) == 1     # 위험 구역이 없으면 한 번만, 규칙 없이 부른다
+    assert sent["details"] == ["average_slope"]
+    assert "custom_model" not in sent and len(seen) == 1     # 성인 + 위험 구역 없음 → 한 번만, 규칙 없이 부른다
 
 
 def test_profile_defaults_to_adult():

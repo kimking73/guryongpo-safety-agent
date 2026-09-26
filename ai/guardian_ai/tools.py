@@ -2,16 +2,29 @@
 
 반환 형식은 A1(API 명세)과 합의할 대상이다. 실제 구현은 A의 DB/엔드포인트가
 준비되면 각 함수 본문만 교체한다 (시그니처와 반환 키는 유지).
+request_route만 실제 구현이다 (B 담당 route 서비스, B7).
 좌표는 WGS84(lat, lon), 시간은 ISO 8601(KST, +09:00).
 """
 
 from __future__ import annotations
 
+import os
 from typing import Any, Literal
+
+import httpx
+
+from .state import Mobility, UserProfile
 
 HazardKind = Literal["landslide", "flood"]
 FacilityKind = Literal["shelter", "medical", "manhole"]
 ObservationKind = Literal["rain", "wind", "water_level", "wave", "tide"]
+
+# 경로 안내 서버 (request_route). 컨테이너 안에서는 compose가 ROUTE_URL=http://route:8002를 넣는다.
+DEFAULT_ROUTE_URL = "http://localhost:8002"
+# 회피 경로는 GraphHopper를 두 번 부르므로 여유 있게. 넘으면 available=False로 답한다.
+ROUTE_TIMEOUT_S = 8.0
+# 이 나이부터 노약자 경로(경사·계단 회피)를 쓴다
+ELDERLY_AGE = 65
 
 # 목업 기준 시각
 _NOW = "2026-09-23T20:00:00+09:00"
@@ -113,16 +126,53 @@ def request_route(
     origin: tuple[float, float],
     destination: tuple[float, float],
     profile: Literal["adult", "elderly", "wheelchair"] = "adult",
+    avoid_manholes: bool = True,
+    client: httpx.Client | None = None,
 ) -> dict[str, Any]:
-    """위험 회피 경로 (B6/B7 GraphHopper, 엔드포인트: /route).
+    """위험 회피 경로. route 서비스(POST /api/route, B6·B7)를 실제로 호출한다 — 목업이 아닌 첫 tool.
 
-    회피: 침수·산사태 위험지역, 침수 시 맨홀. profile에 따라 오르막 가중치.
+    회피: 침수·산사태 위험지역, (avoid_manholes면) 맨홀. profile: adult 최단 시간, elderly·wheelchair 경사·계단 회피.
+    좌표는 (lat, lon). 반환: route 서비스 응답 키 + available=True.
+    경로 서버가 없거나 경로를 못 찾으면 예외 대신 {"available": False, "reason": …}를 돌려준다
+    (agent가 "경로 안내를 지금 할 수 없다"고 답하고 대피소 위치만 알려 주도록).
+    client: 테스트에서 가짜 route 서버를 넣을 때만 쓴다. 없으면 ROUTE_URL 환경 변수의 서버를 부른다.
     """
-    return {
-        "profile": profile, "distance_m": 1200, "duration_s": 1140,
-        "avoided": ["flood-001", "manhole-003"], "still_inside": [],
-        "geometry": "encoded-polyline", "source": "graphhopper",
+    body = {
+        "origin": {"lat": origin[0], "lon": origin[1]},
+        "destination": {"lat": destination[0], "lon": destination[1]},
+        "profile": profile, "avoid_manholes": avoid_manholes,
     }
+    own = client is None
+    http = client or httpx.Client(base_url=os.environ.get("ROUTE_URL") or DEFAULT_ROUTE_URL,
+                                  timeout=ROUTE_TIMEOUT_S)
+    try:
+        res = http.post("/api/route", json=body)
+    except httpx.HTTPError as e:
+        return {"available": False, "reason": f"경로 안내 서버에 연결할 수 없습니다 ({type(e).__name__})",
+                "source": "route"}
+    finally:
+        if own:
+            http.close()
+    if res.status_code != 200:
+        try:
+            detail = res.json().get("detail")
+        except ValueError:
+            detail = None
+        return {"available": False, "reason": detail or f"경로 안내 오류 (HTTP {res.status_code})", "source": "route"}
+    return {**res.json(), "available": True}
+
+
+def route_profile(user: UserProfile) -> Literal["adult", "elderly", "wheelchair"]:
+    """사용자 정보 → request_route의 profile. 위치·경로 agent(B4)가 경로를 요청할 때 쓴다.
+
+    휠체어 이용 → wheelchair. 65세 이상이거나 보행이 불편하거나 보호가 필요한 동반자가 있으면 → elderly
+    (경사·계단을 피하는 느린 경로). 그 밖에는 adult. 정보가 없으면 adult로 두고, agent가 필요하면 묻는다.
+    """
+    if user.mobility == Mobility.WHEELCHAIR:
+        return "wheelchair"
+    if (user.age is not None and user.age >= ELDERLY_AGE) or user.walking_impaired or user.has_dependents:
+        return "elderly"
+    return "adult"
 
 
 def get_action_guides(
