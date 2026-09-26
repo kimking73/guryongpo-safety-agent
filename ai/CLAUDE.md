@@ -20,7 +20,7 @@
 - Commit; if `git push` is blocked for Claude, ask the user to run `! git push`.
 
 ## Current status (2026-09-26, Day 4)
-- **Done: B1, B8, B2, B6.** **In progress: B7** (profile rules, `/api/route/check`, `request_route` wired, NGII DEM pending).
+- **Done: B1, B8, B2, B6.** **In progress: B7** (profile rules, `/api/route/check`, `request_route` wired, NGII public DEM 90m applied; 5m is a carry-over).
   B3 waits for A1·A3. B6: `../route/`
   (`POST /api/route`, avoids mock flood/landslide zones + manholes, reports `avoided`/`still_inside`) + `../graphhopper/`.
   Hazards are mock data until A7. `tools.request_route` is the only real tool: it calls the route service (`ROUTE_URL`,
