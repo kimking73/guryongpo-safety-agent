@@ -35,7 +35,7 @@ A 작업 중 B와 맞물리는 것: **A7**(Day 3–6, 정적 데이터 적재)�
 - 지금 상태: `graphhopper/`(GraphHopper 11, foot, CH 없음 = 요청마다 custom_model 가능), `route/`(`POST /api/route`,
   `avoided`는 항상 `[]`). 확인: `curl localhost:8002/api/route/health`, 테스트 `cd route && .venv/bin/python -m pytest -q`.
 1. 임시 위험지역 `route/data/hazards.sample.geojson`: 침수 구역 2개, 산사태 구역 1개, 맨홀 몇 개, 대피소 2개.
-   GraphHopper 기본 경로가 실제로 지나가는 곳에 두어야 우회가 보인다 (http://localhost:8989/maps로 확인).
+   GraphHopper 기본 경로가 실제로 지나가는 곳에 두어야 우회가 보인다 (http://localhost:8989/maps/로 확인).
    properties는 `id`, `kind`, `grade`, `source:"mock"`. A7(hazard_zones·facilities 테이블)이 나오면 DB 읽기로 교체.
 2. `hazards.py`: `HazardSource` 주입(`GeoJsonHazardSource` → 나중에 PostGIS). 맨홀 점은 반경 약 5m 폴리곤으로 바꾼다.
 3. GraphHopper 요청에 `custom_model.areas` + `priority: in_<id> → multiply_by 0.01`을 넣는다(0이 아니라 0.01이라야

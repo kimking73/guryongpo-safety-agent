@@ -20,7 +20,7 @@ services:
     command: ["uvicorn", "guardian_ai.api:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]
 
   graphhopper:
-    # 로컬에서 GraphHopper를 직접 확인할 때 (http://localhost:8989/maps 지도 화면 포함)
+    # 로컬에서 GraphHopper를 직접 확인할 때 (http://localhost:8989/maps/ 지도 화면 포함)
     ports:
       - "8989:8989"
 
