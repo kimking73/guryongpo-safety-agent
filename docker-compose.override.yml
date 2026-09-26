@@ -18,3 +18,14 @@ services:
     volumes:
       - ./ai/guardian_ai:/srv/guardian_ai
     command: ["uvicorn", "guardian_ai.api:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]
+
+  graphhopper:
+    # 로컬에서 GraphHopper를 직접 확인할 때 (http://localhost:8989/maps 지도 화면 포함)
+    ports:
+      - "8989:8989"
+
+  route:
+    # guardian_route 코드를 고치면 컨테이너 재빌드 없이 자동 재시작
+    volumes:
+      - ./route/guardian_route:/srv/guardian_route
+    command: ["uvicorn", "guardian_route.api:app", "--host", "0.0.0.0", "--port", "8002", "--reload"]

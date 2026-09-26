@@ -1,0 +1,40 @@
+# GraphHopper 설정 (B6). 설정을 바꾸면 graphhopper/data/graph-cache를 지워야 새 설정으로 다시 만든다.
+graphhopper:
+  datareader.file: /data/guryongpo.osm.pbf
+  graph.location: /data/graph-cache
+
+  # 도보 경로. foot.json은 jar에 들어 있는 기본 모델.
+  profiles:
+    - name: foot
+      custom_model_files: [foot.json]
+  # CH·LM 없음(flexible 모드): 요청마다 custom_model로 위험 구역을 넣기 위해서다 (B6 2단계). 구룡포 일대는 그래프가 작아 충분히 빠르다.
+  profiles_ch: []
+  profiles_lm: []
+  graph.encoded_values: foot_access, foot_priority, foot_average_speed, foot_road_access, hike_rating, mtb_rating, average_slope, country, road_class
+
+  # 보행자가 못 다니는 고속도로만 도로망에서 뺀다.
+  import.osm.ignored_highways: motorway,motorway_link
+  prepare.min_network_size: 200
+  prepare.subnetworks.threads: 1
+  routing.snap_preventions_default: tunnel, bridge, ferry
+  graph.dataaccess.default_type: RAM_STORE
+
+server:
+  application_connectors:
+    - type: http
+      port: 8989
+      # 컨테이너 밖(route 서비스)에서 접속하려면 0.0.0.0. 서버에서는 compose가 포트를 열지 않는다.
+      bind_host: 0.0.0.0
+      max_request_header_size: 50k
+  request_log:
+    appenders: []
+  admin_connectors:
+    - type: http
+      port: 8990
+      bind_host: localhost
+
+logging:
+  appenders:
+    - type: console
+      time_zone: Asia/Seoul
+      log_format: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level %logger{36} - %msg%n"

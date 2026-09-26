@@ -6,7 +6,7 @@
 #        → override를 빼서 DB가 외부에 열리지 않는다. (B10 VM, A9 배포)
 #
 # 환경마다 다른 값은 전부 루트 .env에서 읽는다. 값을 여기에 직접 쓰지 않는다.
-# risk, collector, graphhopper, loader 서비스는 각 담당 작업에서 추가한다.
+# risk, collector, loader 서비스는 각 담당 작업에서 추가한다.
 
 # 폴더 이름(코드)이 한글이라 자동 이름이 비므로 직접 지정한다. 컨테이너·볼륨 이름 앞에 붙는다.
 name: guardian
@@ -56,6 +56,38 @@ services:
       - "${AI_PORT:-8001}:8001"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/api/ai/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  graphhopper:
+    # 경로 엔진 (B6). 첫 실행 전에 ./graphhopper/fetch_osm.sh로 도로망 파일을 받아 둔다.
+    # 포트를 열지 않는다. route 서비스만 컨테이너 안에서 http://graphhopper:8989로 부른다.
+    build: ./graphhopper
+    restart: unless-stopped
+    volumes:
+      - ./graphhopper/data:/data      # guryongpo.osm.pbf와 그래프 캐시
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8989/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s               # 캐시가 없으면 시작할 때 그래프를 만든다
+
+  route:
+    # 경로 안내 서버 (B6). 배포 시 Caddy가 /api/route를 여기로 넘긴다 (B10).
+    build: ./route
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      GRAPHHOPPER_URL: http://graphhopper:8989
+    depends_on:
+      graphhopper:
+        condition: service_healthy
+    ports:
+      - "${ROUTE_PORT:-8002}:8002"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/api/route/health', timeout=3)"]
       interval: 10s
       timeout: 5s
       retries: 5

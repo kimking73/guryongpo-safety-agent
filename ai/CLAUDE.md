@@ -10,6 +10,8 @@
    (https://claude.ai/artifact/S1CWwQbkt9mA7TpQbYbbgB, Artifact tool `action: "read"`) and sync `timeline.md`.
    Its downloaded file may come wrapped in an extra host `<html>` shell — strip it before republishing.
 5. Check `docs/agent-design.md` §7 (open questions) and `docs/code_check_list.md` (open: #3, target B5).
+6. Route work (B6·B7): `cd ../route && .venv/bin/python -m pytest -q` → **10 passed, 1 deselected**. Needs
+   `../graphhopper/data/guryongpo.osm.pbf` (`../graphhopper/fetch_osm.sh`).
 
 ## Session end (do this before finishing)
 - Update the status column, "다음 세션 시작점", and "이월 항목" in `.claude/docs/timeline.md`; append one line
@@ -17,8 +19,10 @@
 - If code moved, fix file:line references here, in `architectural_patterns.md`, and in `../CLAUDE.md`.
 - Commit; if `git push` is blocked for Claude, ask the user to run `! git push`.
 
-## Current status (2026-09-24, end of Day 2 work)
-- **Done: B1, B8, B2.** Next: **B3** (Day 5–6). Details and carry-over items: `.claude/docs/timeline.md`.
+## Current status (2026-09-26, Day 4)
+- **Done: B1, B8, B2.** **In progress: B6** (moved ahead of B3, which waits for A1·A3). B6 step 1 done: `../route/`
+  (`POST /api/route`) + `../graphhopper/` (OSM road network, plain foot route). Next: B6 step 2 hazard-zone avoidance.
+  Details and carry-over items: `.claude/docs/timeline.md`.
 - AI path today: `POST /api/chat` (api.py:34) → `ChatService.chat` (service.py:60) → graph with
   `make_manager(GeminiClassifier())` (graph.py:144, llm.py:109). Only the manager is real; specialists,
   advisor, checks, polish are stubs (graph.py:223-265), tools return mocks sharing `_NOW` (tools.py:17).

@@ -18,9 +18,9 @@
 | B1 | 1–2 | agent 구조 설계 | - | 노드·엣지 확정 | **완료** (2026-09-24) |
 | B8 | 1–2 | 개발 환경·GCP·Firebase (docker-compose, PostGIS, .env 규칙, GCP 예산 알림, Firebase 익명인증·FCM) | - | 3명 로컬에서 DB·API 실행 | **완료** (2026-09-24) |
 | B2 | 3–4 | LangGraph 골격·관리자 agent (Gemini 연결, 질문 분류→라우팅, 목업 DB tool, /chat 인터페이스) | B1 | 질문 유형별로 올바른 agent 호출 | **완료** (2026-09-24) |
-| B3 | 5–6 | 침수 agent·환각 검증 (강수+수위 답변, evidence 대조, 최대 반복) | B2, A3 | 틀린 답 주입 시 검증에서 걸러짐 | **다음 작업** |
+| B3 | 5–6 | 침수 agent·환각 검증 (강수+수위 답변, evidence 대조, 최대 반복) | B2, A3 | 틀린 답 주입 시 검증에서 걸러짐 | 보류 (A1·A3 이후, 사용자 결정 2026-09-26) |
 | B4 | 8–10 | 재난 agent 확장·행동 권고 (산사태·강풍태풍·생활안전·위치경로, 규칙 기반 판단 트리, 선제 경고 메시지 함수) | A4, B3, A7 | 재난별 시나리오에 규칙대로 응답 | 미착수 |
-| B6 | 8–10 | GraphHopper 구축 (OSM 도로망, 위험지역·맨홀 회피, /route) | A1, A3 | 위험 구역 우회 경로 반환 | 미착수 |
+| B6 | 8–10 | GraphHopper 구축 (OSM 도로망, 위험지역·맨홀 회피, /route) | A1, A3 | 위험 구역 우회 경로 반환 | **진행 중** (1단계 완료: OSM·/api/route. 다음: 위험 구역 회피) |
 | B5 | 11–13 | 의도 검증·다듬기·음성 (STT/TTS, /voice, 지연 측정 → 필요 시 gemini-3.1-live-preview) | B4 | 음성 왕복 동작, 지연 기록 | 미착수 |
 | B7 | 11–13 | 경로 가중치·DEM·재계산 (프로필별 가중치, /route/check) | B6, B4 | 프로필별 다른 경로 | 미착수 |
 | B10 | 11–12 | GCP VM·도메인·HTTPS (Caddy, / → 웹, /api → FastAPI) | B8, B6 | 외부에서 /api/health 접속 | 미착수 |
@@ -30,18 +30,20 @@ A 작업 중 B와 맞물리는 것: **A7**(Day 3–6, 정적 데이터 적재)�
 
 공동: J1 Day 7 침수 연동 · J2 Day 14 1차 통합 · J3 15–16 버그 수정 · J4 17–18 테스트 · J5 19 웹·UI · J6 20 리허설 · J7 21 예비일.
 
-## 다음 세션 시작점 — B3 침수 agent·환각 검증 (Day 5–6)
-완료 기준: **틀린 답을 일부러 넣으면 환각 검증이 걸러서 관리자로 되돌린다.**
-1. `rain_flood_agent` 실제 구현: stub(`graph.py` `_specialist_stub`)을 override로 교체.
-   tools(목업) `get_observations`(rain·water_level·tide), `get_weather_warnings`, `get_risk_at`, `get_hazard_zones(flood)`로
-   조회 → Gemini가 summary 작성, **모든 수치는 `Evidence`로 남김**(`SpecialistResult`, state.py:110).
-2. `hallucination_check` 실제 구현: 초안의 숫자를 규칙으로 뽑아 evidence와 대조 → 불일치면 `CheckResult(ok=False, feedback=…)`.
-   필요하면 LLM 보조. 실패 → `verify_gate`가 `manager_feedback`에 사유를 넣고 관리자로 재시도(이미 구현됨).
-3. `action_advisor`는 아직 stub(요약 이어 붙이기) — 행동 규칙은 B4. B3에서는 초안이 수치를 그대로 옮기게만.
-4. 테스트: 가짜 LLM으로 "수위 22cm evidence인데 초안에 30cm" 주입 → 검증 실패·재시도·fallback 경로 확인.
-5. 결정 필요: B3부터 질문당 Gemini 호출이 3회 이상 → **무료 한도(모델별 하루 20회)로는 개발이 막힘.**
-   유료 전환 또는 테스트는 가짜 LLM 위주로 할지 사용자에게 먼저 물을 것.
-- A3(침수 판단)과 같은 기간이라 tools는 목업으로 진행. A1 API 명세가 나오면 `docs/agent-design.md` 5절 키 이름 대조.
+## 다음 세션 시작점 — B6 2단계: 위험 구역·맨홀 회피
+완료 기준(B6): **위험 구역을 우회한 경로를 반환한다.** 1단계(2026-09-26)에서 도로망과 기본 도보 경로까지 끝났다.
+- 지금 상태: `graphhopper/`(GraphHopper 11, foot, CH 없음 = 요청마다 custom_model 가능), `route/`(`POST /api/route`,
+  `avoided`는 항상 `[]`). 확인: `curl localhost:8002/api/route/health`, 테스트 `cd route && .venv/bin/python -m pytest -q`.
+1. 임시 위험지역 `route/data/hazards.sample.geojson`: 침수 구역 2개, 산사태 구역 1개, 맨홀 몇 개, 대피소 2개.
+   GraphHopper 기본 경로가 실제로 지나가는 곳에 두어야 우회가 보인다 (http://localhost:8989/maps로 확인).
+   properties는 `id`, `kind`, `grade`, `source:"mock"`. A7(hazard_zones·facilities 테이블)이 나오면 DB 읽기로 교체.
+2. `hazards.py`: `HazardSource` 주입(`GeoJsonHazardSource` → 나중에 PostGIS). 맨홀 점은 반경 약 5m 폴리곤으로 바꾼다.
+3. GraphHopper 요청에 `custom_model.areas` + `priority: in_<id> → multiply_by 0.01`을 넣는다(0이 아니라 0.01이라야
+   출발지가 구역 안이어도 탈출 경로가 나온다). 맨홀은 침수 위험이 있을 때만 피한다(요청 `avoid_manholes`, 기본 true).
+4. `avoided` 계산: 회피 없는 경로도 한 번 받아서 그 경로가 지나는 구역 중 안전 경로가 피한 것. 안전 경로도 지나는
+   구역은 `still_inside`에 넣는다(응답 키 추가 → `agent-design.md` 5절 갱신).
+5. 테스트: 구역을 가로지르는 두 점 → `avoided`에 포함, 거리 증가, 폴리라인이 폴리곤과 교차하지 않음(live).
+- B3는 A1(API 명세)·A3(침수 판단) 이후. Gemini 유료 전환 여부 결정도 그때.
 
 ## 이월 항목 (끝나면 지운다)
 - [ ] gemini-3.6-flash로 `pytest -m live` 재실행 (무료 한도 회복 또는 유료 전환 후). 지금까지 5/5
@@ -68,3 +70,4 @@ A 작업 중 B와 맞물리는 것: **A7**(Day 3–6, 정적 데이터 적재)�
 - 2026-09-24 B2: manager Gemini 분류(실패 시 키워드 대체), alert 규칙 라우팅, 턴 간 초기화, checkpointer 타입 등록, ChatService·/api/chat(ai 컨테이너 8001), 테스트 26건 + live 13건. 무료 등급 한도(분당 5·하루 20, 모델별) 때문에 로컬은 임시로 gemini-3.5-flash-lite + 응답 제한 60초. .env 값 뒤 주석이 값으로 읽히던 문제 수정.
 - 2026-09-24 B2 완료 처리(사용자 결정). 3.6 Flash 전체 라우팅 확인은 무료 한도 회복·유료 전환 후 재실행 필요. 질문별 라우팅 로그 추가(`docker compose logs -f ai | grep 라우팅`). 원본 타임라인 반영.
 - 2026-09-24 세션 마무리: 루트 `CLAUDE.md`·`.claude/docs/architectural_patterns.md`(서비스 공통 패턴) 신설, `ai/CLAUDE.md` 세션 절차·현재 상태 재정리, 이 파일에 다음 세션 시작점(B3)·이월 항목 추가.
+- 2026-09-26 B3을 A1·A3 이후로 미루고 B6 먼저 진행(사용자 결정). B6 1단계: `graphhopper/`(GraphHopper 11 jar + Temurin 21, foot·flexible, `fetch_osm.sh`로 Geofabrik 한국 OSM → 구룡포 bbox 129.48,35.92~129.60,36.04 잘라 302KB, 교차점 3,226개), `route/`(FastAPI `POST /api/route`, `/api/route/health`, 장애 시 503·범위 밖 404), compose에 graphhopper·route 추가, 테스트 10건 + live 1건. 구룡포항→실내체육관 부근 986m·710초 확인.

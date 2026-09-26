@@ -12,14 +12,14 @@ and carry-over items are in `ai/.claude/docs/timeline.md` ("다음 세션 시작
 LangGraph AI agent answers questions, sends proactive warnings, and guides safe evacuation routes
 (landslide, heavy rain/flood, strong wind/typhoon, fine dust/UV).
 
-Lanes: **A** server/DB/data collection/risk engine (`server/`, `db/`) · **B** AI + routing + infra (`ai/`, compose,
-GCP) · **C** Flutter app/web (`app/`). The user of this repo works lane B.
+Lanes: **A** server/DB/data collection/risk engine (`server/`, `db/`) · **B** AI + routing + infra (`ai/`, `route/`,
+`graphhopper/`, compose, GCP) · **C** Flutter app/web (`app/`). The user of this repo works lane B.
 
 ## Tech stack
 - Python 3.12 containers (local venvs ≥3.11), FastAPI + uvicorn for every HTTP service
 - PostgreSQL 17 + PostGIS 3.5 (`imresamu/postgis`, multi-arch — official image lacks arm64)
 - AI: LangGraph ≥1.0, Pydantic v2, google-genai (Gemini); voice planned: Google Cloud STT/TTS
-- Routing (planned, B6): GraphHopper + OSM + 국토지리정보원 DEM
+- Routing (B6 in progress): GraphHopper 11 (Java 21, foot profile, flexible mode) + OSM; DEM planned (B7)
 - Client (planned, C2): Flutter; Firebase anonymous auth + FCM
 - Infra: Docker Compose (OrbStack on Mac, Docker Desktop + WSL2 on Windows); GCP project
   `guryong-guardian-0924` (asia-northeast3), deploy VM + Caddy planned in B10
@@ -27,10 +27,12 @@ GCP) · **C** Flutter app/web (`app/`). The user of this repo works lane B.
 ## Key directories
 | Path | Purpose |
 | --- | --- |
-| `docker-compose.yml` | Services shared by local and server: `db` (:15), `api` (:32), `ai` (:50); project name fixed (:12) |
-| `docker-compose.override.yml` | Local-only: DB host port 5433, code mounts + `--reload` |
+| `docker-compose.yml` | Services shared by local and server: `db` (:15), `api` (:32), `ai` (:50), `graphhopper` (:63), `route` (:77); project name fixed (:12) |
+| `docker-compose.override.yml` | Local-only: DB host port 5433, graphhopper 8989, code mounts + `--reload` |
 | `server/` | FastAPI server (lane A). Only `/api/health` exists (server/app/main.py:15) |
 | `ai/` | LangGraph multi-agent + `POST /api/chat` (ai/guardian_ai/api.py:34). See `ai/CLAUDE.md` |
+| `route/` | Route server (lane B): `POST /api/route` → GraphHopper (route/guardian_route/api.py:35); tests in `route/tests/` |
+| `graphhopper/` | GraphHopper 11 image + `config.yml` (foot, no CH); `fetch_osm.sh` builds `data/guryongpo.osm.pbf` (gitignored) |
 | `app/` | Flutter project placeholder (README only until C2) |
 | `db/init/` | SQL run once on an empty DB volume (PostGIS extension) |
 | `secrets/` | Credential files, gitignored except `.gitkeep` (e.g. `firebase-admin.json`) |
@@ -41,15 +43,18 @@ GCP) · **C** Flutter app/web (`app/`). The user of this repo works lane B.
 Run from this directory (`코드/`).
 ```bash
 cp .env.example .env                         # first time; fill keys from the team's private channel
-docker compose up -d --build                 # start db, api, ai (override auto-merged)
+./graphhopper/fetch_osm.sh                   # first time: OSM road network for graphhopper
+docker compose up -d --build                 # start db, api, ai, graphhopper, route (override auto-merged)
 docker compose ps                            # all services should be (healthy)
 curl localhost:8000/api/health               # {"status":"ok","db":"ok"}
 curl localhost:8001/api/ai/health            # {"status":"ok"}
+curl localhost:8002/api/route/health         # {"status":"ok","graphhopper":"ok"}
 docker compose logs -f ai | grep 라우팅       # per-question AI routing result
 docker compose up -d --force-recreate ai     # after editing .env (env is read at container start)
 docker compose down [-v]                     # stop (-v also wipes DB data, re-runs db/init)
 docker compose -f docker-compose.yml up -d   # server mode: no override, DB not exposed
 cd ai && .venv/bin/python -m pytest -q       # AI tests (offline); `-m live` calls real Gemini
+cd route && .venv/bin/python -m pytest -q    # route tests (fake GraphHopper); `-m live` needs graphhopper on :8989
 ```
 
 ## Working rules
