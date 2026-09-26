@@ -129,7 +129,7 @@ flowchart TD
 | `get_facilities` | kind(shelter·medical·manhole), lat, lon, limit | name, lat, lon, distance_m, phone | facilities | [ ] |
 | `get_life_safety` | lat, lon | pm10, pm25, uv 각 value·grade | observations | [ ] |
 | `get_user_profile` | user_id | UserProfile 키 | users | [ ] |
-| `request_route` | origin, destination, profile(adult·elderly·wheelchair, `route_profile(user)`로 결정), avoid_manholes | available, distance_m, duration_s, ascend_m, descend_m, max_slope_pct, avoided(피한 위험 구역 id), still_inside(어쩔 수 없이 지나는 구역 id), geometry(인코딩된 polyline). 실패 시 available=false, reason | route 서비스 `POST /api/route` → GraphHopper (B6·B7 **실제 구현**, 위험 구역은 임시 GeoJSON → A7 이후 hazard_zones·facilities) | [ ] |
+| `request_route` | origin, destination, profile(adult·elderly, `route_profile(user)`로 결정 — 65세 이상·보행 불편·휠체어·동반자 → elderly), avoid_manholes | available, distance_m, duration_s, ascend_m, descend_m, max_slope_pct, avoided(피한 위험 구역 id), still_inside(어쩔 수 없이 지나는 구역 id), geometry(인코딩된 polyline). 실패 시 available=false, reason | route 서비스 `POST /api/route` → GraphHopper (B6·B7 **실제 구현**, 위험 구역은 임시 GeoJSON → A7 이후 hazard_zones·facilities) | [ ] |
 | `get_action_guides` | disaster, phase, audience | id, text, source_name, source_url | action_guides | [ ] |
 
 조회 방식 제안: AI 프로세스가 **PostgreSQL을 직접 읽기 전용으로 조회**(읽기 전용 계정). FastAPI를 거치지 않아 지연이 줄고, 쓰기는 A의 수집 프로세스만 한다. 경로만 GraphHopper HTTP 호출.

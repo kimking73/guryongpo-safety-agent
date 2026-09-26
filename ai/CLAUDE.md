@@ -10,7 +10,7 @@
    (https://claude.ai/artifact/S1CWwQbkt9mA7TpQbYbbgB, Artifact tool `action: "read"`) and sync `timeline.md`.
    Its downloaded file may come wrapped in an extra host `<html>` shell — strip it before republishing.
 5. Check `docs/agent-design.md` §7 (open questions) and `docs/code_check_list.md` (open: #3, target B5).
-6. Route work (B6·B7): `cd ../route && .venv/bin/python -m pytest -q` → **32 passed, 6 deselected** (live 6). Needs
+6. Route work (B6·B7): `cd ../route && .venv/bin/python -m pytest -q` → **34 passed, 6 deselected** (live 6). Needs
    `../graphhopper/data/guryongpo.osm.pbf` (`../graphhopper/fetch_osm.sh`).
 
 ## Session end (do this before finishing)
@@ -25,7 +25,8 @@
   (`POST /api/route`, avoids mock flood/landslide zones + manholes, reports `avoided`/`still_inside`) + `../graphhopper/`.
   Hazards are mock data until A7. `tools.request_route` is the only real tool: it calls the route service (`ROUTE_URL`,
   compose sets http://route:8002) and returns `available: False` instead of raising; `tools.route_profile(user)` maps
-  UserProfile → adult/elderly/wheelchair for the location/route agent (B4).
+  UserProfile → adult/elderly for the location/route agent (B4). Only two route profiles (wheelchair dropped by the
+  user 2026-09-26; wheelchair users get elderly).
   Details and carry-over items: `.claude/docs/timeline.md`.
 - AI path today: `POST /api/chat` (api.py:34) → `ChatService.chat` (service.py:60) → graph with
   `make_manager(GeminiClassifier())` (graph.py:144, llm.py:109). Only the manager is real; specialists,

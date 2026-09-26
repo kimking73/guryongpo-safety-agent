@@ -76,7 +76,7 @@ curl -X POST localhost:8002/api/route -H 'Content-Type: application/json' \
 ```
 - API 문서: http://localhost:8000/docs (서버), http://localhost:8001/docs (AI), http://localhost:8002/docs (경로)
 - 경로는 침수·산사태 구역과 맨홀을 피한다. 응답의 `avoided`는 피한 구역, `still_inside`는 다른 길이 없어 지나는 구역이다.
-- 요청의 `profile`: `adult`(가장 빠른 길), `elderly`(급경사·계단을 피하고 느린 걸음), `wheelchair`(계단 불가, 경사 8% 넘는 길 회피).
+- 요청의 `profile`: `adult`(가장 빠른 길, 경사 무시), `elderly`(급경사 도로를 피하고 느린 걸음, 같은 경사면 비탈길보다 계단을 선호).
   응답에 `ascend_m`·`descend_m`(오르막·내리막 합계), `max_slope_pct`(가장 급한 경사)가 온다. 규칙은 `route/guardian_route/profiles.py`.
 - 이동 중: `POST /api/route/check`에 현재 위치·목적지·지금 경로(`geometry`)를 보내면 재계산이 필요한지(`reroute`)와 새 경로를 준다.
   경로에서 30m 넘게 벗어났거나, 남은 경로에 새 위험 구역이 생겼을 때 재계산한다. 도착지 20m 안이면 `arrived: true`.

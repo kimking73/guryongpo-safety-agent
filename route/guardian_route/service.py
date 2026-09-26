@@ -1,7 +1,7 @@
 """경로 안내: 요청 형식, 사용자 유형별 규칙, 위험 구역 회피, 이동 중 재계산 판단.
 
 응답 키는 AI tool `request_route`(ai/guardian_ai/tools.py)와 같은 계약이다 (ai/docs/agent-design.md 5절).
-B6: 도보 경로 + 침수·산사태 구역·맨홀 회피. B7: profile별 경사·계단 규칙(profiles.py), /api/route/check.
+B6: 도보 경로 + 침수·산사태 구역·맨홀 회피. B7: 노약자 경사·계단 규칙(profiles.py), /api/route/check.
 """
 
 from __future__ import annotations
@@ -20,12 +20,12 @@ from .gh import GraphHopperClient
 from .hazards import GeoJsonHazardSource, Hazard, HazardSource
 from .profiles import PROFILE_RULES
 
-Profile = Literal["adult", "elderly", "wheelchair"]
+Profile = Literal["adult", "elderly"]
 CheckReason = Literal["off_route", "hazard_on_route"]
 
 # 위험 구역 안 도로의 우선순위 배수. 0이면 그 길을 완전히 막아 출발지·도착지가 구역 안일 때 경로가 아예 없어진다.
 # 0.001이면 1000배 비싼 길이 되어 다른 길이 있으면 반드시 돌아가고, 없을 때만 최소한으로 지난다 (still_inside로 알린다).
-# 사용자 유형 규칙의 가장 강한 벌점(휠체어 급경사 ×0.05)보다 훨씬 세야 "급경사를 피하려다 위험 구역을 지나는" 일이 없다.
+# 사용자 유형 규칙의 가장 강한 벌점(노약자 급경사 ×0.2)보다 훨씬 세야 "급경사를 피하려다 위험 구역을 지나는" 일이 없다.
 AVOID_PRIORITY = 0.001
 # 이동 중 확인: 경로에서 이만큼 벗어나면 다시 계산한다. GPS 오차(보통 5~20m)보다 크게 둔다.
 OFF_ROUTE_M = 30.0
@@ -41,7 +41,7 @@ class LatLon(BaseModel):
 class RouteRequest(BaseModel):
     origin: LatLon
     destination: LatLon
-    profile: Profile = "adult"      # adult(최단 시간), elderly·wheelchair(경사·계단 회피, 느린 속도)
+    profile: Profile = "adult"      # adult(최단 시간, 경사 무시), elderly(급경사 회피·같은 경사면 계단 선호, 느린 속도)
     # 맨홀은 침수 때 뚜껑이 열려 위험하다. 침수 판정(A3·Risk engine)과 연결되기 전까지는 요청으로 켜고 끈다.
     avoid_manholes: bool = True
 

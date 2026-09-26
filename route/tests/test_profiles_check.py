@@ -58,30 +58,51 @@ def test_adult_sends_no_rules():
     assert "custom_model" not in sent[0]
 
 
-@pytest.mark.parametrize("profile", ["elderly", "wheelchair"])
-def test_profile_rules_are_sent(profile):
+def test_elderly_rules_are_sent():
     c, sent = client()
-    assert c.post("/api/route", json=body(profile)).json()["profile"] == profile
+    assert c.post("/api/route", json=body("elderly")).json()["profile"] == "elderly"
     model = sent[0]["custom_model"]
-    assert model["priority"] == PROFILE_RULES[profile]["priority"]
-    assert model["speed"] == PROFILE_RULES[profile]["speed"]
+    assert model["priority"] == PROFILE_RULES["elderly"]["priority"]
+    assert model["speed"] == PROFILE_RULES["elderly"]["speed"]
 
 
-def test_wheelchair_never_takes_steps_and_elderly_avoids_them():
-    steps = {"if": "road_class == STEPS", "multiply_by": "0"}
-    assert steps in PROFILE_RULES["wheelchair"]["priority"]
-    assert {"if": "road_class == STEPS", "multiply_by": "0.3"} in PROFILE_RULES["elderly"]["priority"]
+def test_only_adult_and_elderly():
+    assert set(PROFILE_RULES) == {"adult", "elderly"}
+    c, _ = client()
+    assert c.post("/api/route", json=body("wheelchair")).status_code == 422   # 휠체어 유형은 없앴다
+
+
+def test_adult_ignores_slope():
+    assert PROFILE_RULES["adult"] == {"priority": [], "speed": []}
+
+
+def test_elderly_prefers_steps_over_equally_steep_road():
+    rules = PROFILE_RULES["elderly"]["priority"]
+    # 계단 문장이 맨 앞 if이고 경사 문장은 else_if → 계단에는 경사 벌점이 붙지 않는다
+    assert rules[0]["if"] == "road_class == STEPS"
+    assert all("else_if" in r and "average_slope" in r["else_if"] for r in rules[1:])
+    # 계단(가파름)은 급경사 도로(≥10%)보다 싸다
+    assert float(rules[0]["multiply_by"]) > float(rules[1]["multiply_by"])
+
+
+def test_hazard_penalty_outweighs_every_profile_penalty():
+    """위험 구역 벌점이 유형 규칙이 한 구간에 줄 수 있는 가장 센 벌점보다 10배 이상 세야 한다."""
+    import math
+    from guardian_route.service import AVOID_PRIORITY
+    for rules in PROFILE_RULES.values():
+        worst = math.prod(float(r["multiply_by"]) for r in rules["priority"]) if rules["priority"] else 1.0
+        assert AVOID_PRIORITY * 10 <= worst
 
 
 def test_profile_rules_combine_with_hazard_avoidance():
     c, sent = client([ZONE])
-    res = c.post("/api/route", json=body("wheelchair")).json()
+    res = c.post("/api/route", json=body("elderly")).json()
     safe, base = sent[0]["custom_model"], sent[1]["custom_model"]
-    # 회피 경로: 휠체어 규칙 + 구역 회피
-    assert safe["priority"][:len(PROFILE_RULES["wheelchair"]["priority"])] == PROFILE_RULES["wheelchair"]["priority"]
+    # 회피 경로: 노약자 규칙 + 구역 회피
+    assert safe["priority"][:len(PROFILE_RULES["elderly"]["priority"])] == PROFILE_RULES["elderly"]["priority"]
     assert safe["priority"][-1]["if"] == "in_flood_009" and "areas" in safe
-    # 비교용 기본 경로: 휠체어 규칙은 같고 위험 구역만 뺀다
-    assert base["priority"] == PROFILE_RULES["wheelchair"]["priority"] and "areas" not in base
+    # 비교용 기본 경로: 노약자 규칙은 같고 위험 구역만 뺀다
+    assert base["priority"] == PROFILE_RULES["elderly"]["priority"] and "areas" not in base
     assert res["avoided"] == ["flood-009"]
 
 
@@ -161,13 +182,12 @@ def live_client():
 
 @pytest.mark.live
 def test_live_profiles_differ():
-    """같은 출발·도착이라도 유형별로 시간이 다르고, 노약자·휠체어는 성인보다 급경사가 완만하거나 같아야 한다."""
+    """같은 출발·도착이라도 노약자가 더 오래 걸리고, 급경사는 성인보다 완만하거나 같아야 한다."""
     c = live_client()
     b = {"origin": {"lat": 35.9800, "lon": 129.5600}, "destination": {"lat": 35.9950, "lon": 129.5450}}
-    r = {p: c.post("/api/route", json={**b, "profile": p}).json() for p in ("adult", "elderly", "wheelchair")}
+    r = {p: c.post("/api/route", json={**b, "profile": p}).json() for p in ("adult", "elderly")}
     assert r["adult"]["duration_s"] < r["elderly"]["duration_s"]
-    assert r["adult"]["duration_s"] < r["wheelchair"]["duration_s"]
-    assert r["wheelchair"]["max_slope_pct"] <= r["adult"]["max_slope_pct"]
+    assert r["elderly"]["max_slope_pct"] <= r["adult"]["max_slope_pct"]
 
 
 @pytest.mark.live
@@ -184,6 +204,19 @@ def test_live_off_route_check():
 # --- 실제 구룡포 도로망에서 유형별 규칙이 지켜지는지 (live) ---
 # 구룡포공원 계단(OSM way 1013424272) 아래 → 위, 성인은 계단 31m를 오른다.
 PARK_STEPS = ({"lat": 35.9908295, "lon": 129.5606355}, {"lat": 35.9911047, "lon": 129.5607137})
+
+
+def _steep_road_m(p, seg):
+    """계단이 아닌 도로 중 경사 10% 이상인 구간 길이(m). 노약자 규칙이 피하려는 대상."""
+    steps = [(s, e) for s, e, v in p["details"]["road_class"] if v == "steps"]
+    total = 0.0
+    for s, e, v in p["details"]["average_slope"]:
+        if v is None or abs(v) < 10:
+            continue
+        for i in range(s, e):
+            if not any(a <= i < b for a, b in steps):
+                total += seg[i]
+    return total
 
 
 def _gh_measure(origin, dest, profile):
@@ -206,28 +239,27 @@ def _gh_measure(origin, dest, profile):
     def meters(detail, pred):
         return sum(sum(seg[s:e]) for s, e, v in p["details"][detail] if v is not None and pred(v))
     return {"steps": meters("road_class", lambda v: v == "steps"),
-            "steep": meters("average_slope", lambda v: abs(v) >= 8),
+            "steep": _steep_road_m(p, seg),
             "kmh": p["distance"] / (p["time"] / 1000) * 3.6}
 
 
 @pytest.mark.live
-def test_live_park_steps_only_adult_climbs():
+def test_live_elderly_takes_park_steps_instead_of_steep_road():
+    """구룡포공원 계단: 돌아가는 길도 급경사라서, 노약자는 같은 경사면 계단을 택한다 (사용자 결정)."""
     a, b = PARK_STEPS
     assert _gh_measure(a, b, "adult")["steps"] > 20
-    assert _gh_measure(a, b, "elderly")["steps"] == 0
-    assert _gh_measure(a, b, "wheelchair")["steps"] == 0
+    assert _gh_measure(a, b, "elderly")["steps"] > 20
 
 
 @pytest.mark.live
 def test_live_rules_hold_over_random_trips():
-    """시가지 무작위 20개 경로: 휠체어는 계단 0, 속도는 성인 > 노약자 > 휠체어, 급경사(≥8%) 합계는 성인보다 적다."""
+    """시가지 무작위 20개 경로: 노약자가 항상 느리고, 계단이 아닌 급경사(≥10%) 도로 합계는 성인보다 적다."""
     import random
     rnd = random.Random(7)
     pt = lambda: {"lat": rnd.uniform(35.975, 36.0), "lon": rnd.uniform(129.54, 129.572)}
     trips = [(pt(), pt()) for _ in range(20)]
-    m = {p: [_gh_measure(a, b, p) for a, b in trips] for p in ("adult", "elderly", "wheelchair")}
-    assert all(x["steps"] == 0 for x in m["wheelchair"])
-    for a, e, w in zip(m["adult"], m["elderly"], m["wheelchair"]):
-        assert a["kmh"] > e["kmh"] > w["kmh"]
-    steep = {p: sum(x["steep"] for x in m[p]) for p in m}
-    assert steep["wheelchair"] < steep["elderly"] < steep["adult"]
+    m = {p: [_gh_measure(a, b, p) for a, b in trips] for p in ("adult", "elderly")}
+    for a, e in zip(m["adult"], m["elderly"]):
+        assert a["kmh"] > e["kmh"]
+        assert e["steep"] <= a["steep"] + 1
+    assert sum(x["steep"] for x in m["elderly"]) < sum(x["steep"] for x in m["adult"])

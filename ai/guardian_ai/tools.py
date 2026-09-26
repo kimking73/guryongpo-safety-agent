@@ -125,13 +125,13 @@ def get_user_profile(user_id: str) -> dict[str, Any]:
 def request_route(
     origin: tuple[float, float],
     destination: tuple[float, float],
-    profile: Literal["adult", "elderly", "wheelchair"] = "adult",
+    profile: Literal["adult", "elderly"] = "adult",
     avoid_manholes: bool = True,
     client: httpx.Client | None = None,
 ) -> dict[str, Any]:
     """위험 회피 경로. route 서비스(POST /api/route, B6·B7)를 실제로 호출한다 — 목업이 아닌 첫 tool.
 
-    회피: 침수·산사태 위험지역, (avoid_manholes면) 맨홀. profile: adult 최단 시간, elderly·wheelchair 경사·계단 회피.
+    회피: 침수·산사태 위험지역, (avoid_manholes면) 맨홀. profile: adult 최단 시간(경사 무시), elderly 급경사 회피·같은 경사면 계단 선호.
     좌표는 (lat, lon). 반환: route 서비스 응답 키 + available=True.
     경로 서버가 없거나 경로를 못 찾으면 예외 대신 {"available": False, "reason": …}를 돌려준다
     (agent가 "경로 안내를 지금 할 수 없다"고 답하고 대피소 위치만 알려 주도록).
@@ -162,15 +162,15 @@ def request_route(
     return {**res.json(), "available": True}
 
 
-def route_profile(user: UserProfile) -> Literal["adult", "elderly", "wheelchair"]:
+def route_profile(user: UserProfile) -> Literal["adult", "elderly"]:
     """사용자 정보 → request_route의 profile. 위치·경로 agent(B4)가 경로를 요청할 때 쓴다.
 
-    휠체어 이용 → wheelchair. 65세 이상이거나 보행이 불편하거나 보호가 필요한 동반자가 있으면 → elderly
-    (경사·계단을 피하는 느린 경로). 그 밖에는 adult. 정보가 없으면 adult로 두고, agent가 필요하면 묻는다.
+    65세 이상, 보행이 불편함, 휠체어 이용, 보호가 필요한 동반자 중 하나라도 → elderly (급경사를 피하는 느린 경로).
+    그 밖에는 adult. 정보가 없으면 adult로 두고, agent가 필요하면 묻는다.
+    휠체어 전용 경로는 두지 않는다 (사용자 결정 2026-09-26) — 휠체어 이용자도 노약자 경로를 쓴다.
     """
-    if user.mobility == Mobility.WHEELCHAIR:
-        return "wheelchair"
-    if (user.age is not None and user.age >= ELDERLY_AGE) or user.walking_impaired or user.has_dependents:
+    if ((user.age is not None and user.age >= ELDERLY_AGE) or user.walking_impaired
+            or user.mobility == Mobility.WHEELCHAIR or user.has_dependents):
         return "elderly"
     return "adult"
 

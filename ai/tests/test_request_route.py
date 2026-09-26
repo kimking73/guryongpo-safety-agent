@@ -51,4 +51,4 @@ def test_route_profile_from_user():
     assert route_profile(UserProfile(user_id="u", age=65)) == "elderly"
     assert route_profile(UserProfile(user_id="u", age=30, walking_impaired=True)) == "elderly"
     assert route_profile(UserProfile(user_id="u", has_dependents=True)) == "elderly"
-    assert route_profile(UserProfile(user_id="u", age=80, mobility=Mobility.WHEELCHAIR)) == "wheelchair"
+    assert route_profile(UserProfile(user_id="u", age=30, mobility=Mobility.WHEELCHAIR)) == "elderly"   # 휠체어 전용 없음
