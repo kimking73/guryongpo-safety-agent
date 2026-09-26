@@ -1,7 +1,7 @@
 # 개발 타임라인 · 진행 상황
 
 원본(최신, 편집 가능): https://claude.ai/artifact/S1CWwQbkt9mA7TpQbYbbgB
-— Artifact 도구 `action: "read"`로 읽는다 (WebFetch 불가). 아래는 2026-09-24 기준 사본(B1·B2·B8 완료 반영)이며, 원본과 다르면 원본이 우선.
+— Artifact 도구 `action: "read"`로 읽는다 (WebFetch 불가). 아래는 2026-09-26 기준 사본(B1·B2·B6·B8 완료 반영)이며, 원본과 다르면 원본이 우선.
 
 3명 · 21일. 마일스톤: Day 7 침수 흐름 앱 동작 / Day 14 전 기능 1차 구현 / Day 21 최종 완성.
 핵심 경로: API 명세 → 수집·DB → 침수 기능 연동 → 선제 경고 통합.
@@ -20,7 +20,7 @@
 | B2 | 3–4 | LangGraph 골격·관리자 agent (Gemini 연결, 질문 분류→라우팅, 목업 DB tool, /chat 인터페이스) | B1 | 질문 유형별로 올바른 agent 호출 | **완료** (2026-09-24) |
 | B3 | 5–6 | 침수 agent·환각 검증 (강수+수위 답변, evidence 대조, 최대 반복) | B2, A3 | 틀린 답 주입 시 검증에서 걸러짐 | 보류 (A1·A3 이후, 사용자 결정 2026-09-26) |
 | B4 | 8–10 | 재난 agent 확장·행동 권고 (산사태·강풍태풍·생활안전·위치경로, 규칙 기반 판단 트리, 선제 경고 메시지 함수) | A4, B3, A7 | 재난별 시나리오에 규칙대로 응답 | 미착수 |
-| B6 | 8–10 | GraphHopper 구축 (OSM 도로망, 위험지역·맨홀 회피, /route) | A1, A3 | 위험 구역 우회 경로 반환 | **완료 기준 충족 (임시 데이터)** — 완료 처리는 사용자 확인 후 |
+| B6 | 8–10 | GraphHopper 구축 (OSM 도로망, 위험지역·맨홀 회피, /route) | A1, A3 | 위험 구역 우회 경로 반환 | **완료** (2026-09-26, 임시 위험지역 데이터) |
 | B5 | 11–13 | 의도 검증·다듬기·음성 (STT/TTS, /voice, 지연 측정 → 필요 시 gemini-3.1-live-preview) | B4 | 음성 왕복 동작, 지연 기록 | 미착수 |
 | B7 | 11–13 | 경로 가중치·DEM·재계산 (프로필별 가중치, /route/check) | B6, B4 | 프로필별 다른 경로 | 미착수 |
 | B10 | 11–12 | GCP VM·도메인·HTTPS (Caddy, / → 웹, /api → FastAPI) | B8, B6 | 외부에서 /api/health 접속 | 미착수 |
@@ -30,8 +30,8 @@ A 작업 중 B와 맞물리는 것: **A7**(Day 3–6, 정적 데이터 적재)�
 
 공동: J1 Day 7 침수 연동 · J2 Day 14 1차 통합 · J3 15–16 버그 수정 · J4 17–18 테스트 · J5 19 웹·UI · J6 20 리허설 · J7 21 예비일.
 
-## 다음 세션 시작점 — B6 완료 처리 확인, 다음 작업 고르기
-B6은 임시 위험지역으로 완료 기준(위험 구역 우회 경로 반환)을 충족했다(2026-09-26). 완료 처리는 사용자에게 먼저 묻는다.
+## 다음 세션 시작점 — 다음 작업 고르기 (B6 완료)
+B6은 임시 위험지역으로 완료 기준(위험 구역 우회 경로 반환)을 충족해 완료 처리했다(2026-09-26, 사용자 결정, 라이브 타임라인 반영).
 - 지금 상태: `POST /api/route`가 `route/data/hazards.sample.geojson`(침수 2, 산사태 1, 맨홀 5, 모두 가짜)을 GraphHopper
   `custom_model` areas(우선순위 ×0.01)로 피한다. `avoided`(피한 구역), `still_inside`(다른 길이 없어 지나는 구역).
   GraphHopper를 요청당 두 번 부른다(회피 경로 + avoided 계산용 기본 경로).
@@ -71,3 +71,4 @@ B6은 임시 위험지역으로 완료 기준(위험 구역 우회 경로 반환
 - 2026-09-26 B3을 A1·A3 이후로 미루고 B6 먼저 진행(사용자 결정). B6 1단계: `graphhopper/`(GraphHopper 11 jar + Temurin 21, foot·flexible, `fetch_osm.sh`로 Geofabrik 한국 OSM → 구룡포 bbox 129.48,35.92~129.60,36.04 잘라 302KB, 교차점 3,226개), `route/`(FastAPI `POST /api/route`, `/api/route/health`, 장애 시 503·범위 밖 404), compose에 graphhopper·route 추가, 테스트 10건 + live 1건. 구룡포항→실내체육관 부근 986m·710초 확인.
 - 2026-09-26 지도 화면(/maps/)에서 경로가 안 뜨던 문제: 화면이 항상 elevation=true로 요청 → 'Elevation not supported!'. config.yml에 SRTM 고도(graph.elevation.provider: srtm, /data/srtm) 추가로 해결. 설정은 이미지에 복사되므로 바꾸면 graph-cache 삭제 + 재빌드.
 - 2026-09-26 B6 2단계: 위험 구역·맨홀 회피. `hazards.py`(HazardSource 주입, GeoJSON, 맨홀 점 → 반경 5m 다각형), `polyline.py`, GraphHopper custom_model areas + priority ×0.01(출발지가 구역 안이어도 탈출 가능), 기본 경로와 비교해 `avoided`·`still_inside`, `GET /api/route/hazards`, 요청 `avoid_manholes`. 테스트 19건 + live 2건. 실측: 구룡포항→실내체육관 부근 987m → 1,324m로 flood-001·맨홀 2개 우회, 구역 안 출발 시 still_inside=[flood-001]. `agent-design.md` 5절과 tools.py 목업에 still_inside 추가.
+- 2026-09-26 B6 완료 처리(사용자 결정). 지도 화면(/maps/)에 회피 조건을 붙여 넣어 우회를 사용자가 직접 확인. 라이브 타임라인 반영(B6 체크).

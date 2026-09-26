@@ -20,9 +20,9 @@
 - Commit; if `git push` is blocked for Claude, ask the user to run `! git push`.
 
 ## Current status (2026-09-26, Day 4)
-- **Done: B1, B8, B2.** **In progress: B6** (moved ahead of B3, which waits for A1·A3). B6 steps 1–2 done: `../route/`
+- **Done: B1, B8, B2, B6.** B6 was done ahead of B3 (B3 waits for A1·A3). B6: `../route/`
   (`POST /api/route`, avoids mock flood/landslide zones + manholes, reports `avoided`/`still_inside`) + `../graphhopper/`.
-  B6 meets its done criterion on mock data; mark complete only when the user says so.
+  Hazards are mock data until A7. Next task (B7 or B3) is the user's pick — see timeline "다음 세션 시작점".
   Details and carry-over items: `.claude/docs/timeline.md`.
 - AI path today: `POST /api/chat` (api.py:34) → `ChatService.chat` (service.py:60) → graph with
   `make_manager(GeminiClassifier())` (graph.py:144, llm.py:109). Only the manager is real; specialists,
