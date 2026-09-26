@@ -10,7 +10,7 @@
    (https://claude.ai/artifact/S1CWwQbkt9mA7TpQbYbbgB, Artifact tool `action: "read"`) and sync `timeline.md`.
    Its downloaded file may come wrapped in an extra host `<html>` shell — strip it before republishing.
 5. Check `docs/agent-design.md` §7 (open questions) and `docs/code_check_list.md` (open: #3, target B5).
-6. Route work (B6·B7): `cd ../route && .venv/bin/python -m pytest -q` → **32 passed, 4 deselected**. Needs
+6. Route work (B6·B7): `cd ../route && .venv/bin/python -m pytest -q` → **32 passed, 6 deselected** (live 6). Needs
    `../graphhopper/data/guryongpo.osm.pbf` (`../graphhopper/fetch_osm.sh`).
 
 ## Session end (do this before finishing)

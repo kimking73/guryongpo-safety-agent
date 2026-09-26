@@ -179,3 +179,55 @@ def test_live_off_route_check():
                                            "destination": {"lat": 35.9868, "lon": 129.5480},
                                            "geometry": route["geometry"]}).json()
     assert res["reroute"] is True and "off_route" in res["reasons"] and res["route"]["distance_m"] > 0
+
+
+# --- 실제 구룡포 도로망에서 유형별 규칙이 지켜지는지 (live) ---
+# 구룡포공원 계단(OSM way 1013424272) 아래 → 위, 성인은 계단 31m를 오른다.
+PARK_STEPS = ({"lat": 35.9908295, "lon": 129.5606355}, {"lat": 35.9911047, "lon": 129.5607137})
+
+
+def _gh_measure(origin, dest, profile):
+    """route 서비스와 같은 custom_model로 GraphHopper를 불러 계단·급경사(≥8%) 거리와 평균 속도를 잰다."""
+    import math
+    from guardian_route.profiles import PROFILE_RULES
+    from guardian_route.service import build_model
+    zones = GeoJsonHazardSource().hazards()
+    gh = GraphHopperClient(base_url="http://localhost:8989")
+    body = {"profile": "foot", "points": [[origin["lon"], origin["lat"]], [dest["lon"], dest["lat"]]],
+            "points_encoded": False, "details": ["road_class", "average_slope"]}
+    model = build_model(PROFILE_RULES[profile], zones)
+    if model:
+        body["custom_model"] = model
+    p = gh.http.post("/route", json=body).json()["paths"][0]
+    co = p["points"]["coordinates"]
+    seg = [math.hypot((co[i + 1][0] - co[i][0]) * 111320 * math.cos(math.radians(co[i][1])),
+                      (co[i + 1][1] - co[i][1]) * 110540) for i in range(len(co) - 1)]
+
+    def meters(detail, pred):
+        return sum(sum(seg[s:e]) for s, e, v in p["details"][detail] if v is not None and pred(v))
+    return {"steps": meters("road_class", lambda v: v == "steps"),
+            "steep": meters("average_slope", lambda v: abs(v) >= 8),
+            "kmh": p["distance"] / (p["time"] / 1000) * 3.6}
+
+
+@pytest.mark.live
+def test_live_park_steps_only_adult_climbs():
+    a, b = PARK_STEPS
+    assert _gh_measure(a, b, "adult")["steps"] > 20
+    assert _gh_measure(a, b, "elderly")["steps"] == 0
+    assert _gh_measure(a, b, "wheelchair")["steps"] == 0
+
+
+@pytest.mark.live
+def test_live_rules_hold_over_random_trips():
+    """시가지 무작위 20개 경로: 휠체어는 계단 0, 속도는 성인 > 노약자 > 휠체어, 급경사(≥8%) 합계는 성인보다 적다."""
+    import random
+    rnd = random.Random(7)
+    pt = lambda: {"lat": rnd.uniform(35.975, 36.0), "lon": rnd.uniform(129.54, 129.572)}
+    trips = [(pt(), pt()) for _ in range(20)]
+    m = {p: [_gh_measure(a, b, p) for a, b in trips] for p in ("adult", "elderly", "wheelchair")}
+    assert all(x["steps"] == 0 for x in m["wheelchair"])
+    for a, e, w in zip(m["adult"], m["elderly"], m["wheelchair"]):
+        assert a["kmh"] > e["kmh"] > w["kmh"]
+    steep = {p: sum(x["steep"] for x in m[p]) for p in m}
+    assert steep["wheelchair"] < steep["elderly"] < steep["adult"]
