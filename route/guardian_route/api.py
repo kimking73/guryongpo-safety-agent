@@ -32,6 +32,12 @@ def health(service: RouteService = Depends(get_service)) -> dict:
     return service.health()
 
 
+@app.get("/api/route/hazards")
+def hazards(service: RouteService = Depends(get_service)) -> dict:
+    """경로가 피하는 위험 구역 원본 (GeoJSON). 지금은 임시 데이터라 확인용이다. 지도에 그리려면 geojson.io 등에 붙여 넣는다."""
+    return service.hazards.raw()
+
+
 @app.post("/api/route", response_model=RouteResponse)
 def route(req: RouteRequest, service: RouteService = Depends(get_service)) -> RouteResponse:
     try:

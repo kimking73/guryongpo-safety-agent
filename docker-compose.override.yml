@@ -28,4 +28,5 @@ services:
     # guardian_route 코드를 고치면 컨테이너 재빌드 없이 자동 재시작
     volumes:
       - ./route/guardian_route:/srv/guardian_route
+      - ./route/data:/srv/data        # 임시 위험지역 GeoJSON을 고치면 다음 요청부터 바로 반영
     command: ["uvicorn", "guardian_route.api:app", "--host", "0.0.0.0", "--port", "8002", "--reload"]

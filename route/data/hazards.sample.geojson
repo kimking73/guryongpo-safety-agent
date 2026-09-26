@@ -1,0 +1,202 @@
+{
+ "type": "FeatureCollection",
+ "name": "구룡포 임시 위험지역 (B6 테스트용, 실제 데이터 아님)",
+ "features": [
+  {
+   "type": "Feature",
+   "properties": {
+    "id": "flood-001",
+    "kind": "flood",
+    "grade": "high",
+    "name": "임시 침수 구역 1 (항구 뒷길)",
+    "source": "mock"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       129.553,
+       35.9886
+      ],
+      [
+       129.5542,
+       35.9886
+      ],
+      [
+       129.5542,
+       35.9894
+      ],
+      [
+       129.553,
+       35.9894
+      ],
+      [
+       129.553,
+       35.9886
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "id": "flood-002",
+    "kind": "flood",
+    "grade": "medium",
+    "name": "임시 침수 구역 2 (해안 도로)",
+    "source": "mock"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       129.557,
+       35.9905
+      ],
+      [
+       129.5578,
+       35.9905
+      ],
+      [
+       129.5578,
+       35.9914
+      ],
+      [
+       129.557,
+       35.9914
+      ],
+      [
+       129.557,
+       35.9905
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "id": "landslide-001",
+    "kind": "landslide",
+    "grade": "high",
+    "name": "임시 산사태 구역 1 (서쪽 언덕)",
+    "source": "mock"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       129.5485,
+       35.9927
+      ],
+      [
+       129.5497,
+       35.9927
+      ],
+      [
+       129.5497,
+       35.9937
+      ],
+      [
+       129.5485,
+       35.9937
+      ],
+      [
+       129.5485,
+       35.9927
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "id": "manhole-001",
+    "kind": "manhole",
+    "grade": null,
+    "name": "임시 맨홀 1",
+    "source": "mock"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.55191,
+     35.98804
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "id": "manhole-002",
+    "kind": "manhole",
+    "grade": null,
+    "name": "임시 맨홀 2",
+    "source": "mock"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.54926,
+     35.98742
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "id": "manhole-003",
+    "kind": "manhole",
+    "grade": null,
+    "name": "임시 맨홀 3",
+    "source": "mock"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.5601,
+     35.99003
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "id": "manhole-004",
+    "kind": "manhole",
+    "grade": null,
+    "name": "임시 맨홀 4",
+    "source": "mock"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.5626,
+     35.9899
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "id": "manhole-005",
+    "kind": "manhole",
+    "grade": null,
+    "name": "임시 맨홀 5",
+    "source": "mock"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.55197,
+     35.98542
+    ]
+   }
+  }
+ ]
+}

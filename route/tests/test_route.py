@@ -1,4 +1,7 @@
-"""경로 안내 서버 /api/route 왕복 (가짜 GraphHopper, 오프라인) + 실제 GraphHopper(live)."""
+"""경로 안내 서버 /api/route 왕복 (가짜 GraphHopper, 오프라인) + 실제 GraphHopper(live).
+
+위험 구역 회피 테스트는 test_avoid.py.
+"""
 
 import json
 
@@ -8,7 +11,14 @@ from fastapi.testclient import TestClient
 
 from guardian_route.api import app, get_service
 from guardian_route.gh import GraphHopperClient
+from guardian_route.polyline import decode as decode_polyline
 from guardian_route.service import RouteService
+
+
+class NoHazards:
+    """위험 구역 없음. 이 파일은 기본 경로 변환만 본다."""
+    def hazards(self):
+        return []
 
 # 구룡포항 → 구룡포 실내체육관 부근
 BODY = {"origin": {"lat": 35.9905, "lon": 129.5560}, "destination": {"lat": 35.9868, "lon": 129.5480}}
@@ -24,7 +34,7 @@ def client(handler) -> tuple[TestClient, list[httpx.Request]]:
         return handler(req)
 
     gh = GraphHopperClient(base_url="http://gh", transport=httpx.MockTransport(record))
-    service = RouteService(client=gh)
+    service = RouteService(client=gh, hazards=NoHazards())
     app.dependency_overrides[get_service] = lambda: service
     return TestClient(app), seen
 
@@ -40,11 +50,12 @@ def test_route_converts_graphhopper_response():
     res = c.post("/api/route", json={**BODY, "profile": "elderly"})
     assert res.status_code == 200
     assert res.json() == {"profile": "elderly", "distance_m": 986, "duration_s": 710, "avoided": [],
-                          "geometry": PATH["points"], "source": "graphhopper"}
+                          "still_inside": [], "geometry": PATH["points"], "source": "graphhopper"}
     # GraphHopper에는 [lon, lat] 순서, 도보 profile, 인코딩된 polyline으로 요청한다
     sent = json.loads(seen[0].content)
     assert sent["points"] == [[129.5560, 35.9905], [129.5480, 35.9868]]
     assert sent["profile"] == "foot" and sent["points_encoded"] is True
+    assert "custom_model" not in sent and len(seen) == 1     # 위험 구역이 없으면 한 번만, 규칙 없이 부른다
 
 
 def test_profile_defaults_to_adult():
@@ -103,32 +114,10 @@ def test_health_reports_graphhopper_state():
     assert res.json() == {"status": "ok", "graphhopper": "error"}
 
 
-def decode_polyline(s: str) -> list[tuple[float, float]]:
-    """Google polyline(정밀도 1e5) → [(lat, lon)]."""
-    coords, idx, lat, lon = [], 0, 0, 0
-    while idx < len(s):
-        for which in range(2):
-            shift = result = 0
-            while True:
-                b = ord(s[idx]) - 63
-                idx += 1
-                result |= (b & 0x1F) << shift
-                shift += 5
-                if b < 0x20:
-                    break
-            delta = ~(result >> 1) if result & 1 else result >> 1
-            if which == 0:
-                lat += delta
-            else:
-                lon += delta
-        coords.append((lat / 1e5, lon / 1e5))
-    return coords
-
-
 @pytest.mark.live
 def test_live_route_in_guryongpo():
     """실제 graphhopper 컨테이너(localhost:8989). 구룡포 안 두 점 사이에 도로를 따라가는 경로가 나와야 한다."""
-    service = RouteService(client=GraphHopperClient(base_url="http://localhost:8989"))
+    service = RouteService(client=GraphHopperClient(base_url="http://localhost:8989"), hazards=NoHazards())
     app.dependency_overrides[get_service] = lambda: service
     res = TestClient(app).post("/api/route", json=BODY).json()
     assert 500 < res["distance_m"] < 3000

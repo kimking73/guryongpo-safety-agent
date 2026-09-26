@@ -7,6 +7,8 @@ COPY pyproject.toml .
 RUN python -c "import tomllib, subprocess, sys; deps = tomllib.load(open('pyproject.toml', 'rb'))['project']['dependencies']; subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--no-cache-dir', *deps])"
 
 COPY guardian_route ./guardian_route
+# 임시 위험지역 GeoJSON (A7 DB 적재 전까지)
+COPY data ./data
 
 EXPOSE 8002
 CMD ["uvicorn", "guardian_route.api:app", "--host", "0.0.0.0", "--port", "8002"]

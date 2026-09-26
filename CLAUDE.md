@@ -31,7 +31,7 @@ Lanes: **A** server/DB/data collection/risk engine (`server/`, `db/`) · **B** A
 | `docker-compose.override.yml` | Local-only: DB host port 5433, graphhopper 8989, code mounts + `--reload` |
 | `server/` | FastAPI server (lane A). Only `/api/health` exists (server/app/main.py:15) |
 | `ai/` | LangGraph multi-agent + `POST /api/chat` (ai/guardian_ai/api.py:34). See `ai/CLAUDE.md` |
-| `route/` | Route server (lane B): `POST /api/route` → GraphHopper (route/guardian_route/api.py:35); tests in `route/tests/` |
+| `route/` | Route server (lane B): `POST /api/route` → GraphHopper with hazard avoidance (route/guardian_route/api.py:41, service.py:55); mock hazards `route/data/hazards.sample.geojson`; tests in `route/tests/` |
 | `graphhopper/` | GraphHopper 11 image + `config.yml` (foot, no CH); `fetch_osm.sh` builds `data/guryongpo.osm.pbf` (gitignored) |
 | `app/` | Flutter project placeholder (README only until C2) |
 | `db/init/` | SQL run once on an empty DB volume (PostGIS extension) |

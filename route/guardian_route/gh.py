@@ -32,14 +32,20 @@ class GraphHopperClient:
         timeout_ms = timeout_ms or int(os.environ.get("GRAPHHOPPER_TIMEOUT_MS") or DEFAULT_TIMEOUT_MS)
         self.http = httpx.Client(base_url=base_url, timeout=timeout_ms / 1000, transport=transport)
 
-    def route(self, points: list[tuple[float, float]], profile: str = "foot") -> dict[str, Any]:
-        """(lat, lon) 좌표 목록을 순서대로 지나는 경로. GraphHopper 응답의 첫 번째 path를 돌려준다."""
-        body = {
+    def route(self, points: list[tuple[float, float]], profile: str = "foot",
+              custom_model: dict[str, Any] | None = None) -> dict[str, Any]:
+        """(lat, lon) 좌표 목록을 순서대로 지나는 경로. GraphHopper 응답의 첫 번째 path를 돌려준다.
+
+        custom_model: 이번 요청에만 더할 규칙 (위험 구역 회피 등). profile 기본 모델(foot.json)에 합쳐진다.
+        """
+        body: dict[str, Any] = {
             "profile": profile,
             "points": [[lon, lat] for lat, lon in points],
             "points_encoded": True,    # geometry를 인코딩된 polyline 문자열로 받는다 (Google polyline 형식, 정밀도 1e5)
             "instructions": False,     # 회전 안내 문구는 아직 쓰지 않는다 (C5 경로 화면에서 필요하면 켠다)
         }
+        if custom_model:
+            body["custom_model"] = custom_model
         try:
             res = self.http.post("/route", json=body)
         except httpx.HTTPError as e:   # 연결 실패, 시간 초과

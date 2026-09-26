@@ -120,7 +120,7 @@ def request_route(
     """
     return {
         "profile": profile, "distance_m": 1200, "duration_s": 1140,
-        "avoided": ["flood-001", "manhole-003"],
+        "avoided": ["flood-001", "manhole-003"], "still_inside": [],
         "geometry": "encoded-polyline", "source": "graphhopper",
     }
 

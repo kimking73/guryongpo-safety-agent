@@ -71,6 +71,8 @@ curl -X POST localhost:8002/api/route -H 'Content-Type: application/json' \
      -d '{"origin":{"lat":35.9905,"lon":129.5560},"destination":{"lat":35.9868,"lon":129.5480}}'
 ```
 - API 문서: http://localhost:8000/docs (서버), http://localhost:8001/docs (AI), http://localhost:8002/docs (경로)
+- 경로는 침수·산사태 구역과 맨홀을 피한다. 응답의 `avoided`는 피한 구역, `still_inside`는 다른 길이 없어 지나는 구역이다.
+  지금 위험 구역은 **임시 데이터**(`route/data/hazards.sample.geojson`)이며, 목록은 http://localhost:8002/api/route/hazards 에서 볼 수 있다.
 - GraphHopper 지도 화면(로컬 확인용): http://localhost:8989/maps/ (끝의 `/` 필수. 없으면 빈 화면)
 - 경로 응답의 `geometry`는 인코딩된 polyline(Google 형식, 정밀도 1e5)이다. 앱에서 풀어서 지도에 그린다.
 - AI가 Gemini를 쓰려면 `.env`의 `GEMINI_API_KEY`가 필요하다. 없으면 키워드 분류로 동작한다.
