@@ -88,7 +88,7 @@ docker compose exec db psql -U guardian -d guardian   # DB 셸
 ```
 - `server/app/`, `ai/guardian_ai/`, `route/guardian_route/` 코드를 고치면 해당 서버가 자동으로 재시작된다 (재빌드 불필요).
 - 배포 시 Caddy가 `/api/chat`은 ai(8001)로, `/api/route`는 route(8002)로, 나머지 `/api`는 서버(8000)로 넘긴다 (B10).
-- `graphhopper/config.yml`을 바꾸면 `rm -rf graphhopper/data/graph-cache` 후 `docker compose restart graphhopper` (그래프를 다시 만든다).
+- `graphhopper/config.yml`을 바꾸면 `rm -rf graphhopper/data/graph-cache` 후 `docker compose up -d --build graphhopper` (설정이 이미지에 들어가므로 재빌드, 그래프도 다시 만든다).
 
 ## 환경 변수 규칙
 

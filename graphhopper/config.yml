@@ -1,6 +1,6 @@
-# GraphHopper 설정 (B6). 설정을 바꾸면 graphhopper/data/graph-cache를 지워야 새 설정으로 다시 만든다.
+# GraphHopper 설정 (B6). 바꾸면 graphhopper/data/graph-cache를 지우고 `docker compose up -d --build graphhopper` (이미지에 복사되므로 재빌드).
 graphhopper:
-  datareader.file: /data/guryongpo.osm.pbf
+  datareader.file: /data/guryongpo.osm.pbf 
   graph.location: /data/graph-cache
 
   # 도보 경로. foot.json은 jar에 들어 있는 기본 모델.
@@ -12,6 +12,10 @@ graphhopper:
   profiles_lm: []
   graph.encoded_values: foot_access, foot_priority, foot_average_speed, foot_road_access, hike_rating, mtb_rating, average_slope, country, road_class
 
+  # 고도: SRTM(무료 위성 고도, 약 90m 간격)을 처음 그래프를 만들 때 받아 /data/srtm에 저장한다.
+  # 지도 화면(/maps/)이 항상 고도를 요청해서 꺼 두면 경로가 안 뜬다. B7에서 국토지리정보원 DEM으로 바꿀 수 있다.
+  graph.elevation.provider: srtm
+  graph.elevation.cache_dir: /data/srtm
   # 보행자가 못 다니는 고속도로만 도로망에서 뺀다.
   import.osm.ignored_highways: motorway,motorway_link
   prepare.min_network_size: 200
