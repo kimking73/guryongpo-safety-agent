@@ -175,5 +175,5 @@ cd server/tools && python3 validate.py            # 명세(spec/openapi.yaml) �
 
 - A4 (재난 확장): `risk/engine.py` 에 호우(AWS 3·12시간 누적, 1·2번)·강풍·태풍·산사태·미세먼지·자외선 판정 추가, 시나리오 추가
 - A5 (경고): `/user`, `/device-token`, `/alerts` 를 users·user_devices·user_alerts 로 → `routers/user.py`, `routers/alerts.py`
-- A7 이후: 침수·해안 위험지역 영역 데이터(flood_zones·coastal_zones 레이어) 출처 확보 시 `db/init/07_*.sql` 로 추가 → loader 가 자동 포함. route 서비스가 임시 GeoJSON 대신 hazard_zones·manholes 를 읽도록 B 와 합의
+- A7 이후: 위험지역 고정 영역은 산사태 취약지역만 사용 (침수·해안 영역 레이어는 제거, 침수는 실시간 판정 영역 risk_areas). 새 정적 데이터는 `db/init/07_*.sql` 로 추가 → loader 가 자동 포함. route 서비스가 임시 GeoJSON 대신 hazard_zones·manholes 를 읽도록 B 와 합의
 - B: `/api/chat` 은 ai 서비스, `/api/route` 는 route 서비스가 실제 구현 — 여기 `/api/v1/chat`·`/api/v1/route` 목업은 앱 개발용 (Caddy 경로 정리 시 합의)

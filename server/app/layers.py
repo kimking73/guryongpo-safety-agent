@@ -2,7 +2,7 @@
 
 실데이터: stations (관측소 + 최신값), landslide_zones (산사태 취약지역), risk_areas (A3 판정 결과 — risk.queries),
          shelters · medical · manholes (A7 loader 가 적재한 정적 데이터)
-빈 레이어: flood_zones · coastal_zones (공개 영역 데이터 미확보)
+위험지역 고정 영역은 산사태 취약지역만 사용 (침수는 수위계 기반 실시간 판정 영역 risk_areas 로 표시)
 """
 from __future__ import annotations
 

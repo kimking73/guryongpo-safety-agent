@@ -251,7 +251,8 @@ paths:
         stations 레이어의 properties = { name, kind, source, metric, value, unit, source_level, source_level_label, level, observed_at } (최신값 포함)
         shelters: { id, name, shelter_types, address, capacity, phone, is_indoor, is_accessible, in_risk_area } — in_risk_area = 현재 주의 이상 위험 영역 안
         medical: { id, name, kind, address, phone, er_phone, emergency_class } — 구룡포 안에 응급의료기관이 없어 bbox 생략 시 포항 전체
-        manholes: { id, kind(smart = 포항 DT 스마트맨홀), name, source } · flood_zones·coastal_zones 는 데이터 확보 전까지 빈 FeatureCollection
+        manholes: { id, kind(smart = 포항 DT 스마트맨홀), name, source }
+        위험지역 고정 영역은 landslide_zones(산사태 취약지역)만. 침수는 실시간 판정 영역 risk_areas
       operationId: getLayer
       security: []
       parameters:
@@ -752,7 +753,7 @@ components:
     # ------------------------------------------------------------ dashboard
     LayerId:
       type: string
-      enum: [shelters, medical, landslide_zones, flood_zones, coastal_zones, manholes, stations, risk_areas]
+      enum: [shelters, medical, landslide_zones, manholes, stations, risk_areas]
     Dashboard:
       type: object
       required: [mode, point_risk, widgets, highlight_layers, updated_at]

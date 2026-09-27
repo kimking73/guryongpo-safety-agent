@@ -72,7 +72,7 @@ def test_layers(client, fake_db):
     f = r.json()["features"][0]
     assert f["geometry"]["coordinates"] == [129.556, 35.990]       # GeoJSON 은 [경도, 위도]
     assert f["properties"]["level"] == "warning" and f["properties"]["source_level_label"] == "경보"
-    assert client.get("/api/v1/dashboard/layers/flood_zones").headers["X-Mock"] == "true"    # 영역 데이터 미확보 → 빈 목업
+    assert client.get("/api/v1/dashboard/layers/flood_zones").status_code == 404           # 침수·해안 고정 영역 레이어 없음 (산사태만)
     assert client.get("/api/v1/dashboard/layers/nope").status_code == 404
     assert client.get("/api/v1/dashboard/layers/stations?bbox=1,2").status_code == 422
 
