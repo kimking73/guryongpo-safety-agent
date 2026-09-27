@@ -8,10 +8,21 @@ services:
       - "${DB_HOST_PORT:-5433}:5432"
 
   api:
-    # server/app 코드를 고치면 컨테이너 재빌드 없이 자동 재시작
+    # server 코드를 고치면 컨테이너 재빌드 없이 자동 재시작
     volumes:
       - ./server/app:/srv/app
+      - ./server/collector:/srv/collector
+      - ./server/risk:/srv/risk
+      - ./server/mock:/srv/mock
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  collector:
+    # 코드는 마운트하지만 스케줄러라 자동 재시작은 없음 → 고친 뒤 `docker compose restart collector`
+    volumes:
+      - ./server/app:/srv/app
+      - ./server/collector:/srv/collector
+      - ./server/risk:/srv/risk
+      - ./server/mock:/srv/mock
 
   ai:
     # guardian_ai 코드를 고치면 컨테이너 재빌드 없이 자동 재시작

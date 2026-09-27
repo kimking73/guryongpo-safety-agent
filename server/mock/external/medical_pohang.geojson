@@ -1,0 +1,95 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.3549930430143,
+     36.03462413480262
+    ]
+   },
+   "properties": {
+    "external_id": "A2700005",
+    "name": "경상북도포항의료원",
+    "address": "경상북도 포항시 북구 용흥로 36 (용흥동, (용흥동))",
+    "phone": "054-247-0551",
+    "er_phone": "054-245-0129",
+    "emergency_class": "지역응급의료기관"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.3314002552,
+     36.0348228983
+    ]
+   },
+   "properties": {
+    "external_id": "A2700008",
+    "name": "에스포항병원",
+    "address": "경상북도 포항시 남구 희망대로 352 (이동, 에스포항병원)",
+    "phone": "054-289-9000",
+    "er_phone": "054-289-9120",
+    "emergency_class": "지역응급의료기관"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.36704339734024,
+     36.048089061494764
+    ]
+   },
+   "properties": {
+    "external_id": "A2702563",
+    "name": "의료법인은성의료재단좋은선린병원",
+    "address": "경상북도 포항시 북구 대신로 43 (대신동)",
+    "phone": "054-245-5000",
+    "er_phone": "054-245-5200",
+    "emergency_class": "지역응급의료기관"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.33981334567275,
+     36.01585627687779
+    ]
+   },
+   "properties": {
+    "external_id": "A2700016",
+    "name": "포항성모병원",
+    "address": "경상북도 포항시 남구 대잠동길 17 (대잠동)",
+    "phone": "054-272-0151",
+    "er_phone": "054-260-8600",
+    "emergency_class": "권역응급의료센터"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.3615706051,
+     36.0181008246
+    ]
+   },
+   "properties": {
+    "external_id": "A2700002",
+    "name": "포항세명기독병원",
+    "address": "경상북도 포항시 남구 포스코대로 351 (대도동)",
+    "phone": "054-275-0005",
+    "er_phone": "054-289-1711",
+    "emergency_class": "지역응급의료센터"
+   }
+  }
+ ]
+}

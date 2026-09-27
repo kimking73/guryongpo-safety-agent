@@ -1,0 +1,95 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "id": 1022,
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              129.5544,
+              35.9896
+            ],
+            [
+              129.5577,
+              35.9896
+            ],
+            [
+              129.5577,
+              35.992
+            ],
+            [
+              129.5544,
+              35.992
+            ],
+            [
+              129.5544,
+              35.9896
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "hazard": "flood",
+        "level": "warning",
+        "level_num": 3,
+        "label": "침수 경보",
+        "reason": "구룡포환승센터 지표면 수위계 침수심 230mm (기준 150mm) · 포항 DT 4단계(경보)",
+        "location": {
+          "lat": 35.9903,
+          "lng": 129.5558
+        },
+        "area_id": 1022,
+        "rule_id": 23,
+        "observed_at": "2026-10-05T14:27:00+09:00"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": 1023,
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              129.547,
+              35.985
+            ],
+            [
+              129.55,
+              35.985
+            ],
+            [
+              129.55,
+              35.9875
+            ],
+            [
+              129.547,
+              35.9875
+            ],
+            [
+              129.547,
+              35.985
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "hazard": "landslide",
+        "level": "warning",
+        "level_num": 3,
+        "label": "산사태 경고",
+        "reason": "호우경보 중 · 등록 장소 '우리집'이 산사태 위험지역 내부",
+        "location": {
+          "lat": 35.9862,
+          "lng": 129.5489
+        },
+        "area_id": 1023,
+        "rule_id": 11,
+        "observed_at": "2026-10-05T14:30:00+09:00"
+      }
+    }
+  ]
+}

@@ -1,0 +1,166 @@
+{
+  "mode": "normal",
+  "headline": null,
+  "point_risk": {
+    "location": {
+      "lat": 35.9903,
+      "lng": 129.5558
+    },
+    "max_level": "watch",
+    "max_level_num": 1,
+    "items": [
+      {
+        "hazard": "uv",
+        "level": "watch",
+        "level_num": 1,
+        "label": "자외선 보통",
+        "reason": "자외선지수 4 (포항 디지털 트윈, 14:00)",
+        "location": {
+          "lat": 35.9903,
+          "lng": 129.5558
+        },
+        "area_id": null,
+        "rule_id": 17,
+        "observed_at": "2026-10-05T14:00:00+09:00"
+      }
+    ],
+    "computed_at": "2026-10-05T14:30:00+09:00"
+  },
+  "places": [
+    {
+      "place_id": "7b1f6a3e-2c4d-4e8f-9a01-3b5c7d9e1f20",
+      "label": "우리집",
+      "max_level": "normal",
+      "max_level_num": 0
+    },
+    {
+      "place_id": "8c2e7b4f-3d5e-4f90-8b12-4c6d8e0f2a31",
+      "label": "구룡포항 3부두",
+      "max_level": "normal",
+      "max_level_num": 0
+    }
+  ],
+  "widgets": [
+    {
+      "type": "forecast",
+      "emphasized": false,
+      "data": {
+        "slots": [
+          {
+            "t": "2026-10-05T15:00:00+09:00",
+            "pop": 30,
+            "pty": "없음",
+            "pcp_mm": 0,
+            "tmp": 21,
+            "wsd": 3.2
+          },
+          {
+            "t": "2026-10-05T18:00:00+09:00",
+            "pop": 60,
+            "pty": "비",
+            "pcp_mm": 2.0,
+            "tmp": 19,
+            "wsd": 4.8
+          }
+        ]
+      }
+    },
+    {
+      "type": "life_safety",
+      "emphasized": false,
+      "data": {
+        "items": [
+          {
+            "hazard": "uv",
+            "level": "watch",
+            "level_num": 1,
+            "label": "자외선 보통",
+            "reason": "자외선지수 4 (포항 디지털 트윈, 14:00)",
+            "location": {
+              "lat": 35.9903,
+              "lng": 129.5558
+            },
+            "area_id": null,
+            "rule_id": 17,
+            "observed_at": "2026-10-05T14:00:00+09:00",
+            "value": 4,
+            "unit": "index"
+          },
+          {
+            "hazard": "fine_dust",
+            "level": "normal",
+            "level_num": 0,
+            "label": "미세먼지 좋음",
+            "value": 28,
+            "unit": "㎍/㎥"
+          }
+        ]
+      }
+    },
+    {
+      "type": "checklist",
+      "emphasized": false,
+      "data": {
+        "hazard": "typhoon",
+        "items": [
+          {
+            "id": 31,
+            "content": "선박 결박 상태와 계류줄 점검",
+            "checked": false,
+            "is_often_missed": true
+          },
+          {
+            "id": 32,
+            "content": "비상용 손전등·보조배터리 준비",
+            "checked": true,
+            "is_often_missed": false
+          }
+        ]
+      }
+    },
+    {
+      "type": "disaster_messages",
+      "emphasized": false,
+      "data": {
+        "items": []
+      }
+    }
+  ],
+  "highlight_layers": [],
+  "nearest_shelters": [
+    {
+      "id": 12,
+      "name": "구룡포읍 대피소 A (예시)",
+      "shelter_types": [
+        "flood",
+        "earthquake"
+      ],
+      "address": "경북 포항시 남구 구룡포읍 (예시 주소)",
+      "capacity": 300,
+      "is_accessible": true,
+      "location": {
+        "lat": 35.9921,
+        "lng": 129.5512
+      },
+      "distance_m": 540,
+      "in_risk_area": false
+    },
+    {
+      "id": 15,
+      "name": "구룡포읍 대피소 B (예시)",
+      "shelter_types": [
+        "flood"
+      ],
+      "address": "경북 포항시 남구 구룡포읍 (예시 주소)",
+      "capacity": 150,
+      "is_accessible": false,
+      "location": {
+        "lat": 35.995,
+        "lng": 129.547
+      },
+      "distance_m": 1010,
+      "in_risk_area": false
+    }
+  ],
+  "updated_at": "2026-10-05T14:30:00+09:00"
+}

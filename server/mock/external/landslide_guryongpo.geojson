@@ -1,0 +1,442 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.527548,
+     35.956167
+    ]
+   },
+   "properties": {
+    "external_id": "gb_43",
+    "grade": "토석류",
+    "name": "포항시 남구 구룡포읍 구평리 산172임",
+    "area_m2": 180.0,
+    "radius_m": 50.0,
+    "emd": "구룡포읍",
+    "designated_date": "2026-06-04",
+    "reason": "계류의 종단 물매가 급하고, 다수의 구간에서 침식 및 토사유실이 관찰되며, 계상에 전도목 및 유동가능 토석들이 적치되어 있어 호우 시 피해 우려됨.",
+    "manager": "포항시",
+    "ownership": "사유림",
+    "shelter_distance_m": 2276.18
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.534466,
+     35.984909
+    ]
+   },
+   "properties": {
+    "external_id": "gb_44",
+    "grade": "산사태",
+    "name": "포항시 남구 구룡포읍 후동리 산9-3임",
+    "area_m2": 598.0,
+    "radius_m": 50.0,
+    "emd": "구룡포읍",
+    "designated_date": "2026-06-04",
+    "reason": "사면 붕괴 피해 발생지이며, 사면의 경사가 매우 급하고, 사면 내 소계류가 존재하고, 일부구간 침식으로 인한 토사유출이 상당히 진행중임.",
+    "manager": "포항시",
+    "ownership": "사유림",
+    "shelter_distance_m": 525.05
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.536077,
+     35.970074
+    ]
+   },
+   "properties": {
+    "external_id": "gb_45",
+    "grade": "토석류",
+    "name": "포항시 남구 구룡포읍 하정리 산191임",
+    "area_m2": 331.0,
+    "radius_m": 50.0,
+    "emd": "구룡포읍",
+    "designated_date": "2026-06-04",
+    "reason": "유역면적이 아주 넓고 계류의 길이가 길며, 토석류 유동흔적이 관찰되고, 계류 내 다수의 구간에서 침식 및 토사유실이 관찰되고, 계상에 유동가능 토석들이 불안정하게 적치되어 있어 호우 시 피해 우려됨.",
+    "manager": "포항시",
+    "ownership": "사유림",
+    "shelter_distance_m": 1453.03
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.538578,
+     35.994298
+    ]
+   },
+   "properties": {
+    "external_id": "gb_46",
+    "grade": "산사태",
+    "name": "포항시 남구 구룡포읍 눌태리 산70-2임",
+    "area_m2": 629.0,
+    "radius_m": 50.0,
+    "emd": "구룡포읍",
+    "designated_date": "2026-06-04",
+    "reason": "사면의 경사가 매우 급하고, 일부구간 침식으로 인한 토사유출이 관찰됨.",
+    "manager": "포항시",
+    "ownership": "사유림",
+    "shelter_distance_m": 300.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.546868,
+     35.967974
+    ]
+   },
+   "properties": {
+    "external_id": "gb_48",
+    "grade": "토석류",
+    "name": "포항시 남구 구룡포읍 하정리 산48-2임",
+    "area_m2": 136.0,
+    "radius_m": 50.0,
+    "emd": "구룡포읍",
+    "designated_date": "2026-06-04",
+    "reason": "계류 내 침식으로 인해 발생한 토사가 퇴적되어 있으며, 계류의 길이가 길고 계폭이 좁아 호우 시 인접한 사찰의 피해 우려됨.",
+    "manager": "포항시",
+    "ownership": "사유림",
+    "shelter_distance_m": 1054.2
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.550071,
+     35.984364
+    ]
+   },
+   "properties": {
+    "external_id": "gb_49",
+    "grade": "산사태",
+    "name": "포항시 남구 구룡포읍 병포리 산1-2임",
+    "area_m2": 185.0,
+    "radius_m": 50.0,
+    "emd": "구룡포읍",
+    "designated_date": "2026-06-04",
+    "reason": "사면의 경사가 매우 급하고, 사면의 침식에 의한 토사유출이 상당히 진행중이며, 배수시설의 미비로 인가로의 유수 유입이 있음.",
+    "manager": "포항시",
+    "ownership": "사유림",
+    "shelter_distance_m": 875.81
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.549888,
+     35.984694
+    ]
+   },
+   "properties": {
+    "external_id": "gb_50",
+    "grade": "산사태",
+    "name": "포항시 남구 구룡포읍 병포리 산1-2임",
+    "area_m2": 233.0,
+    "radius_m": 50.0,
+    "emd": "구룡포읍",
+    "designated_date": "2026-06-04",
+    "reason": "사면의 경사가 매우 급하고, 사면 내 소계류가 존재하며, 일부구간 침식으로 인한 토사유출이 상당히 진행중임.",
+    "manager": "포항시",
+    "ownership": "사유림",
+    "shelter_distance_m": 781.17
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.554107,
+     36.011293
+    ]
+   },
+   "properties": {
+    "external_id": "gb_51",
+    "grade": "토석류",
+    "name": "포항시 남구 구룡포읍 삼정리 산126-2임",
+    "area_m2": 179.0,
+    "radius_m": 50.0,
+    "emd": "구룡포읍",
+    "designated_date": "2026-06-04",
+    "reason": "과거 월류 피해 이력이 있으며, 계류 내 붕괴지가 관찰되고, 전 구간에 걸쳐 침식 및 토사유실이 관찰되어 호우 시 피해 우려됨.",
+    "manager": "포항시",
+    "ownership": "사유림",
+    "shelter_distance_m": 2115.94
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.515833,
+     35.961333
+    ]
+   },
+   "properties": {
+    "external_id": "gb_127",
+    "grade": "토석류",
+    "name": "포항시 남구 구룡포읍 구평리 1492외 3",
+    "area_m2": 5473.0,
+    "radius_m": 50.0,
+    "emd": "구룡포읍",
+    "designated_date": "2026-06-04",
+    "reason": "토석류 피해 우려지역",
+    "manager": "포항시",
+    "ownership": "사유림",
+    "shelter_distance_m": 0.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.518905,
+     35.96123
+    ]
+   },
+   "properties": {
+    "external_id": "gb_128",
+    "grade": "토석류",
+    "name": "포항시 남구 구룡포읍 구평리 산43임",
+    "area_m2": 4195.0,
+    "radius_m": 50.0,
+    "emd": "구룡포읍",
+    "designated_date": "2026-06-04",
+    "reason": "하부 시설물의 상태가 불량하며 퇴적물이 월류하여 지속적으로 피해를 보고 있다는 주민의견이 있음. 또한 계류 중상부 경작지 근처에서는 사면의 붕괴와 침식이 다수 관찰되는 바 취약지역으로 지정하여 관리가 필요하다고 사료됨.",
+    "manager": "포항시",
+    "ownership": "사유림",
+    "shelter_distance_m": 0.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.530083,
+     35.993722
+    ]
+   },
+   "properties": {
+    "external_id": "gb_134",
+    "grade": "토석류",
+    "name": "포항시 남구 구룡포읍 후동리 산33임",
+    "area_m2": 5882.0,
+    "radius_m": 50.0,
+    "emd": "구룡포읍",
+    "designated_date": "2026-06-04",
+    "reason": "계류 내 적치된 토석이 하류로 유동되어 하부 하천상태가 불량하며 침식 및 수목 전도, 붕괴지, 등 위험요소가 산재된 유역으로 계류 정비가 시급한 지역으로 사료됨. 따라서 하류부 농경지를 보호하고자 계류보전 사업의 검토가 필요함.",
+    "manager": "포항시",
+    "ownership": "사유림",
+    "shelter_distance_m": 0.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.538056,
+     36.018194
+    ]
+   },
+   "properties": {
+    "external_id": "gb_138",
+    "grade": "토석류",
+    "name": "포항시 남구 구룡포읍 삼정리 산107임",
+    "area_m2": 3588.0,
+    "radius_m": 50.0,
+    "emd": "구룡포읍",
+    "designated_date": "2026-06-04",
+    "reason": "계류수가 상시 흐르고 있으며 계류바닥이 기반암층으로 전부 드러나 있는 상태로 보아 강우시 유량이 증가하여 퇴적물의 유동이 심해질 것으로 사료됨",
+    "manager": "포항시",
+    "ownership": "사유림",
+    "shelter_distance_m": 0.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.546276,
+     35.997202
+    ]
+   },
+   "properties": {
+    "external_id": "gb_140",
+    "grade": "토석류",
+    "name": "포항시 남구 구룡포읍 구룡포리 산109-11임",
+    "area_m2": 2887.0,
+    "radius_m": 50.0,
+    "emd": "구룡포읍",
+    "designated_date": "2026-06-04",
+    "reason": "폐가 뒤편에 위치한 계류로 식생의 뿌리 노출 등 세굴이 진행 중이며 계류 내 수목 전도가 다수 관찰되는 등 토석류 발생 잠재적 위험이 산재되어 있는 구간으로 이를 예방하기 위한 계류보전 사업의 검토가 필요할 것으로 사료됨",
+    "manager": "포항시",
+    "ownership": "사유림",
+    "shelter_distance_m": 596.29
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.5528,
+     35.992544
+    ]
+   },
+   "properties": {
+    "external_id": "gb_143",
+    "grade": "토석류",
+    "name": "포항시 남구 구룡포읍 구룡포리 산93-11임",
+    "area_m2": 361.51,
+    "radius_m": 50.0,
+    "emd": "구룡포읍",
+    "designated_date": "2026-06-04",
+    "reason": null,
+    "manager": null,
+    "ownership": null,
+    "shelter_distance_m": null
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.552769,
+     35.992593
+    ]
+   },
+   "properties": {
+    "external_id": "gb_144",
+    "grade": "토석류",
+    "name": "포항시 남구 구룡포읍 구룡포리 산93-16임",
+    "area_m2": 50.0,
+    "radius_m": 50.0,
+    "emd": "구룡포읍",
+    "designated_date": "2026-06-04",
+    "reason": "계류의 유역면적은 소규모이나, 계류의 종단물매가 급하고, 계류 상부에 침식지가 존재하고, 계상에 다량의 전석, 유송잡물 등의 퇴적물이 존재하여 집중호우시 하부로 일시에 이동할 경우 암거를 막아 월류가 우려됨.",
+    "manager": "포항시",
+    "ownership": "사유림",
+    "shelter_distance_m": 0.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.557348,
+     35.999665
+    ]
+   },
+   "properties": {
+    "external_id": "gb_148",
+    "grade": "토석류",
+    "name": "포항시 남구 구룡포읍 구룡포리 산74-20임",
+    "area_m2": 3095.0,
+    "radius_m": 50.0,
+    "emd": "구룡포읍",
+    "designated_date": "2026-06-04",
+    "reason": "암반이 드러나있고 세굴과 침식이 심하여 나무의 뿌리가 드러나 차후 인근 수목이 쓰러져 계류로 유입될 가능성도 심할 것으로 사료됨",
+    "manager": "포항시",
+    "ownership": "사유림",
+    "shelter_distance_m": 0.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.558722,
+     36.012694
+    ]
+   },
+   "properties": {
+    "external_id": "gb_149",
+    "grade": "토석류",
+    "name": "포항시 남구 구룡포읍 삼정리 산59임",
+    "area_m2": 1250.0,
+    "radius_m": 50.0,
+    "emd": "구룡포읍",
+    "designated_date": "2026-06-04",
+    "reason": "퇴적물의 유동 흔적이 심하고 세굴과 침식 흔적이 발견됨을 미루어보아 강우시 유량이 급증하여 하부까지 피해를 줄 수 있을 것으로 보임",
+    "manager": "포항시",
+    "ownership": "사유림",
+    "shelter_distance_m": 0.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.565139,
+     36.011222
+    ]
+   },
+   "properties": {
+    "external_id": "gb_151",
+    "grade": "토석류",
+    "name": "포항시 남구 구룡포읍 삼정리 산35임",
+    "area_m2": 3527.0,
+    "radius_m": 50.0,
+    "emd": "구룡포읍",
+    "designated_date": "2026-06-04",
+    "reason": "퇴적물이 농경지 상부에 퇴적된 상태로 배수가 불량하고, 계류 황폐화가 진행 중임. 따라서 농경지의 재산피해를 예방하기 위해 사방시설물 설치·검토가 필요함.",
+    "manager": "포항시",
+    "ownership": "사유림",
+    "shelter_distance_m": 0.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     129.571906,
+     36.014806
+    ]
+   },
+   "properties": {
+    "external_id": "gb_153",
+    "grade": "토석류",
+    "name": "포항시 남구 구룡포읍 석병리 1098",
+    "area_m2": 13476.0,
+    "radius_m": 65.5,
+    "emd": "구룡포읍",
+    "designated_date": "2026-06-04",
+    "reason": "집중호우시 토사의 이동이 많을 것으로 예상됨",
+    "manager": "포항시",
+    "ownership": "사유림",
+    "shelter_distance_m": 0.0
+   }
+  }
+ ]
+}

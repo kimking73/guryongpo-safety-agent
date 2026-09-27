@@ -1,0 +1,69 @@
+{
+  "session_id": "e5f6a7b8-c9d0-4e1f-8a2b-4c5d6e7f8091",
+  "message": {
+    "id": "c3d4e5f6-a7b8-4c9d-8e0f-2a3b4c5d6e7f",
+    "role": "assistant",
+    "content": "지금 구룡포에 **호우경보**가 발효 중이고, 계신 곳 주변 도로가 **23cm 잠긴** 상태예요.\n배를 확인하러 부두로 가지 마시고, 먼저 대피소 A로 이동하세요.",
+    "blocks": [
+      {
+        "type": "action_steps",
+        "title": "지금 할 일",
+        "data": {
+          "steps": [
+            {
+              "order": 1,
+              "text": "부두·해안가로 가지 않기 (선박 점검은 경보 해제 후)"
+            },
+            {
+              "order": 2,
+              "text": "맨홀·배수구를 피해 대피소 A로 이동"
+            },
+            {
+              "order": 3,
+              "text": "딸에게 위치 알리기"
+            }
+          ]
+        }
+      },
+      {
+        "type": "route_card",
+        "title": "대피 경로",
+        "data": {
+          "route_id": "d4e5f6a7-b8c9-4d0e-9f1a-3b4c5d6e7f80",
+          "shelter_name": "구룡포읍 대피소 A (예시)",
+          "distance_m": 690,
+          "duration_s": 780
+        }
+      },
+      {
+        "type": "call_button",
+        "title": "긴급 전화",
+        "data": {
+          "label": "119 연결",
+          "phone": "119"
+        }
+      }
+    ],
+    "audio_url": null,
+    "grounding": [
+      {
+        "kind": "warning",
+        "ref_id": "88",
+        "label": "호우경보 (포항시, 13:00 발효)"
+      },
+      {
+        "kind": "observation",
+        "ref_id": "10:flood_depth:2026-10-05T14:27",
+        "label": "구룡포환승센터 지표면 수위계 침수심 230mm (14:27 수집)"
+      },
+      {
+        "kind": "action_guide",
+        "ref_id": "57",
+        "label": "침수 시 행동요령 — 국민재난안전포털"
+      }
+    ],
+    "verification": "passed",
+    "profile_suggestions": {},
+    "created_at": "2026-10-05T14:30:09+09:00"
+  }
+}

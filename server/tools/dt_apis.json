@@ -1,0 +1,588 @@
+[
+  {
+    "name": "uv_latest",
+    "url": "${DT_BASE_URL}/sensor/latest/uvIndex",
+    "params": {
+      "serviceKey": "${DT_KEY}"
+    }
+  },
+  {
+    "name": "atmosphere_realtime",
+    "url": "${DT_BASE_URL}/atmosphere/devices/realtime",
+    "params": {
+      "serviceKey": "${DT_KEY}"
+    }
+  },
+  {
+    "name": "atmosphere_devices",
+    "url": "${DT_BASE_URL}/atmosphere/devices",
+    "params": {
+      "serviceKey": "${DT_KEY}"
+    }
+  },
+  {
+    "name": "pohang_dt_water_level",
+    "url": "${DT_BASE_URL}/sensor/latest/sensorLevel",
+    "params": {
+      "serviceKey": "${DT_KEY}"
+    }
+  },
+  {
+    "name": "rain_device_5",
+    "url": "${DT_BASE_URL}/water/rainDevices",
+    "params": {
+      "serviceKey": "${DT_KEY}",
+      "id": "5"
+    },
+    "skip": true,
+    "note": "장비 이름·좌표만 반환 (수위계 응답과 중복) — 필요 시 skip 제거"
+  },
+  {
+    "name": "kma_ncst_105_94",
+    "url": "https://apihub.kma.go.kr/api/typ02/openApi/VilageFcstInfoService_2.0/getUltraSrtNcst",
+    "params": {
+      "pageNo": "1",
+      "numOfRows": "100",
+      "dataType": "JSON",
+      "base_date": "${NCST_DATE}",
+      "base_time": "${NCST_TIME}",
+      "nx": "105",
+      "ny": "94",
+      "authKey": "${KMA_KEY}"
+    }
+  },
+  {
+    "name": "kma_ncst_106_94",
+    "url": "https://apihub.kma.go.kr/api/typ02/openApi/VilageFcstInfoService_2.0/getUltraSrtNcst",
+    "params": {
+      "pageNo": "1",
+      "numOfRows": "100",
+      "dataType": "JSON",
+      "base_date": "${NCST_DATE}",
+      "base_time": "${NCST_TIME}",
+      "nx": "106",
+      "ny": "94",
+      "authKey": "${KMA_KEY}"
+    }
+  },
+  {
+    "name": "kma_fcst_105_94",
+    "url": "https://apihub.kma.go.kr/api/typ02/openApi/VilageFcstInfoService_2.0/getUltraSrtFcst",
+    "params": {
+      "pageNo": "1",
+      "numOfRows": "100",
+      "dataType": "JSON",
+      "base_date": "${FCST_DATE}",
+      "base_time": "${FCST_TIME}",
+      "nx": "105",
+      "ny": "94",
+      "authKey": "${KMA_KEY}"
+    }
+  },
+  {
+    "name": "kma_fcst_106_94",
+    "url": "https://apihub.kma.go.kr/api/typ02/openApi/VilageFcstInfoService_2.0/getUltraSrtFcst",
+    "params": {
+      "pageNo": "1",
+      "numOfRows": "100",
+      "dataType": "JSON",
+      "base_date": "${FCST_DATE}",
+      "base_time": "${FCST_TIME}",
+      "nx": "106",
+      "ny": "94",
+      "authKey": "${KMA_KEY}"
+    }
+  },
+  {
+    "name": "kma_vil_105_94",
+    "url": "https://apihub.kma.go.kr/api/typ02/openApi/VilageFcstInfoService_2.0/getVilageFcst",
+    "params": {
+      "pageNo": "1",
+      "numOfRows": "1500",
+      "dataType": "JSON",
+      "base_date": "${VIL_DATE}",
+      "base_time": "${VIL_TIME}",
+      "nx": "105",
+      "ny": "94",
+      "authKey": "${KMA_KEY}"
+    }
+  },
+  {
+    "name": "kma_vil_106_94",
+    "url": "https://apihub.kma.go.kr/api/typ02/openApi/VilageFcstInfoService_2.0/getVilageFcst",
+    "params": {
+      "pageNo": "1",
+      "numOfRows": "1500",
+      "dataType": "JSON",
+      "base_date": "${VIL_DATE}",
+      "base_time": "${VIL_TIME}",
+      "nx": "106",
+      "ny": "94",
+      "authKey": "${KMA_KEY}"
+    }
+  },
+  {
+    "name": "kma_wrn_now",
+    "url": "https://apihub.kma.go.kr/api/typ01/url/wrn_now_data.php",
+    "params": {
+      "fe": "f",
+      "tm": "",
+      "disp": "1",
+      "help": "1",
+      "authKey": "${KMA_KEY}"
+    },
+    "encoding": "euc-kr"
+  },
+  {
+    "name": "kma_wrn_hinnamno",
+    "url": "https://apihub.kma.go.kr/api/typ01/url/wrn_now_data.php",
+    "params": {
+      "fe": "f",
+      "tm": "202209051800",
+      "disp": "1",
+      "help": "1",
+      "authKey": "${KMA_KEY}"
+    },
+    "note": "과거 시각 특보현황 (힌남노 접근 중) — 목업·형식 확인용 1회 (받음: mock/external/kma_wrn_hinnamno.json)",
+    "skip": true
+  },
+  {
+    "name": "kma_wrn_reg",
+    "url": "https://apihub.kma.go.kr/api/typ01/url/wrn_reg.php",
+    "params": {
+      "tmfc": "0",
+      "authKey": "${KMA_KEY}"
+    },
+    "encoding": "euc-kr",
+    "note": "특보구역 목록 (1회용, 확인 완료: 포항 L1072400, 경북남부앞바다 S1131200)",
+    "skip": true
+  },
+  {
+    "name": "kma_mid_land_11H10000",
+    "url": "https://apihub.kma.go.kr/api/typ02/openApi/MidFcstInfoService/getMidLandFcst",
+    "params": {
+      "pageNo": "1",
+      "numOfRows": "10",
+      "dataType": "JSON",
+      "regId": "11H10000",
+      "tmFc": "${MID_TMFC}",
+      "authKey": "${KMA_KEY}"
+    },
+    "note": "대구·경북 육상"
+  },
+  {
+    "name": "kma_mid_ta_11H10201",
+    "url": "https://apihub.kma.go.kr/api/typ02/openApi/MidFcstInfoService/getMidTa",
+    "params": {
+      "pageNo": "1",
+      "numOfRows": "10",
+      "dataType": "JSON",
+      "regId": "11H10201",
+      "tmFc": "${MID_TMFC}",
+      "authKey": "${KMA_KEY}"
+    },
+    "note": "포항 기온"
+  },
+  {
+    "name": "kma_aws_min_816",
+    "url": "https://apihub.kma.go.kr/api/typ01/cgi-bin/url/nph-aws2_min",
+    "params": {
+      "tm1": "${AWS_TM}",
+      "tm2": "${AWS_TM}",
+      "stn": "816",
+      "disp": "1",
+      "help": "1",
+      "authKey": "${KMA_KEY}"
+    },
+    "encoding": "euc-kr",
+    "note": "구룡포 AWS 매분",
+    "timeout": 120
+  },
+  {
+    "name": "kma_awsh_wind",
+    "url": "https://apihub.kma.go.kr/api/typ01/url/awsh.php",
+    "params": {
+      "var": "WD",
+      "tm": "${AWSH_TM}",
+      "help": "1",
+      "authKey": "${KMA_KEY}"
+    },
+    "encoding": "euc-kr",
+    "timeout": 120,
+    "note": "보조 (전 지점, 느림). 구룡포는 AWS 매분의 WSS 사용",
+    "skip": true
+  },
+  {
+    "name": "kma_aws_stnlist_2025",
+    "url": "https://apihub.kma.go.kr/api/typ02/openApi/AwsYearlyInfoService/getAwsStnLstTbl",
+    "params": {
+      "pageNo": "1",
+      "numOfRows": "1000",
+      "dataType": "JSON",
+      "year": "2025",
+      "month": "12",
+      "authKey": "${KMA_KEY}"
+    },
+    "timeout": 60,
+    "note": "AWS 지점 일람표 (1회용) — 구룡포 지점번호 확인",
+    "skip": true
+  },
+  {
+    "name": "kma_aws_stnlist_2024",
+    "url": "https://apihub.kma.go.kr/api/typ02/openApi/AwsYearlyInfoService/getAwsStnLstTbl",
+    "params": {
+      "pageNo": "1",
+      "numOfRows": "1000",
+      "dataType": "JSON",
+      "year": "2024",
+      "month": "12",
+      "authKey": "${KMA_KEY}"
+    },
+    "timeout": 60,
+    "note": "AWS 지점 일람표 (1회용) — 구룡포 지점번호 확인",
+    "skip": true
+  },
+  {
+    "name": "kma_typ_list",
+    "url": "https://apihub.kma.go.kr/api/typ01/url/typ_lst.php",
+    "params": {
+      "YY": "${YEAR}",
+      "disp": "1",
+      "help": "1",
+      "authKey": "${KMA_KEY}"
+    },
+    "note": "올해 태풍 목록"
+  },
+  {
+    "name": "kma_typ_now",
+    "url": "https://apihub.kma.go.kr/api/typ01/url/typ_now.php",
+    "params": {
+      "tm": "${NOW_TM_UTC}",
+      "mode": "1",
+      "disp": "1",
+      "help": "1",
+      "authKey": "${KMA_KEY}"
+    },
+    "note": "현재 활동 태풍 위치+예측 (tm 은 UTC)"
+  },
+  {
+    "name": "kma_typ_list_2022",
+    "url": "https://apihub.kma.go.kr/api/typ01/url/typ_lst.php",
+    "params": {
+      "YY": "2022",
+      "disp": "1",
+      "help": "1",
+      "authKey": "${KMA_KEY}"
+    },
+    "note": "힌남노 번호 확인용 (1회)",
+    "skip": true
+  },
+  {
+    "name": "kma_typ_hinnamno",
+    "url": "https://apihub.kma.go.kr/api/typ01/url/typ_now.php",
+    "params": {
+      "tm": "202209051800",
+      "mode": "1",
+      "disp": "1",
+      "help": "1",
+      "authKey": "${KMA_KEY}"
+    },
+    "note": "힌남노 접근 시점 위치+예측 — 목업용 (1회)",
+    "skip": true
+  },
+  {
+    "name": "kma_wrn_hinnamno_0603",
+    "url": "https://apihub.kma.go.kr/api/typ01/url/wrn_now_data.php",
+    "params": {
+      "fe": "f",
+      "tm": "202209060300",
+      "disp": "1",
+      "help": "1",
+      "authKey": "${KMA_KEY}"
+    },
+    "note": "힌남노 최근접 직전 특보 (KST 09-06 03시 = 태풍 mock 분석시각 18UTC 와 동일 시점)",
+    "skip": true
+  },
+  {
+    "name": "safemap_tsunami_shelter",
+    "url": "https://safemap.go.kr/openapi2/IF_0126",
+    "params": {
+      "serviceKey": "${SAFEMAP_KEY}",
+      "pageNo": "1",
+      "numOfRows": "1000",
+      "returnType": "xml"
+    },
+    "timeout": 60,
+    "note": "생활안전지도 (1회 수집). 파라미터는 추정 — 응답 보고 조정"
+  },
+  {
+    "name": "safemap_emergency_medical",
+    "url": "https://safemap.go.kr/openapi2/IF_0047",
+    "params": {
+      "serviceKey": "${SAFEMAP_KEY}",
+      "pageNo": "1",
+      "numOfRows": "100",
+      "returnType": "xml"
+    },
+    "timeout": 60,
+    "note": "IF_0047 없음(NO_OPENAPI_SERVICE_ERROR) — 다른 출처 사용",
+    "skip": true
+  },
+  {
+    "name": "safemap_civil_shelter_p01",
+    "url": "https://safemap.go.kr/openapi2/IF_0122",
+    "params": {
+      "serviceKey": "${SAFEMAP_KEY}",
+      "pageNo": "1",
+      "numOfRows": "1000",
+      "returnType": "xml"
+    },
+    "timeout": 120,
+    "note": "민방위대피시설 전국 17,231건 — 1000건씩 18페이지 (1회 수집)"
+  },
+  {
+    "name": "safemap_civil_shelter_p02",
+    "url": "https://safemap.go.kr/openapi2/IF_0122",
+    "params": {
+      "serviceKey": "${SAFEMAP_KEY}",
+      "pageNo": "2",
+      "numOfRows": "1000",
+      "returnType": "xml"
+    },
+    "timeout": 120,
+    "note": "민방위대피시설 전국 17,231건 — 1000건씩 18페이지 (1회 수집)"
+  },
+  {
+    "name": "safemap_civil_shelter_p03",
+    "url": "https://safemap.go.kr/openapi2/IF_0122",
+    "params": {
+      "serviceKey": "${SAFEMAP_KEY}",
+      "pageNo": "3",
+      "numOfRows": "1000",
+      "returnType": "xml"
+    },
+    "timeout": 120,
+    "note": "민방위대피시설 전국 17,231건 — 1000건씩 18페이지 (1회 수집)"
+  },
+  {
+    "name": "safemap_civil_shelter_p04",
+    "url": "https://safemap.go.kr/openapi2/IF_0122",
+    "params": {
+      "serviceKey": "${SAFEMAP_KEY}",
+      "pageNo": "4",
+      "numOfRows": "1000",
+      "returnType": "xml"
+    },
+    "timeout": 120,
+    "note": "민방위대피시설 전국 17,231건 — 1000건씩 18페이지 (1회 수집)"
+  },
+  {
+    "name": "safemap_civil_shelter_p05",
+    "url": "https://safemap.go.kr/openapi2/IF_0122",
+    "params": {
+      "serviceKey": "${SAFEMAP_KEY}",
+      "pageNo": "5",
+      "numOfRows": "1000",
+      "returnType": "xml"
+    },
+    "timeout": 120,
+    "note": "민방위대피시설 전국 17,231건 — 1000건씩 18페이지 (1회 수집)"
+  },
+  {
+    "name": "safemap_civil_shelter_p06",
+    "url": "https://safemap.go.kr/openapi2/IF_0122",
+    "params": {
+      "serviceKey": "${SAFEMAP_KEY}",
+      "pageNo": "6",
+      "numOfRows": "1000",
+      "returnType": "xml"
+    },
+    "timeout": 120,
+    "note": "민방위대피시설 전국 17,231건 — 1000건씩 18페이지 (1회 수집)"
+  },
+  {
+    "name": "safemap_civil_shelter_p07",
+    "url": "https://safemap.go.kr/openapi2/IF_0122",
+    "params": {
+      "serviceKey": "${SAFEMAP_KEY}",
+      "pageNo": "7",
+      "numOfRows": "1000",
+      "returnType": "xml"
+    },
+    "timeout": 120,
+    "note": "민방위대피시설 전국 17,231건 — 1000건씩 18페이지 (1회 수집)"
+  },
+  {
+    "name": "safemap_civil_shelter_p08",
+    "url": "https://safemap.go.kr/openapi2/IF_0122",
+    "params": {
+      "serviceKey": "${SAFEMAP_KEY}",
+      "pageNo": "8",
+      "numOfRows": "1000",
+      "returnType": "xml"
+    },
+    "timeout": 120,
+    "note": "민방위대피시설 전국 17,231건 — 1000건씩 18페이지 (1회 수집)"
+  },
+  {
+    "name": "safemap_civil_shelter_p09",
+    "url": "https://safemap.go.kr/openapi2/IF_0122",
+    "params": {
+      "serviceKey": "${SAFEMAP_KEY}",
+      "pageNo": "9",
+      "numOfRows": "1000",
+      "returnType": "xml"
+    },
+    "timeout": 120,
+    "note": "민방위대피시설 전국 17,231건 — 1000건씩 18페이지 (1회 수집)"
+  },
+  {
+    "name": "safemap_civil_shelter_p10",
+    "url": "https://safemap.go.kr/openapi2/IF_0122",
+    "params": {
+      "serviceKey": "${SAFEMAP_KEY}",
+      "pageNo": "10",
+      "numOfRows": "1000",
+      "returnType": "xml"
+    },
+    "timeout": 120,
+    "note": "민방위대피시설 전국 17,231건 — 1000건씩 18페이지 (1회 수집)"
+  },
+  {
+    "name": "safemap_civil_shelter_p11",
+    "url": "https://safemap.go.kr/openapi2/IF_0122",
+    "params": {
+      "serviceKey": "${SAFEMAP_KEY}",
+      "pageNo": "11",
+      "numOfRows": "1000",
+      "returnType": "xml"
+    },
+    "timeout": 120,
+    "note": "민방위대피시설 전국 17,231건 — 1000건씩 18페이지 (1회 수집)"
+  },
+  {
+    "name": "safemap_civil_shelter_p12",
+    "url": "https://safemap.go.kr/openapi2/IF_0122",
+    "params": {
+      "serviceKey": "${SAFEMAP_KEY}",
+      "pageNo": "12",
+      "numOfRows": "1000",
+      "returnType": "xml"
+    },
+    "timeout": 120,
+    "note": "민방위대피시설 전국 17,231건 — 1000건씩 18페이지 (1회 수집)"
+  },
+  {
+    "name": "safemap_civil_shelter_p13",
+    "url": "https://safemap.go.kr/openapi2/IF_0122",
+    "params": {
+      "serviceKey": "${SAFEMAP_KEY}",
+      "pageNo": "13",
+      "numOfRows": "1000",
+      "returnType": "xml"
+    },
+    "timeout": 120,
+    "note": "민방위대피시설 전국 17,231건 — 1000건씩 18페이지 (1회 수집)"
+  },
+  {
+    "name": "safemap_civil_shelter_p14",
+    "url": "https://safemap.go.kr/openapi2/IF_0122",
+    "params": {
+      "serviceKey": "${SAFEMAP_KEY}",
+      "pageNo": "14",
+      "numOfRows": "1000",
+      "returnType": "xml"
+    },
+    "timeout": 120,
+    "note": "민방위대피시설 전국 17,231건 — 1000건씩 18페이지 (1회 수집)"
+  },
+  {
+    "name": "safemap_civil_shelter_p15",
+    "url": "https://safemap.go.kr/openapi2/IF_0122",
+    "params": {
+      "serviceKey": "${SAFEMAP_KEY}",
+      "pageNo": "15",
+      "numOfRows": "1000",
+      "returnType": "xml"
+    },
+    "timeout": 120,
+    "note": "민방위대피시설 전국 17,231건 — 1000건씩 18페이지 (1회 수집)"
+  },
+  {
+    "name": "safemap_civil_shelter_p16",
+    "url": "https://safemap.go.kr/openapi2/IF_0122",
+    "params": {
+      "serviceKey": "${SAFEMAP_KEY}",
+      "pageNo": "16",
+      "numOfRows": "1000",
+      "returnType": "xml"
+    },
+    "timeout": 120,
+    "note": "민방위대피시설 전국 17,231건 — 1000건씩 18페이지 (1회 수집)"
+  },
+  {
+    "name": "safemap_civil_shelter_p17",
+    "url": "https://safemap.go.kr/openapi2/IF_0122",
+    "params": {
+      "serviceKey": "${SAFEMAP_KEY}",
+      "pageNo": "17",
+      "numOfRows": "1000",
+      "returnType": "xml"
+    },
+    "timeout": 120,
+    "note": "민방위대피시설 전국 17,231건 — 1000건씩 18페이지 (1회 수집)"
+  },
+  {
+    "name": "safemap_civil_shelter_p18",
+    "url": "https://safemap.go.kr/openapi2/IF_0122",
+    "params": {
+      "serviceKey": "${SAFEMAP_KEY}",
+      "pageNo": "18",
+      "numOfRows": "1000",
+      "returnType": "xml"
+    },
+    "timeout": 120,
+    "note": "민방위대피시설 전국 17,231건 — 1000건씩 18페이지 (1회 수집)"
+  },
+  {
+    "name": "nmc_er_near_guryongpo",
+    "url": "https://apis.data.go.kr/B552657/ErmctInfoInqireService/getEgytLcinfoInqire",
+    "params": {
+      "serviceKey": "${DATA_GO_KR_KEY}",
+      "WGS84_LON": "129.548065",
+      "WGS84_LAT": "35.985863",
+      "pageNo": "1",
+      "numOfRows": "10"
+    },
+    "timeout": 60,
+    "note": "구룡포읍 행정복지센터 기준 가까운 응급의료기관 10곳 (거리 포함) (1회 수집 완료 → db/seed_medical.sql)",
+    "skip": true
+  },
+  {
+    "name": "nmc_er_beds_pohang",
+    "url": "https://apis.data.go.kr/B552657/ErmctInfoInqireService/getEmrrmRltmUsefulSckbdInfoInqire",
+    "params": {
+      "serviceKey": "${DATA_GO_KR_KEY}",
+      "STAGE1": "경상북도",
+      "STAGE2": "포항시",
+      "pageNo": "1",
+      "numOfRows": "50"
+    },
+    "timeout": 60,
+    "note": "응급실 실시간 가용병상 (포항 5곳) — 10분 주기 → er_availability"
+  },
+  {
+    "name": "nmc_er_list_pohang",
+    "url": "https://apis.data.go.kr/B552657/ErmctInfoInqireService/getEgytListInfoInqire",
+    "params": {
+      "serviceKey": "${DATA_GO_KR_KEY}",
+      "Q0": "경상북도",
+      "Q1": "포항시",
+      "pageNo": "1",
+      "numOfRows": "50"
+    },
+    "timeout": 60,
+    "note": "포항시 응급의료기관 목록 (1회 수집 완료 → db/seed_medical.sql)",
+    "skip": true
+  }
+]

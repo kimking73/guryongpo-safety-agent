@@ -1,0 +1,53 @@
+{
+  "location": {
+    "lat": 35.9903,
+    "lng": 129.5558
+  },
+  "max_level": "warning",
+  "max_level_num": 3,
+  "items": [
+    {
+      "hazard": "heavy_rain",
+      "level": "warning",
+      "level_num": 3,
+      "label": "호우경보",
+      "reason": "3시간 누적강수 92.0mm (구룡포 AWS, 14:30 관측)",
+      "location": {
+        "lat": 35.9903,
+        "lng": 129.5558
+      },
+      "area_id": 1021,
+      "rule_id": 2,
+      "observed_at": "2026-10-05T14:30:00+09:00"
+    },
+    {
+      "hazard": "flood",
+      "level": "warning",
+      "level_num": 3,
+      "label": "침수 경보",
+      "reason": "구룡포환승센터 지표면 수위계 침수심 230mm (기준 150mm) · 포항 DT 4단계(경보)",
+      "location": {
+        "lat": 35.9903,
+        "lng": 129.5558
+      },
+      "area_id": 1022,
+      "rule_id": 23,
+      "observed_at": "2026-10-05T14:27:00+09:00"
+    },
+    {
+      "hazard": "uv",
+      "level": "watch",
+      "level_num": 1,
+      "label": "자외선 보통",
+      "reason": "자외선지수 4 (포항 디지털 트윈, 14:00)",
+      "location": {
+        "lat": 35.9903,
+        "lng": 129.5558
+      },
+      "area_id": null,
+      "rule_id": 17,
+      "observed_at": "2026-10-05T14:00:00+09:00"
+    }
+  ],
+  "computed_at": "2026-10-05T14:30:00+09:00"
+}
