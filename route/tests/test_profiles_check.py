@@ -81,8 +81,16 @@ def test_elderly_prefers_steps_over_equally_steep_road():
     # 계단 문장이 맨 앞 if이고 경사 문장은 else_if → 계단에는 경사 벌점이 붙지 않는다
     assert rules[0]["if"] == "road_class == STEPS"
     assert all("else_if" in r and "average_slope" in r["else_if"] for r in rules[1:])
-    # 계단(가파름)은 급경사 도로(≥10%)보다 싸다
-    assert float(rules[0]["multiply_by"]) > float(rules[1]["multiply_by"])
+    # 1m당 비용(초 ÷ 선호도)으로 비교: 계단은 기본 3km/h·선호도 1.2, 도로는 5km/h·선호도 0.8~1.5 (도보 기본 모델)
+    speed = 0.75                                    # 노약자 속도 배수 (계단·도로 공통)
+
+    def cost_per_m(base_kmh, base_prio, mult):
+        return 3.6 / (base_kmh * speed) / (base_prio * mult)
+    steps = cost_per_m(3.0, 1.2, float(rules[0]["multiply_by"]))
+    for road_prio in (0.8, 1.0, 1.2, 1.5):
+        steep_road = cost_per_m(5.0, road_prio, float(rules[1]["multiply_by"]))    # ≥10%
+        assert steps < steep_road                   # 같은 경사면 계단이 싸다
+    assert steps > cost_per_m(5.0, 1.2, float(rules[2]["multiply_by"]))   # 완만한(6~10%) 주택가 길보다는 비싸다
 
 
 def test_hazard_penalty_outweighs_every_profile_penalty():
