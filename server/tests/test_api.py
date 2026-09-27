@@ -72,9 +72,40 @@ def test_layers(client, fake_db):
     f = r.json()["features"][0]
     assert f["geometry"]["coordinates"] == [129.556, 35.990]       # GeoJSON 은 [경도, 위도]
     assert f["properties"]["level"] == "warning" and f["properties"]["source_level_label"] == "경보"
-    assert client.get("/api/v1/dashboard/layers/shelters").headers["X-Mock"] == "true"
+    assert client.get("/api/v1/dashboard/layers/flood_zones").headers["X-Mock"] == "true"    # 영역 데이터 미확보 → 빈 목업
     assert client.get("/api/v1/dashboard/layers/nope").status_code == 404
     assert client.get("/api/v1/dashboard/layers/stations?bbox=1,2").status_code == 422
+
+
+def test_static_layers(client, fake_db):
+    """A7: 대피소·의료시설·맨홀은 loader 가 적재한 DB 값"""
+    fake_db.rows["FROM shelters s"] = [{
+        "id": 3, "name": "구룡포 초등학교 앞", "shelter_types": ["tsunami"], "address": "구룡포길65번길 7", "capacity": None,
+        "phone": None, "is_indoor": False, "is_accessible": None, "lng": 129.5526, "lat": 35.9912, "in_risk_area": True}]
+    fake_db.rows["FROM medical_facilities"] = [{
+        "id": 1, "name": "포항성모병원", "kind": "emergency_room", "address": "대잠동길 17", "phone": "054-272-0151",
+        "meta": {"er_phone": "054-260-8600", "emergency_class": "권역응급의료센터"}, "lng": 129.34, "lat": 36.016}]
+    fake_db.rows["FROM manholes m"] = [{
+        "id": 1, "source_code": "pohang_dt", "external_id": "2", "kind": "smart", "lng": 129.549, "lat": 35.986,
+        "name": "하나과메기_스마트맨홀"}]
+    r = client.get("/api/v1/dashboard/layers/shelters")
+    assert "X-Mock" not in r.headers
+    p = r.json()["features"][0]["properties"]
+    assert p["shelter_types"] == ["tsunami"] and p["in_risk_area"] is True
+    m = client.get("/api/v1/dashboard/layers/medical").json()["features"][0]
+    assert m["properties"]["er_phone"] == "054-260-8600" and m["geometry"]["coordinates"] == [129.34, 36.016]
+    assert client.get("/api/v1/dashboard/layers/manholes").json()["features"][0]["properties"]["kind"] == "smart"
+
+
+def test_medical_default_bbox_is_pohang(client, monkeypatch):
+    """구룡포 안에 응급의료기관이 없음 → bbox 생략 시 포항 전체 범위로 조회"""
+    from app import db, layers
+    seen = []
+    monkeypatch.setattr(db, "fetch_all", lambda sql, params=None: seen.append(params) or [])
+    client.get("/api/v1/dashboard/layers/medical")
+    client.get("/api/v1/dashboard/layers/medical?bbox=129.5,35.9,129.6,36.0")
+    assert [seen[0][k] for k in "abcd"] == list(layers.POHANG_BBOX)
+    assert seen[1]["a"] == 129.5
 
 
 def test_device_token_stable(client):

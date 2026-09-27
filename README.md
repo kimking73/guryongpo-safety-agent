@@ -12,7 +12,7 @@
 | `route/` | 경로 안내 서버 (`/api/route`, GraphHopper 앞단) | B |
 | `graphhopper/` | GraphHopper 경로 엔진 설정, 구룡포 OSM 도로망 받기 스크립트 | B |
 | `app/` | Flutter 앱·웹 | C |
-| `db/init/` | DB 최초 생성 시 실행되는 SQL: PostGIS 확장, 스키마(01), 판단 기준·관측소(02), 산사태 취약지역(03), 행동요령(04), 대피소(05), 응급의료(06) | A |
+| `db/init/` | DB 최초 생성 시 실행되는 SQL: PostGIS 확장, 스키마(01), 판단 기준·관측소·맨홀(02), 산사태 취약지역(03), 행동요령(04), 대피소(05), 응급의료(06). 이후 바뀐 시드는 `docker compose run --rm loader`로 다시 적재 | A |
 | `secrets/` | 서비스 계정 키 등 비밀 파일 (커밋 안 됨) | - |
 
 ## 처음 설정
@@ -98,9 +98,10 @@ docker compose down -v           # 중지 + DB 데이터 삭제 (db/init SQL을 
 docker compose exec db psql -U guardian -d guardian   # DB 셸
 docker compose logs -f collector                      # 수집·위험 판정 로그 (10분마다)
 docker compose exec api python -m collector --once    # 수집 전체 1회 즉시 실행 (결과 표)
+docker compose run --rm loader                        # 정적 데이터(대피소·위험지역·행동요령·판단 기준) 다시 적재, 관측값은 유지
 ```
-- **이 저장소를 처음 받았거나 `db/init/*.sql`이 바뀌었으면** 기존 DB 볼륨에는 스키마가 없으므로 `docker compose down -v` 후 다시 `up`.
-- 서버 API 대부분은 아직 목업(응답 헤더 `X-Mock: true`)이다. 실데이터: `/api/health`, `/api/v1/risk*`, 지도 레이어 `stations`·`landslide_zones`·`risk_areas`. 자세한 건 `server/README.md`.
+- **`db/init`의 시드(02~)가 바뀌었으면** `docker compose run --rm loader` (DB 데이터 유지). **스키마(01)가 바뀌었으면** loader가 알려 주고 멈추므로 `docker compose down -v` 후 다시 `up`.
+- 서버 API 대부분은 아직 목업(응답 헤더 `X-Mock: true`)이다. 실데이터: `/api/health`, `/api/v1/risk*`, 지도 레이어 `stations`·`landslide_zones`·`risk_areas`·`shelters`·`medical`·`manholes`. 자세한 건 `server/README.md`.
 - `server/app/`·`server/collector/`·`server/risk/`(api), `ai/guardian_ai/`, `route/guardian_route/` 코드를 고치면 해당 서버가 자동으로 재시작된다 (재빌드 불필요).
 - 배포 시 Caddy가 `/api/chat`은 ai(8001)로, `/api/route`는 route(8002)로, 나머지 `/api`는 서버(8000)로 넘긴다 (B10).
 - `graphhopper/config.yml`을 바꾸면 `rm -rf graphhopper/data/graph-cache` 후 `docker compose up -d --build graphhopper` (설정이 이미지에 들어가므로 재빌드, 그래프도 다시 만든다).

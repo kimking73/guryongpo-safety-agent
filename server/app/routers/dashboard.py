@@ -10,7 +10,6 @@ from ..errors import ApiError
 
 router = APIRouter(tags=["dashboard"])
 LayerId = Literal["shelters", "medical", "landslide_zones", "flood_zones", "coastal_zones", "manholes", "stations", "risk_areas"]
-MOCK_LAYERS = {"shelters": "layer.shelters.geojson"}
 
 
 @router.get("/dashboard", summary="맞춤 대시보드 (목업)")
@@ -20,7 +19,7 @@ def get_dashboard(lat: float = Query(ge=-90, le=90), lng: float = Query(ge=-180,
     return mocks.mock(f"dashboard.{scenario}.json")
 
 
-@router.get("/dashboard/layers/{layer_id}", summary="지도 레이어 GeoJSON (stations·landslide_zones·risk_areas 는 실데이터)")
+@router.get("/dashboard/layers/{layer_id}", summary="지도 레이어 GeoJSON (flood_zones·coastal_zones 외 실데이터)")
 def get_layer(layer_id: str, bbox: Optional[str] = Query(None, description="minLng,minLat,maxLng,maxLat")):
     if layer_id not in get_args(LayerId):
         raise ApiError("NOT_FOUND", "지도 레이어를 찾을 수 없습니다.", detail={"layer_id": layer_id, "available": list(get_args(LayerId))})
@@ -32,7 +31,11 @@ def get_layer(layer_id: str, bbox: Optional[str] = Query(None, description="minL
     if layer_id == "risk_areas":
         from risk import queries
         return JSONResponse(queries.areas(None, None, box), media_type="application/geo+json")
-    if layer_id in MOCK_LAYERS:
-        return mocks.mock(MOCK_LAYERS[layer_id])
-    # 아직 데이터 없음 (medical·flood_zones·coastal_zones·manholes) → 빈 레이어
+    if layer_id == "shelters":
+        return JSONResponse(layers.shelters_layer(box), media_type="application/geo+json")
+    if layer_id == "medical":
+        return JSONResponse(layers.medical_layer(box if bbox else layers.POHANG_BBOX), media_type="application/geo+json")
+    if layer_id == "manholes":
+        return JSONResponse(layers.manholes_layer(box), media_type="application/geo+json")
+    # 아직 데이터 없음 (flood_zones·coastal_zones) → 빈 레이어
     return mocks.respond({"type": "FeatureCollection", "features": []}, media_type="application/geo+json")

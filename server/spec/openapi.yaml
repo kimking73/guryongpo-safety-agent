@@ -249,6 +249,9 @@ paths:
       summary: 지도 레이어 GeoJSON (대피소·의료시설·위험지역·맨홀·관측소·위험영역)
       description: |
         stations 레이어의 properties = { name, kind, source, metric, value, unit, source_level, source_level_label, level, observed_at } (최신값 포함)
+        shelters: { id, name, shelter_types, address, capacity, phone, is_indoor, is_accessible, in_risk_area } — in_risk_area = 현재 주의 이상 위험 영역 안
+        medical: { id, name, kind, address, phone, er_phone, emergency_class } — 구룡포 안에 응급의료기관이 없어 bbox 생략 시 포항 전체
+        manholes: { id, kind(smart = 포항 DT 스마트맨홀), name, source } · flood_zones·coastal_zones 는 데이터 확보 전까지 빈 FeatureCollection
       operationId: getLayer
       security: []
       parameters:

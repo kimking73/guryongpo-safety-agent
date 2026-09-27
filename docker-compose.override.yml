@@ -24,6 +24,12 @@ services:
       - ./server/risk:/srv/risk
       - ./server/mock:/srv/mock
 
+  loader:
+    # 적재 코드를 고친 뒤 재빌드 없이 `docker compose run --rm loader`
+    volumes:
+      - ./server/app:/srv/app
+      - ./server/loader:/srv/loader
+
   ai:
     # guardian_ai 코드를 고치면 컨테이너 재빌드 없이 자동 재시작
     volumes:
