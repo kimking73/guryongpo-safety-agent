@@ -6,7 +6,7 @@
 #        → override를 빼서 DB가 외부에 열리지 않는다. (B10 VM, A9 배포)
 #
 # 환경마다 다른 값은 전부 루트 .env에서 읽는다. 값을 여기에 직접 쓰지 않는다.
-# risk, collector, loader 서비스는 각 담당 작업에서 추가한다.
+# loader 서비스는 담당 작업(A7)에서 추가한다. 위험 판정(risk)은 collector 안에서 10분마다 돈다.
 
 # 폴더 이름(코드)이 한글이라 자동 이름이 비므로 직접 지정한다. 컨테이너·볼륨 이름 앞에 붙는다.
 name: guardian
@@ -22,7 +22,8 @@ services:
       POSTGRES_DB: ${DB_NAME:?.env에 DB_NAME이 필요합니다}
     volumes:
       - db-data:/var/lib/postgresql/data
-      - ./db/init:/docker-entrypoint-initdb.d:ro   # 볼륨이 비어 있을 때 한 번만 실행
+      # 볼륨이 비어 있을 때 한 번만 이름 순서대로 실행: 00 PostGIS → 01 스키마 → 02~06 시드 (A1·A7)
+      - ./db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -30,12 +31,19 @@ services:
       retries: 10
 
   api:
+    # 앱·웹이 부르는 REST API (A2~). 배포 시 Caddy가 /api/chat·/api/route 외의 /api를 여기로 넘긴다 (B10).
     build: ./server
     restart: unless-stopped
     env_file: .env
     environment:
       # 컨테이너끼리는 서비스 이름(db)과 내부 포트(5432)로 접속한다.
       DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+      # /api/health 에 함께 표시할 다른 서비스 (꺼져 있으면 down 으로만 표시, api 는 영향 없음)
+      ROUTE_HEALTH_URL: http://route:8002/api/route/health
+      AI_HEALTH_URL: http://ai:8001/api/ai/health
+    volumes:
+      # Firebase 서비스 계정 키 (.env 의 FIREBASE_CREDENTIALS=secrets/firebase-admin.json)
+      - ./secrets:/srv/secrets:ro
     depends_on:
       db:
         condition: service_healthy
@@ -46,6 +54,26 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  collector:
+    # 데이터 수집기 + 위험 판정 (A2·A3). api 와 같은 이미지, 명령만 다름. 포트 없음.
+    # 포항 디지털 트윈·기상청을 10분마다 받아 DB에 쌓고, 수위 수집 1분 뒤 침수 위험을 판정한다.
+    build: ./server
+    command: ["python", "-m", "collector"]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      # 최근 30분 안에 성공한 수집이 하나도 없으면 unhealthy (외부 API 전체 장애·키 오류 감지)
+      test: ["CMD", "python", "-m", "collector", "--health"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
 
   ai:
     # LangGraph 멀티 agent + Gemini. 배포 시 Caddy가 /api/chat을 여기로 넘긴다 (B10).

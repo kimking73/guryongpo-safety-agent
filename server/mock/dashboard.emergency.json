@@ -1,0 +1,382 @@
+{
+  "mode": "emergency",
+  "headline": {
+    "risk": {
+      "hazard": "heavy_rain",
+      "level": "warning",
+      "level_num": 3,
+      "label": "호우경보",
+      "reason": "3시간 누적강수 92.0mm (구룡포 AWS, 14:30 관측)",
+      "location": {
+        "lat": 35.9903,
+        "lng": 129.5558
+      },
+      "area_id": 1021,
+      "rule_id": 2,
+      "observed_at": "2026-10-05T14:30:00+09:00"
+    },
+    "title": "호우경보 · 현재 위치 침수 — 가까운 대피소로 이동하세요",
+    "action": "open_route"
+  },
+  "point_risk": {
+    "location": {
+      "lat": 35.9903,
+      "lng": 129.5558
+    },
+    "max_level": "warning",
+    "max_level_num": 3,
+    "items": [
+      {
+        "hazard": "heavy_rain",
+        "level": "warning",
+        "level_num": 3,
+        "label": "호우경보",
+        "reason": "3시간 누적강수 92.0mm (구룡포 AWS, 14:30 관측)",
+        "location": {
+          "lat": 35.9903,
+          "lng": 129.5558
+        },
+        "area_id": 1021,
+        "rule_id": 2,
+        "observed_at": "2026-10-05T14:30:00+09:00"
+      },
+      {
+        "hazard": "flood",
+        "level": "warning",
+        "level_num": 3,
+        "label": "침수 경보",
+        "reason": "구룡포환승센터 지표면 수위계 침수심 230mm (기준 150mm) · 포항 DT 4단계(경보)",
+        "location": {
+          "lat": 35.9903,
+          "lng": 129.5558
+        },
+        "area_id": 1022,
+        "rule_id": 23,
+        "observed_at": "2026-10-05T14:27:00+09:00"
+      },
+      {
+        "hazard": "uv",
+        "level": "watch",
+        "level_num": 1,
+        "label": "자외선 보통",
+        "reason": "자외선지수 4 (포항 디지털 트윈, 14:00)",
+        "location": {
+          "lat": 35.9903,
+          "lng": 129.5558
+        },
+        "area_id": null,
+        "rule_id": 17,
+        "observed_at": "2026-10-05T14:00:00+09:00"
+      }
+    ],
+    "computed_at": "2026-10-05T14:30:00+09:00"
+  },
+  "places": [
+    {
+      "place_id": "7b1f6a3e-2c4d-4e8f-9a01-3b5c7d9e1f20",
+      "label": "우리집",
+      "max_level": "warning",
+      "max_level_num": 3
+    },
+    {
+      "place_id": "8c2e7b4f-3d5e-4f90-8b12-4c6d8e0f2a31",
+      "label": "구룡포항 3부두",
+      "max_level": "advisory",
+      "max_level_num": 2
+    }
+  ],
+  "widgets": [
+    {
+      "type": "warnings",
+      "emphasized": true,
+      "data": {
+        "items": [
+          {
+            "label": "호우경보",
+            "region_name": "포항시",
+            "issued_at": "2026-10-05T13:00:00+09:00"
+          }
+        ]
+      }
+    },
+    {
+      "type": "water_level",
+      "emphasized": true,
+      "data": {
+        "observed_at": "2026-10-05T14:27:00+09:00",
+        "stations": [
+          {
+            "station_id": 1,
+            "station_name": "구룡포교_하천수위계",
+            "kind": "river_level",
+            "metric": "river_level",
+            "value": 1850,
+            "unit": "mm",
+            "source_level": 3,
+            "source_level_label": "주의",
+            "level": "advisory",
+            "location": {
+              "lat": 35.987244,
+              "lng": 129.550467
+            }
+          },
+          {
+            "station_id": 2,
+            "station_name": "하나과메기_스마트맨홀",
+            "kind": "manhole",
+            "metric": "manhole_level",
+            "value": null,
+            "unit": "mm",
+            "source_level": 1,
+            "source_level_label": "정상",
+            "level": "normal",
+            "location": {
+              "lat": 35.985929,
+              "lng": 129.549278
+            }
+          },
+          {
+            "station_id": 3,
+            "station_name": "로터리종합건재_스마트맨홀",
+            "kind": "manhole",
+            "metric": "manhole_level",
+            "value": null,
+            "unit": "mm",
+            "source_level": 2,
+            "source_level_label": "보통",
+            "level": "watch",
+            "location": {
+              "lat": 35.987373,
+              "lng": 129.551115
+            }
+          },
+          {
+            "station_id": 4,
+            "station_name": "구룡포수협_스마트맨홀",
+            "kind": "manhole",
+            "metric": "manhole_level",
+            "value": null,
+            "unit": "mm",
+            "source_level": 4,
+            "source_level_label": "경보",
+            "level": "warning",
+            "location": {
+              "lat": 35.991235,
+              "lng": 129.557327
+            }
+          },
+          {
+            "station_id": 7,
+            "station_name": "하나과메기_지표면 수위계",
+            "kind": "road_flood",
+            "metric": "flood_depth",
+            "value": 0,
+            "unit": "mm",
+            "source_level": 1,
+            "source_level_label": "정상",
+            "level": "normal",
+            "location": {
+              "lat": 35.986115,
+              "lng": 129.549245
+            }
+          },
+          {
+            "station_id": 8,
+            "station_name": "구룡포파출소_지표면 수위계",
+            "kind": "road_flood",
+            "metric": "flood_depth",
+            "value": 60,
+            "unit": "mm",
+            "source_level": 2,
+            "source_level_label": "보통",
+            "level": "watch",
+            "location": {
+              "lat": 35.988698,
+              "lng": 129.553056
+            }
+          },
+          {
+            "station_id": 9,
+            "station_name": "해양경찰서_지표면 수위계",
+            "kind": "road_flood",
+            "metric": "flood_depth",
+            "value": 110,
+            "unit": "mm",
+            "source_level": 3,
+            "source_level_label": "주의",
+            "level": "advisory",
+            "location": {
+              "lat": 35.98947,
+              "lng": 129.554646
+            }
+          },
+          {
+            "station_id": 10,
+            "station_name": "구룡포환승센터_지표면 수위계",
+            "kind": "road_flood",
+            "metric": "flood_depth",
+            "value": 230,
+            "unit": "mm",
+            "source_level": 4,
+            "source_level_label": "경보",
+            "level": "warning",
+            "location": {
+              "lat": 35.99069,
+              "lng": 129.556057
+            }
+          },
+          {
+            "station_id": 11,
+            "station_name": "구룡포수협_지표면 수위계",
+            "kind": "road_flood",
+            "metric": "flood_depth",
+            "value": 170,
+            "unit": "mm",
+            "source_level": 3,
+            "source_level_label": "주의",
+            "level": "advisory",
+            "location": {
+              "lat": 35.991109,
+              "lng": 129.557354
+            }
+          }
+        ],
+        "series": {
+          "station_id": 10,
+          "metric": "flood_depth",
+          "points": [
+            {
+              "t": "2026-10-05T13:27:00+09:00",
+              "v": 0
+            },
+            {
+              "t": "2026-10-05T13:57:00+09:00",
+              "v": 90
+            },
+            {
+              "t": "2026-10-05T14:27:00+09:00",
+              "v": 230
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "rain",
+      "emphasized": true,
+      "data": {
+        "station_name": "구룡포 AWS",
+        "value": 92.0,
+        "unit": "mm/3h",
+        "observed_at": "2026-10-05T14:30:00+09:00",
+        "level": "warning",
+        "series": [
+          {
+            "t": "2026-10-05T12:30:00+09:00",
+            "v": 18.5
+          },
+          {
+            "t": "2026-10-05T13:30:00+09:00",
+            "v": 51.0
+          },
+          {
+            "t": "2026-10-05T14:30:00+09:00",
+            "v": 92.0
+          }
+        ]
+      }
+    },
+    {
+      "type": "disaster_messages",
+      "emphasized": true,
+      "data": {
+        "items": [
+          {
+            "sent_at": "2026-10-05T13:05:00+09:00",
+            "sender": "포항시",
+            "message": "[포항시] 호우경보 발효. 하천변·해안가 저지대 접근 금지, 산사태 위험지역 주민은 대피 바랍니다. (예시)"
+          }
+        ]
+      }
+    },
+    {
+      "type": "checklist",
+      "emphasized": false,
+      "data": {
+        "hazard": "flood",
+        "items": [
+          {
+            "id": 41,
+            "content": "전기 차단기 내리기",
+            "checked": false,
+            "is_often_missed": true
+          },
+          {
+            "id": 42,
+            "content": "맨홀·배수구 주변으로 걷지 않기",
+            "checked": false,
+            "is_often_missed": true
+          }
+        ]
+      }
+    },
+    {
+      "type": "forecast",
+      "emphasized": false,
+      "data": {
+        "slots": [
+          {
+            "t": "2026-10-05T15:00:00+09:00",
+            "pop": 90,
+            "pty": "비",
+            "pcp_mm": 30.0,
+            "tmp": 19,
+            "wsd": 9.1
+          }
+        ]
+      }
+    }
+  ],
+  "highlight_layers": [
+    "risk_areas",
+    "shelters",
+    "manholes",
+    "landslide_zones"
+  ],
+  "nearest_shelters": [
+    {
+      "id": 12,
+      "name": "구룡포읍 대피소 A (예시)",
+      "shelter_types": [
+        "flood",
+        "earthquake"
+      ],
+      "address": "경북 포항시 남구 구룡포읍 (예시 주소)",
+      "capacity": 300,
+      "is_accessible": true,
+      "location": {
+        "lat": 35.9921,
+        "lng": 129.5512
+      },
+      "distance_m": 540,
+      "in_risk_area": false
+    },
+    {
+      "id": 15,
+      "name": "구룡포읍 대피소 B (예시)",
+      "shelter_types": [
+        "flood"
+      ],
+      "address": "경북 포항시 남구 구룡포읍 (예시 주소)",
+      "capacity": 150,
+      "is_accessible": false,
+      "location": {
+        "lat": 35.995,
+        "lng": 129.547
+      },
+      "distance_m": 1010,
+      "in_risk_area": false
+    }
+  ],
+  "updated_at": "2026-10-05T14:30:00+09:00"
+}

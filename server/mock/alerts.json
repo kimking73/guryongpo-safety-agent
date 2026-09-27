@@ -1,0 +1,95 @@
+{
+  "alerts": [
+    {
+      "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+      "risk": {
+        "hazard": "landslide",
+        "level": "warning",
+        "level_num": 3,
+        "label": "산사태 경고",
+        "reason": "호우경보 중 · 등록 장소 '우리집'이 산사태 위험지역 내부",
+        "location": {
+          "lat": 35.9862,
+          "lng": 129.5489
+        },
+        "area_id": 1023,
+        "rule_id": 11,
+        "observed_at": "2026-10-05T14:30:00+09:00"
+      },
+      "title": "[산사태 경고] 우리집 주변 대피 필요",
+      "body": "호우경보가 발효 중이고 '우리집'이 산사태 위험지역에 있습니다. 보행이 불편하시면 지금 바로 대피소로 이동하세요.",
+      "reason": {
+        "trigger": "place",
+        "place_label": "우리집",
+        "profile_tags": [
+          "elderly",
+          "walking_limited"
+        ]
+      },
+      "actions": [
+        {
+          "type": "open_route",
+          "label": "대피 경로 보기",
+          "params": {
+            "shelter_id": 12
+          }
+        },
+        {
+          "type": "call",
+          "label": "딸에게 전화",
+          "params": {
+            "phone": "010-0000-0000"
+          }
+        }
+      ],
+      "created_at": "2026-10-05T14:28:00+09:00",
+      "read_at": null
+    },
+    {
+      "id": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+      "risk": {
+        "hazard": "flood",
+        "level": "warning",
+        "level_num": 3,
+        "label": "침수 경보",
+        "reason": "구룡포환승센터 지표면 수위계 침수심 230mm (기준 150mm) · 포항 DT 4단계(경보)",
+        "location": {
+          "lat": 35.9903,
+          "lng": 129.5558
+        },
+        "area_id": 1022,
+        "rule_id": 23,
+        "observed_at": "2026-10-05T14:27:00+09:00"
+      },
+      "title": "[침수 경보] 구룡포환승센터 일대 침수",
+      "body": "현재 위치 주변 도로 침수심 23cm, 구룡포수협 맨홀도 경보 단계입니다. 맨홀·배수구를 피해 높은 곳으로 이동하세요. 선박 점검은 물이 빠진 뒤에 하세요.",
+      "reason": {
+        "trigger": "current_location",
+        "place_label": null,
+        "profile_tags": [
+          "fisher",
+          "vessel_owner"
+        ]
+      },
+      "actions": [
+        {
+          "type": "open_route",
+          "label": "안전 경로",
+          "params": {}
+        },
+        {
+          "type": "open_checklist",
+          "label": "침수 체크리스트",
+          "params": {
+            "hazard": "flood"
+          }
+        }
+      ],
+      "created_at": "2026-10-05T14:30:00+09:00",
+      "read_at": null
+    }
+  ],
+  "mode": "emergency",
+  "server_time": "2026-10-05T14:30:05+09:00",
+  "next_poll_sec": 15
+}

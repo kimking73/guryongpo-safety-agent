@@ -1,0 +1,243 @@
+erDiagram
+  %% ---------- 사용자
+  users ||--o| user_profiles : has
+  users ||--o{ user_places : registers
+  users ||--o{ emergency_contacts : has
+  users ||--o{ user_devices : uses
+  users ||--o{ user_alerts : receives
+  users ||--o{ user_checklist_progress : checks
+  users ||--o{ route_requests : requests
+  users ||--o{ chat_sessions : opens
+  users ||--o{ emergency_events : sends
+
+  %% ---------- 수집
+  data_sources ||--o{ ingest_runs : runs
+  data_sources ||--o{ stations : owns
+  stations ||--o{ observations : measures
+  ingest_runs |o--o{ observations : loaded
+  data_sources ||--o{ weather_warnings : issues
+  data_sources ||--o{ shelters : provides
+  data_sources ||--o{ medical_facilities : provides
+  data_sources ||--o{ hazard_zones : provides
+  data_sources ||--o{ manholes : provides
+
+  %% ---------- 위험 판정
+  risk_rules ||--o{ risk_assessments : applied
+  risk_assessments |o--o{ user_alerts : triggers
+  weather_warnings |o--o{ user_alerts : triggers
+  user_places |o--o{ user_alerts : about
+
+  %% ---------- 경로 / 지식 / 대화
+  shelters |o--o{ route_requests : destination
+  route_requests |o--o{ route_requests : rerouted_from
+  checklist_items ||--o{ user_checklist_progress : item
+  chat_sessions ||--o{ chat_messages : contains
+  chat_messages ||--o{ agent_runs : traced
+
+  users {
+    uuid id PK
+    text firebase_uid UK
+    bool is_anonymous
+    text nickname
+  }
+  user_profiles {
+    uuid user_id PK,FK
+    enum user_type
+    int birth_year
+    enum mobility
+    text occupation
+    bool owns_vessel
+    enum walking_ability
+    text blood_type
+    bool has_dependents
+  }
+  user_places {
+    uuid id PK
+    uuid user_id FK
+    enum place_type
+    text label
+    point geom
+  }
+  emergency_contacts {
+    uuid id PK
+    uuid user_id FK
+    text name
+    text phone
+  }
+  user_devices {
+    uuid id PK
+    uuid user_id FK
+    text platform
+    text fcm_token UK
+    point last_location
+  }
+  data_sources {
+    text code PK
+    text name
+  }
+  ingest_runs {
+    bigint id PK
+    text source_code FK
+    text job
+    text status
+  }
+  stations {
+    int id PK
+    text source_code FK
+    text kind
+    text address
+    point geom
+    bool is_mountain
+  }
+  observations {
+    int station_id PK,FK
+    text metric PK
+    timestamptz observed_at PK
+    float value
+    text unit
+    int source_level
+  }
+  forecasts {
+    bigint id PK
+    text kind
+    int grid_nx
+    int grid_ny
+    timestamptz fcst_time
+    text category
+    text value
+  }
+  weather_warnings {
+    bigint id PK
+    enum hazard
+    enum level
+    text region_name
+    timestamptz issued_at
+    timestamptz released_at
+  }
+  typhoon_tracks {
+    bigint id PK
+    text typhoon_code
+    timestamptz observed_at
+    point geom
+    float radius_15ms_km
+  }
+  disaster_messages {
+    bigint id PK
+    text external_id UK
+    timestamptz sent_at
+    enum hazard
+    text message
+  }
+  shelters {
+    int id PK
+    text name
+    text_arr shelter_types
+    int capacity
+    bool is_accessible
+    point geom
+  }
+  medical_facilities {
+    int id PK
+    text name
+    text kind
+    point geom
+  }
+  hazard_zones {
+    int id PK
+    enum hazard
+    text grade
+    multipolygon geom
+  }
+  manholes {
+    int id PK
+    point geom
+  }
+  risk_rules {
+    int id PK
+    enum hazard
+    enum level
+    text label
+    text metric
+    float threshold
+    jsonb condition
+    text source_name
+  }
+  risk_assessments {
+    bigint id PK
+    enum hazard
+    enum level
+    multipolygon area
+    int rule_id FK
+    jsonb basis
+    timestamptz valid_to
+  }
+  user_alerts {
+    uuid id PK
+    uuid user_id FK
+    enum hazard
+    enum level
+    text title
+    bigint assessment_id FK
+    bigint warning_id FK
+    uuid place_id FK
+    text dedupe_key
+  }
+  route_requests {
+    uuid id PK
+    uuid user_id FK
+    int shelter_id FK
+    text profile
+    linestring path
+    uuid parent_id FK
+  }
+  action_guides {
+    int id PK
+    enum hazard
+    enum phase
+    text_arr targets
+    int priority
+    text content
+  }
+  checklist_items {
+    int id PK
+    enum hazard
+    enum phase
+    text content
+    bool is_often_missed
+  }
+  user_checklist_progress {
+    uuid user_id PK,FK
+    int item_id PK,FK
+  }
+  support_programs {
+    int id PK
+    text category
+    text name
+    text department
+  }
+  chat_sessions {
+    uuid id PK
+    uuid user_id FK
+    text mode
+  }
+  chat_messages {
+    uuid id PK
+    uuid session_id FK
+    enum role
+    text content
+    jsonb grounding
+    enum verification
+  }
+  agent_runs {
+    bigint id PK
+    uuid message_id FK
+    int iteration
+    text agent
+    text status
+  }
+  emergency_events {
+    uuid id PK
+    uuid user_id FK
+    point location
+    jsonb payload
+  }

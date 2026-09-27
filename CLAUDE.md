@@ -27,14 +27,14 @@ Lanes: **A** server/DB/data collection/risk engine (`server/`, `db/`) · **B** A
 ## Key directories
 | Path | Purpose |
 | --- | --- |
-| `docker-compose.yml` | Services shared by local and server: `db` (:15), `api` (:32), `ai` (:50), `graphhopper` (:63), `route` (:77); project name fixed (:12) |
+| `docker-compose.yml` | Services shared by local and server: `db`, `api`, `collector`, `ai`, `graphhopper`, `route`; project name fixed (:12) |
 | `docker-compose.override.yml` | Local-only: DB host port 5433, graphhopper 8989, code mounts + `--reload` |
-| `server/` | FastAPI server (lane A). Only `/api/health` exists (server/app/main.py:15) |
+| `server/` | Lane A: FastAPI API (`/api/v1`, mostly mock responses with `X-Mock: true`; real: `/api/health`, `/api/v1/risk*`, map layers), `collector/` (Pohang DT + KMA ingestion, APScheduler, runs as the `collector` service), `risk/` (flood risk engine → `risk_assessments`), `spec/openapi.yaml`, `mock/`, `tools/`. See `server/README.md` |
 | `ai/` | LangGraph multi-agent + `POST /api/chat` (ai/guardian_ai/api.py:34). See `ai/CLAUDE.md` |
 | `route/` | Route server (lane B): `POST /api/route` (hazard avoidance + per-profile slope/steps rules, route/guardian_route/service.py:85, profiles.py), `POST /api/route/check` (reroute while moving, service.py:116); mock hazards `route/data/hazards.sample.geojson`; tests in `route/tests/` |
 | `graphhopper/` | GraphHopper 11 image + `config.yml` (foot, no CH); `fetch_osm.sh` builds `data/guryongpo.osm.pbf`; `build_dem.sh` turns 국토지리정보원 DEM in `dem/ngii/` into `data/dem-hgt/`; `entrypoint.sh` picks DEM (NGII if present, else SRTM) and rebuilds the graph when it changes (data/ and dem/ngii/ gitignored) |
 | `app/` | Flutter project placeholder (README only until C2) |
-| `db/init/` | SQL run once on an empty DB volume (PostGIS extension) |
+| `db/init/` | SQL run once on an empty DB volume: 00 PostGIS, 01 schema, 02–06 seeds (rules/stations, landslide zones, knowledge, shelters, medical) — lane A |
 | `secrets/` | Credential files, gitignored except `.gitkeep` (e.g. `firebase-admin.json`) |
 | `.env.example` | Every env key with local defaults; rules in its header (.env.example:2-8) |
 | `README.md` | Team-facing setup (Mac/Windows), common commands, env and service rules |

@@ -2,3 +2,9 @@
 __pycache__/
 *.egg-info/
 .pytest_cache/
+tests/
+tools/
+data/
+docs/
+spec/
+dt_config.txt

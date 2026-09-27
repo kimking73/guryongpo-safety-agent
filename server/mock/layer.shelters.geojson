@@ -1,0 +1,50 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "id": 12,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          129.5512,
+          35.9921
+        ]
+      },
+      "properties": {
+        "id": 12,
+        "name": "구룡포읍 대피소 A (예시)",
+        "shelter_types": [
+          "flood",
+          "earthquake"
+        ],
+        "address": "경북 포항시 남구 구룡포읍 (예시 주소)",
+        "capacity": 300,
+        "is_accessible": true,
+        "in_risk_area": false
+      }
+    },
+    {
+      "type": "Feature",
+      "id": 15,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          129.547,
+          35.995
+        ]
+      },
+      "properties": {
+        "id": 15,
+        "name": "구룡포읍 대피소 B (예시)",
+        "shelter_types": [
+          "flood"
+        ],
+        "address": "경북 포항시 남구 구룡포읍 (예시 주소)",
+        "capacity": 150,
+        "is_accessible": false,
+        "in_risk_area": false
+      }
+    }
+  ]
+}

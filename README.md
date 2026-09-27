@@ -7,12 +7,12 @@
 
 | 폴더 | 내용 | 담당 |
 | --- | --- | --- |
-| `server/` | FastAPI 서버 (`/api/...`) | A |
+| `server/` | FastAPI 서버 (`/api/v1/...`), 데이터 수집기(`collector/`), 위험 판정(`risk/`), API 명세·목업(`spec/`, `mock/`) — `server/README.md` | A |
 | `ai/` | LangGraph multi-agent (`ai/CLAUDE.md`, `ai/docs/agent-design.md`) | B |
 | `route/` | 경로 안내 서버 (`/api/route`, GraphHopper 앞단) | B |
 | `graphhopper/` | GraphHopper 경로 엔진 설정, 구룡포 OSM 도로망 받기 스크립트 | B |
 | `app/` | Flutter 앱·웹 | C |
-| `db/init/` | DB 최초 생성 시 실행되는 SQL (PostGIS 확장) | A |
+| `db/init/` | DB 최초 생성 시 실행되는 SQL: PostGIS 확장, 스키마(01), 판단 기준·관측소(02), 산사태 취약지역(03), 행동요령(04), 대피소(05), 응급의료(06) | A |
 | `secrets/` | 서비스 계정 키 등 비밀 파일 (커밋 안 됨) | - |
 
 ## 처음 설정
@@ -65,8 +65,9 @@ docker compose up -d --build
 
 확인:
 ```bash
-docker compose ps                        # db, api, ai, graphhopper, route 모두 (healthy)
-curl localhost:8000/api/health           # {"status":"ok","db":"ok"}
+docker compose ps                        # db, api, collector, ai, graphhopper, route 모두 (healthy)
+curl localhost:8000/api/health           # {"status":"ok","db":"ok", ... 수집 상태 components}
+curl "localhost:8000/api/v1/risk?lat=35.99069&lng=129.556057"     # 이 지점의 현재 위험도 (침수 등)
 curl localhost:8001/api/ai/health        # {"status":"ok"}
 curl -X POST localhost:8001/api/chat -H 'Content-Type: application/json' \
      -d '{"user_id":"me","question":"비 오는데 걸어서 가도 돼요?"}'
@@ -74,7 +75,7 @@ curl localhost:8002/api/route/health     # {"status":"ok","graphhopper":"ok"}
 curl -X POST localhost:8002/api/route -H 'Content-Type: application/json' \
      -d '{"origin":{"lat":35.9905,"lon":129.5560},"destination":{"lat":35.9868,"lon":129.5480}}'
 ```
-- API 문서: http://localhost:8000/docs (서버), http://localhost:8001/docs (AI), http://localhost:8002/docs (경로)
+- API 문서: http://localhost:8000/api/v1/docs (서버, 명세 원본은 `server/spec/openapi.yaml`), http://localhost:8001/docs (AI), http://localhost:8002/docs (경로)
 - 경로는 침수·산사태 구역과 맨홀을 피한다. 응답의 `avoided`는 피한 구역, `still_inside`는 다른 길이 없어 지나는 구역이다.
 - 요청의 `profile`: `adult`(가장 빠른 길, 경사 무시), `elderly`(급경사 도로를 피하고 느린 걸음, 같은 경사면 비탈길보다 계단을 선호).
   응답에 `ascend_m`·`descend_m`(오르막·내리막 합계), `max_slope_pct`(가장 급한 경사)가 온다. 규칙은 `route/guardian_route/profiles.py`.
@@ -95,8 +96,12 @@ docker compose logs -f api       # API 로그 보기
 docker compose down              # 중지 (DB 데이터는 유지)
 docker compose down -v           # 중지 + DB 데이터 삭제 (db/init SQL을 다시 실행하고 싶을 때)
 docker compose exec db psql -U guardian -d guardian   # DB 셸
+docker compose logs -f collector                      # 수집·위험 판정 로그 (10분마다)
+docker compose exec api python -m collector --once    # 수집 전체 1회 즉시 실행 (결과 표)
 ```
-- `server/app/`, `ai/guardian_ai/`, `route/guardian_route/` 코드를 고치면 해당 서버가 자동으로 재시작된다 (재빌드 불필요).
+- **이 저장소를 처음 받았거나 `db/init/*.sql`이 바뀌었으면** 기존 DB 볼륨에는 스키마가 없으므로 `docker compose down -v` 후 다시 `up`.
+- 서버 API 대부분은 아직 목업(응답 헤더 `X-Mock: true`)이다. 실데이터: `/api/health`, `/api/v1/risk*`, 지도 레이어 `stations`·`landslide_zones`·`risk_areas`. 자세한 건 `server/README.md`.
+- `server/app/`·`server/collector/`·`server/risk/`(api), `ai/guardian_ai/`, `route/guardian_route/` 코드를 고치면 해당 서버가 자동으로 재시작된다 (재빌드 불필요).
 - 배포 시 Caddy가 `/api/chat`은 ai(8001)로, `/api/route`는 route(8002)로, 나머지 `/api`는 서버(8000)로 넘긴다 (B10).
 - `graphhopper/config.yml`을 바꾸면 `rm -rf graphhopper/data/graph-cache` 후 `docker compose up -d --build graphhopper` (설정이 이미지에 들어가므로 재빌드, 그래프도 다시 만든다).
 
@@ -111,7 +116,7 @@ docker compose exec db psql -U guardian -d guardian   # DB 셸
 
 ## 서비스 추가 규칙
 
-- 새 서비스(risk, collector, loader)는 담당 작업에서 `docker-compose.yml`에 추가한다.
+- 새 서비스(loader)는 담당 작업에서 `docker-compose.yml`에 추가한다. collector(수집+위험 판정)는 추가됨.
 - 모든 서비스에 `restart: unless-stopped`와 `healthcheck`를 둔다.
 - 로컬에서만 필요한 설정(포트 노출, 코드 마운트)은 `docker-compose.override.yml`에 둔다.
   서버에서는 `docker compose -f docker-compose.yml up -d`로 override 없이 실행한다.

@@ -1,0 +1,235 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "id": 1,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          129.550467,
+          35.987244
+        ]
+      },
+      "properties": {
+        "name": "구룡포교_하천수위계",
+        "kind": "river_level",
+        "source": "pohang_dt",
+        "metric": "river_level",
+        "value": 1850,
+        "unit": "mm",
+        "source_level": 3,
+        "source_level_label": "주의",
+        "level": "advisory",
+        "observed_at": "2026-10-05T14:27:00+09:00"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": 2,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          129.549278,
+          35.985929
+        ]
+      },
+      "properties": {
+        "name": "하나과메기_스마트맨홀",
+        "kind": "manhole",
+        "source": "pohang_dt",
+        "metric": "manhole_level",
+        "value": null,
+        "unit": "mm",
+        "source_level": 1,
+        "source_level_label": "정상",
+        "level": "normal",
+        "observed_at": "2026-10-05T14:27:00+09:00"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": 3,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          129.551115,
+          35.987373
+        ]
+      },
+      "properties": {
+        "name": "로터리종합건재_스마트맨홀",
+        "kind": "manhole",
+        "source": "pohang_dt",
+        "metric": "manhole_level",
+        "value": null,
+        "unit": "mm",
+        "source_level": 2,
+        "source_level_label": "보통",
+        "level": "watch",
+        "observed_at": "2026-10-05T14:27:00+09:00"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": 4,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          129.557327,
+          35.991235
+        ]
+      },
+      "properties": {
+        "name": "구룡포수협_스마트맨홀",
+        "kind": "manhole",
+        "source": "pohang_dt",
+        "metric": "manhole_level",
+        "value": null,
+        "unit": "mm",
+        "source_level": 4,
+        "source_level_label": "경보",
+        "level": "warning",
+        "observed_at": "2026-10-05T14:27:00+09:00"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": 5,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          129.546115,
+          35.984987
+        ]
+      },
+      "properties": {
+        "name": "구룡포읍행정복지센터_강우량계",
+        "kind": "rain_gauge",
+        "source": "pohang_dt",
+        "metric": "rain_1h",
+        "value": 38.5,
+        "unit": "mm",
+        "source_level": 4,
+        "source_level_label": "경보",
+        "level": "warning",
+        "observed_at": "2026-10-05T14:27:00+09:00"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": 7,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          129.549245,
+          35.986115
+        ]
+      },
+      "properties": {
+        "name": "하나과메기_지표면 수위계",
+        "kind": "road_flood",
+        "source": "pohang_dt",
+        "metric": "flood_depth",
+        "value": 0,
+        "unit": "mm",
+        "source_level": 1,
+        "source_level_label": "정상",
+        "level": "normal",
+        "observed_at": "2026-10-05T14:27:00+09:00"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": 8,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          129.553056,
+          35.988698
+        ]
+      },
+      "properties": {
+        "name": "구룡포파출소_지표면 수위계",
+        "kind": "road_flood",
+        "source": "pohang_dt",
+        "metric": "flood_depth",
+        "value": 60,
+        "unit": "mm",
+        "source_level": 2,
+        "source_level_label": "보통",
+        "level": "watch",
+        "observed_at": "2026-10-05T14:27:00+09:00"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": 9,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          129.554646,
+          35.98947
+        ]
+      },
+      "properties": {
+        "name": "해양경찰서_지표면 수위계",
+        "kind": "road_flood",
+        "source": "pohang_dt",
+        "metric": "flood_depth",
+        "value": 110,
+        "unit": "mm",
+        "source_level": 3,
+        "source_level_label": "주의",
+        "level": "advisory",
+        "observed_at": "2026-10-05T14:27:00+09:00"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": 10,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          129.556057,
+          35.99069
+        ]
+      },
+      "properties": {
+        "name": "구룡포환승센터_지표면 수위계",
+        "kind": "road_flood",
+        "source": "pohang_dt",
+        "metric": "flood_depth",
+        "value": 230,
+        "unit": "mm",
+        "source_level": 4,
+        "source_level_label": "경보",
+        "level": "warning",
+        "observed_at": "2026-10-05T14:27:00+09:00"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": 11,
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          129.557354,
+          35.991109
+        ]
+      },
+      "properties": {
+        "name": "구룡포수협_지표면 수위계",
+        "kind": "road_flood",
+        "source": "pohang_dt",
+        "metric": "flood_depth",
+        "value": 170,
+        "unit": "mm",
+        "source_level": 3,
+        "source_level_label": "주의",
+        "level": "advisory",
+        "observed_at": "2026-10-05T14:27:00+09:00"
+      }
+    }
+  ]
+}
