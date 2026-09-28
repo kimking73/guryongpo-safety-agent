@@ -13,4 +13,5 @@
 | `make_mocks.py` · `validate.py` | 목업 JSON 재생성 · 명세(`server/spec/openapi.yaml`) ↔ 목업 검증 | `server/mock/*` |
 | `pohang_dt_*.py` · `kma_*.py` | 원천 응답 변환기 원본 (수집기 사본은 `server/collector/converters/`) | – |
 
-`db/init/*.sql` 을 다시 만들면 DB 볼륨을 새로 만들어야 적용된다 (`docker compose down -v`).
+`db/init/*.sql` 시드를 다시 만들면 `docker compose run --rm loader` 로 기존 DB 에 적용한다 (볼륨 초기화 불필요, 스키마 01 변경만 `down -v`).
+생성하는 SQL 은 여러 번 적용해도 같은 결과여야 한다 (ON CONFLICT upsert 또는 TRUNCATE 후 삽입) — `server/tests/test_loader.py` 가 검사.

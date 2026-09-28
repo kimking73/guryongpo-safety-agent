@@ -6,7 +6,8 @@
 #        → override를 빼서 DB가 외부에 열리지 않는다. (B10 VM, A9 배포)
 #
 # 환경마다 다른 값은 전부 루트 .env에서 읽는다. 값을 여기에 직접 쓰지 않는다.
-# loader 서비스는 담당 작업(A7)에서 추가한다. 위험 판정(risk)은 collector 안에서 10분마다 돈다.
+# 위험 판정(risk)은 collector 안에서 10분마다 돈다.
+# 정적 데이터(대피소·의료시설·위험지역·행동요령·판정 기준) 다시 적재: docker compose run --rm loader (A7)
 
 # 폴더 이름(코드)이 한글이라 자동 이름이 비므로 직접 지정한다. 컨테이너·볼륨 이름 앞에 붙는다.
 name: guardian
@@ -74,6 +75,24 @@ services:
       timeout: 10s
       retries: 3
       start_period: 120s
+
+  loader:
+    # 정적 데이터 적재 (A7). 한 번 돌고 끝나는 작업이라 `up` 에 포함하지 않는다 (profiles).
+    #   docker compose run --rm loader            → db/init 02~ 시드를 다시 적용 (관측값·사용자 데이터는 유지)
+    #   빈 DB(initdb 미실행)면 00·01 스키마부터 만든다. 여러 번 실행해도 결과가 같다.
+    # 상주 서비스가 아니므로 restart·healthcheck 없음 (결과는 종료 코드와 ingest_runs 의 loader 기록)
+    build: ./server
+    command: ["python", "-m", "loader"]
+    profiles: ["tools"]
+    restart: "no"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+    volumes:
+      - ./db/init:/srv/db/init:ro
+    depends_on:
+      db:
+        condition: service_healthy
 
   ai:
     # LangGraph 멀티 agent + Gemini. 배포 시 Caddy가 /api/chat을 여기로 넘긴다 (B10).

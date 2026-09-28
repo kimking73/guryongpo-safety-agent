@@ -339,7 +339,7 @@ CREATE TABLE manholes (
   id           serial PRIMARY KEY,
   source_code  text NOT NULL REFERENCES data_sources(code),
   external_id  text,
-  kind         text,                      -- 우수/오수/합류
+  kind         text,                      -- 우수/오수/합류, smart = 포항 DT 스마트맨홀 (stations kind=manhole 에서 복사)
   geom         geometry(Point, 4326) NOT NULL,
   UNIQUE (source_code, external_id)
 );

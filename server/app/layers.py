@@ -1,7 +1,8 @@
 """지도 레이어 GeoJSON — 실데이터가 있는 레이어는 DB, 나머지는 목업
 
-실데이터: stations (관측소 + 최신값), landslide_zones (산사태 취약지역)
-목업    : shelters, medical, flood_zones, coastal_zones, manholes, risk_areas (A3·A7 에서 교체)
+실데이터: stations (관측소 + 최신값), landslide_zones (산사태 취약지역), risk_areas (A3 판정 결과 — risk.queries),
+         shelters · medical · manholes (A7 loader 가 적재한 정적 데이터)
+위험지역 고정 영역은 산사태 취약지역만 사용 (침수는 수위계 기반 실시간 판정 영역 risk_areas 로 표시)
 """
 from __future__ import annotations
 
@@ -113,4 +114,64 @@ def landslide_layer(bbox: tuple[float, float, float, float]) -> dict:
                       "properties": {"name": r["name"], "hazard": "landslide", "grade": r["grade"],
                                      "reason": meta.get("reason"), "area_m2": meta.get("area_m2"),
                                      "shelter_distance_m": meta.get("shelter_distance_m")}})
+    return {"type": "FeatureCollection", "features": feats}
+
+
+# ---------------------------------------------------------------- 정적 시설 (A7 loader 가 적재)
+POHANG_BBOX = (129.30, 35.90, 129.62, 36.10)          # 구룡포 안에 응급의료기관이 없어 의료시설은 bbox 생략 시 포항 전체
+
+# in_risk_area: 대피소 자체가 현재 유효한 위험 영역(risk_assessments, 주의 이상) 안이면 true → 앱·경로 안내에서 제외
+SHELTERS_SQL = """
+SELECT s.id, s.name, s.shelter_types, s.address, s.capacity, s.phone, s.is_indoor, s.is_accessible,
+       ST_X(s.geom) AS lng, ST_Y(s.geom) AS lat,
+       EXISTS (SELECT 1 FROM risk_assessments ra
+               WHERE ra.valid_to IS NULL AND ra.level >= 'advisory' AND ST_Intersects(ra.area, s.geom)) AS in_risk_area
+FROM shelters s
+WHERE s.is_open AND ST_Intersects(s.geom, ST_MakeEnvelope(%(a)s, %(b)s, %(c)s, %(d)s, 4326))
+ORDER BY s.id
+"""
+
+MEDICAL_SQL = """
+SELECT id, name, kind, address, phone, meta, ST_X(geom) AS lng, ST_Y(geom) AS lat
+FROM medical_facilities
+WHERE ST_Intersects(geom, ST_MakeEnvelope(%(a)s, %(b)s, %(c)s, %(d)s, 4326))
+ORDER BY id
+"""
+
+MANHOLES_SQL = """
+SELECT m.id, m.source_code, m.external_id, m.kind, ST_X(m.geom) AS lng, ST_Y(m.geom) AS lat, st.name
+FROM manholes m
+LEFT JOIN stations st ON st.source_code = m.source_code AND st.external_id = m.external_id
+WHERE ST_Intersects(m.geom, ST_MakeEnvelope(%(a)s, %(b)s, %(c)s, %(d)s, 4326))
+ORDER BY m.id
+"""
+
+
+def _point(r: dict, props: dict) -> dict:
+    return {"type": "Feature", "id": r["id"], "geometry": {"type": "Point", "coordinates": [r["lng"], r["lat"]]},
+            "properties": props}
+
+
+def shelters_layer(bbox: tuple[float, float, float, float]) -> dict:
+    feats = [_point(r, {"id": r["id"], "name": r["name"], "shelter_types": list(r["shelter_types"] or []),
+                        "address": r["address"], "capacity": r["capacity"], "phone": r["phone"],
+                        "is_indoor": r["is_indoor"], "is_accessible": r["is_accessible"],
+                        "in_risk_area": bool(r["in_risk_area"])})
+             for r in db.fetch_all(SHELTERS_SQL, dict(zip("abcd", bbox)))]
+    return {"type": "FeatureCollection", "features": feats}
+
+
+def medical_layer(bbox: tuple[float, float, float, float]) -> dict:
+    feats = []
+    for r in db.fetch_all(MEDICAL_SQL, dict(zip("abcd", bbox))):
+        meta = r["meta"] if isinstance(r["meta"], dict) else json.loads(r["meta"] or "{}")
+        feats.append(_point(r, {"id": r["id"], "name": r["name"], "kind": r["kind"], "address": r["address"],
+                                "phone": r["phone"], "er_phone": meta.get("er_phone"),
+                                "emergency_class": meta.get("emergency_class")}))
+    return {"type": "FeatureCollection", "features": feats}
+
+
+def manholes_layer(bbox: tuple[float, float, float, float]) -> dict:
+    feats = [_point(r, {"id": r["id"], "kind": r["kind"], "name": r["name"], "source": r["source_code"]})
+             for r in db.fetch_all(MANHOLES_SQL, dict(zip("abcd", bbox)))]
     return {"type": "FeatureCollection", "features": feats}

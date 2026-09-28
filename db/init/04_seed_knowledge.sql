@@ -1,4 +1,7 @@
 -- 포항시 재난안전 홈페이지 기반 지식 데이터 — tools/seed_knowledge.py 로 생성 (2026-09-26 확인)
+-- 재적용 시 중복 방지: 행동요령·지원제도는 비우고 다시 넣는다 (참조하는 테이블 없음, id 는 1부터 같은 순서).
+-- 긴급전화는 02_seed.sql 이 비운 뒤 전국 공통을 넣고, 여기서 포항시 페이지 번호를 덧붙인다 → 이 파일만 따로 실행하지 말고 loader 로 적용
+TRUNCATE action_guides, support_programs RESTART IDENTITY;
 
 INSERT INTO action_guides (hazard, phase, min_level, targets, priority, title, content, voice_text, source_name, source_url) VALUES
   ('heavy_rain', 'during', 'advisory', '{all}', 10, '호우가 시작되면', '신속히 안전한 곳으로 대피하고 외출을 삼갑니다. 이웃·가족과 연락해 안전 여부를 확인합니다.', '비가 많이 오고 있습니다. 외출을 삼가고 안전한 곳에 머무르세요.', '포항시 재난안전 홈페이지', 'https://www.pohang.go.kr/safe/contents.do?mid=0301010000'),

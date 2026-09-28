@@ -160,7 +160,10 @@ def q(v):
     return "NULL" if v is None else "'" + str(v).replace("'", "''") + "'"
 
 
-out = ["-- 포항시 재난안전 홈페이지 기반 지식 데이터 — tools/seed_knowledge.py 로 생성 (2026-09-26 확인)", ""]
+out = ["-- 포항시 재난안전 홈페이지 기반 지식 데이터 — tools/seed_knowledge.py 로 생성 (2026-09-26 확인)",
+       "-- 재적용 시 중복 방지: 행동요령·지원제도는 비우고 다시 넣는다 (참조하는 테이블 없음, id 는 1부터 같은 순서).",
+       "-- 긴급전화는 02_seed.sql 이 비운 뒤 전국 공통을 넣고, 여기서 포항시 페이지 번호를 덧붙인다 → 이 파일만 따로 실행하지 말고 loader 로 적용",
+       "TRUNCATE action_guides, support_programs RESTART IDENTITY;", ""]
 rows = []
 for hz, ph, lv, tg, pr, ti, co, vo, mid in G:
     for h in hz:

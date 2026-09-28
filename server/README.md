@@ -22,6 +22,7 @@ server/
     store.py           DB upsert
     scheduler.py       APScheduler (Asia/Seoul)
     converters/        tools/ 변환기 사본 (이후 수정은 여기서)
+  loader/              정적 데이터 적재 (A7) — db/init 스키마·시드 적용, 재실행 안전 (docker compose run --rm loader)
   risk/                판정 엔진 (A3)
     engine.py          최신 관측값 + risk_rules → risk_assessments 동기화
     queries.py         /risk (좌표), /risk/areas (영역 GeoJSON)
@@ -46,7 +47,24 @@ docker compose exec api python -m collector --once              # 전체 1회 �
 docker compose exec api python -m collector --once kma.aws      # 작업 하나만
 ```
 
-- DB 는 볼륨이 비어 있을 때만 `db/init/*.sql` 을 이름 순서대로 실행한다. 스키마·시드가 바뀌면 `docker compose down -v` 후 다시 up (데이터 초기화)
+- DB 는 볼륨이 비어 있을 때만 `db/init/*.sql` 을 이름 순서대로 실행한다.
+- **시드(02~)가 바뀌면** `docker compose run --rm loader` — 수집한 관측값·사용자 데이터는 두고 정적 데이터만 다시 적재 (여러 번 실행해도 결과 같음)
+- **스키마(01)가 바뀌면** loader 가 없는 테이블을 알려 주고 멈춘다 → 로컬은 `docker compose down -v` 후 다시 up, 배포 DB 는 해당 CREATE 문 직접 적용
+
+### 정적 데이터 적재 — loader (A7)
+
+```bash
+docker compose run --rm loader              # 02 판단 기준·관측소·맨홀 · 03 산사태 · 04 행동요령 · 05 대피소 · 06 응급의료
+docker compose run --rm loader --dry-run    # 적용해 보고 되돌림 (행 수만 확인)
+docker compose run --rm loader --check      # 적용 없이 행 수 확인 — 최소 행 수 미달이면 종료 코드 1
+```
+
+- 전 파일을 한 트랜잭션으로 적용 → 중간에 SQL 오류가 나면 전부 되돌리고 DB 는 그대로 (종료 코드 2)
+- 빈 DB(initdb 를 거치지 않은 DB)면 00·01 스키마부터 만든다 → `createdb` 만 한 테스트 DB 도 loader 한 번으로 준비
+- 적재 기록: `ingest_runs` (source_code=`loader`, job=`static_seed`, row_count = 정적 테이블 행 합계)
+- 시드 규칙: 여러 번 적용해도 같은 결과여야 함 — upsert(`ON CONFLICT`) 또는 참조 없는 테이블은 `TRUNCATE ... RESTART IDENTITY` 후 삽입.
+  `risk_rules` 는 id 를 고정(1~30)해서 upsert (판정 결과·문서가 번호로 참조). 검사: `tests/test_loader.py::test_seeds_are_rerunnable`
+- 테이블별 최소 행 수는 `loader/core.py` 의 `REQUIRED` (원천이 줄었거나 생성 스크립트가 잘못됐을 때 경고)
 - 서버 모드(배포): `docker compose -f docker-compose.yml up -d --build` — override(코드 마운트·DB 포트)가 빠진다
 - 네트워크·키 없이: `.env` 에 `COLLECTOR_FETCH_MODE=replay` → `server/mock/external` 저장 원문(2026-09-26 실측)으로 적재
 
@@ -147,7 +165,8 @@ curl -H "Authorization: Bearer dev:harin" "localhost:8000/api/v1/dashboard?lat=3
 ```bash
 cd server && .venv/bin/python -m pytest -q        # DB·네트워크 없이
 # 실제 PostGIS 통합 테스트 — 운영 DB 와 분리된 guardian_test DB 를 만들어서 (저장소 루트에서)
-docker compose exec db sh -c 'createdb -U "$POSTGRES_USER" guardian_test && for f in /docker-entrypoint-initdb.d/*.sql; do psql -q -U "$POSTGRES_USER" -d guardian_test -f $f; done'
+docker compose exec db sh -c 'createdb -U "$POSTGRES_USER" guardian_test'
+docker compose run --rm -e DATABASE_URL=postgresql://guardian:guardian-local-only@db:5432/guardian_test loader   # 빈 DB → 스키마+시드
 cd server && TEST_DATABASE_URL=postgresql://guardian:guardian-local-only@localhost:5433/guardian_test .venv/bin/python -m pytest -q
 cd server/tools && python3 validate.py            # 명세(spec/openapi.yaml) ↔ 목업(mock/) 검증
 ```
@@ -156,5 +175,5 @@ cd server/tools && python3 validate.py            # 명세(spec/openapi.yaml) �
 
 - A4 (재난 확장): `risk/engine.py` 에 호우(AWS 3·12시간 누적, 1·2번)·강풍·태풍·산사태·미세먼지·자외선 판정 추가, 시나리오 추가
 - A5 (경고): `/user`, `/device-token`, `/alerts` 를 users·user_devices·user_alerts 로 → `routers/user.py`, `routers/alerts.py`
-- A7 (정적 데이터): 대피소·응급의료 시드는 적재됨(db/init/05·06) → `app/layers.py` 의 shelters·medical 레이어 실데이터 전환, loader 서비스, route 서비스용 위험지역(PostGIS) 제공
+- A7 이후: 위험지역 고정 영역은 산사태 취약지역만 사용 (침수·해안 영역 레이어는 제거, 침수는 실시간 판정 영역 risk_areas). 새 정적 데이터는 `db/init/07_*.sql` 로 추가 → loader 가 자동 포함. route 서비스가 임시 GeoJSON 대신 hazard_zones·manholes 를 읽도록 B 와 합의
 - B: `/api/chat` 은 ai 서비스, `/api/route` 는 route 서비스가 실제 구현 — 여기 `/api/v1/chat`·`/api/v1/route` 목업은 앱 개발용 (Caddy 경로 정리 시 합의)

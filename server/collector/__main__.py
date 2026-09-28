@@ -35,7 +35,7 @@ def main(argv: list[str] | None = None) -> int:
         import psycopg
         try:
             with psycopg.connect(settings.database_url, connect_timeout=3) as conn:
-                n = conn.execute("SELECT count(*) FROM ingest_runs WHERE status = 'success' "
+                n = conn.execute("SELECT count(*) FROM ingest_runs WHERE status = 'success' AND source_code <> 'loader' "
                                  "AND finished_at > now() - interval '30 minutes'").fetchone()[0]
         except Exception as e:  # noqa: BLE001
             print("unhealthy:", type(e).__name__)
