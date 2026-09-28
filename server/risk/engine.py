@@ -26,7 +26,7 @@ ENGINE = "flood_v1"
 HAZARDS = ["flood", "heavy_rain"]
 KINDS = ["manhole", "road_flood", "river_level", "rain_gauge"]
 PRIMARY_METRIC = {"manhole": "manhole_level", "road_flood": "flood_depth", "river_level": "river_level", "rain_gauge": "rain_1h"}
-MAX_AGE_MIN = 40          # 10분 주기 수집 → 3회 연속 실패하면 판정에서 빠짐 (/health 도 degraded)
+MAX_AGE_MIN = 40          # 10분 주기 수집 → 3회 연속 실패하면 판정에서 빠짐 (/health 도 degraded) — risk/freshness.VALID_MIN 과 같은 값
 SIM_MAX_AGE_MIN = 360     # 시연용 모의값은 6시간 동안 실측보다 우선
 
 

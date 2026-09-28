@@ -10,6 +10,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from . import db
+from risk.freshness import freshness
 
 KST = timezone(timedelta(hours=9))
 GURYONGPO_BBOX = (129.50, 35.93, 129.60, 36.05)      # 생략 시 구룡포 전체 (minLng,minLat,maxLng,maxLat)
@@ -19,7 +20,7 @@ PRIMARY_METRIC = {"manhole": "manhole_level", "road_flood": "flood_depth", "rive
                   "rain_gauge": "rain_1h", "air": "pm10", "uv": "uv_index", "weather": "wind_speed",
                   "wave": "wave_height", "tide": "tide_level"}
 DT_LEVEL = {1: ("normal", "정상"), 2: ("watch", "보통"), 3: ("advisory", "주의"), 4: ("warning", "경보"), 5: ("critical", "위험")}
-FRESH_MIN = {"air": 60, "uv": 90}                     # 이보다 오래된 값은 stale=true (위험 판단 미사용)
+# 오래된 자료 판정은 risk/freshness.py 한 곳에서 (표시는 최신값 + 경과 시간, 유효 시간 넘으면 stale)
 KMA_GRID_PRIMARY = "temp"                             # 초단기실황 격자는 풍속보다 기온이 대표값
 
 
@@ -62,6 +63,12 @@ def _iso(t):
     return t.astimezone(KST).isoformat(timespec="seconds") if t else None
 
 
+def _fresh(obs_at, r, now) -> dict:
+    f = freshness(obs_at, r["source_code"], r["kind"], r["external_id"], now)
+    # stale: 유효 시간을 넘은 값 (앱은 회색 처리·"오래된 자료", 판단에는 미사용). age_label 은 그대로 표시용
+    return {"stale": bool(obs_at) and f["stale"], "age_min": f["age_min"], "age_label": f["label"]}
+
+
 def stations_layer(bbox: tuple[float, float, float, float], now: datetime | None = None) -> dict:
     now = now or datetime.now(KST)
     rows = db.fetch_all(STATIONS_SQL, dict(zip("abcd", bbox)))
@@ -89,7 +96,7 @@ def stations_layer(bbox: tuple[float, float, float, float], now: datetime | None
             "level": lv[0] if lv else None,          # 우리 위험 단계는 risk engine(A3) 연결 후 채움 — 지금은 포항 DT 등급만
             "observed_at": _iso(obs_at),
             "observed_label": "수집" if r["kind"] in ("manhole", "road_flood", "river_level", "rain_gauge") else "측정",
-            "stale": bool(obs_at and r["kind"] in FRESH_MIN and now - obs_at > timedelta(minutes=FRESH_MIN[r["kind"]])),
+            **_fresh(obs_at, r, now),
             "metrics": {k: v["value"] for k, v in ms.items() if k not in ("battery",)},
             "simulated": bool(p and p.get("simulated")),
         }

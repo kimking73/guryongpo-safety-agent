@@ -67,3 +67,9 @@ def upsert_warnings(rows: list[dict], regions: list[str], now: datetime | None =
 
 def upsert_typhoon_tracks(rows: list[dict]) -> int:
     return db.execute_many(kma_typhoon.UPSERT_TRACK_SQL, rows)
+
+
+def upsert_disaster_messages(rows: list[dict]) -> int:
+    from .converters import safety_msg
+    return db.execute_many(safety_msg.UPSERT_MESSAGE_SQL,
+                           [{**r, "raw": json.dumps(r["raw"], ensure_ascii=False)} for r in rows])
