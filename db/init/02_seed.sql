@@ -56,8 +56,14 @@ INSERT INTO risk_rules (id, hazard, level, label, metric, operator, threshold, t
   (9, 'flood', 'advisory', '침수 발생', 'flood_depth', '>=', 150, NULL, NULL,
    '{"station_kind":"road_flood","unit":"mm","buffer_m":150,"note":"영향 범위 = 수위계 반경 150m"}', '정부 침수 판단 기준(15cm) / 포항 디지털 트윈 지표면 수위계'),
 -- 산사태: 호우 특보 중 + 사용자/지점이 산사태 위험지역 내부 또는 인접(100m)
+-- 100m 버퍼 근거: 국립산림과학원·한국지질자원연구원 조사에 따르면 국내 자연사면 산사태의
+-- 진행방향 평균 길이는 지질에 따라 약 36~82m이고, 전체 산사태의 약 78%가 진행방향 100m 미만에서
+-- 멈춘다 (한국지질자원연구원, https://data.kigam.re.kr/ieg/cmmn/downloadFile.do?fileName=Y3061006.PDF).
+-- 지정 취약지역 자체가 점+면적을 원으로 근사한 폴리곤이라 경계 오차가 있어, 이 조사치를 안전 마진으로
+-- 채택해 주의보 단계에서는 경계+100m까지, 경보 단계에서는 지정 영역 내부로 좁혀 판단한다.
   (10, 'landslide', 'advisory', '산사태 주의', NULL, 'composite', NULL, NULL, NULL,
-   '{"all":[{"risk":"heavy_rain","min_level":"advisory"},{"within":"hazard_zones.landslide","buffer_m":100}]}', '공공데이터포털 산사태 위험지역 + 기상특보'),
+   '{"all":[{"risk":"heavy_rain","min_level":"advisory"},{"within":"hazard_zones.landslide","buffer_m":100}]}',
+   '공공데이터포털 산사태 위험지역 + 기상특보 / 버퍼 100m 근거: 한국지질자원연구원 산사태 진행거리 조사(진행방향 100m 미만 약 78%)'),
   (11, 'landslide', 'warning',  '산사태 경고', NULL, 'composite', NULL, NULL, NULL,
    '{"all":[{"risk":"heavy_rain","min_level":"warning"},{"within":"hazard_zones.landslide","buffer_m":0}]}', '공공데이터포털 산사태 위험지역 + 기상특보'),
 -- 미세먼지 · 초미세먼지 (포항 DT 대기환경 측정기 24대, 원천 측정 시각 60분 이내 값만 사용)
