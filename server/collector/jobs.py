@@ -214,6 +214,11 @@ def run_flood_risk(run_id: int) -> int:
     return engine.run(run_id)
 
 
+def run_hazards_risk(run_id: int) -> int:
+    from risk import hazards
+    return hazards.run(run_id)
+
+
 # ------------------------------------------------------------------ 목록
 EVERY_10 = {"minute": "*/10"}
 JOBS: list[Job] = [
@@ -232,6 +237,8 @@ JOBS: list[Job] = [
     Job("kma", "typhoon", run_typhoon, {"hour": "*/3", "minute": "10"}, stale_after_min=7 * 60),
     # 판정은 수위 수집(매 10분 정각) 1분 뒤 — 수집 직후 값으로 판정
     Job("risk", "flood", run_flood_risk, {"minute": "1-59/10"}),
+    # A4: 호우·강풍(AWS 10분 수집)·산사태(호우 단계 + 취약지역) — AWS 수집(매 10분 정각) 2분 뒤
+    Job("risk", "hazards", run_hazards_risk, {"minute": "2-59/10"}),
 ]
 BY_KEY = {j.key: j for j in JOBS}
 
