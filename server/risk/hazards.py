@@ -290,7 +290,12 @@ def run(run_id: Optional[int] = None) -> int:
     # 태풍: 특보·경로 테이블은 항상 조회 가능(관측소 연결 유무와 무관) → 매 회차 seen 에 포함
     active_warnings = db.fetch_all(ACTIVE_TYPHOON_WARNINGS_SQL)
     track_rows = db.fetch_all(TYPHOON_TRACKS_SQL)
-    impacts = kma_typhoon.impact(track_rows) if track_rows else {}
+    # kma_typhoon.impact()는 태풍별로 "현재"(is_forecast=False) 관측 1건이 있다고 가정한다.
+    # 아직 예보(forecast)만 들어오고 현재 관측이 없는 태풍은 대상에서 제외한다 — 특보(active_warnings)
+    # 경로로는 여전히 잡히므로 판단 자체가 누락되지는 않는다.
+    codes_with_now = {r["typhoon_code"] for r in track_rows if not r["is_forecast"]}
+    usable_track_rows = [r for r in track_rows if r["typhoon_code"] in codes_with_now]
+    impacts = kma_typhoon.impact(usable_track_rows) if usable_track_rows else {}
     typhoon_res = evaluate_typhoon(active_warnings, impacts, rules)
     if typhoon_res:
         results.append(typhoon_res)
