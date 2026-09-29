@@ -26,6 +26,10 @@ LANDSLIDE_RULES = [
      "condition": {"all": [{"risk": "heavy_rain", "min_level": "warning"}, {"within": "hazard_zones.landslide", "buffer_m": 0}]}},
 ]
 ZONE = {"id": 1, "name": "포항시 남구 연일읍 자명리 산42임", "meta": {"emd": "연일읍"}, "lng": 129.31, "lat": 36.01}
+TYPHOON_RULES = [
+    {"id": 7, "hazard": "typhoon", "level": "advisory", "label": "태풍주의보/영향권"},
+    {"id": 8, "hazard": "typhoon", "level": "warning", "label": "태풍경보"},
+]
 
 
 # ------------------------------------------------------------------ 호우 (rules 1·2)
@@ -113,3 +117,39 @@ def test_landslide_reason_avoids_certainty_language():
     r = evaluate_landslide("advisory", [ZONE], LANDSLIDE_RULES)[0]
     assert "발생 가능성" in r.reason
     assert "산사태가 발생" not in r.reason and "산사태 발생했" not in r.reason
+
+
+# ------------------------------------------------------------------ 태풍 (rules 7·8) — 특보 발효 or 반경 진입
+def test_typhoon_nothing_active_gives_none():
+    from risk.hazards import evaluate_typhoon
+    assert evaluate_typhoon([], {}, TYPHOON_RULES) is None
+
+
+def test_typhoon_preliminary_warning_counts_as_advisory():
+    from risk.hazards import evaluate_typhoon
+    warnings = [{"level": "watch", "region_name": "포항시", "headline": "포항시 태풍예비특보", "issued_at": None}]
+    r = evaluate_typhoon(warnings, {}, TYPHOON_RULES)
+    assert (r.level, r.rule_id) == ("advisory", 7)
+    assert "예비특보" in r.reason
+
+
+def test_typhoon_warning_level():
+    from risk.hazards import evaluate_typhoon
+    warnings = [{"level": "warning", "region_name": "포항시", "headline": "포항시 태풍경보", "issued_at": None}]
+    r = evaluate_typhoon(warnings, {}, TYPHOON_RULES)
+    assert (r.level, r.rule_id) == ("warning", 8)
+
+
+def test_typhoon_inside_gale_radius_without_warning_still_advisory():
+    """특보가 아직 안 나도, 강풍반경(15m/s) 안에 들어오면 주의 단계로 판단"""
+    from risk.hazards import evaluate_typhoon
+    impacts = {"2611": {"in_15ms_now": True, "in_25ms_now": False, "now_distance_km": 80}}
+    r = evaluate_typhoon([], impacts, TYPHOON_RULES)
+    assert r.level == "advisory" and "80km" in r.reason
+
+
+def test_typhoon_inside_storm_radius_is_warning():
+    from risk.hazards import evaluate_typhoon
+    impacts = {"2611": {"in_15ms_now": True, "in_25ms_now": True, "now_distance_km": 30}}
+    r = evaluate_typhoon([], impacts, TYPHOON_RULES)
+    assert (r.level, r.rule_id) == ("warning", 8)

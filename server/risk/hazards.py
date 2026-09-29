@@ -26,6 +26,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from app import db
+from collector.converters import kma_typhoon
 from risk import freshness
 from risk.engine import Result, sync
 from risk.levels import GURYONGPO_CENTER, GURYONGPO_RADIUS_M, LEVEL_NUM
@@ -33,9 +34,9 @@ from risk.levels import GURYONGPO_CENTER, GURYONGPO_RADIUS_M, LEVEL_NUM
 log = logging.getLogger("risk.hazards")
 KST = timezone(timedelta(hours=9))
 ENGINE = "hazards_v1"
-HAZARDS = ["heavy_rain", "strong_wind", "landslide"]
+HAZARDS = ["heavy_rain", "strong_wind", "landslide", "typhoon"]
 AWS_SOURCE, AWS_EXTERNAL_ID = "kma", "816"
-STA_HEAVY_RAIN, STA_STRONG_WIND = -1, -2   # basis.station_id sentinel (실제 관측소 id 와 겹치지 않게 음수)
+STA_HEAVY_RAIN, STA_STRONG_WIND, STA_TYPHOON = -1, -2, -3   # basis.station_id sentinel (실제 관측소 id 와 겹치지 않게 음수)
 
 
 def _zone_sentinel(zone_id: int) -> int:
@@ -130,6 +131,40 @@ def evaluate_strong_wind(wind_speed: Optional[float], wind_gust: Optional[float]
     return None
 
 
+# ------------------------------------------------------------------ 태풍 (rules 7·8)
+# any: 기상청 태풍 특보(주의보/경보, 우리 지역) 발효 중 이거나, 태풍 강풍(15m/s)·폭풍(25m/s) 반경 안에 구룡포가 들어옴
+def evaluate_typhoon(active_warnings: list[dict], impacts: dict[str, dict], rules: list[dict]) -> Optional[Result]:
+    """active_warnings: weather_warnings 에서 hazard='typhoon', released_at IS NULL 인 행들 (region_name·level·headline)
+    impacts: kma_typhoon.impact() 결과 {typhoon_code: {...}} — in_15ms_now/in_25ms_now 로 반경 진입 여부 판단
+    자료가 아예 없으면(특보도 없고 진행 중 태풍도 없음) None — 이건 '판단 불가'가 아니라 '해당 없음'과 같으므로
+    호출 측이 항상 seen 에 포함시켜 즉시 정상 처리한다"""
+    warn_level = {w["level"] for w in active_warnings}
+    for r in _rules_by_hazard(rules, "typhoon"):
+        need_warn = "warning" if r["level"] == "warning" else {"advisory", "watch"}
+        need_warn = {need_warn} if isinstance(need_warn, str) else need_warn
+        warn_hit = bool(warn_level & need_warn)
+        radius_key = "in_25ms_now" if r["level"] == "warning" else "in_15ms_now"
+        radius_hits = [(code, im) for code, im in impacts.items() if im.get(radius_key)]
+        if not (warn_hit or radius_hits):
+            continue
+        parts = []
+        if warn_hit:
+            w = next(w for w in active_warnings if w["level"] in need_warn)
+            parts.append(f"기상청 {w['headline'] or w['region_name'] + ' 태풍특보'} 발효 중")
+        for code, im in radius_hits:
+            radius_ko = "폭풍반경(25m/s)" if r["level"] == "warning" else "강풍반경(15m/s)"
+            parts.append(f"제{code}호 태풍 {radius_ko} 안 · 구룡포 중심 거리 {im['now_distance_km']}km")
+        return Result(
+            key="typhoon:guryongpo", hazard="typhoon", level=r["level"], rule_id=r["id"], label=r["label"],
+            reason=" · ".join(parts), lng=GURYONGPO_CENTER[0], lat=GURYONGPO_CENTER[1],
+            buffer_m=GURYONGPO_RADIUS_M, observed_at=None,
+            basis={"engine": ENGINE, "key": "typhoon:guryongpo", "station_id": STA_TYPHOON,
+                   "warning_hit": warn_hit, "radius_hit_codes": [c for c, _ in radius_hits],
+                   "impacts": impacts},
+        )
+    return None
+
+
 # ------------------------------------------------------------------ 산사태 (rules 10·11)
 def evaluate_landslide(heavy_rain_level: Optional[str], zones: list[dict], rules: list[dict]) -> list[Result]:
     """heavy_rain_level=None 이면 호우 판정 자체가 불가한 상태 → 산사태도 판단 불가로 보고 빈 목록 반환"""
@@ -190,6 +225,18 @@ RULES_SQL = ("SELECT id, hazard::text AS hazard, level::text AS level, label, co
              "WHERE is_active AND hazard::text = ANY(%(hazards)s) ORDER BY id")
 STALE_HEAVY_RAIN_MIN = 40
 
+ACTIVE_TYPHOON_WARNINGS_SQL = """
+SELECT level::text AS level, region_name, headline, issued_at
+FROM weather_warnings WHERE hazard = 'typhoon' AND released_at IS NULL
+"""
+TYPHOON_TRACKS_SQL = """
+SELECT typhoon_code, name_ko, observed_at, issued_at, is_forecast,
+       ST_Y(geom) AS lat, ST_X(geom) AS lng, radius_15ms_km, radius_25ms_km, location_text
+FROM typhoon_tracks
+WHERE observed_at >= now() - interval '2 days'
+ORDER BY typhoon_code, observed_at
+"""
+
 
 def run(run_id: Optional[int] = None) -> int:
     """수집기 job 진입점. 반환: 이번에 생성/갱신된 위험 영역 수"""
@@ -240,7 +287,17 @@ def run(run_id: Optional[int] = None) -> int:
     if heavy_rain_level is not None:
         seen.update(_zone_sentinel(z["id"]) for z in zones)
 
+    # 태풍: 특보·경로 테이블은 항상 조회 가능(관측소 연결 유무와 무관) → 매 회차 seen 에 포함
+    active_warnings = db.fetch_all(ACTIVE_TYPHOON_WARNINGS_SQL)
+    track_rows = db.fetch_all(TYPHOON_TRACKS_SQL)
+    impacts = kma_typhoon.impact(track_rows) if track_rows else {}
+    typhoon_res = evaluate_typhoon(active_warnings, impacts, rules)
+    if typhoon_res:
+        results.append(typhoon_res)
+    seen.add(STA_TYPHOON)
+
     stats = sync(results, seen)
-    log.info("hazards: heavy_rain=%s wind_seen=%s landslide_zones=%d active=%d %s",
-             heavy_rain_level, STA_STRONG_WIND in seen, len(landslide_results), len(results), stats)
+    log.info("hazards: heavy_rain=%s wind_seen=%s landslide_zones=%d typhoon=%s active=%d %s",
+             heavy_rain_level, STA_STRONG_WIND in seen, len(landslide_results),
+             typhoon_res.level if typhoon_res else None, len(results), stats)
     return len(results)
