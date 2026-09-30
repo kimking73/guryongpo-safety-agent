@@ -6,6 +6,7 @@
   - 포항 DT 대기·자외선: 원천 측정 시각 있음, 같은 값은 PK 로 중복 저장 안 됨 → 10분
   - 기상청 특보·AWS: 10분 (선제 경고 1차 입력)
   - 초단기실황 :45 (정시 발표 +40분) · 초단기예보 :20 (30분 발표 +45분) · 단기예보 발표 +20분
+  - 긴급재난문자 2분 (일일 한도 1,000회 → 720회/일. 발송→API 등록 약 20초, 휴대폰 CBS 가 1차이므로 대시보드·Agent 설명용)
   - 중기예보 06:30·18:30 · 태풍 3시간마다(진행 중인 태풍이 있을 때만 경로 호출) · 대기 장비 목록 하루 1회
 """
 from __future__ import annotations
@@ -18,7 +19,7 @@ from typing import Callable
 
 from app.config import settings
 from . import fetch, store
-from .converters import kma_typhoon, kma_vilage, kma_warn_aws, pohang_dt_air, pohang_dt_water
+from .converters import kma_typhoon, kma_vilage, kma_warn_aws, pohang_dt_air, pohang_dt_water, safety_msg
 
 log = logging.getLogger("collector")
 KST = timezone(timedelta(hours=9))
@@ -191,10 +192,31 @@ def run_typhoon(run_id: int) -> int:
     return store.upsert_typhoon_tracks(rows)
 
 
+# ------------------------------------------------------------------ 긴급재난문자 (행정안전부)
+SAFETY_MSG_URL = "https://www.safetydata.go.kr/V2/api/DSSP-IF-00247"
+
+
+def run_disaster_messages(run_id: int) -> int:
+    """어제 날짜부터(자정 경계 누락 방지) 포항 수신 문자 → SN 기준 upsert. 0건은 정상 (문자 없는 날)"""
+    since = (datetime.now(KST) - timedelta(days=1)).strftime("%Y%m%d")
+    text = fetch.get("safety_msg_pohang", SAFETY_MSG_URL,
+                     {"serviceKey": _need(settings.safetydata_key, "SAFETYDATA_KEY"), "returnType": "json",
+                      "pageNo": "1", "numOfRows": "1000", "crtDt": since, "rgnNm": "포항"}).text
+    rows, skipped = safety_msg.normalize(text)
+    if skipped:
+        log.info("disaster_messages skipped %d", len(skipped))
+    return store.upsert_disaster_messages(rows)
+
+
 # ------------------------------------------------------------------ 판정 (A3)
 def run_flood_risk(run_id: int) -> int:
     from risk import engine
     return engine.run(run_id)
+
+
+def run_hazards_risk(run_id: int) -> int:
+    from risk import hazards
+    return hazards.run(run_id)
 
 
 # ------------------------------------------------------------------ 목록
@@ -210,9 +232,13 @@ JOBS: list[Job] = [
     Job("kma", "ultra_fcst", run_ultra_fcst, {"minute": "20"}, stale_after_min=130),
     Job("kma", "vilage_fcst", run_vilage_fcst, {"hour": "2,5,8,11,14,17,20,23", "minute": "20"}, stale_after_min=7 * 60),
     Job("kma", "mid_fcst", run_mid_fcst, {"hour": "6,18", "minute": "30"}, stale_after_min=26 * 60),
+    # 재난문자: 일일 호출 한도 1,000회 → 2분 = 720회/일 (재시작·수동 테스트·개발 PC 여유 280회). 86초 미만은 한도 초과
+    Job("safety24", "disaster_messages", run_disaster_messages, {"minute": "*/2"}, stale_after_min=10),
     Job("kma", "typhoon", run_typhoon, {"hour": "*/3", "minute": "10"}, stale_after_min=7 * 60),
     # 판정은 수위 수집(매 10분 정각) 1분 뒤 — 수집 직후 값으로 판정
     Job("risk", "flood", run_flood_risk, {"minute": "1-59/10"}),
+    # A4: 호우·강풍(AWS 10분 수집)·산사태(호우 단계 + 취약지역) — AWS 수집(매 10분 정각) 2분 뒤
+    Job("risk", "hazards", run_hazards_risk, {"minute": "2-59/10"}),
 ]
 BY_KEY = {j.key: j for j in JOBS}
 

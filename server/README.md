@@ -89,7 +89,7 @@ DATABASE_URL=postgresql://guardian:guardian-local-only@localhost:5433/guardian .
 | `COLLECTOR_FETCH_MODE` | `live` | `replay` = 저장 원문으로 적재 |
 | `COLLECTOR_IN_API` | `false` | api 컨테이너 안에서도 스케줄러 (collector 없이 쓸 때만) |
 
-`server/tools/` 스크립트는 `server/dt_config.txt`(gitignore)의 `DT_KEY`·`KMA_KEY`·`KAKAO_REST_KEY` 등을 읽는다. 서버도 이 파일이 있으면 읽는다(환경 변수가 우선).
+`server/tools/` 스크립트는 `server/dt_config.txt`(gitignore)의 `DT_KEY`·`KMA_KEY`·`SAFETYDATA_KEY`·`KAKAO_REST_KEY` 등을 읽는다. 서버도 이 파일이 있으면 읽는다(환경 변수가 우선).
 
 ## 2. 수집 작업 (`python -m collector --list`)
 
@@ -177,3 +177,12 @@ cd server/tools && python3 validate.py            # 명세(spec/openapi.yaml) �
 - A5 (경고): `/user`, `/device-token`, `/alerts` 를 users·user_devices·user_alerts 로 → `routers/user.py`, `routers/alerts.py`
 - A7 이후: 위험지역 고정 영역은 산사태 취약지역만 사용 (침수·해안 영역 레이어는 제거, 침수는 실시간 판정 영역 risk_areas). 새 정적 데이터는 `db/init/07_*.sql` 로 추가 → loader 가 자동 포함. route 서비스가 임시 GeoJSON 대신 hazard_zones·manholes 를 읽도록 B 와 합의
 - B: `/api/chat` 은 ai 서비스, `/api/route` 는 route 서비스가 실제 구현 — 여기 `/api/v1/chat`·`/api/v1/route` 목업은 앱 개발용 (Caddy 경로 정리 시 합의)
+
+## 자료 신선도 규칙 (`risk/freshness.py`)
+- **표시**: 수집이 실패해도 가장 최근 성공값을 보여 줌. 지도 레이어 `stations` 에 `age_min`, `age_label`("14:10 기준 · 50분 전 자료"), `stale` 포함 → 앱·Agent 는 stale 이면 "오래된 자료"로 안내
+- **판단**: 유효 시간 안의 값만 (수위계 40분 · 대기 60분 · 자외선 90분 · AWS 30분 · 초단기실황 격자 90분). 없으면 `FALLBACK` 순서로 대체 출처(AWS 816 → 격자 105,94 → 106,94), 그것도 없으면 **판단 불가(unknown)** — '정상'으로 내리지 않음
+- 호우·강풍 판정(A4)은 `judge_source(metric, latest)` 로 출처를 고른 뒤 `risk_rules` 기준 적용. 순간풍속(wind_gust)은 AWS 에만 있어 없으면 평균풍속 기준만
+
+## 긴급재난문자 (`safety24.disaster_messages`)
+- 재난안전데이터공유플랫폼 `DSSP-IF-00247`, 키 `SAFETY24_API_KEY`(또는 dt_config `SAFETYDATA_KEY`). **등록된 IP 에서만 호출 가능** → 배포 VM 고정 IP 를 플랫폼에 추가 등록
+- 2분 주기 (일일 한도 1,000회 → 720회/일). 어제 날짜부터 `rgnNm=포항` 조회, `SN` 기준 upsert

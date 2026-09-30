@@ -76,6 +76,7 @@ class Settings:
     dt_base_url: str = "https://genix.pohang-eum.kr/dpg"
     dt_key: Optional[str] = None
     kma_key: Optional[str] = None
+    safetydata_key: Optional[str] = None       # 재난안전데이터공유플랫폼 (긴급재난문자) — 등록 IP 에서만 동작
     # 다른 서비스 상태 확인 (설정된 것만 /health 에 표시)
     route_health_url: Optional[str] = None
     ai_health_url: Optional[str] = None
@@ -99,6 +100,7 @@ def load_settings() -> Settings:
         dt_base_url=_get(e, "POHANG_TWIN_BASE_URL", "DT_BASE_URL", default=Settings.dt_base_url).rstrip("/"),
         dt_key=_get(e, "POHANG_TWIN_API_KEY", "DT_KEY"),
         kma_key=_get(e, "KMA_API_KEY", "KMA_KEY"),
+        safetydata_key=_get(e, "SAFETY24_API_KEY", "SAFETYDATA_KEY"),
         route_health_url=_get(e, "ROUTE_HEALTH_URL"),
         ai_health_url=_get(e, "AI_HEALTH_URL"),
         cors_origins=[x.strip() for x in _get(e, "API_CORS_ORIGINS", "CORS_ORIGINS", default="*").split(",") if x.strip()],

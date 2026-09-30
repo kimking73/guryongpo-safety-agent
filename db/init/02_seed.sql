@@ -56,8 +56,16 @@ INSERT INTO risk_rules (id, hazard, level, label, metric, operator, threshold, t
   (9, 'flood', 'advisory', '침수 발생', 'flood_depth', '>=', 150, NULL, NULL,
    '{"station_kind":"road_flood","unit":"mm","buffer_m":150,"note":"영향 범위 = 수위계 반경 150m"}', '정부 침수 판단 기준(15cm) / 포항 디지털 트윈 지표면 수위계'),
 -- 산사태: 호우 특보 중 + 사용자/지점이 산사태 위험지역 내부 또는 인접(100m)
+-- 100m 버퍼 근거: 김경수 외(2006), "자연사면에서 발생된 토석류산사태의 기하양상", KIGAM
+-- (https://data.kigam.re.kr/ieg/cmmn/downloadFile.do?fileName=Y3061006.PDF). 1998년 집중호우 산사태
+-- 1,582건을 지질별 3개 지역(편마암류=장흥·화강암류=상주·제3기퇴적암류=포항)으로 분석했는데, 그 중
+-- 구룡포와 같은 지질조건인 "제3기퇴적암류(포항)" 지역 산사태의 진행방향 길이는 평균 36m, 91%가
+-- 60m 이내에서 멈췄다(화강암류=상주 지역은 평균 82m, 78%가 100m 미만). 지정 취약지역 자체가
+-- 점+면적을 원으로 근사한 폴리곤이라 경계 오차가 있어, 실측된 진행거리보다 넉넉한 100m를 주의보
+-- 단계의 안전 마진으로 채택하고, 경보 단계에서는 지정 영역 내부로 좁혀 판단한다.
   (10, 'landslide', 'advisory', '산사태 주의', NULL, 'composite', NULL, NULL, NULL,
-   '{"all":[{"risk":"heavy_rain","min_level":"advisory"},{"within":"hazard_zones.landslide","buffer_m":100}]}', '공공데이터포털 산사태 위험지역 + 기상특보'),
+   '{"all":[{"risk":"heavy_rain","min_level":"advisory"},{"within":"hazard_zones.landslide","buffer_m":100}]}',
+   '공공데이터포털 산사태 위험지역 + 기상특보 / 버퍼 100m 근거: KIGAM 김경수 외(2006) 포항(제3기퇴적암류) 산사태 진행거리 평균 36m·91%가 60m 이내'),
   (11, 'landslide', 'warning',  '산사태 경고', NULL, 'composite', NULL, NULL, NULL,
    '{"all":[{"risk":"heavy_rain","min_level":"warning"},{"within":"hazard_zones.landslide","buffer_m":0}]}', '공공데이터포털 산사태 위험지역 + 기상특보'),
 -- 미세먼지 · 초미세먼지 (포항 DT 대기환경 측정기 24대, 원천 측정 시각 60분 이내 값만 사용)

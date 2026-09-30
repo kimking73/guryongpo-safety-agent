@@ -28,7 +28,8 @@ def test_kma_times():
 
 @pytest.mark.parametrize("key", ["pohang_dt.water_level", "pohang_dt.air_realtime", "pohang_dt.uv",
                                  "pohang_dt.air_devices", "kma.warnings", "kma.aws", "kma.ncst", "kma.ultra_fcst",
-                                 "kma.vilage_fcst", "kma.mid_fcst", "kma.typhoon"])
+                                 "kma.vilage_fcst", "kma.mid_fcst", "kma.typhoon",
+                                 "safety24.disaster_messages"])
 def test_jobs_replay(fake_db, replay, key):
     from collector import jobs
     fake_db.rows["INSERT INTO ingest_runs"] = [{"id": 1}]
@@ -82,3 +83,39 @@ def test_empty_warning_response_is_failure(fake_db, replay, monkeypatch, tmp_pat
         object.__setattr__(settings, "replay_dir", original)
     assert res["status"] == "failed"
     assert not any("released_at = %(now)s" in sql for sql, _ in fake_db.executed)
+
+
+def test_safety_msg_normalize():
+    from pathlib import Path
+    from collector.converters import safety_msg
+    text = (Path(__file__).resolve().parent.parent / "mock/external/safety_msg_pohang.json").read_text(encoding="utf-8")
+    rows, skipped = safety_msg.normalize(text)
+    assert len(rows) == 5 and not skipped
+    r = next(x for x in rows if x["category"] == "풍랑")
+    assert r["hazard"] == "high_seas" and r["alert_class"] == "안전안내" and r["sender"] == "동해지방해양경찰청"
+    assert r["sent_at"].endswith("+09:00") and "포항시 남구" in r["region_name"]
+
+
+def test_safety_msg_errors():
+    from collector.converters import safety_msg
+    with pytest.raises(safety_msg.SafetyMsgError, match="32"):   # 미등록 IP → 실패로 기록돼야 함 (0건 성공 아님)
+        safety_msg.normalize('{"header":{"resultCode":"32","resultMsg":"UNREGISTERED IP ERROR"},"body":null}')
+    rows, skipped = safety_msg.normalize('{"header":{"resultCode":"00"},"body":[{"SN":1,"CRT_DT":"2026/09/27 10:00:00",'
+                                         '"MSG_CN":"x","RCPTN_RGN_NM":"경기도 김포시 "}]}')
+    assert rows == [] and len(skipped) == 1                       # 포항 외 지역 제외
+
+
+def test_freshness_rules():
+    from risk.freshness import freshness, judge_source
+    now = datetime(2026, 9, 28, 15, 0, tzinfo=KST)
+    f = freshness("2026-09-28T14:20:00+09:00", "kma", "weather", "aws_816", now)
+    assert f["age_min"] == 40 and f["stale"] and "14:20 기준 · 40분 전 자료 (오래된 자료)" == f["label"]
+    assert not freshness("2026-09-28T14:20:00+09:00", "kma", "weather", "grid_105_94", now)["stale"]   # 격자는 90분
+    assert freshness(None, "kma", "weather", "aws_816", now)["label"] == "자료 없음"
+    rows = [{"source_code": "kma", "external_id": "aws_816", "kind": "weather", "metric": "wind_speed", "value": 3,
+             "observed_at": "2026-09-28T14:10:00+09:00"},                       # AWS 50분 전 → 무효
+            {"source_code": "kma", "external_id": "grid_105_94", "kind": "weather", "metric": "wind_speed", "value": 4,
+             "observed_at": "2026-09-28T14:00:00+09:00"}]                       # 격자 60분 전 → 유효
+    j = judge_source("wind_speed", rows, now)
+    assert j["external_id"] == "grid_105_94" and j["fallback_rank"] == 1         # AWS 실패 → 격자로 대체
+    assert judge_source("wind_gust", rows, now) is None                          # 순간풍속은 대체 출처 없음 → 판단 불가
