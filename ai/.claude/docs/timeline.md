@@ -23,7 +23,7 @@
 | B6 | 8–10 | GraphHopper 구축 (OSM 도로망, 위험지역·맨홀 회피, /route) | A1, A3 | 위험 구역 우회 경로 반환 | **완료** (2026-09-26, 임시 위험지역 데이터) |
 | B5 | 11–13 | 의도 검증·다듬기·음성 (STT/TTS, /voice, 지연 측정 → 필요 시 gemini-3.1-live-preview) | B4 | 음성 왕복 동작, 지연 기록 | 미착수 |
 | B7 | 11–13 | 경로 가중치·DEM·재계산 (프로필별 가중치, /route/check) | B6, B4 | 프로필별 다른 경로 | **진행 중** (규칙·/route/check·AI 연결 완료, 국토지리정보원 공개DEM 90m 적용, 5m는 이월) |
-| B10 | 11–12 | GCP VM·도메인·HTTPS (Caddy, / → 웹, /api → FastAPI) | B8, B6 | 외부에서 /api/health 접속 | 미착수 |
+| B10 | 11–12 | GCP VM·도메인·HTTPS (Caddy, / → 웹, /api → FastAPI) | B8, B6 | 외부에서 /api/health 접속 | **진행 중** (VM·도커·전 서비스 실행 완료, 고정 IP·Caddy·도메인 남음) |
 | B9 | 15–16 | 배포 안정화 (재시작 정책, 헬스체크, API 한도, Gemini 속도 제한, Uptime check) | A9 | 강제 종료 후 자동 복구 | 미착수 |
 
 A 작업 중 B와 맞물리는 것: **A7**(Day 3–6, 정적 데이터 적재)에 행동요령 원문 수집 포함 → `action_guides` 테이블, B4의 `get_action_guides`가 사용.
@@ -42,7 +42,21 @@ A 작업 중 B와 맞물리는 것: **A7**(Day 3–6, 정적 데이터 적재)�
 - 이후 후보: B3(A1·A3 확인, Gemini 유료 전환 결정) 또는 B4(재난 agent 확장 — 위치·경로 agent가 `request_route`·`route_profile` 사용).
 - 위험 구역은 지금 항상 피한다(Risk engine 활성 판정과 연결은 A3·A4 이후). A7 적재 후 `hazards.py`에 PostGIS 읽기 추가.
 
+- **배포 VM (2026-10-01)**: `guryongpo-safety-agent` · e2-medium · asia-northeast3-b · Ubuntu 22.04 · 50GB · 스왑 2GB.
+  계정 minecraftjykim@gmail.com, 프로젝트 "My First Project"(`project-265888b6-2837-43d6-9d8`) — 팀 프로젝트 아님(사용자 결정: 유지).
+  접속 `ssh jongyeonkim@<외부IP>`(임시 IP 34.64.177.195), 코드 `~/guryongpo-safety-agent`, 실행 `docker compose -f docker-compose.yml up -d --build`.
+  B10 남은 것: 고정 IP 예약 → Caddy·도메인(없으면 nip.io)·HTTPS, 이 프로젝트 예산 알림, 배포 스크립트(pull + 재빌드).
+
 ## 이월 항목 (끝나면 지운다)
+- [ ] **`SAFETY24_API_KEY`(재난안전데이터·긴급재난문자) 받아서 `.env`에 넣기** — 사용자가 추후 저장(2026-10-01).
+      넣은 뒤 VM에 `.env` 복사(해시 비교) → VM에서 `docker compose -f docker-compose.yml up -d --force-recreate api collector`
+      → `/api/health`의 `ingest.safety24`가 ok인지 확인. 기상청·포항 디지털트윈 키는 반영 완료
+- [ ] **남은 API 활용신청** — 사용자가 추후 진행(2026-10-01). 지금 성공: 기상청 특보(wrn_now_data)·AWS 매분(nph-aws2_min)·
+      초단기실황(getUltraSrtNcst)·태풍 목록(typ_lst), 포항 DT 수위·자외선. 실패(403/401):
+      기상청 API허브 — 단기예보 조회서비스의 초단기예보(getUltraSrtFcst)·단기예보(getVilageFcst),
+      중기예보 조회서비스의 중기육상(getMidLandFcst)·중기기온(getMidTa), 태풍 현재 위치(typ_now) /
+      포항 디지털트윈 — 대기질(atmosphere/devices, 40104 권한 없음).
+      키는 그대로라 `.env` 변경 불필요. 신청 후 VM에서 `docker compose -f docker-compose.yml exec -T collector python -m collector --once`로 확인
 - [ ] **휠체어 경로 유형 다시 검토** — 2026-09-26 사용자 결정으로 제외(지금은 휠체어 이용자 → 노약자 경로).
       되살릴 때 참고: 이전 규칙은 계단 ×0(통행 불가), 산길(path·track) ×0.1, 경사 ≥5% ×0.3·≥8% ×0.05(경사로 기준 1/12≈8%),
       속도 ×0.7 (커밋 7407ed3의 route/guardian_route/profiles.py). 검증에서 나온 쟁점: ① 계단 금지 때문에 짧은 계단 대신 급경사로
@@ -89,3 +103,4 @@ A 작업 중 B와 맞물리는 것: **A7**(Day 3–6, 정적 데이터 적재)�
 - 2026-09-26 유형 규칙 변경(사용자 결정): 휠체어 유형 삭제(휠체어 이용자는 route_profile에서 elderly), 성인은 경사 반영 안 함(그대로), 노약자는 같은 경사면 계단 선호 — 계단(×0.3)에는 경사 벌점을 빼고(if/else_if), 급경사 도로(≥10% ×0.2, ≥6% ×0.5)보다 계단이 싸게. 33개 경로 재검증: 노약자 계단 이용 성인과 같음(구룡포공원 계단 포함), 계단 아닌 ≥10% 도로 합계 10.3km → 6.3km, 노약자가 성인보다 급경사가 많은 경로 0건. 위험 구역 벌점이 모든 유형 벌점보다 10배 이상 센지 검사하는 테스트 추가. route 34 + live 6, ai 30.
 - 2026-09-26 휠체어 경로 유형을 이월 항목(나중에 고려)으로 기록 — 이전 규칙과 검증 쟁점 포함.
 - 2026-09-27 노약자 계단 배수 0.3 → 0.5: 기본 도보 모델이 계단을 3km/h(도로 5km/h)로 계산해 0.3이면 같은 경사·같은 길이에서 계단이 주택가 급경사 도로보다 1m당 약 11% 비쌌다(선호 미보장). 1m 비용 부등식 테스트 추가. 참고: GraphHopper average_slope는 5비트라 31%가 최대(그 이상도 31로 저장), 8m 미만 구간은 경사 0.
+- 2026-10-01 B10(진행): e2-medium VM에 스왑 2GB·Docker 29.8/Compose v5.5 설치, 저장소 clone, `.env`·firebase 키·OSM·DEM(dem-hgt) 복사(해시 확인, 600 권한), 서버 모드로 6개 서비스 healthy. 실측 메모리 합계 약 0.6GB(graphhopper 364MB) → e2-medium 충분. 8000–8002는 GCP 방화벽으로 외부 차단 확인. 기상청·포항 DT 키 반영 — 일부 API 활용신청 미완, 생활안전24 키 없음(이월 항목).
