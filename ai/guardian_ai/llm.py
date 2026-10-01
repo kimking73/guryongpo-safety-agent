@@ -184,7 +184,8 @@ class OpenAIWriter:
         self.tracker = tracker or get_tracker()
 
     def __call__(self, question: str, evidence: str, data, feedback: str = "") -> str:
-        where = (data.location.label or "현재 위치") if data.location_known else "구룡포읍 중심(위치 정보 없음)"
+        from .flood import location_text
+        where = location_text(data)   # 근거 목록의 '기준 위치'와 같은 이름 (검증기와 같은 정보를 보게)
         body = [f"질문: {question or '(경고 알림 — 질문 없음)'}", f"기준 위치: {where}",
                 f"침수·호우 위험 단계(판정 엔진): {data.level.value}", "근거 목록:", evidence or "(없음)"]
         if data.unavailable:

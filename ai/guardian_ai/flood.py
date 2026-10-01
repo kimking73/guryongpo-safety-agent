@@ -51,14 +51,22 @@ class FloodData:
 
 
 def pick_location(state: GuardianState) -> tuple[Location, bool]:
-    """현재 위치 → 집 → 구룡포읍 중심 순. 두 번째 값은 사용자 위치를 알았는지."""
+    """현재 위치 → 집 → 구룡포읍 중심 순. 두 번째 값은 사용자 위치를 알았는지.
+
+    label은 항상 채운다 ("현재 위치"/"집"/사용자가 붙인 이름) — 근거 목록의 '기준 위치'와 답변 작성기에 같은 이름을 쓰기 위해.
+    """
     loc = state.get("current_location")
     if loc:
-        return loc, True
+        return loc.model_copy(update={"label": loc.label or "현재 위치"}), True
     user = state.get("user")
     if user is not None and user.home:
-        return user.home, True
+        return user.home.model_copy(update={"label": user.home.label or "집"}), True
     return GURYONGPO_CENTER, False
+
+
+def location_text(d: "FloodData") -> str:
+    """답변과 근거에 쓰는 기준 위치 이름. 위치를 모르면 그렇다고 밝힌다."""
+    return d.location.label if d.location_known else "구룡포읍 중심(위치 정보 없음)"
 
 
 def _ts(iso: str | None) -> datetime | None:
@@ -95,6 +103,10 @@ def build_evidence(d: FloodData) -> tuple[list[Evidence], list[str]]:
     """답변에 쓸 수 있는 사실을 근거 목록으로. 이 목록에 없는 숫자는 환각 검증에서 걸린다."""
     ev: list[Evidence] = []
     missing: list[str] = []
+
+    # 기준 위치 — 아래 판정·거리는 모두 이 위치 기준. 답변 작성기에도 같은 이름을 준다.
+    # (빠져 있으면 검증기가 "집"을 근거 없는 말로 보고 재시도를 일으켰다 — 2026-10-01 지연 측정에서 발견)
+    ev.append(Evidence(source="request", key="기준 위치", value=location_text(d)))
 
     # 위험 판정 (A의 판정 엔진)
     if not d.risk.get("available"):
@@ -194,8 +206,7 @@ def _fmt(v: Any) -> str:
 
 def template_summary(d: FloodData) -> str:
     """LLM 없이 근거 숫자를 그대로 넣은 문장. LLM 실패·시간 초과 때 쓴다."""
-    where = "현재 위치" if d.location_known else "구룡포읍 중심(위치 정보 없음)"
-    parts = [f"{where} 기준 침수·호우 위험 단계는 '{LEVEL_KO[d.level.value]}'입니다."]
+    parts = [f"{location_text(d)} 기준 침수·호우 위험 단계는 '{LEVEL_KO[d.level.value]}'입니다."]
     depth = next((e for e in d.evidence if e.key.endswith(("침수심", "하천 수위")) and e.source == "observations"), None)
     if depth:
         parts.append(f"가장 가까운 {depth.key}는 {_fmt(depth.value)}{depth.unit or ''}입니다.")

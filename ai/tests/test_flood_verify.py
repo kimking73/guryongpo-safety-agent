@@ -64,6 +64,7 @@ def test_flood_agent_uses_engine_level_and_records_every_number_as_evidence():
     assert keys["구룡포수협 지표면 수위계 침수심"] == 160.0
     assert keys["구룡포 AWS 1시간 강수량"] == 42.5
     assert keys["가까운 대피소"] == "구룡포초등학교"           # 주의 이상 → 대피소
+    assert keys["기준 위치"] == "집"                         # 검증기도 기준 위치를 알아야 "집" 언급이 오탐되지 않는다
     # 템플릿 답변(LLM 없음)도 근거 숫자만 쓰므로 숫자 검사를 통과한다
     assert "160mm" in r.summary and check_numbers(r.summary, r.evidence).ok
 
