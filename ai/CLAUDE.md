@@ -24,47 +24,32 @@
 - If code moved, fix file:line references here, in `architectural_patterns.md`, and in `../CLAUDE.md`.
 - Commit; if `git push` is blocked for Claude, ask the user to run `! git push`.
 
-## Current status (2026-09-26, Day 4)
-- **Done: B1, B8, B2, B6.** **In progress: B7** (profile rules, `/api/route/check`, `request_route` wired, NGII public DEM 90m applied; 5m is a carry-over).
-  B3 waits for A1·A3. B6: `../route/`
-  (`POST /api/route`, avoids mock flood/landslide zones + manholes, reports `avoided`/`still_inside`) + `../graphhopper/`.
-  Hazards are mock data until A7. `tools.request_route` is the only real tool: it calls the route service (`ROUTE_URL`,
-  compose sets http://route:8002) and returns `available: False` instead of raising; `tools.route_profile(user)` maps
-  UserProfile → adult/elderly for the location/route agent (B4). Only two route profiles (wheelchair dropped by the
-  user 2026-09-26; wheelchair users get elderly).
-  Details and carry-over items: `.claude/docs/timeline.md`.
-- AI path today: `POST /api/chat` (api.py:34) → `ChatService.chat` (service.py:60) → graph with
-  `make_manager(OpenAIClassifier())` (graph.py:144, llm.py:112). Only the manager is real; specialists,
-  advisor, checks, polish are stubs (graph.py:223-265). So `answer` is placeholder text like "rain_flood_agent stub";
-  `selected_agents` is the real output.
-- **B3 in progress (2026-10-01)**: tools read PostgreSQL directly with a read-only role (user decision, matches the
-  proposal). `db.py` = lazy psycopg pool from `AI_DB_*` (compose sets `AI_DB_HOST=db`); role made by
-  `../db/init/07_ai_readonly.sh` (SELECT-only + read-only transactions, run once by hand on existing DBs).
-  Every DB tool takes `fetch=` (fake in tests) and returns `{"available": False, "reason"}` on failure.
-  `RiskLevel` now = DB 5 levels (`.rank` for comparisons); `ActionGuide` = `action_guides` row. Only
-  `get_user_profile` is still a mock.
-- **B3 done (2026-10-01, user confirmed)**: real `rain_flood_agent` (`flood.py`: code collects
-  data + builds Evidence, `OpenAIWriter` only phrases it, template fallback) and `hallucination_check` (`verify.py`: rule
-  number check with unit conversion/rounding, then `OpenAIFactChecker` for non-numeric claims). `ChatService()` wires
-  them; `DEFAULT_NODES` keeps the specialist stub and a rule-only check so offline tests need no DB/LLM.
-  Live: wrong answers 10/10 caught, right 3/3 passed, twice. E2E with A's `heavy_rain_flood` simulation: ~4–6 s/question.
-  Demo scenario: `docker compose exec api python -c "from app import db; from app.config import settings;
-  db.init_pool(settings.database_url); from risk import simulate; print(simulate.apply('heavy_rain_flood'))"` (`'clear'` to undo).
-- **Memory (2026-10-02)**: short-term = `InMemorySaver` (thread = conversation_id; expires 60 min after the last turn
-  or on restart — `ChatService._open_conversation` drops expired threads and issues a new id for expired/unknown/other
-  users' ids), long-term = `PostgresStore` (`("users", uid, "facts"|"episodes")`) in schema `ai_memory` via role
-  `AI_MEM_DB_*` (`../db/init/08_ai_memory.sh`). Short-term moved off Postgres by user decision (≈12 checkpoints per
-  question, sensitive state persisted). `ChatService` loads memory per chat (fills empty profile fields, `user_memory` into
-  manager prompt + flood evidence) and saves after answering in a thread (`OpenAIMemoryExtractor`, only self-stated facts,
-  never disaster data); `close()` on shutdown waits for pending saves. `remember` defaults to True (user decision).
-  `/api/ai/memory/{uid}` GET/DELETE has no auth yet — keep it off the public proxy (B10).
-- LLM: OpenAI since 2026-10-01 (user decision; Gemini free tier was 20 calls/day). `OPENAI_API_KEY` /
-  `OPENAI_MODEL=gpt-6-luna` / `OPENAI_TIMEOUT_MS=10000` in `../.env`. Responses API `responses.parse` with
-  `text_format=Classification`; gpt-6-luna is a reasoning model → no `temperature`, classifier uses
-  `reasoning.effort="low"`; SDK retries off (`max_retries=0`) so a failure falls back to keywords within the timeout.
-  Plan: Luna everywhere, raise only weak steps (likely hallucination check) to `gpt-6.1-sol`.
-  Live routing on OpenAI: 13/13 (2026-10-01). Key is borrowed from another person, so no dashboard spend limit —
-  `usage.py` only estimates and warns (it never blocks calls; user decision).
+## Current status (2026-10-02, Day 10)
+- **Done: B1, B8, B2, B3, B6.** In progress: **B7** (done criterion met, awaiting user's completion call), **B10** (VM up;
+  static IP·Caddy·domain left). Next: **B4** (landslide·wind/typhoon·life-safety·location/route agents + rule-based action
+  advisor). Plan, carry-overs and work log: `.claude/docs/timeline.md`.
+- AI path: `POST /api/chat` → `ChatService.chat` (service.py) → graph. Real nodes: manager (`OpenAIClassifier`, keyword
+  fallback), `rain_flood_agent` (`flood.py`: code collects DB data + builds Evidence incl. "기준 위치" and user memory,
+  `OpenAIWriter` only phrases, template fallback), `hallucination_check` (`verify.py`: rule number check → `OpenAIFactChecker`).
+  Still stubs: other 4 specialists (answers end with "/ location_route_agent stub"), action_advisor, intent_check, polish.
+  `ChatService()` wires the real nodes; `DEFAULT_NODES`/`ChatService(classifier=…)` stay offline for tests.
+- Data: tools read PostgreSQL directly with read-only role `AI_DB_*` (`../db/init/07_ai_readonly.sh`); every tool takes
+  `fetch=` and returns `{"available": False, "reason"}` on failure; observations prefer A's simulated values for 6 h like
+  the risk engine. `RiskLevel` = DB 5 levels (`.rank`), `ActionGuide` = `action_guides` row. `get_user_profile` is a mock.
+- Memory: short-term `InMemorySaver` (60 min after last turn or restart; expired/unknown/other users' ids → new
+  conversation), long-term `PostgresStore` in schema `ai_memory` via role `AI_MEM_DB_*` (`../db/init/08_ai_memory.sh`):
+  self-stated user facts + conversation summaries, loaded per chat (empty profile fields, manager prompt, flood evidence),
+  saved after answering in a thread (`OpenAIMemoryExtractor`); `remember` defaults True; `/api/ai/memory/{uid}` has no
+  auth — keep it off the public proxy.
+- LLM: OpenAI `gpt-6-luna` (Responses API structured output; reasoning model → no `temperature`; classifier/writer
+  effort low, checker medium; SDK retries off). `OPENAI_VERIFY_MODEL` can raise only the checker. Key is borrowed — no
+  dashboard cap; `usage.py` estimates and warns at 50/80/100% of 200,000원 (step 3a).
+- Latency (2026-10-01, local): ~8 s/question (classify ~2.7 + write ~2.4 + check ~3.0 s, DB 0.02 s), 0 retries in 20;
+  one forced retry → 12–15 s. B4/B5 will add LLM calls — set a target before B5.
+- Routing: `../route/` + GraphHopper; elderly slope thresholds = 「보도 설치 및 관리 지침」 1/18·1/12 (multipliers
+  ×0.5·×0.2·speed ×0.75·stairs ×0.5 still unsourced). Hazards are still the mock GeoJSON (always avoided) — connect
+  PostGIS + active risk in B4. Avoidance demo `../route/scripts/avoid_demo.py`: 16/16.
+- VM `.env` differs from the Mac's (`AI_DB_PASSWORD`, `AI_MEM_DB_PASSWORD` are VM-only) — never copy the Mac `.env` over it.
 - Any LLM failure falls back to keyword routing and logs `라우팅 [키워드 대체]`; a fast (<1 s) answer means fallback.
 - Never print `.env` values (a Gemini key leaked once via grep on 2026-09-24; the user rotated it).
 
