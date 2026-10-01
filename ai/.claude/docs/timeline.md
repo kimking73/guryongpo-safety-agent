@@ -51,11 +51,12 @@ B3 완료. 선행 A4·A7·B3 모두 끝나 **B4 시작 가능**: 산사태·강�
   계정 minecraftjykim@gmail.com, 프로젝트 "My First Project"(`project-265888b6-2837-43d6-9d8`) — 팀 프로젝트 아님(사용자 결정: 유지).
   접속 `ssh jongyeonkim@<외부IP>`(임시 IP 34.64.177.195), 코드 `~/guryongpo-safety-agent`, 실행 `docker compose -f docker-compose.yml up -d --build`.
   B10 남은 것: 고정 IP 예약 → Caddy·도메인(없으면 nip.io)·HTTPS, 이 프로젝트 예산 알림, 배포 스크립트(pull + 재빌드).
+  **VM `.env`는 맥 `.env`와 다르다 (2026-10-01~)**: `AI_DB_PASSWORD`가 VM에서 만든 48자 무작위 값(출력·저장 안 함).
+  맥 `.env`를 VM에 다시 복사하면 AI의 DB 접속이 끊긴다 → 바뀐 키만 VM `.env`에 `sed`로 넣거나, 복사 후
+  `AI_DB_PASSWORD`를 새로 만들고 `exec db sh /docker-entrypoint-initdb.d/07_ai_readonly.sh`로 계정 비밀번호도 맞춘다.
+  VM의 `DB_PASSWORD`(메인 계정)는 아직 로컬 기본값 — DB 포트는 외부에 안 열려 있지만 B10에서 바꾼다.
 
 ## 이월 항목 (끝나면 지운다)
-- [ ] **VM에 AI 읽기 전용 DB 계정 반영** — VM `.env`에 `AI_DB_USER`·`AI_DB_PASSWORD`(**서버용 새 비밀번호**) 넣기 →
-      `git pull` → `docker compose -f docker-compose.yml up -d db` → `exec db sh /docker-entrypoint-initdb.d/07_ai_readonly.sh`
-      → `up -d --build ai`. 그 전까지 VM ai는 DB tool이 available=False (아직 쓰는 agent가 없어 영향 없음)
 - [ ] **A 레인에 공유**: AI가 risk_assessments·v_latest_observations·weather_warnings·disaster_messages·hazard_zones·shelters·
       medical_facilities·manholes·action_guides·ingest_runs를 읽기 전용으로 직접 읽음 → 컬럼 이름·의미 바꿀 때 B에게 알려 달라.
       `db/init/07_ai_readonly.sh`(B 소유) 추가 사실과 팀원 로컬 DB에 한 번 실행하는 명령도 함께 (README에 적음)
@@ -122,4 +123,4 @@ B3 완료. 선행 A4·A7·B3 모두 끝나 **B4 시작 가능**: 산사태·강�
 - 2026-10-01 OpenAI 사용량 경고: `usage.py`(응답 usage → 모델 단가·환율 1,400원으로 예상 비용, 월별 파일 누적, 월 예산 `OPENAI_BUDGET_KRW`=20만 원의 50·80·100%에서 WARNING, 호출은 막지 않음), `GET /api/ai/usage`, compose `ai-data` 볼륨. live 라우팅 13/13 통과 — 13회 입력 10,944·출력 717 토큰, 약 2원(호출당 0.16원). 테스트 34 + live 13.
 - 2026-10-01 B3(진행) DB 직접 조회(사용자 결정, 기획서와 같음): `db/init/07_ai_readonly.sh`(guardian_ai 계정 — SELECT만, 계정·접속 두 겹 읽기 전용, 조회 3초 제한), `ai/guardian_ai/db.py`(첫 조회 때 여는 커넥션 풀), `tools.py` 9개 tool을 실제 SQL로 교체(실패 시 available=False), `RiskLevel`을 DB 5단계로·`ActionGuide`를 action_guides 행 형식으로, alert 경로 agent는 경보 이상(critical 포함). 로컬 DB 초기화(사용자가 직접 볼륨 삭제) 후 표 36개·대피소 19·산사태 488·행동요령 51 확인. 테스트 49 + db 2(쓰기 차단 두 겹 확인) + live 13. 발견: 침수 지정 대피소 없음.
 - 2026-10-01 B3 침수 agent·환각 검증: `flood.py`(코드가 DB 수집·근거 생성, LLM은 문장만, 실패 시 템플릿, 위치 없으면 구룡포읍 중심 명시, DB 장애 시 "확인 불가"), `verify.py`(숫자 규칙 검사 — 단위 변환·반올림 허용 → LLM 내용 검사, 장애 시 숫자 결과만), `llm.py` `OpenAIWriter`·`OpenAIFactChecker`(`OPENAI_VERIFY_MODEL`). 관측 tool이 시연 모의값을 6시간 우선(판정 엔진과 맞춤 — 아니면 판정 "경보"인데 근거 0mm). A의 heavy_rain_flood 시나리오로 /api/chat 왕복 확인(질문당 4–6초), 끝나고 clear. live 틀린 답 주입 10/10·맞는 답 3/3 (2회). 테스트 71 + db 2 + live 26. 누적 OpenAI 약 8원.
-- 2026-10-01 B3 완료 처리(사용자 결정). 라이브 타임라인 B3 체크(12/30). GitHub 푸시, VM 반영.
+- 2026-10-01 B3 완료 처리(사용자 결정). 라이브 타임라인 B3 체크(12/30). GitHub 푸시. VM: `.env` 복사 후 AI_DB_PASSWORD만 VM 전용 무작위 값으로, git pull(d91b74c), 07 스크립트로 읽기 전용 계정, ai 재빌드 → DB tool·쓰기 차단·/api/chat(침수 agent LLM + 환각 검증 통과) 확인.
