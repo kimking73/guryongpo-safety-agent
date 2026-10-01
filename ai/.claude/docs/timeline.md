@@ -43,7 +43,7 @@ B3 완료. 선행 A4·A7·B3 모두 끝나 **B4 시작 가능**: 산사태·강�
    유형은 성인·노약자 둘뿐(휠체어 제외, 2026-09-26 사용자 결정).
    → 완료 기준은 충족. 사용자에게 B7 완료 처리 여부를 묻는다(라이브 타임라인 포함).
 2. 5m DEM을 구하면(이월 항목) `graphhopper/dem/ngii/`의 90m 파일을 바꾸고 `build_dem.sh` → `docker compose restart graphhopper`,
-   `route/guardian_route/profiles.py` 노약자 경사 기준(6·10%)과 계단 배수(0.3)를 실제 경로를 보며 조정.
+   `route/guardian_route/profiles.py` 노약자 경사 배수(×0.5·×0.2, 기준선은 1/18·1/12로 확정 2026-10-02)와 계단 배수(0.5)를 실제 경로를 보며 조정.
 - 이후 후보: B3(A1·A3 확인, LLM은 OpenAI gpt-6-luna로 전환 완료) 또는 B4(재난 agent 확장 — 위치·경로 agent가 `request_route`·`route_profile` 사용).
 - 위험 구역은 지금 항상 피한다(Risk engine 활성 판정과 연결은 A3·A4 이후). A7 적재 후 `hazards.py`에 PostGIS 읽기 추가.
 
@@ -91,7 +91,11 @@ B3 완료. 선행 A4·A7·B3 모두 끝나 **B4 시작 가능**: 산사태·강�
 - [ ] C와 `/api/chat` 응답 형식 합의 — 목업의 카드형(판정·수치 칩·할 일·출처·버튼)은 B5에서 확장 (`agent-design.md` 8절)
 - [ ] 조위(만조) 데이터: 기획서·목업은 쓰지만 수집 목록에 없음 → A에게 제안 (tools에는 `tide` 종류만 있음)
 - [ ] 조하린 GCP·GitHub 권한, 팀원 로컬 실행 확인 — 사용자가 직접 진행
-- [ ] 대화 기억은 메모리 저장(ai 재시작 시 소실) — 필요해지면 PostgreSQL checkpointer로
+- [ ] **VM에 기억 저장 반영** — VM `.env`에 `AI_MEM_DB_USER`·`AI_MEM_DB_PASSWORD`(VM 전용 무작위 값) 추가 → `git pull` →
+      `docker compose -f docker-compose.yml up -d db` → `exec db sh /docker-entrypoint-initdb.d/08_ai_memory.sh` → `up -d --build ai`.
+      B10 Caddy에서 `/api/ai/memory`는 외부에 열지 않는다(인증 전)
+- [ ] 사용자 기억 정식 서비스 전: 앱 동의 화면·"기억 보기/끄기/지우기"(C), Firebase 인증 연결(A 방식), 익명 로그인은 재설치 시 다른 사용자
+- [ ] A의 `users`·`user_profiles`와 AI 기억(`ai_memory`) 동기화 여부 — A와 결정
 
 ## 일정 리스크 (B1 세션 분석)
 - B 과부하: Day 8–10에 B4+B6 동시, Day 11–13에 B5+B7+B10 동시. C는 같은 기간 한 개씩 → B10/B6 일부 이관 검토.
@@ -125,3 +129,7 @@ B3 완료. 선행 A4·A7·B3 모두 끝나 **B4 시작 가능**: 산사태·강�
 - 2026-10-01 B3 침수 agent·환각 검증: `flood.py`(코드가 DB 수집·근거 생성, LLM은 문장만, 실패 시 템플릿, 위치 없으면 구룡포읍 중심 명시, DB 장애 시 "확인 불가"), `verify.py`(숫자 규칙 검사 — 단위 변환·반올림 허용 → LLM 내용 검사, 장애 시 숫자 결과만), `llm.py` `OpenAIWriter`·`OpenAIFactChecker`(`OPENAI_VERIFY_MODEL`). 관측 tool이 시연 모의값을 6시간 우선(판정 엔진과 맞춤 — 아니면 판정 "경보"인데 근거 0mm). A의 heavy_rain_flood 시나리오로 /api/chat 왕복 확인(질문당 4–6초), 끝나고 clear. live 틀린 답 주입 10/10·맞는 답 3/3 (2회). 테스트 71 + db 2 + live 26. 누적 OpenAI 약 8원.
 - 2026-10-01 B3 완료 처리(사용자 결정). 라이브 타임라인 B3 체크(12/30). GitHub 푸시. VM: `.env` 복사 후 AI_DB_PASSWORD만 VM 전용 무작위 값으로, git pull(d91b74c), 07 스크립트로 읽기 전용 계정, ai 재빌드 → DB tool·쓰기 차단·/api/chat(침수 agent LLM + 환각 검증 통과) 확인.
 - 2026-10-01 지연 측정(로컬, 실제 OpenAI·DB): 질문당 OpenAI 3회 직렬(분류 ~3초·작성 ~3초·환각 검증 ~3–4초), DB 0.02초. 재시도 10건 중 3건 → 17–22초. 확인된 원인: 근거 목록에 기준 위치가 없어 검증기가 "집" 언급을 근거 없는 말로 봄(시스템 빈틈) → `flood.py` 근거에 "기준 위치" 추가, 작성기와 같은 이름(`location_text`). 수정 후 20건 재시도 0, 평균 8.1초(최대 11.5초), 틀린 답 주입 10/10 유지. 남은 개선 후보: 재시도 때 분류 생략, 검증 effort low, 스트리밍(B5). B4·B5로 호출이 7회가 되면 15–20초 → B5 전에 목표 시간 정하기.
+- 2026-10-01 경로 시연 1 — 위험 구역 회피 검증: `route/scripts/avoid_demo.py`(운영 `RouteService`에 메모리 위험 구역 주입, 실제 GraphHopper). 출발·도착 3쌍 × 가상 침수 구역 6개(경로 위 4·대조군 2)를 무작위로 켜고 끄기 15회 + 경계 사례(출발지가 구역 안) 1회 → **16/16 통과**(켜진 구역 통과 없음, avoided 일치, 경로 밖 구역만 켜지면 기본 경로 유지, 피할 수 없으면 still_inside로 알림). 응답 10–70ms. 회차별 PNG·모아보기·GIF·결과 표는 `route/out/avoid_demo/`(gitignore). 참고: 우회가 기본보다 짧은 회차 2건(−59m, −17m) — GraphHopper는 거리가 아니라 시간×도로 선호도로 고르기 때문. 사용자 유형별 검증은 다음.
+- 2026-10-02 노약자 경사 기준선을 공식 자료로 교체(사용자 결정: 배수는 그대로): ≥6%→**1/18(5.56%) 초과**, ≥10%→**1/12(8.33%) 초과** — 국토해양부 「보도 설치 및 관리 지침」(2011.07) 원문(보도 종단경사 1/18 이하, 곤란 시 1/12, 1/12 = 교통약자 통행 최대). `profiles.py` `SLOPE_SIDEWALK_MAX`·`SLOPE_ACCESSIBLE_MAX`, 상수 이름 `ELDERLY_OVER_SIDEWALK`(×0.5)·`ELDERLY_OVER_ACCESSIBLE`(×0.2). 정수 경사 저장이라 실질 6% 이상·9% 이상(9%가 강한 벌점으로 이동). 시가지 21경로 비교: 7개 경로 변경, 9% 이상 도로 4,184→3,769m(−10%), 총거리 +1.3%. 테스트 route 35 + live 6. 배수(×0.5·×0.2·속도 ×0.75·계단 ×0.5) 근거 조사 결과: 속도는 경찰청 0.8 기준, 선호도 배수는 Valhalla 설계값(연구 근거 없음)뿐 — 보행 경로 선택 관찰 연구 조사는 이월.
+- 2026-10-02 사용자별 기억(사용자 계획 승인): 단기 = LangGraph `PostgresSaver`(대화 안, 재시작해도 이어짐), 장기 = `PostgresStore`(사용자 사실·대화 요약). `db/init/08_ai_memory.sh`(스키마 ai_memory + 전용 계정, public 권한 없음), `memory.py`(DB 못 닿으면 메모리 대체, 대화 주인 확인, 불러오기 → 빈 프로필 칸·분류 프롬프트·침수 근거, 저장 → 백그라운드 `OpenAIMemoryExtractor`), `remember` 기본 켜짐(사용자 결정), `GET/DELETE /api/ai/memory/{uid}`. 로컬 왕복: 무릎 발언 → 새 대화 분류 이유에 "보행 불편도 고려", AI 재시작 후 기억·대화 유지, "거기까지"를 이전 대화로 해석. 발견·수정: 재시작 직전 백그라운드 저장 유실 → 종료 때 대기(`close()`·lifespan), 이어지는 대화가 요약을 덮어씀 → 기존 요약을 넘겨 넓힘. 테스트 ai 87 + db 4 + live 32(추출기 6/6: 직접 말한 사실만, 추측·재난 수치 저장 안 함).
+- 2026-10-02 단기 기억을 InMemorySaver로 되돌림(사용자 결정): 실측 질문 1개당 체크포인트 약 12개·이전 질문 근거까지 DB에 누적, 위치·건강 정보가 상태째 영구 저장 → 대화 기억은 서버 메모리 + 마지막 문답 후 60분 만료(`CONVERSATION_TTL_MIN`, 만료 대화 지우기, 만료·모르는·남의 id는 새 대화), 장기 기억만 PostgresStore. 로컬 확인: 재시작 후 사용자 기억 유지·옛 대화 id는 새 대화, 새 대화에서도 "거기"를 대화 요약(장기 기억)으로 대피소로 해석. 테스트 ai 89 + db 4. 로컬 ai_memory에 오전 PostgresSaver 시험 때 생긴 checkpoint 표 4개(테스트 대화 데이터)가 남아 있음 — 정리 필요.

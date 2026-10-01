@@ -85,7 +85,7 @@ B3 구현 (2026-10-01):
 
 | 그룹 | 필드 | 비고 |
 | --- | --- | --- |
-| 입력 | mode, user, current_location, question, risk_event, history | mode = `chat` 또는 `alert` |
+| 입력 | mode, user, current_location, question, risk_event, history, user_memory | mode = `chat` 또는 `alert`, user_memory = 사용자 기억 문장 (아래 기억 절) |
 | 관리자 | phase, selected_agents, manager_feedback | |
 | 전문 → 권고 | specialist_results, action_plan, draft | specialist_results는 병렬 누적 reducer, 재시도 시 RESET |
 | 루프 1 | checks, retry_count, verdict | checks는 병렬 병합 reducer |
@@ -168,13 +168,33 @@ A7이 `action_guides` 표에 적재한 형식을 그대로 쓴다 (2026-10-01, �
 - `targets`: all, resident, tourist, fisher, vessel_owner, coastal, farmer, driver (`all`은 항상 포함해 조회)
 - `priority`: 낮을수록 먼저. 행동 권고 agent는 이 문장만 인용한다
 
+## 6-1. 기억 (2026-10-02, `memory.py`)
+
+| | 단기 기억 (대화 안) | 장기 기억 (사용자별, 대화를 넘어) |
+| --- | --- | --- |
+| LangGraph 기능 | Checkpointer — `InMemorySaver` (서버 메모리) | Store — `PostgresStore` (DB) |
+| 구분 | thread_id = conversation_id | 이름공간 `("users", user_id, "facts" / "episodes")` |
+| 내용 | 그래프 상태 전체 (대화 기록·근거·검증 결과) | 사용자가 자기에 대해 직접 말한 사실(보행 불편·나이·동반자·이동수단·직업·자주 가는 곳·기타) + 대화별 한 문장 요약 |
+| 저장 | 그래프 실행 때 자동 | 응답 뒤 백그라운드에서 `OpenAIMemoryExtractor`가 추출 → `store.put` (이어지는 대화는 요약을 넓힘) |
+| 수명 | 마지막 문답 후 1시간(`CONVERSATION_TTL_MIN`) 또는 서버 재시작까지 — 지나면 지우고 새 대화로 시작 | 사용자가 지울 때까지 |
+| 읽기 | 같은 conversation_id로 요청하면 자동 | 대화마다 `ChatService`가 불러와 ① 앱이 안 보낸 프로필 칸 채움(→ 노약자 경로 등) ② 관리자 분류 프롬프트에 "기억하는 것" ③ 침수 agent 근거에 `user_memory`(검증 오탐 방지) |
+
+- 단기 기억을 DB가 아닌 메모리에 두는 이유(사용자 결정 2026-10-02): 질문 1개당 체크포인트가 약 12개 쌓이는데 다음 질문에 쓰는 건
+  최근 문답뿐이고, 위치·건강 정보가 대화 상태째로 영구 저장되지 않게. 남길 것(사용자 사실·대화 요약)은 장기 기억이 들고 있다.
+- 장기 기억 저장 위치: `ai_memory` 스키마, 전용 계정 `AI_MEM_DB_USER` (`db/init/08_ai_memory.sh`) — public(재난 데이터) 권한 없음.
+  표는 `setup()`이 만든다. DB에 못 닿으면 메모리 저장으로 대체(재시작 시 소실).
+- 원칙: **재난 정보는 기억하지 않는다**(항상 DB 최신값), 추측은 저장하지 않는다, 앱이 보낸 프로필이 기억보다 우선.
+- 대화 주인: 진행 중인 대화의 주인을 서버 메모리에 기록, 남의 conversation_id·만료된 id·모르는 id(재시작 전)는 새 대화로 시작.
+- 동의: `ChatRequest.remember`(기본 켜짐, 사용자 결정) — 끄면 불러오기·저장 모두 안 함. 보기·지우기 `GET/DELETE /api/ai/memory/{user_id}`
+  (인증 전이라 외부 비공개, B10 Caddy에서 막는다). 서버 종료 때 백그라운드 저장이 끝날 때까지 기다린다.
+
 ## 7. 열린 질문
 
 1. 재난 '후' 판정 기간 N시간 (예: 특보 해제 후 24시간)?
 2. 맨홀 위치 데이터를 포항 디지털 트윈이 제공하는가? (A7과 동일 질문)
 3. ~~AI의 DB 직접 조회(읽기 전용) vs FastAPI 경유~~ → 직접 조회로 결정 (2026-10-01, 5절)
 4. 한 질문당 LLM 호출이 최소 5회. 음성 대화에서 지연이 크면 alert 모드처럼 의도 검증 생략, 또는 단순 질문은 다듬기 생략 검토 (B5에서 측정 후 결정)
-5. 대화 중 알게 된 사용자 정보(예: "다리가 불편해요")를 `users`에 저장하는 주체 — 관리자 agent가 tool로 쓰기? A와 결정
+5. ~~대화 중 알게 된 사용자 정보 저장 주체~~ → AI가 자기 기억 저장소(`ai_memory`)에 저장 (2026-10-02, 6-1절). A의 `users`·`user_profiles`와 동기화할지는 남은 질문
 
 ## 8. 채팅 API (B2, 초안)
 

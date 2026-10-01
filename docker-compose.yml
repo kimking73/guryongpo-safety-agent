@@ -24,9 +24,12 @@ services:
       # db/init/07_ai_readonly.sh가 AI 전용 읽기 전용 계정을 만들 때 쓴다 (비어 있으면 건너뜀)
       AI_DB_USER: ${AI_DB_USER:-guardian_ai}
       AI_DB_PASSWORD: ${AI_DB_PASSWORD:-}
+      # db/init/08_ai_memory.sh가 AI 기억 저장 계정·ai_memory 스키마를 만들 때 쓴다 (비어 있으면 건너뜀)
+      AI_MEM_DB_USER: ${AI_MEM_DB_USER:-guardian_ai_mem}
+      AI_MEM_DB_PASSWORD: ${AI_MEM_DB_PASSWORD:-}
     volumes:
       - db-data:/var/lib/postgresql/data
-      # 볼륨이 비어 있을 때 한 번만 이름 순서대로 실행: 00 PostGIS → 01 스키마 → 02~06 시드 (A1·A7) → 07 AI 읽기 전용 계정 (B3)
+      # 볼륨이 비어 있을 때 한 번만 이름 순서대로 실행: 00 PostGIS → 01 스키마 → 02~06 시드 (A1·A7) → 07 AI 읽기 전용 계정 (B3) → 08 AI 기억 저장 계정
       - ./db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]

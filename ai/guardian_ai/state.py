@@ -193,6 +193,7 @@ class GuardianState(TypedDict, total=False):
     question: str | None                 # chat 모드
     risk_event: RiskEvent | None         # alert 모드
     history: list[dict[str, str]]        # 이전 대화 (role, content)
+    user_memory: list[str]               # 사용자 기억 — 지난 대화들에서 사용자가 말한 사실·대화 요약 (memory.py)
 
     # 관리자
     phase: Phase

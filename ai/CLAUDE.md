@@ -4,8 +4,8 @@
 1. Read `.claude/docs/timeline.md` → status table, "다음 세션 시작점", "이월 항목", work log.
 2. From `코드/`: `git pull` (teammates push to `main`), then `docker compose up -d` and `docker compose ps`
    (db, api, ai all healthy). If `.env` changed since the ai container started: `docker compose up -d --force-recreate ai`.
-3. Baseline tests: `.venv/bin/python -m pytest -q` → **71 passed, 28 deselected**. `-m db` → 2 passed (needs local db +
-   `AI_DB_*` in `.env`). `-m live` → 26 passed on gpt-6-luna (routing 13 + B3 wrong-answer injection 13, ~5원).
+3. Baseline tests: `.venv/bin/python -m pytest -q` → **89 passed**. `-m db` → 4 passed (needs local db + `AI_DB_*`,
+   `AI_MEM_DB_*` in `.env`). `-m live` → 32 passed on gpt-6-luna (routing 13 + B3 injection 13 + memory extractor 6, ~7원).
 3a. **OpenAI spend check — warn the user** (user's budget 200,000원/month, user request 2026-10-01): read
    `curl -s localhost:8001/api/ai/usage` (local container), the VM's same URL over ssh, and
    `.venv/bin/python -c "from guardian_ai.usage import UsageTracker; print(UsageTracker().summary())"` (local runs/live
@@ -50,6 +50,14 @@
   Live: wrong answers 10/10 caught, right 3/3 passed, twice. E2E with A's `heavy_rain_flood` simulation: ~4–6 s/question.
   Demo scenario: `docker compose exec api python -c "from app import db; from app.config import settings;
   db.init_pool(settings.database_url); from risk import simulate; print(simulate.apply('heavy_rain_flood'))"` (`'clear'` to undo).
+- **Memory (2026-10-02)**: short-term = `InMemorySaver` (thread = conversation_id; expires 60 min after the last turn
+  or on restart — `ChatService._open_conversation` drops expired threads and issues a new id for expired/unknown/other
+  users' ids), long-term = `PostgresStore` (`("users", uid, "facts"|"episodes")`) in schema `ai_memory` via role
+  `AI_MEM_DB_*` (`../db/init/08_ai_memory.sh`). Short-term moved off Postgres by user decision (≈12 checkpoints per
+  question, sensitive state persisted). `ChatService` loads memory per chat (fills empty profile fields, `user_memory` into
+  manager prompt + flood evidence) and saves after answering in a thread (`OpenAIMemoryExtractor`, only self-stated facts,
+  never disaster data); `close()` on shutdown waits for pending saves. `remember` defaults to True (user decision).
+  `/api/ai/memory/{uid}` GET/DELETE has no auth yet — keep it off the public proxy (B10).
 - LLM: OpenAI since 2026-10-01 (user decision; Gemini free tier was 20 calls/day). `OPENAI_API_KEY` /
   `OPENAI_MODEL=gpt-6-luna` / `OPENAI_TIMEOUT_MS=10000` in `../.env`. Responses API `responses.parse` with
   `text_format=Classification`; gpt-6-luna is a reasoning model → no `temperature`, classifier uses
@@ -83,6 +91,7 @@ Flutter app/web (teammate C). This lane (B) also owns GraphHopper routing and GC
 | `guardian_ai/tools.py` | Read-only DB tools (risk, observations, warnings, messages, zones, facilities, life safety, action guides), `request_route`; allowlist `AGENT_TOOLS` |
 | `guardian_ai/flood.py` | Rain/flood agent: `collect` → `build_evidence` → writer or `template_summary`; `make_rain_flood_agent(writer, fetch)` |
 | `guardian_ai/verify.py` | Hallucination check: `check_numbers` (rule), `make_hallucination_check(checker)` |
+| `guardian_ai/memory.py` | Memory: `make_backends()` → InMemorySaver + PostgresStore in `ai_memory` (fallback InMemoryStore), `CONVERSATION_TTL_MIN`, user facts/episodes load·apply·save·export·forget |
 | `guardian_ai/db.py` | Read-only PostgreSQL access (`Database`, `default_fetch`, `conninfo()` from `AI_DB_*`) |
 | `guardian_ai/usage.py` | OpenAI token/cost ledger per month (`data/openai_usage.json`, volume `ai-data` in compose), warns at 50/80/100% of `OPENAI_BUDGET_KRW`; `GET /api/ai/usage` |
 | `guardian_ai/llm.py` | `make_client()`, `OpenAIClassifier`, `OpenAIWriter` (flood sentences), `OpenAIFactChecker` (`OPENAI_VERIFY_MODEL`), prompts |

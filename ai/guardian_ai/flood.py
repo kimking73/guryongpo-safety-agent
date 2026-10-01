@@ -237,6 +237,10 @@ def make_rain_flood_agent(writer: Writer | None = None, fetch: Fetch | None = No
     def rain_flood_agent(state: GuardianState) -> dict:
         location, known = pick_location(state)
         data = collect(location, known, fetch=fetch)
+        # 사용자 기억(지난 대화에서 사용자가 말한 사실)도 근거로 — 답변이 "무릎이 불편하시니"라고 써도 검증이 오탐하지 않게.
+        # 재난 수치가 아니라 사람에 대한 정보다 (memory.py).
+        data.evidence += [Evidence(source="user_memory", key="사용자 기억", value=m)
+                          for m in state.get("user_memory") or []]
         summary, how = None, "템플릿"
         if writer is not None:
             try:

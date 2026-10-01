@@ -12,6 +12,7 @@ API 키는 환경 변수 OPENAI_API_KEY (루트 .env), 모델은 OPENAI_MODEL.
 from __future__ import annotations
 
 import os
+from typing import Literal
 
 from openai import OpenAI
 from pydantic import BaseModel, Field
@@ -97,6 +98,10 @@ def build_prompt(state: GuardianState) -> str:
     #   - assistant: ...
     #   질문: 그럼 거기 가도 돼요?
     lines = [f"사용자: {_profile_line(state.get('user'))}"]
+    # 지난 대화들에서 기억한 것 (memory.py). 이동·건강 관련 사실이 agent 선택에 영향을 준다.
+    if state.get("user_memory"):
+        lines.append("이 사용자에 대해 기억하는 것:")
+        lines += [f"- {m}" for m in state["user_memory"]]
     # 지시어("거기", "그럼") 해석용. 토큰·지연을 줄이려고 최근 HISTORY_TURNS개만 넣는다.
     history = (state.get("history") or [])[-HISTORY_TURNS:]
     if history:
@@ -171,7 +176,9 @@ WRITER_PROMPT = """너는 포항 구룡포 재난 대응 서비스 '구룡가디
 - '확인할 수 없는 정보'가 있으면 그 정보는 지금 확인할 수 없다고 밝힌다. 그 상태에서 "안전하다"고 단정하지 않는다.
 - 위치가 '구룡포읍 중심(위치 정보 없음)'이면 그 기준이라고 밝힌다.
 - 행동요령(대피 방법 등)은 쓰지 않는다. 다른 agent가 공식 행동요령으로 따로 안내한다. 가까운 대피소 이름·거리는 근거에 있으면 써도 된다.
-- 재검증 실패 사유가 주어지면 그 문제를 고쳐서 다시 쓴다."""
+- 재검증 실패 사유가 주어지면 그 문제를 고쳐서 다시 쓴다.
+- '사용자 기억' 항목은 이 사용자가 지난 대화에서 직접 말한 자기 정보다(예: 보행 불편). 답을 그 사람에 맞추는 데만 쓰고,
+  재난 상황 판단에는 쓰지 않는다."""
 
 
 class OpenAIWriter:
@@ -221,6 +228,7 @@ CHECKER_PROMPT = """너는 재난 안내 답변의 사실 검증자다. 답변 �
 - 근거에서 확인할 수 없다고 한 정보를 두고 "안전하다"고 단정함
 - 관측소·지명을 다른 것과 바꿔 말함
 
+'사용자 기억' 항목은 사용자가 직접 말한 자기 정보로, 그 사용자에 대한 근거로 인정한다.
 실패가 아닌 것: 표현을 쉽게 바꾸기, 근거 일부만 고르기, "확인할 수 없다"고 밝히기, 일반적인 주의 당부.
 issues에는 무엇이 근거와 어떻게 다른지 짧게 쓴다."""
 
@@ -253,3 +261,58 @@ class OpenAIFactChecker:
         if result.ok:   # ok=true인데 issues가 있으면 사소한 메모로 보고 통과 (오탐으로 안전 안내까지 가지 않게)
             return CheckResult(ok=True)
         return CheckResult(ok=False, feedback="근거와 다른 내용: " + " / ".join(result.issues or ["(사유 없음)"]))
+
+
+# ---------------------------------------------------------------------------
+# 사용자 기억 추출 (2026-10-02) — 응답 뒤 백그라운드에서 이번 문답으로 장기 기억을 갱신 (memory.save)
+# ---------------------------------------------------------------------------
+
+class MemoryFact(BaseModel):
+    field: Literal["age", "walking_impaired", "has_dependents", "mobility", "occupation", "frequent_place", "note"]
+    value: str = Field(description="age는 숫자, walking_impaired·has_dependents는 true/false, "
+                                   "mobility는 walk·car·wheelchair·public_transport 중 하나, 나머지는 짧은 문장")
+    quote: str = Field(description="근거가 된 사용자 발언 원문 일부")
+
+
+class MemoryUpdate(BaseModel):
+    facts: list[MemoryFact] = Field(description="새로 알게 됐거나 바뀐 사실. 없으면 빈 목록")
+    summary: str = Field(description="이번 대화에서 사용자가 무엇을 물었는지 한 문장 (재난 수치는 쓰지 않음)")
+
+
+EXTRACTOR_PROMPT = """너는 재난 안내 서비스 '구룡가디언'의 기억 관리자다. 사용자와 AI의 이번 문답을 보고,
+다음 대화에서도 이 사용자를 돕는 데 필요한 '사용자 자신에 대한 사실'만 고른다.
+
+저장할 것 (사용자가 자기 자신에 대해 직접 말한 것만):
+- age 나이, walking_impaired 보행 불편(다리·무릎이 아픔, 지팡이 등), has_dependents 보호가 필요한 동반자(아이·노부모 등),
+  mobility 이동수단, occupation 직업(어업·선박 보유 등), frequent_place 자주 가는 곳, note 그 밖의 재난 대응에 필요한 사실
+저장하지 말 것:
+- 추측·암시("비가 와서 힘들어요"는 보행 불편이 아님), AI 답변에만 있는 내용
+- 재난 상황·날씨·수위·특보 같은 그때그때 바뀌는 정보 (항상 DB 최신값을 쓰므로 기억하면 안 됨)
+- 이미 기억하는 것과 같은 사실 (바뀐 경우만 다시 저장)
+summary: 이 대화 전체에서 사용자가 무엇을 물었는지 한 문장 (예: "침수 위험과 가까운 대피소, 가는 시간을 물어봄").
+'이 대화의 지금까지 요약'이 주어지면 그 내용을 유지하면서 이번 질문을 더한다. 수치·날짜는 쓰지 않는다."""
+
+
+class OpenAIMemoryExtractor:
+    """service.ChatService가 응답 뒤 백그라운드에서 부른다. 실패해도 답변에는 영향이 없다."""
+
+    def __init__(self, client: OpenAI | None = None, model: str | None = None,
+                 tracker: UsageTracker | None = None):
+        self.client = client or make_client()
+        self.model = model or os.environ.get("OPENAI_MODEL") or DEFAULT_MODEL
+        self.tracker = tracker or get_tracker()
+
+    def __call__(self, question: str, answer: str, known: list[str], conversation_summary: str = "") -> MemoryUpdate:
+        body = ["이미 기억하는 것:", *(f"- {k}" for k in known or ["(없음)"])]
+        if conversation_summary:
+            body.append(f"이 대화의 지금까지 요약: {conversation_summary}")
+        body += [f"\n사용자: {question}", f"AI: {answer}"]
+        response = self.client.responses.parse(
+            model=self.model, instructions=EXTRACTOR_PROMPT, input="\n".join(body),
+            text_format=MemoryUpdate, reasoning={"effort": "low"})
+        self.tracker.record(self.model, getattr(response, "usage", None))
+        result = response.output_parsed
+        if not isinstance(result, MemoryUpdate):
+            raise ValueError(f"기억 추출 결과를 해석하지 못함: {response.output_text!r}")
+        return result
+

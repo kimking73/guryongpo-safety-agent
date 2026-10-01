@@ -82,6 +82,7 @@ curl -X POST localhost:8002/api/route -H 'Content-Type: application/json' \
 - 이동 중: `POST /api/route/check`에 현재 위치·목적지·지금 경로(`geometry`)를 보내면 재계산이 필요한지(`reroute`)와 새 경로를 준다.
   경로에서 30m 넘게 벗어났거나, 남은 경로에 새 위험 구역이 생겼을 때 재계산한다. 도착지 20m 안이면 `arrived: true`.
   지금 위험 구역은 **임시 데이터**(`route/data/hazards.sample.geojson`)이며, 목록은 http://localhost:8002/api/route/hazards 에서 볼 수 있다.
+- 위험 구역 회피 시연: `cd route && uv pip install -p .venv -e ".[demo]" && .venv/bin/python scripts/avoid_demo.py` — 가상 침수 구역을 무작위로 켜고 끄며 16회 경로 계산·판정, 그림·GIF·결과 표를 `route/out/avoid_demo/`에 만든다 (graphhopper가 떠 있어야 함)
 - GraphHopper 지도 화면(로컬 확인용): http://localhost:8989/maps/ (끝의 `/` 필수. 없으면 빈 화면)
 - 경로 응답의 `geometry`는 인코딩된 polyline(Google 형식, 정밀도 1e5)이다. 앱에서 풀어서 지도에 그린다.
 - AI가 OpenAI(`gpt-6-luna`)를 쓰려면 `.env`의 `OPENAI_API_KEY`가 필요하다. 없으면 키워드 분류로 동작한다.
@@ -103,6 +104,10 @@ docker compose run --rm loader                        # 정적 데이터(대피�
 ```
 - **AI 읽기 전용 계정 만들기 (2026-10-01 이전에 만든 DB 한 번만)**: `.env`에 `.env.example`의 `AI_DB_USER`·`AI_DB_PASSWORD` 두 줄을 넣고
   `docker compose up -d db` → `docker compose exec db sh /docker-entrypoint-initdb.d/07_ai_readonly.sh`. 새로 만드는 DB는 자동.
+- **AI 기억 저장 계정 만들기 (2026-10-02 이전에 만든 DB 한 번만)**: `.env`에 `.env.example`의 `AI_MEM_DB_USER`·`AI_MEM_DB_PASSWORD` 두 줄을 넣고
+  `docker compose up -d db` → `docker compose exec db sh /docker-entrypoint-initdb.d/08_ai_memory.sh` → `docker compose up -d --build ai`.
+  AI의 사용자 기억(사용자가 말한 사실·대화 요약)은 `ai_memory` 스키마에 남아 AI를 재시작해도 이어진다. 대화 기억(진행 중인 대화)은
+  AI 서버 메모리에만 있어 마지막 문답 후 1시간 또는 재시작 때 사라진다. 확인: `curl localhost:8001/api/ai/memory/<user_id>`
 - **`db/init`의 시드(02~)가 바뀌었으면** `docker compose run --rm loader` (DB 데이터 유지). **스키마(01)가 바뀌었으면** loader가 알려 주고 멈추므로 `docker compose down -v` 후 다시 `up`.
 - 서버 API 대부분은 아직 목업(응답 헤더 `X-Mock: true`)이다. 실데이터: `/api/health`, `/api/v1/risk*`, 지도 레이어 `stations`·`landslide_zones`·`risk_areas`·`shelters`·`medical`·`manholes`. 자세한 건 `server/README.md`.
 - `server/app/`·`server/collector/`·`server/risk/`(api), `ai/guardian_ai/`, `route/guardian_route/` 코드를 고치면 해당 서버가 자동으로 재시작된다 (재빌드 불필요).
