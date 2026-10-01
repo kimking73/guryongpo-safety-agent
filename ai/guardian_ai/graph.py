@@ -110,10 +110,12 @@ ALERT_AGENT = {
     DisasterType.FLOOD: Specialist.RAIN_FLOOD,
     DisasterType.STRONG_WIND: Specialist.WIND_TYPHOON,
     DisasterType.TYPHOON: Specialist.WIND_TYPHOON,
+    DisasterType.HIGH_SEAS: Specialist.WIND_TYPHOON,
     DisasterType.FINE_DUST: Specialist.LIFE_SAFETY,
+    DisasterType.ULTRAFINE_DUST: Specialist.LIFE_SAFETY,
     DisasterType.UV: Specialist.LIFE_SAFETY,
 }
-# 대피 경로가 필요한 재난. 이 재난이 경보(WARNING) 단계일 때만 위치·경로 agent를 붙인다.
+# 대피 경로가 필요한 재난. 이 재난이 경보(WARNING) 이상일 때만 위치·경로 agent를 붙인다.
 EVACUATION_DISASTERS = {
     DisasterType.LANDSLIDE, DisasterType.HEAVY_RAIN, DisasterType.FLOOD,
     DisasterType.STRONG_WIND, DisasterType.TYPHOON,
@@ -122,7 +124,7 @@ EVACUATION_DISASTERS = {
 
 def alert_agents(event: RiskEvent) -> list[Specialist]:
     selected = [ALERT_AGENT[event.disaster]]
-    if event.level == RiskLevel.WARNING and event.disaster in EVACUATION_DISASTERS:
+    if event.level.rank >= RiskLevel.WARNING.rank and event.disaster in EVACUATION_DISASTERS:
         selected.append(Specialist.LOCATION_ROUTE)
     return selected
 
@@ -242,7 +244,7 @@ def action_advisor(state: GuardianState) -> dict:
     → AI가 잘못된 행동요령을 지어내는 것을 막는다.
     """
     results = state.get("specialist_results", [])
-    plan = ActionPlan(phase=state.get("phase", Phase.NONE), risk_level=RiskLevel.SAFE, steps=[])
+    plan = ActionPlan(phase=state.get("phase", Phase.NONE), risk_level=RiskLevel.NORMAL, steps=[])
     # stub: 전문 agent 요약을 이어 붙여 초안으로 쓴다. 선택된 agent가 없으면 기본 문구.
     draft = " / ".join(r.summary for r in results) or "현재 확인된 위험 없음"
     return {"action_plan": plan, "draft": draft}

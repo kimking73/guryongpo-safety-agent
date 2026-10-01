@@ -18,7 +18,7 @@
 | B1 | 1–2 | agent 구조 설계 | - | 노드·엣지 확정 | **완료** (2026-09-24) |
 | B8 | 1–2 | 개발 환경·GCP·Firebase (docker-compose, PostGIS, .env 규칙, GCP 예산 알림, Firebase 익명인증·FCM) | - | 3명 로컬에서 DB·API 실행 | **완료** (2026-09-24) |
 | B2 | 3–4 | LangGraph 골격·관리자 agent (Gemini 연결, 질문 분류→라우팅, 목업 DB tool, /chat 인터페이스) | B1 | 질문 유형별로 올바른 agent 호출 | **완료** (2026-09-24) |
-| B3 | 5–6 | 침수 agent·환각 검증 (강수+수위 답변, evidence 대조, 최대 반복) | B2, A3 | 틀린 답 주입 시 검증에서 걸러짐 | 보류 (A1·A3 이후, 사용자 결정 2026-09-26) |
+| B3 | 5–6 | 침수 agent·환각 검증 (강수+수위 답변, evidence 대조, 최대 반복) | B2, A3 | 틀린 답 주입 시 검증에서 걸러짐 | **진행 중** (2026-10-01: DB 직접 조회 tool 완료, 다음 침수 agent·환각 검증) |
 | B4 | 8–10 | 재난 agent 확장·행동 권고 (산사태·강풍태풍·생활안전·위치경로, 규칙 기반 판단 트리, 선제 경고 메시지 함수) | A4, B3, A7 | 재난별 시나리오에 규칙대로 응답 | 미착수 |
 | B6 | 8–10 | GraphHopper 구축 (OSM 도로망, 위험지역·맨홀 회피, /route) | A1, A3 | 위험 구역 우회 경로 반환 | **완료** (2026-09-26, 임시 위험지역 데이터) |
 | B5 | 11–13 | 의도 검증·다듬기·음성 (STT/TTS, /voice, 지연 측정 → 필요 시 OpenAI Realtime) | B4 | 음성 왕복 동작, 지연 기록 | 미착수 |
@@ -48,6 +48,13 @@ A 작업 중 B와 맞물리는 것: **A7**(Day 3–6, 정적 데이터 적재)�
   B10 남은 것: 고정 IP 예약 → Caddy·도메인(없으면 nip.io)·HTTPS, 이 프로젝트 예산 알림, 배포 스크립트(pull + 재빌드).
 
 ## 이월 항목 (끝나면 지운다)
+- [ ] **VM에 AI 읽기 전용 DB 계정 반영** — VM `.env`에 `AI_DB_USER`·`AI_DB_PASSWORD`(**서버용 새 비밀번호**) 넣기 →
+      `git pull` → `docker compose -f docker-compose.yml up -d db` → `exec db sh /docker-entrypoint-initdb.d/07_ai_readonly.sh`
+      → `up -d --build ai`. 그 전까지 VM ai는 DB tool이 available=False (아직 쓰는 agent가 없어 영향 없음)
+- [ ] **A 레인에 공유**: AI가 risk_assessments·v_latest_observations·weather_warnings·disaster_messages·hazard_zones·shelters·
+      medical_facilities·manholes·action_guides·ingest_runs를 읽기 전용으로 직접 읽음 → 컬럼 이름·의미 바꿀 때 B에게 알려 달라.
+      `db/init/07_ai_readonly.sh`(B 소유) 추가 사실과 팀원 로컬 DB에 한 번 실행하는 명령도 함께 (README에 적음)
+- [ ] 침수 지정 대피소가 데이터에 없음(구룡포 19곳 = 지진해일 17·민방위 2) → A에게 확인 요청, 그 전까지 침수 안내는 종류 무관 가장 가까운 대피소
 - [ ] **`SAFETY24_API_KEY`(재난안전데이터·긴급재난문자) 받아서 `.env`에 넣기** — 사용자가 추후 저장(2026-10-01).
       넣은 뒤 VM에 `.env` 복사(해시 비교) → VM에서 `docker compose -f docker-compose.yml up -d --force-recreate api collector`
       → `/api/health`의 `ingest.safety24`가 ok인지 확인. 기상청·포항 디지털트윈 키는 반영 완료
@@ -108,3 +115,4 @@ A 작업 중 B와 맞물리는 것: **A7**(Day 3–6, 정적 데이터 적재)�
 - 2026-10-01 B10(진행): e2-medium VM에 스왑 2GB·Docker 29.8/Compose v5.5 설치, 저장소 clone, `.env`·firebase 키·OSM·DEM(dem-hgt) 복사(해시 확인, 600 권한), 서버 모드로 6개 서비스 healthy. 실측 메모리 합계 약 0.6GB(graphhopper 364MB) → e2-medium 충분. 8000–8002는 GCP 방화벽으로 외부 차단 확인. 기상청·포항 DT 키 반영 — 일부 API 활용신청 미완, 생활안전24 키 없음(이월 항목).
 - 2026-10-01 LLM을 Gemini → OpenAI `gpt-6-luna`로 전환(사용자 결정, 가성비 기준 — 입력 $0.1·출력 $0.5/1M, 질문당 약 4원 추정). `llm.py` `OpenAIClassifier`(Responses API 구조화 출력, 추론 effort low, temperature 없음, SDK 재시도 끔), `.env.example` `OPENAI_*`, 테스트 가짜 클라이언트 교체. 오프라인 30 통과, live는 키 받은 뒤.
 - 2026-10-01 OpenAI 사용량 경고: `usage.py`(응답 usage → 모델 단가·환율 1,400원으로 예상 비용, 월별 파일 누적, 월 예산 `OPENAI_BUDGET_KRW`=20만 원의 50·80·100%에서 WARNING, 호출은 막지 않음), `GET /api/ai/usage`, compose `ai-data` 볼륨. live 라우팅 13/13 통과 — 13회 입력 10,944·출력 717 토큰, 약 2원(호출당 0.16원). 테스트 34 + live 13.
+- 2026-10-01 B3(진행) DB 직접 조회(사용자 결정, 기획서와 같음): `db/init/07_ai_readonly.sh`(guardian_ai 계정 — SELECT만, 계정·접속 두 겹 읽기 전용, 조회 3초 제한), `ai/guardian_ai/db.py`(첫 조회 때 여는 커넥션 풀), `tools.py` 9개 tool을 실제 SQL로 교체(실패 시 available=False), `RiskLevel`을 DB 5단계로·`ActionGuide`를 action_guides 행 형식으로, alert 경로 agent는 경보 이상(critical 포함). 로컬 DB 초기화(사용자가 직접 볼륨 삭제) 후 표 36개·대피소 19·산사태 488·행동요령 51 확인. 테스트 49 + db 2(쓰기 차단 두 겹 확인) + live 13. 발견: 침수 지정 대피소 없음.

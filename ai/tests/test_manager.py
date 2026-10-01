@@ -46,6 +46,13 @@ def test_alert_advisory_does_not_add_route_agent():
     assert G.manager(alert(DisasterType.FLOOD, RiskLevel.ADVISORY))["selected_agents"] == [Specialist.RAIN_FLOOD]
 
 
+def test_alert_critical_also_adds_route_agent():
+    # DB 5단계 중 최고(critical)도 경보 이상 → 대피 경로 필요
+    assert G.manager(alert(DisasterType.FLOOD, RiskLevel.CRITICAL))["selected_agents"] == \
+        [Specialist.RAIN_FLOOD, Specialist.LOCATION_ROUTE]
+    assert G.manager(alert(DisasterType.HIGH_SEAS, RiskLevel.WARNING))["selected_agents"] == [Specialist.WIND_TYPHOON]
+
+
 def test_alert_does_not_call_classifier():
     def boom(state):
         raise AssertionError("alert 모드에서 분류기를 부르면 안 됨")

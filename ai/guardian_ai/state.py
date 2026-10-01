@@ -17,12 +17,15 @@ from pydantic import BaseModel, Field
 # ---------------------------------------------------------------------------
 
 class DisasterType(str, Enum):
+    """DB hazard_type과 같은 값 (db/init/01_schema.sql)."""
     LANDSLIDE = "landslide"      # 산사태
     HEAVY_RAIN = "heavy_rain"    # 호우
     FLOOD = "flood"              # 침수
     STRONG_WIND = "strong_wind"  # 강풍
     TYPHOON = "typhoon"          # 태풍
+    HIGH_SEAS = "high_seas"      # 풍랑 (어업·해안)
     FINE_DUST = "fine_dust"      # 미세먼지 (생활안전)
+    ULTRAFINE_DUST = "ultrafine_dust"  # 초미세먼지 (생활안전)
     UV = "uv"                    # 자외선 (생활안전)
 
 
@@ -35,9 +38,16 @@ class Phase(str, Enum):
 
 
 class RiskLevel(str, Enum):
-    SAFE = "safe"
-    ADVISORY = "advisory"  # 주의보·주의
-    WARNING = "warning"    # 경보·위험
+    """DB risk_level과 같은 5단계 (A의 판정 엔진·특보와 공통). 순서대로 높아진다."""
+    NORMAL = "normal"      # 정상
+    WATCH = "watch"        # 관심 · 예비특보
+    ADVISORY = "advisory"  # 주의 · 주의보
+    WARNING = "warning"    # 경계 · 경보
+    CRITICAL = "critical"  # 심각 · 위험
+
+    @property
+    def rank(self) -> int:
+        return list(RiskLevel).index(self)
 
 
 class Specialist(str, Enum):
@@ -110,7 +120,7 @@ class RiskEvent(BaseModel):
 class SpecialistResult(BaseModel):
     agent: Specialist
     summary: str                         # 해당 재난에 대한 답변 조각
-    risk_level: RiskLevel = RiskLevel.SAFE
+    risk_level: RiskLevel = RiskLevel.NORMAL
     evidence: list[Evidence] = Field(default_factory=list)
     route: dict[str, Any] | None = None  # 위치/경로 agent만 사용
 
@@ -120,7 +130,7 @@ class ActionPlan(BaseModel):
     phase: Phase
     risk_level: RiskLevel
     steps: list[str]                     # 우선순위 순서
-    guide_ids: list[str] = Field(default_factory=list)  # 인용한 ActionGuide.id
+    guide_ids: list[int] = Field(default_factory=list)  # 인용한 ActionGuide.id
     call_emergency: bool = False         # 이동 불가 → 119 연결 버튼 표시
 
 
@@ -130,15 +140,18 @@ class CheckResult(BaseModel):
 
 
 class ActionGuide(BaseModel):
-    """행동요령 원문 한 건. 원문 수집은 별도 작업(저장 형식만 여기서 정의)."""
-    id: str                              # 예: "flood.during.general.01"
-    disaster: DisasterType
-    phase: Phase
-    audience: Literal["general", "elderly", "disabled", "tourist", "fisher"] = "general"
-    text: str
-    source_name: str                     # 예: "포항시 재난안전"
-    source_url: str
-    retrieved_at: datetime | None = None
+    """행동요령 원문 한 건 = DB action_guides 한 행 (A7이 적재). 행동 권고 agent는 이 문장만 인용한다."""
+    id: int
+    disaster: DisasterType               # DB 컬럼 이름은 hazard
+    phase: Phase                         # before / during / after
+    min_level: RiskLevel                 # 이 단계 이상일 때 보여 준다
+    targets: list[str]                   # all, resident, tourist, fisher, vessel_owner, coastal, farmer, driver
+    priority: int                        # 낮을수록 먼저
+    title: str
+    content: str
+    voice_text: str | None = None        # 음성 안내용 짧은 문장 (B5)
+    source_name: str                     # 예: "포항시 재난안전 홈페이지"
+    source_url: str | None = None
 
 
 # ---------------------------------------------------------------------------

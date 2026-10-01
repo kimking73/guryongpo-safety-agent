@@ -82,7 +82,7 @@ flowchart TD
 | 출력 | final_answer, used_fallback | |
 
 도메인 모델: `UserProfile`, `Location`, `RiskEvent`, `Evidence`, `SpecialistResult`, `ActionPlan`, `CheckResult`, `ActionGuide`.
-enum: `DisasterType`(7종), `Phase`(전·중·후·평시), `RiskLevel`(안전·주의·경보), `Specialist`, `Mobility`.
+enum: `DisasterType`(9종, DB hazard_type과 같음), `Phase`(전·중·후·평시), `RiskLevel`(DB와 같은 5단계 normal·watch·advisory·warning·critical), `Specialist`, `Mobility`.
 
 ## 4. 행동 권고 판단 트리 (규칙, B4에서 구현)
 
@@ -114,53 +114,54 @@ flowchart TD
 "이동 가능"은 `UserProfile`(보행 장애, 휠체어, 동반자)과 경로 존재 여부로 판단. 정보가 없으면 질문한다.
 행동 권고 agent는 `get_action_guides`로 가져온 원문만 인용하고, 인용한 id를 `ActionPlan.guide_ids`에 남긴다.
 
-## 5. DB 조회 tool 명세 — A와 합의 필요
+## 5. DB 조회 tool 명세 — 직접 조회 (B3, 2026-10-01 결정)
 
-반환 예시는 `guardian_ai/tools.py`의 목업. A1 API 명세와 대조 후 키 이름을 맞춘다.
-공통: 좌표 WGS84, 시간 ISO 8601(+09:00), 모든 응답에 `source` 포함(evidence용).
+**조회 방식**: AI 프로세스가 PostgreSQL을 **읽기 전용 계정으로 직접 조회**한다 (기획서 "데이터베이스와 AI agent를 연결").
+A의 FastAPI는 앱·웹이 부르는 창구로 남고, AI는 거치지 않는다. 쓰기는 A의 수집기·판정 엔진만 한다.
+- 계정: `db/init/07_ai_readonly.sh`가 만든 `AI_DB_USER`(기본 guardian_ai) — public 스키마 SELECT만, 계정 기본값과
+  접속 옵션 두 겹으로 읽기 전용 트랜잭션, 조회 3초 제한. 이미 만든 DB에는 스크립트를 한 번 직접 실행한다.
+- 코드: `guardian_ai/db.py`(커넥션 풀, 첫 조회 때 연결), `guardian_ai/tools.py`(SQL과 결과 변환).
+- A와의 약속: AI가 아래 표·뷰를 읽는다. **컬럼 이름이나 의미를 바꿀 때는 B에게 알린다.**
 
-| tool | 인자 | 반환 핵심 키 | 테이블/출처 | 합의 |
-| --- | --- | --- | --- | --- |
-| `get_risk_at` | lat, lon, radius_m | disaster, level, distance_m, reason, assessed_at | risk_assessments (Risk engine) | [ ] |
-| `get_observations` | kind(rain·wind·water_level·wave·tide), lat, lon | value, unit, station, observed_at | observations (디지털 트윈, 기상청) | [ ] |
-| `get_weather_warnings` | region | type, level, status(planned·active·lifted), issued_at, lifted_at | weather_warnings (기상청) | [ ] |
-| `get_disaster_messages` | region, hours | sent_at, sender, text | disaster_messages (재난안전24) | [ ] |
-| `get_hazard_zones` | kind(landslide·flood), lat, lon, radius_m | zone_id, grade, contains_point, distance_m | hazard_zones (PostGIS) | [ ] |
-| `get_facilities` | kind(shelter·medical·manhole), lat, lon, limit | name, lat, lon, distance_m, phone | facilities | [ ] |
-| `get_life_safety` | lat, lon | pm10, pm25, uv 각 value·grade | observations | [ ] |
-| `get_user_profile` | user_id | UserProfile 키 | users | [ ] |
-| `request_route` | origin, destination, profile(adult·elderly, `route_profile(user)`로 결정 — 65세 이상·보행 불편·휠체어·동반자 → elderly), avoid_manholes | available, distance_m, duration_s, ascend_m, descend_m, max_slope_pct, avoided(피한 위험 구역 id), still_inside(어쩔 수 없이 지나는 구역 id), geometry(인코딩된 polyline). 실패 시 available=false, reason | route 서비스 `POST /api/route` → GraphHopper (B6·B7 **실제 구현**, 위험 구역은 임시 GeoJSON → A7 이후 hazard_zones·facilities) | [ ] |
-| `get_action_guides` | disaster, phase, audience | id, text, source_name, source_url | action_guides | [ ] |
+공통: 반환은 dict `{"available": True, ..., "source": <테이블>}`, 실패하면 예외 대신 `{"available": False, "reason"}`.
+좌표 WGS84, 시간 ISO 8601(+09:00), 거리 m 정수. 위험 단계는 DB와 같은 5단계 `normal < watch < advisory < warning < critical`.
 
-조회 방식 제안: AI 프로세스가 **PostgreSQL을 직접 읽기 전용으로 조회**(읽기 전용 계정). FastAPI를 거치지 않아 지연이 줄고, 쓰기는 A의 수집 프로세스만 한다. 경로만 GraphHopper HTTP 호출.
+| tool | 인자 | 반환 핵심 키 (`items[]`) | 읽는 표 |
+| --- | --- | --- | --- |
+| `get_risk_at` | lat, lon, radius_m=500 | max_level, data_stale(판정 30분 이상 멈춤), items: hazard, level, label, reason(엔진 근거 문장), metric·value·unit, distance_m, observed_at, simulated | risk_assessments, ingest_runs |
+| `get_observations` | kind(water_level·rain·wind·uv·air), lat, lon | station, metric, value, unit, level_label(포항 DT 등급), observed_at, distance_m, stale(2시간) | v_latest_observations |
+| `get_weather_warnings` | lifted_hours=24 | hazard, level, region, headline, status(planned·active·lifted), issued_at, lifted_at | weather_warnings |
+| `get_disaster_messages` | hours=6 | sent_at, sender, category, hazard, alert_class, text | disaster_messages (재난안전24 키 받기 전 비어 있음) |
+| `get_hazard_zones` | lat, lon, radius_m, kind=landslide | zone_id, name, grade, contains_point, distance_m | hazard_zones (산사태 488곳, 침수 구역은 A가 삭제) |
+| `get_facilities` | kind(shelter·medical·manhole), lat, lon, limit, shelter_type | facility_id, name, lat, lon, distance_m + 종류별(대피소 종류·수용인원, 응급실 직통) | shelters, medical_facilities, manholes |
+| `get_life_safety` | lat, lon | uv·pm10·pm25 각 value·grade (미세먼지는 수집 권한 전까지 None) | v_latest_observations |
+| `get_action_guides` | disaster, phase, level, targets | `ActionGuide`와 같은 키: id, min_level, targets, priority, title, content, voice_text, source_name | action_guides (51건) |
+| `get_user_profile` | user_id | UserProfile 키 | **목업** — 지금은 앱이 요청에 프로필을 실어 보낸다 |
+| `request_route` | origin, destination, profile(adult·elderly), avoid_manholes | available, distance_m, duration_s, ascend_m, descend_m, max_slope_pct, avoided, still_inside, geometry | route 서비스 HTTP (B6·B7) |
+
+데이터에서 알게 된 것 (2026-10-01): 구룡포 대피소 19곳은 지진해일(17)·민방위(2)만 지정, **침수 지정 대피소 없음** →
+침수 안내는 `shelter_type=None`으로 가까운 대피소를 쓴다. 의료시설 5곳은 포항 시내 응급실(구룡포에서 약 20km).
+조위·파고는 아직 수집하지 않는다.
 
 ## 6. 행동요령 데이터 형식 (`ActionGuide`)
 
-원문 수집은 별도 작업. 저장 형식만 확정한다.
+A7이 `action_guides` 표에 적재한 형식을 그대로 쓴다 (2026-10-01, 이전 문자열 id·audience 안을 대체).
 
 ```json
-{
-  "id": "flood.during.elderly.01",
-  "disaster": "flood",
-  "phase": "during",
-  "audience": "elderly",
-  "text": "(원문 그대로)",
-  "source_name": "포항시 재난안전",
-  "source_url": "https://...",
-  "retrieved_at": "2026-09-24T10:00:00+09:00"
-}
+{"id": 1, "disaster": "heavy_rain", "phase": "during", "min_level": "advisory", "targets": ["all"], "priority": 10,
+ "title": "호우가 시작되면", "content": "(원문 그대로)", "voice_text": "(음성용 짧은 문장)",
+ "source_name": "포항시 재난안전 홈페이지", "source_url": null}
 ```
 
-- `disaster`: landslide, heavy_rain, flood, strong_wind, typhoon, fine_dust, uv
-- `phase`: before, during, after
-- `audience`: general, elderly, disabled, tourist, fisher
-- id 규칙: `{disaster}.{phase}.{audience}.{순번}`
+- `phase`: before, during, after / `min_level`: 이 단계 이상일 때만 보여 준다
+- `targets`: all, resident, tourist, fisher, vessel_owner, coastal, farmer, driver (`all`은 항상 포함해 조회)
+- `priority`: 낮을수록 먼저. 행동 권고 agent는 이 문장만 인용한다
 
 ## 7. 열린 질문
 
 1. 재난 '후' 판정 기간 N시간 (예: 특보 해제 후 24시간)?
 2. 맨홀 위치 데이터를 포항 디지털 트윈이 제공하는가? (A7과 동일 질문)
-3. AI의 DB 직접 조회(읽기 전용) vs FastAPI 경유 — A와 결정
+3. ~~AI의 DB 직접 조회(읽기 전용) vs FastAPI 경유~~ → 직접 조회로 결정 (2026-10-01, 5절)
 4. 한 질문당 LLM 호출이 최소 5회. 음성 대화에서 지연이 크면 alert 모드처럼 의도 검증 생략, 또는 단순 질문은 다듬기 생략 검토 (B5에서 측정 후 결정)
 5. 대화 중 알게 된 사용자 정보(예: "다리가 불편해요")를 `users`에 저장하는 주체 — 관리자 agent가 tool로 쓰기? A와 결정
 

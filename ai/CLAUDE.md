@@ -4,8 +4,8 @@
 1. Read `.claude/docs/timeline.md` → status table, "다음 세션 시작점", "이월 항목", work log.
 2. From `코드/`: `git pull` (teammates push to `main`), then `docker compose up -d` and `docker compose ps`
    (db, api, ai all healthy). If `.env` changed since the ai container started: `docker compose up -d --force-recreate ai`.
-3. Baseline tests: `.venv/bin/python -m pytest -q` → **34 passed, 13 deselected** ("1 skipped" if `OPENAI_API_KEY`
-   is empty). `-m live` → 13 passed on gpt-6-luna (2026-10-01, ~2원, ~1.3 s/call).
+3. Baseline tests: `.venv/bin/python -m pytest -q` → **49 passed, 15 deselected**. `-m db` → 2 passed (needs local db +
+   `AI_DB_*` in `.env`). `-m live` → 13 passed on gpt-6-luna (2026-10-01, ~2원, ~1.3 s/call).
 3a. **OpenAI spend check — warn the user** (user's budget 200,000원/month, user request 2026-10-01): read
    `curl -s localhost:8001/api/ai/usage` (local container), the VM's same URL over ssh, and
    `.venv/bin/python -c "from guardian_ai.usage import UsageTracker; print(UsageTracker().summary())"` (local runs/live
@@ -35,8 +35,14 @@
   Details and carry-over items: `.claude/docs/timeline.md`.
 - AI path today: `POST /api/chat` (api.py:34) → `ChatService.chat` (service.py:60) → graph with
   `make_manager(OpenAIClassifier())` (graph.py:144, llm.py:112). Only the manager is real; specialists,
-  advisor, checks, polish are stubs (graph.py:223-265), tools return mocks sharing `_NOW` (tools.py:17).
-  So `answer` is placeholder text like "rain_flood_agent stub"; `selected_agents` is the real output.
+  advisor, checks, polish are stubs (graph.py:223-265). So `answer` is placeholder text like "rain_flood_agent stub";
+  `selected_agents` is the real output.
+- **B3 in progress (2026-10-01)**: tools read PostgreSQL directly with a read-only role (user decision, matches the
+  proposal). `db.py` = lazy psycopg pool from `AI_DB_*` (compose sets `AI_DB_HOST=db`); role made by
+  `../db/init/07_ai_readonly.sh` (SELECT-only + read-only transactions, run once by hand on existing DBs).
+  Every DB tool takes `fetch=` (fake in tests) and returns `{"available": False, "reason"}` on failure.
+  `RiskLevel` now = DB 5 levels (`.rank` for comparisons); `ActionGuide` = `action_guides` row. Only
+  `get_user_profile` is still a mock. Next: real `rain_flood_agent` with Evidence, then hallucination check.
 - LLM: OpenAI since 2026-10-01 (user decision; Gemini free tier was 20 calls/day). `OPENAI_API_KEY` /
   `OPENAI_MODEL=gpt-6-luna` / `OPENAI_TIMEOUT_MS=10000` in `../.env`. Responses API `responses.parse` with
   `text_format=Classification`; gpt-6-luna is a reasoning model → no `temperature`, classifier uses
@@ -67,12 +73,13 @@ Flutter app/web (teammate C). This lane (B) also owns GraphHopper routing and GC
 | --- | --- |
 | `guardian_ai/state.py` | Enums, Pydantic domain models, reducers, `GuardianState` (state.py:175), retry limits (state.py:211) |
 | `guardian_ai/graph.py` | Node functions (stubs), routing functions, `build_graph()` (graph.py:400) |
-| `guardian_ai/tools.py` | DB lookup tool specs with mock returns; per-agent tool allowlist `AGENT_TOOLS` (tools.py:143) |
+| `guardian_ai/tools.py` | Read-only DB tools (risk, observations, warnings, messages, zones, facilities, life safety, action guides), `request_route`; allowlist `AGENT_TOOLS` |
+| `guardian_ai/db.py` | Read-only PostgreSQL access (`Database`, `default_fetch`, `conninfo()` from `AI_DB_*`) |
 | `guardian_ai/usage.py` | OpenAI token/cost ledger per month (`data/openai_usage.json`, volume `ai-data` in compose), warns at 50/80/100% of `OPENAI_BUDGET_KRW`; `GET /api/ai/usage` |
 | `guardian_ai/llm.py` | OpenAI client, `OpenAIClassifier` (llm.py:112), prompt (`SYSTEM_PROMPT` :53, `build_prompt` :91) |
 | `guardian_ai/service.py` | `ChatRequest`/`ChatResponse`, `ChatService` (service.py:49), checkpointer + `STATE_TYPES` allowlist |
 | `guardian_ai/api.py` | FastAPI app for the `ai` container: `/api/chat`, `/api/ai/health` |
-| `tests/` | Topology (stub overrides), manager/API (fakes, offline), `test_routing_live.py` (real OpenAI, `live` marker) |
+| `tests/` | Topology (stub overrides), manager/API (fakes, offline), `test_tools_db.py` (fake fetch), `test_tools_db_live.py` (local DB, `db` marker), `test_routing_live.py` (real OpenAI, `live` marker) |
 | `Dockerfile` | `ai` container, port 8001 (service defined in `../docker-compose.yml`) |
 | `docs/agent-design.md` | Team-facing design doc (Korean): graph, node I/O, decision tree, tool contract, open questions |
 | `.claude/docs/` | Claude-facing notes: timeline/progress, architectural patterns |
@@ -83,6 +90,7 @@ Run from this directory (`코드/ai`). A project-local venv is used; do not inst
 uv venv .venv && uv pip install -p .venv -e ".[dev]"   # setup (already done once)
 .venv/bin/python -m pytest -q                         # offline tests (live excluded by addopts)
 .venv/bin/python -m pytest -m live -q                 # real OpenAI routing, 13 calls (paid, tiny)
+.venv/bin/python -m pytest -m db -q                   # tools against local DB (localhost:5433) + read-only check
 docker compose logs -f ai | grep 라우팅                # (from 코드/) per-question routing: [분류기]/[키워드 대체]/[alert 규칙]
 .venv/bin/python -c "from guardian_ai.graph import build_graph; print(build_graph().get_graph().draw_mermaid())"  # dump graph
 ```

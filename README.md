@@ -12,7 +12,7 @@
 | `route/` | 경로 안내 서버 (`/api/route`, GraphHopper 앞단) | B |
 | `graphhopper/` | GraphHopper 경로 엔진 설정, 구룡포 OSM 도로망 받기 스크립트 | B |
 | `app/` | Flutter 앱·웹 | C |
-| `db/init/` | DB 최초 생성 시 실행되는 SQL: PostGIS 확장, 스키마(01), 판단 기준·관측소·맨홀(02), 산사태 취약지역(03), 행동요령(04), 대피소(05), 응급의료(06). 이후 바뀐 시드는 `docker compose run --rm loader`로 다시 적재 | A |
+| `db/init/` | DB 최초 생성 시 실행되는 SQL: PostGIS 확장, 스키마(01), 판단 기준·관측소·맨홀(02), 산사태 취약지역(03), 행동요령(04), 대피소(05), 응급의료(06), AI 읽기 전용 계정(07, B). 이후 바뀐 시드는 `docker compose run --rm loader`로 다시 적재 | A (07은 B) |
 | `secrets/` | 서비스 계정 키 등 비밀 파일 (커밋 안 됨) | - |
 
 ## 처음 설정
@@ -86,6 +86,7 @@ curl -X POST localhost:8002/api/route -H 'Content-Type: application/json' \
 - 경로 응답의 `geometry`는 인코딩된 polyline(Google 형식, 정밀도 1e5)이다. 앱에서 풀어서 지도에 그린다.
 - AI가 OpenAI(`gpt-6-luna`)를 쓰려면 `.env`의 `OPENAI_API_KEY`가 필요하다. 없으면 키워드 분류로 동작한다.
 - DB 접속: `localhost:5433`, 사용자·비밀번호·DB 이름은 `.env`의 `DB_*`
+- AI는 DB를 **읽기 전용 계정**(`.env`의 `AI_DB_USER`·`AI_DB_PASSWORD`)으로 직접 읽는다. 이 계정은 SELECT만 할 수 있다.
   (5432는 로컬에 설치된 PostgreSQL과 겹칠 수 있어 5433을 쓴다)
 
 ## 자주 쓰는 명령
@@ -100,6 +101,8 @@ docker compose logs -f collector                      # 수집·위험 판정 �
 docker compose exec api python -m collector --once    # 수집 전체 1회 즉시 실행 (결과 표)
 docker compose run --rm loader                        # 정적 데이터(대피소·위험지역·행동요령·판단 기준) 다시 적재, 관측값은 유지
 ```
+- **AI 읽기 전용 계정 만들기 (2026-10-01 이전에 만든 DB 한 번만)**: `.env`에 `.env.example`의 `AI_DB_USER`·`AI_DB_PASSWORD` 두 줄을 넣고
+  `docker compose up -d db` → `docker compose exec db sh /docker-entrypoint-initdb.d/07_ai_readonly.sh`. 새로 만드는 DB는 자동.
 - **`db/init`의 시드(02~)가 바뀌었으면** `docker compose run --rm loader` (DB 데이터 유지). **스키마(01)가 바뀌었으면** loader가 알려 주고 멈추므로 `docker compose down -v` 후 다시 `up`.
 - 서버 API 대부분은 아직 목업(응답 헤더 `X-Mock: true`)이다. 실데이터: `/api/health`, `/api/v1/risk*`, 지도 레이어 `stations`·`landslide_zones`·`risk_areas`·`shelters`·`medical`·`manholes`. 자세한 건 `server/README.md`.
 - `server/app/`·`server/collector/`·`server/risk/`(api), `ai/guardian_ai/`, `route/guardian_route/` 코드를 고치면 해당 서버가 자동으로 재시작된다 (재빌드 불필요).

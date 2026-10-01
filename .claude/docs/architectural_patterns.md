@@ -46,7 +46,8 @@ log, return a reduced-but-valid result.
   (route/guardian_route/service.py:152).
 - Route engine down/slow → 503 with a Korean reason, never a made-up path (route/guardian_route/api.py:45-50, :58-63).
 - Route server down → the AI `request_route` tool returns `available: False` with a reason instead of raising
-  (ai/guardian_ai/tools.py `request_route`); ai starts without route.
+  (ai/guardian_ai/tools.py `request_route`); ai starts without route. Every DB tool does the same
+  (`_unavailable` in ai/guardian_ai/tools.py); the AI's DB pool opens on first query, so ai starts without db.
 - LLM failure → keyword classification (ai/guardian_ai/graph.py:185-189).
 - Verification exhausted → safe fixed answer node (ai/guardian_ai/graph.py:326).
 - Timeouts are short by default (ai/guardian_ai/llm.py:24) so fallback kicks in quickly.
