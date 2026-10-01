@@ -48,10 +48,10 @@ def make_checkpointer() -> InMemorySaver:
 
 class ChatService:
     def __init__(self, classifier: G.Classifier | None = None, checkpointer=None):
-        """classifier를 안 주면 Gemini 분류기를 쓴다 (GEMINI_API_KEY 필요)."""
+        """classifier를 안 주면 OpenAI 분류기를 쓴다 (OPENAI_API_KEY 필요)."""
         if classifier is None:
-            from .llm import GeminiClassifier   # 키가 없는 테스트 환경에서 import 오류를 피한다
-            classifier = GeminiClassifier()
+            from .llm import OpenAIClassifier   # 키가 없는 테스트 환경에서 import 오류를 피한다
+            classifier = OpenAIClassifier()
         self.app = G.build_graph(
             {G.MANAGER: G.make_manager(classifier)},
             checkpointer=checkpointer or make_checkpointer(),

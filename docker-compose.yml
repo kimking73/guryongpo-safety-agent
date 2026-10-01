@@ -95,13 +95,16 @@ services:
         condition: service_healthy
 
   ai:
-    # LangGraph 멀티 agent + Gemini. 배포 시 Caddy가 /api/chat을 여기로 넘긴다 (B10).
+    # LangGraph 멀티 agent + OpenAI. 배포 시 Caddy가 /api/chat을 여기로 넘긴다 (B10).
     build: ./ai
     restart: unless-stopped
     env_file: .env
     environment:
       # request_route tool이 부르는 경로 안내 서버. 꺼져 있어도 ai는 뜨고, 경로만 "지금 안내 불가"로 답한다.
       ROUTE_URL: http://route:8002
+    volumes:
+      # OpenAI 사용량·예상 비용 기록(openai_usage.json). 재시작·재빌드해도 남는다
+      - ai-data:/srv/data
     ports:
       - "${AI_PORT:-8001}:8001"
     healthcheck:
@@ -144,3 +147,4 @@ services:
 
 volumes:
   db-data:
+  ai-data:

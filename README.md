@@ -84,7 +84,7 @@ curl -X POST localhost:8002/api/route -H 'Content-Type: application/json' \
   지금 위험 구역은 **임시 데이터**(`route/data/hazards.sample.geojson`)이며, 목록은 http://localhost:8002/api/route/hazards 에서 볼 수 있다.
 - GraphHopper 지도 화면(로컬 확인용): http://localhost:8989/maps/ (끝의 `/` 필수. 없으면 빈 화면)
 - 경로 응답의 `geometry`는 인코딩된 polyline(Google 형식, 정밀도 1e5)이다. 앱에서 풀어서 지도에 그린다.
-- AI가 Gemini를 쓰려면 `.env`의 `GEMINI_API_KEY`가 필요하다. 없으면 키워드 분류로 동작한다.
+- AI가 OpenAI(`gpt-6-luna`)를 쓰려면 `.env`의 `OPENAI_API_KEY`가 필요하다. 없으면 키워드 분류로 동작한다.
 - DB 접속: `localhost:5433`, 사용자·비밀번호·DB 이름은 `.env`의 `DB_*`
   (5432는 로컬에 설치된 PostgreSQL과 겹칠 수 있어 5433을 쓴다)
 
@@ -110,7 +110,7 @@ docker compose run --rm loader                        # 정적 데이터(대피�
 
 - `.env`는 절대 커밋하지 않는다. `.env.example`은 항상 모든 키를 담는다.
 - 새 키를 추가하면 **같은 커밋에서** `.env.example`에도 추가한다 (값은 비우거나 로컬 기본값).
-- 이름은 대문자 스네이크 + 영역 접두사: `DB_`, `API_`, `GCP_`, `FIREBASE_`, `GEMINI_`, `ROUTE_`, `GRAPHHOPPER_`, `KMA_`, `POHANG_TWIN_`, `SAFETY24_`
+- 이름은 대문자 스네이크 + 영역 접두사: `DB_`, `API_`, `GCP_`, `FIREBASE_`, `OPENAI_`, `ROUTE_`, `GRAPHHOPPER_`, `KMA_`, `POHANG_TWIN_`, `SAFETY24_`
 - 파일로 된 비밀은 `secrets/`에 두고 `.env`에는 경로만 쓴다.
 - 주석은 반드시 별도 줄에 쓴다. `KEY=  # 설명`처럼 값 뒤에 붙이면 docker가 주석까지 값으로 읽는다.
 - 실제 키 값은 팀 비공개 채널로만 공유한다. 저장소·이슈·PR·공개 채팅에 붙이지 않는다.

@@ -21,10 +21,10 @@
 | B3 | 5–6 | 침수 agent·환각 검증 (강수+수위 답변, evidence 대조, 최대 반복) | B2, A3 | 틀린 답 주입 시 검증에서 걸러짐 | 보류 (A1·A3 이후, 사용자 결정 2026-09-26) |
 | B4 | 8–10 | 재난 agent 확장·행동 권고 (산사태·강풍태풍·생활안전·위치경로, 규칙 기반 판단 트리, 선제 경고 메시지 함수) | A4, B3, A7 | 재난별 시나리오에 규칙대로 응답 | 미착수 |
 | B6 | 8–10 | GraphHopper 구축 (OSM 도로망, 위험지역·맨홀 회피, /route) | A1, A3 | 위험 구역 우회 경로 반환 | **완료** (2026-09-26, 임시 위험지역 데이터) |
-| B5 | 11–13 | 의도 검증·다듬기·음성 (STT/TTS, /voice, 지연 측정 → 필요 시 gemini-3.1-live-preview) | B4 | 음성 왕복 동작, 지연 기록 | 미착수 |
+| B5 | 11–13 | 의도 검증·다듬기·음성 (STT/TTS, /voice, 지연 측정 → 필요 시 OpenAI Realtime) | B4 | 음성 왕복 동작, 지연 기록 | 미착수 |
 | B7 | 11–13 | 경로 가중치·DEM·재계산 (프로필별 가중치, /route/check) | B6, B4 | 프로필별 다른 경로 | **진행 중** (규칙·/route/check·AI 연결 완료, 국토지리정보원 공개DEM 90m 적용, 5m는 이월) |
 | B10 | 11–12 | GCP VM·도메인·HTTPS (Caddy, / → 웹, /api → FastAPI) | B8, B6 | 외부에서 /api/health 접속 | **진행 중** (VM·도커·전 서비스 실행 완료, 고정 IP·Caddy·도메인 남음) |
-| B9 | 15–16 | 배포 안정화 (재시작 정책, 헬스체크, API 한도, Gemini 속도 제한, Uptime check) | A9 | 강제 종료 후 자동 복구 | 미착수 |
+| B9 | 15–16 | 배포 안정화 (재시작 정책, 헬스체크, API 한도, OpenAI 사용 한도, Uptime check) | A9 | 강제 종료 후 자동 복구 | 미착수 |
 
 A 작업 중 B와 맞물리는 것: **A7**(Day 3–6, 정적 데이터 적재)에 행동요령 원문 수집 포함 → `action_guides` 테이블, B4의 `get_action_guides`가 사용.
 
@@ -39,7 +39,7 @@ A 작업 중 B와 맞물리는 것: **A7**(Day 3–6, 정적 데이터 적재)�
    → 완료 기준은 충족. 사용자에게 B7 완료 처리 여부를 묻는다(라이브 타임라인 포함).
 2. 5m DEM을 구하면(이월 항목) `graphhopper/dem/ngii/`의 90m 파일을 바꾸고 `build_dem.sh` → `docker compose restart graphhopper`,
    `route/guardian_route/profiles.py` 노약자 경사 기준(6·10%)과 계단 배수(0.3)를 실제 경로를 보며 조정.
-- 이후 후보: B3(A1·A3 확인, Gemini 유료 전환 결정) 또는 B4(재난 agent 확장 — 위치·경로 agent가 `request_route`·`route_profile` 사용).
+- 이후 후보: B3(A1·A3 확인, LLM은 OpenAI gpt-6-luna로 전환 완료) 또는 B4(재난 agent 확장 — 위치·경로 agent가 `request_route`·`route_profile` 사용).
 - 위험 구역은 지금 항상 피한다(Risk engine 활성 판정과 연결은 A3·A4 이후). A7 적재 후 `hazards.py`에 PostGIS 읽기 추가.
 
 - **배포 VM (2026-10-01)**: `guryongpo-safety-agent` · e2-medium · asia-northeast3-b · Ubuntu 22.04 · 50GB · 스왑 2GB.
@@ -69,9 +69,11 @@ A 작업 중 B와 맞물리는 것: **A7**(Day 3–6, 정적 데이터 적재)�
       다운로드에 INNORIX-Agent 필요(국토정보플랫폼 공지 notice_id=1408, Mac·Windows·Linux)
 - [ ] 공개DEM 북쪽 도엽 추가 — 35903은 북위 36.00°까지라 도로망 북쪽 4km(36.00~36.04)가 빠져 SRTM으로 채워짐.
       구룡포 시가지(약 35.99°)는 덮인다. 5m를 구하면 함께 해결
-- [ ] gemini-3.6-flash로 `pytest -m live` 재실행 (무료 한도 회복 또는 유료 전환 후). 지금까지 5/5
-- [ ] 시연 전 `.env`를 `GEMINI_MODEL=gemini-3.6-flash`, `GEMINI_TIMEOUT_MS=10000`으로 되돌리기 (지금 Lite·60초 임시)
-- [ ] Gemini API 하루 요청 한도(비용 차단) 설정 — 유료 전환 시 GCP 콘솔 Quotas에서
+- [ ] **OpenAI 전환을 로컬·VM 컨테이너에 반영** — 키 넣음·live 13/13 통과(2026-10-01). 남은 것: 로컬 `docker compose up -d --build ai`,
+      VM은 `.env` 복사(해시 비교) 후 `docker compose -f docker-compose.yml up -d --build ai`
+- [ ] OpenAI 월 사용 한도 — 키가 다른 사람 것이라 대시보드 한도는 보류(사용자 결정). 대신 `usage.py`가 예상 비용을 세고
+      월 20만 원의 50·80·100%에서 경고. 키 주인에게 전용 프로젝트·한도·새 키를 부탁하는 안은 열어 둠
+- [ ] B3 환각 검증 테스트 결과를 보고 부족한 단계만 `gpt-6.1-sol`로 올릴지 결정 (지금 전 단계 gpt-6-luna)
 - [ ] A와 DB 조회 방식 합의 (읽기 전용 직접 조회 vs FastAPI 경유, `agent-design.md` 7절 3번) — 미배정
 - [ ] C와 `/api/chat` 응답 형식 합의 — 목업의 카드형(판정·수치 칩·할 일·출처·버튼)은 B5에서 확장 (`agent-design.md` 8절)
 - [ ] 조위(만조) 데이터: 기획서·목업은 쓰지만 수집 목록에 없음 → A에게 제안 (tools에는 `tide` 종류만 있음)
@@ -104,3 +106,5 @@ A 작업 중 B와 맞물리는 것: **A7**(Day 3–6, 정적 데이터 적재)�
 - 2026-09-26 휠체어 경로 유형을 이월 항목(나중에 고려)으로 기록 — 이전 규칙과 검증 쟁점 포함.
 - 2026-09-27 노약자 계단 배수 0.3 → 0.5: 기본 도보 모델이 계단을 3km/h(도로 5km/h)로 계산해 0.3이면 같은 경사·같은 길이에서 계단이 주택가 급경사 도로보다 1m당 약 11% 비쌌다(선호 미보장). 1m 비용 부등식 테스트 추가. 참고: GraphHopper average_slope는 5비트라 31%가 최대(그 이상도 31로 저장), 8m 미만 구간은 경사 0.
 - 2026-10-01 B10(진행): e2-medium VM에 스왑 2GB·Docker 29.8/Compose v5.5 설치, 저장소 clone, `.env`·firebase 키·OSM·DEM(dem-hgt) 복사(해시 확인, 600 권한), 서버 모드로 6개 서비스 healthy. 실측 메모리 합계 약 0.6GB(graphhopper 364MB) → e2-medium 충분. 8000–8002는 GCP 방화벽으로 외부 차단 확인. 기상청·포항 DT 키 반영 — 일부 API 활용신청 미완, 생활안전24 키 없음(이월 항목).
+- 2026-10-01 LLM을 Gemini → OpenAI `gpt-6-luna`로 전환(사용자 결정, 가성비 기준 — 입력 $0.1·출력 $0.5/1M, 질문당 약 4원 추정). `llm.py` `OpenAIClassifier`(Responses API 구조화 출력, 추론 effort low, temperature 없음, SDK 재시도 끔), `.env.example` `OPENAI_*`, 테스트 가짜 클라이언트 교체. 오프라인 30 통과, live는 키 받은 뒤.
+- 2026-10-01 OpenAI 사용량 경고: `usage.py`(응답 usage → 모델 단가·환율 1,400원으로 예상 비용, 월별 파일 누적, 월 예산 `OPENAI_BUDGET_KRW`=20만 원의 50·80·100%에서 WARNING, 호출은 막지 않음), `GET /api/ai/usage`, compose `ai-data` 볼륨. live 라우팅 13/13 통과 — 13회 입력 10,944·출력 717 토큰, 약 2원(호출당 0.16원). 테스트 34 + live 13.

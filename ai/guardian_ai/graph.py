@@ -84,10 +84,10 @@ Node = Callable[[GuardianState], dict]
 # ===========================================================================
 
 # 질문 분류기의 형태: state를 받아 호출할 전문 agent 목록을 돌려준다.
-# 실제 서비스는 Gemini 분류기(llm.py)를, 테스트·장애 대비는 키워드 분류기를 쓴다.
+# 실제 서비스는 OpenAI 분류기(llm.py)를, 테스트·장애 대비는 키워드 분류기를 쓴다.
 Classifier = Callable[[GuardianState], list[Specialist]]
 
-# 키워드 분류: Gemini가 없거나 실패했을 때 쓰는 대체 수단. 테스트의 기본 분류기이기도 하다.
+# 키워드 분류: LLM이 없거나 실패했을 때 쓰는 대체 수단. 테스트의 기본 분류기이기도 하다.
 _KEYWORDS = {
     Specialist.LANDSLIDE: ["산사태", "산", "토사"],
     Specialist.RAIN_FLOOD: ["비", "호우", "침수", "물", "수위"],
@@ -148,7 +148,7 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
         LangGraph 노드는 state 하나만 받는 함수여야 한다. 그런데 manager는 "어떤 분류기를 쓸지"도
         알아야 한다. 그래서 바깥 함수가 분류기를 받아 두고, 안쪽 manager가 그것을 기억해서 쓴다(클로저).
         - 테스트·기본값: make_manager(keyword_classify)          → 이 함수 바로 아래 `manager = ...`
-        - 서비스:       make_manager(GeminiClassifier())         → service.py
+        - 서비스:       make_manager(OpenAIClassifier())         → service.py
     """
 
     def manager(state: GuardianState) -> dict:
@@ -179,11 +179,11 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
             # alert 모드: 사용자 질문이 없다 → LLM 없이 규칙표(ALERT_AGENT)로 고른다.
             selected, how = alert_agents(state["risk_event"]), "alert 규칙"
         else:
-            # chat 모드: 분류기(서비스에서는 Gemini)가 질문을 읽고 고른다.
+            # chat 모드: 분류기(서비스에서는 OpenAI)가 질문을 읽고 고른다.
             try:
                 selected, how = classify(view), "분류기"
             except Exception:
-                # Gemini 시간 초과·키 오류·응답 형식 오류 등 무엇이든 → 키워드 분류로 대체.
+                # LLM 시간 초과·키 오류·응답 형식 오류 등 무엇이든 → 키워드 분류로 대체.
                 # LLM이 죽어도 답변은 나가야 하므로 예외를 위로 올리지 않는다.
                 logger.exception("질문 분류 실패, 키워드 분류로 대체")
                 selected, how = fallback_classify(view), "키워드 대체"
@@ -191,7 +191,7 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
         # ── 3) 라우팅 로그 (질문마다 한 줄) ─────────────────────────────────
         # `docker compose logs -f ai | grep 라우팅`으로 볼 수 있다.
         # 예) 라우팅 [분류기] '비 많이 와요?' → ['rain_flood_agent'] (강수 관련 질문)
-        # reason: GeminiClassifier는 마지막 분류 결과를 .last에 저장한다(llm.py). 거기서 선택 이유를 꺼낸다.
+        # reason: OpenAIClassifier는 마지막 분류 결과를 .last에 저장한다(llm.py). 거기서 선택 이유를 꺼낸다.
         #   getattr를 두 번 쓰는 이유: keyword_classify 같은 일반 함수에는 .last가 없고,
         #   .last가 None일 수도 있다. 어느 경우든 오류 없이 ""가 되게 한다.
         reason = getattr(getattr(classify, "last", None), "reason", "") if how == "분류기" else ""
@@ -216,7 +216,7 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
     return manager
 
 
-# 기본 manager: 키워드 분류. 서비스는 service.py에서 Gemini 분류기를 넣은 manager로 바꿔 끼운다.
+# 기본 manager: 키워드 분류. 서비스는 service.py에서 OpenAI 분류기를 넣은 manager로 바꿔 끼운다.
 manager = make_manager(keyword_classify)
 
 

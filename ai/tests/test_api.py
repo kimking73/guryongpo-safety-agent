@@ -1,4 +1,4 @@
-"""AI 서버 /api/chat 왕복 (Gemini 대신 키워드 분류기)."""
+"""AI 서버 /api/chat 왕복 (LLM 대신 키워드 분류기)."""
 
 from fastapi.testclient import TestClient
 

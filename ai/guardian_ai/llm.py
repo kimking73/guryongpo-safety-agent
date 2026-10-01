@@ -1,10 +1,10 @@
-"""Gemini 호출.
+"""OpenAI 호출 (2026-10-01 Gemini → OpenAI 전환).
 
 관리자 agent의 질문 분류(B2)부터 시작한다. 이후 전문 agent·검증·다듬기 노드도 여기의 클라이언트를 쓴다.
-API 키는 환경 변수 GEMINI_API_KEY (루트 .env), 모델은 GEMINI_MODEL.
+API 키는 환경 변수 OPENAI_API_KEY (루트 .env), 모델은 OPENAI_MODEL.
 
 흐름: 질문·사용자 정보·이전 대화 → build_prompt()로 요청 본문 작성
-      → GeminiClassifier가 SYSTEM_PROMPT와 함께 Gemini에 보냄
+      → OpenAIClassifier가 SYSTEM_PROMPT와 함께 OpenAI Responses API에 보냄
       → Classification(JSON)으로 받아 호출할 전문 agent 목록을 돌려준다.
 호출이 실패하면(시간 초과·키 없음 등) graph.make_manager가 키워드 분류로 대체한다.
 """
@@ -13,22 +13,25 @@ from __future__ import annotations
 
 import os
 
-from google import genai
-from google.genai import types
+from openai import OpenAI
 from pydantic import BaseModel, Field
 
 from .state import GuardianState, Specialist, UserProfile
+from .usage import UsageTracker, get_tracker
 
-DEFAULT_MODEL = "gemini-3.6-flash"
-# 재난 상황에서 오래 기다리지 않는다. 넘으면 키워드 분류로 대체. 느린 모델로 테스트할 때만 GEMINI_TIMEOUT_MS로 늘린다.
+# 가성비 기준으로 고른 모델 (가장 싼 6세대). 부족한 단계만 gpt-6.1-sol로 올린다.
+DEFAULT_MODEL = "gpt-6-luna"
+# 재난 상황에서 오래 기다리지 않는다. 넘으면 키워드 분류로 대체. 느린 모델로 테스트할 때만 OPENAI_TIMEOUT_MS로 늘린다.
 DEFAULT_TIMEOUT_MS = 10_000
+# gpt-6-luna는 추론 모델(기본 medium). 분류는 쉬운 작업이라 low로 지연을 줄인다.
+CLASSIFY_REASONING_EFFORT = "low"
 HISTORY_TURNS = 6          # 분류에 참고할 최근 대화 메시지 수
 
 
 class Classification(BaseModel):
-    """관리자 agent의 분류 결과 (Gemini 구조화 출력 스키마).
+    """관리자 agent의 분류 결과 (OpenAI 구조화 출력 스키마).
 
-    Gemini에 response_schema로 넘기면 응답이 이 형태의 JSON으로 강제된다.
+    text_format으로 넘기면 응답이 이 형태의 JSON으로 강제된다.
     Field의 description도 모델에 전달되므로 필드 의미를 설명하는 프롬프트 역할을 한다.
     """
     agents: list[Specialist] = Field(description="호출할 전문 agent. 해당 없으면 빈 목록")
@@ -36,7 +39,7 @@ class Classification(BaseModel):
 
 
 # 전문 agent 역할 (docs/agent-design.md 2절과 맞춘다)
-# 아래 SYSTEM_PROMPT에 "- agent이름: 역할" 목록으로 들어가 Gemini가 고를 기준이 된다.
+# 아래 SYSTEM_PROMPT에 "- agent이름: 역할" 목록으로 들어가 모델이 고를 기준이 된다.
 _AGENT_ROLES = {
     Specialist.LANDSLIDE: "산사태 위험지역, 토사 붕괴, 산 근처 안전",
     Specialist.RAIN_FLOOD: "비·호우·강수량, 침수·수위, 만조와 겹친 침수",
@@ -106,39 +109,42 @@ def build_prompt(state: GuardianState) -> str:
     return "\n".join(lines)
 
 
-class GeminiClassifier:
-    """관리자 agent용 질문 분류기. graph.make_manager(GeminiClassifier())로 쓴다."""
+class OpenAIClassifier:
+    """관리자 agent용 질문 분류기. graph.make_manager(OpenAIClassifier())로 쓴다."""
 
-    def __init__(self, client: genai.Client | None = None, model: str | None = None):
+    def __init__(self, client: OpenAI | None = None, model: str | None = None,
+                 tracker: UsageTracker | None = None):
         # client를 넘기면 그대로 쓴다(테스트에서 가짜 클라이언트 주입용).
-        # 안 넘기면 환경 변수로 실제 Gemini 클라이언트를 만든다.
+        # 안 넘기면 환경 변수로 실제 OpenAI 클라이언트를 만든다.
         if client is None:
-            api_key = os.environ.get("GEMINI_API_KEY")
+            api_key = os.environ.get("OPENAI_API_KEY")
             if not api_key:
-                raise RuntimeError("GEMINI_API_KEY가 없습니다. 루트 .env에 AI Studio 키를 넣으세요.")
-            timeout_ms = int(os.environ.get("GEMINI_TIMEOUT_MS") or DEFAULT_TIMEOUT_MS)
+                raise RuntimeError("OPENAI_API_KEY가 없습니다. 루트 .env에 OpenAI API 키를 넣으세요.")
+            timeout_ms = int(os.environ.get("OPENAI_TIMEOUT_MS") or DEFAULT_TIMEOUT_MS)
             # 응답 대기 한도. 넘으면 예외가 나고 graph 쪽에서 키워드 분류로 넘어간다.
-            client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=timeout_ms))
+            # SDK 기본 재시도(2회)는 한도를 몇 배로 늘리므로 끈다 — 실패하면 바로 키워드 분류.
+            client = OpenAI(api_key=api_key, timeout=timeout_ms / 1000, max_retries=0)
         self.client = client
-        # 모델 우선순위: 인자 > GEMINI_MODEL 환경 변수 > DEFAULT_MODEL
-        self.model = model or os.environ.get("GEMINI_MODEL") or DEFAULT_MODEL
+        # 모델 우선순위: 인자 > OPENAI_MODEL 환경 변수 > DEFAULT_MODEL
+        self.model = model or os.environ.get("OPENAI_MODEL") or DEFAULT_MODEL
         self.last: Classification | None = None   # 디버깅·로그용 마지막 분류 결과
+        # 호출마다 토큰·예상 비용을 누적하고 월 예산의 50·80·100%에서 경고 (usage.py)
+        self.tracker = tracker or get_tracker()
 
     def __call__(self, state: GuardianState) -> list[Specialist]:
         """질문을 분류해 호출할 전문 agent 목록을 돌려준다. 실패하면 예외를 낸다."""
-        response = self.client.models.generate_content(
+        response = self.client.responses.parse(
             model=self.model,
-            contents=build_prompt(state),
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-                response_mime_type="application/json",   # JSON으로만 답하게 하고
-                response_schema=Classification,          # 그 JSON이 Classification 형태를 따르게 한다
-                temperature=0,                           # 같은 질문엔 같은 분류가 나오도록 무작위성 최소화
-            ),
+            instructions=SYSTEM_PROMPT,
+            input=build_prompt(state),
+            text_format=Classification,                       # 응답 JSON이 Classification 형태를 따르게 한다
+            reasoning={"effort": CLASSIFY_REASONING_EFFORT},
+            # temperature는 넣지 않는다: 추론 모델(gpt-6-luna)은 지원하지 않는다
         )
-        # SDK가 JSON을 Classification 객체로 변환해 둔 값. 형식이 어긋나면 None이 올 수 있다.
-        result = response.parsed
+        self.tracker.record(self.model, getattr(response, "usage", None))
+        # SDK가 JSON을 Classification 객체로 변환해 둔 값. 거절·형식 오류면 None이 올 수 있다.
+        result = response.output_parsed
         if not isinstance(result, Classification):
-            raise ValueError(f"분류 결과를 해석하지 못함: {response.text!r}")
+            raise ValueError(f"분류 결과를 해석하지 못함: {response.output_text!r}")
         self.last = result
         return list(dict.fromkeys(result.agents))   # 중복 제거, 순서 유지

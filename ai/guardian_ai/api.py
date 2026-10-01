@@ -12,6 +12,7 @@ from functools import lru_cache
 from fastapi import Depends, FastAPI
 
 from .service import ChatRequest, ChatResponse, ChatService
+from .usage import get_tracker
 
 # guardian_ai 로그(라우팅 결과 등)를 컨테이너 로그에 INFO부터 남긴다
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -29,6 +30,12 @@ def get_service() -> ChatService:
 @app.get("/api/ai/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/api/ai/usage")
+def usage() -> dict:
+    """이번 달 OpenAI 호출 수·토큰·예상 비용과 월 예산 대비 비율 (usage.py)."""
+    return get_tracker().summary()
 
 
 @app.post("/api/chat", response_model=ChatResponse)

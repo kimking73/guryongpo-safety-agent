@@ -54,7 +54,7 @@ log, return a reduced-but-valid result.
 ## 6. Injectable dependencies with production defaults
 - Constructors/factories accept the dependency and build the real one only when omitted:
   `ChatService(classifier=None, checkpointer=None)` (ai/guardian_ai/service.py:50),
-  `GeminiClassifier(client=None, model=None)` (ai/guardian_ai/llm.py:112), `make_manager(classify)` (ai/guardian_ai/graph.py:144),
+  `OpenAIClassifier(client=None, model=None)` (ai/guardian_ai/llm.py:112), `make_manager(classify)` (ai/guardian_ai/graph.py:144),
   `RouteService(client=None, hazards=None)` (route/guardian_route/service.py:81), `GraphHopperClient(..., transport=None)` (route/guardian_route/gh.py:27)
   — tests pass `httpx.MockTransport` as a fake GraphHopper (route/tests/test_route.py:29); `request_route(..., client=None)` likewise takes a fake
   route server (ai/tests/test_request_route.py);

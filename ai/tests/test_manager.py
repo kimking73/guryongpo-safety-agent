@@ -1,4 +1,4 @@
-"""관리자 agent (B2): alert 라우팅 규칙, 대화 간 초기화, 분류기 장애 대체, Gemini 분류기 호출 형태."""
+"""관리자 agent (B2): alert 라우팅 규칙, 대화 간 초기화, 분류기 장애 대체, OpenAI 분류기 호출 형태."""
 
 from datetime import datetime
 from types import SimpleNamespace
@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from guardian_ai import graph as G
-from guardian_ai.llm import Classification, GeminiClassifier, build_prompt
+from guardian_ai.llm import Classification, OpenAIClassifier, build_prompt
 from guardian_ai.service import ChatRequest, ChatService
 from guardian_ai.state import (
     CheckResult,
@@ -118,39 +118,40 @@ def test_checkpointer_restores_state_types_without_warnings(caplog):
 
 def test_classifier_failure_falls_back_to_keywords():
     def broken(state):
-        raise TimeoutError("Gemini 응답 없음")
+        raise TimeoutError("LLM 응답 없음")
     out = G.make_manager(broken)({"mode": "chat", "user": USER, "question": "태풍 오면 배는 어떻게 해요?"})
     assert out["selected_agents"] == [Specialist.WIND_TYPHOON]
 
 
-# --- Gemini 분류기: 실제 호출 없이 요청 형태와 결과 처리만 확인 ---------------------------
+# --- OpenAI 분류기: 실제 호출 없이 요청 형태와 결과 처리만 확인 ---------------------------
 
-class FakeModels:
+class FakeResponses:
     def __init__(self, parsed):
         self.parsed, self.calls = parsed, []
 
-    def generate_content(self, **kwargs):
+    def parse(self, **kwargs):
         self.calls.append(kwargs)
-        return SimpleNamespace(parsed=self.parsed, text="...")
+        return SimpleNamespace(output_parsed=self.parsed, output_text="...")
 
 
-def fake_classifier(parsed) -> GeminiClassifier:
-    return GeminiClassifier(client=SimpleNamespace(models=FakeModels(parsed)), model="test-model")
+def fake_classifier(parsed) -> OpenAIClassifier:
+    return OpenAIClassifier(client=SimpleNamespace(responses=FakeResponses(parsed)), model="test-model")
 
 
-def test_gemini_classifier_returns_agents_and_requests_structured_output():
+def test_openai_classifier_returns_agents_and_requests_structured_output():
     clf = fake_classifier(Classification(
         agents=[Specialist.RAIN_FLOOD, Specialist.LOCATION_ROUTE, Specialist.RAIN_FLOOD], reason="이동 판단"))
     agents = clf({"mode": "chat", "user": USER, "question": "비 오는데 걸어서 가도 돼요?"})
 
     assert agents == [Specialist.RAIN_FLOOD, Specialist.LOCATION_ROUTE]   # 중복 제거
-    call = clf.client.models.calls[0]
+    call = clf.client.responses.calls[0]
     assert call["model"] == "test-model"
-    assert call["config"].response_schema is Classification
-    assert "비 오는데 걸어서 가도 돼요?" in call["contents"]
+    assert call["text_format"] is Classification
+    assert "temperature" not in call            # 추론 모델은 temperature를 받지 않는다
+    assert "비 오는데 걸어서 가도 돼요?" in call["input"]
 
 
-def test_gemini_classifier_unparsable_response_raises():
+def test_openai_classifier_unparsable_response_raises():
     with pytest.raises(ValueError):
         fake_classifier(None)({"mode": "chat", "user": USER, "question": "?"})
 

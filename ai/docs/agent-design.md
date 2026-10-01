@@ -4,7 +4,7 @@
 상태 스키마는 `guardian_ai/state.py`, DB 조회 tool은 `guardian_ai/tools.py`에 코드로 있다.
 노드 본문은 아직 stub이며 B2(골격·관리자) → B3(침수·환각) → B4(재난 확장·행동 권고) → B5(의도·다듬기·음성) 순서로 채운다.
 
-- LLM: Gemini 3.6 Flash / 오케스트레이터: LangGraph
+- LLM: OpenAI gpt-6-luna (2026-10-01 Gemini에서 전환, 가성비 기준) / 오케스트레이터: LangGraph
 - 테스트: `cd 코드/ai && .venv/bin/python -m pytest` (토폴로지·루프 한도 7건)
 
 ## 1. 그래프
@@ -63,8 +63,8 @@ flowchart TD
 환각 검증의 전제: **모든 전문 agent는 답변에 쓴 수치를 `Evidence`로 남긴다.** evidence에 없는 수치가 초안에 있으면 실패.
 
 관리자 agent 동작 (B2 구현):
-- chat 모드: Gemini가 질문·최근 대화·사용자 프로필(재시도면 실패 사유 포함)을 보고 전문 agent를 고른다 (`llm.py` `GeminiClassifier`).
-  Gemini가 실패하거나 10초 안에 답하지 않으면 **키워드 분류로 대체**한다. 재난 중 AI 장애로 답이 끊기지 않게 하기 위함.
+- chat 모드: LLM(OpenAI)이 질문·최근 대화·사용자 프로필(재시도면 실패 사유 포함)을 보고 전문 agent를 고른다 (`llm.py` `OpenAIClassifier`).
+  LLM이 실패하거나 10초 안에 답하지 않으면 **키워드 분류로 대체**한다. 재난 중 AI 장애로 답이 끊기지 않게 하기 위함.
 - alert 모드: LLM 없이 규칙으로 고른다. 산사태→산사태, 호우·침수→강수·침수, 강풍·태풍→강풍·태풍, 미세먼지·자외선→생활안전.
   위치·경로 agent는 경보(WARNING) 단계이면서 대피가 필요한 재난(산사태·호우·침수·강풍·태풍)일 때만 붙는다.
 - 새 질문이 들어오면 이전 질문의 재시도 횟수·실패 사유를 초기화한다. 검증 실패로 되돌아온 경우(`verdict == "retry"`)만 이어 간다.

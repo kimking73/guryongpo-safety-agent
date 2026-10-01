@@ -4,8 +4,13 @@
 1. Read `.claude/docs/timeline.md` → status table, "다음 세션 시작점", "이월 항목", work log.
 2. From `코드/`: `git pull` (teammates push to `main`), then `docker compose up -d` and `docker compose ps`
    (db, api, ai all healthy). If `.env` changed since the ai container started: `docker compose up -d --force-recreate ai`.
-3. Baseline tests: `.venv/bin/python -m pytest -q` → **30 passed, 13 deselected** as of B7.
-   Don't run `-m live` casually — it spends Gemini free-tier quota (5/min, 20/day per model).
+3. Baseline tests: `.venv/bin/python -m pytest -q` → **34 passed, 13 deselected** ("1 skipped" if `OPENAI_API_KEY`
+   is empty). `-m live` → 13 passed on gpt-6-luna (2026-10-01, ~2원, ~1.3 s/call).
+3a. **OpenAI spend check — warn the user** (user's budget 200,000원/month, user request 2026-10-01): read
+   `curl -s localhost:8001/api/ai/usage` (local container), the VM's same URL over ssh, and
+   `.venv/bin/python -c "from guardian_ai.usage import UsageTracker; print(UsageTracker().summary())"` (local runs/live
+   tests). Sum `cost_krw`; if ≥50% of 200,000원, or a single session/test run burned unusually much, tell the user
+   first thing. Also grep ai logs for `OpenAI 사용량 경고`. These are estimates — the key owner's dashboard is the truth.
 4. If the user mentions timeline changes, re-read the live timeline artifact
    (https://claude.ai/artifact/S1CWwQbkt9mA7TpQbYbbgB, Artifact tool `action: "read"`) and sync `timeline.md`.
    Its downloaded file may come wrapped in an extra host `<html>` shell — strip it before republishing.
@@ -29,15 +34,18 @@
   user 2026-09-26; wheelchair users get elderly).
   Details and carry-over items: `.claude/docs/timeline.md`.
 - AI path today: `POST /api/chat` (api.py:34) → `ChatService.chat` (service.py:60) → graph with
-  `make_manager(GeminiClassifier())` (graph.py:144, llm.py:109). Only the manager is real; specialists,
+  `make_manager(OpenAIClassifier())` (graph.py:144, llm.py:112). Only the manager is real; specialists,
   advisor, checks, polish are stubs (graph.py:223-265), tools return mocks sharing `_NOW` (tools.py:17).
   So `answer` is placeholder text like "rain_flood_agent stub"; `selected_agents` is the real output.
-- Gemini: AI Studio key in `../.env` (project `guryong-guardian-0924`). **Temporary local model**
-  `gemini-3.5-flash-lite` + `GEMINI_TIMEOUT_MS=60000` (Lite free tier answers in 17–39 s, sometimes 504).
-  Target is `gemini-3.6-flash` / 10 s as in `../.env.example` — revert before demo or once billing is on.
-  Live routing check: 13/13 on gemini-3.5-flash; 3.6 only 5/5 before quota ran out (rerun pending).
+- LLM: OpenAI since 2026-10-01 (user decision; Gemini free tier was 20 calls/day). `OPENAI_API_KEY` /
+  `OPENAI_MODEL=gpt-6-luna` / `OPENAI_TIMEOUT_MS=10000` in `../.env`. Responses API `responses.parse` with
+  `text_format=Classification`; gpt-6-luna is a reasoning model → no `temperature`, classifier uses
+  `reasoning.effort="low"`; SDK retries off (`max_retries=0`) so a failure falls back to keywords within the timeout.
+  Plan: Luna everywhere, raise only weak steps (likely hallucination check) to `gpt-6.1-sol`.
+  Live routing on OpenAI: 13/13 (2026-10-01). Key is borrowed from another person, so no dashboard spend limit —
+  `usage.py` only estimates and warns (it never blocks calls; user decision).
 - Any LLM failure falls back to keyword routing and logs `라우팅 [키워드 대체]`; a fast (<1 s) answer means fallback.
-- Never print `.env` values (the Gemini key leaked once via grep on 2026-09-24; the user rotated it).
+- Never print `.env` values (a Gemini key leaked once via grep on 2026-09-24; the user rotated it).
 
 ## Project overview
 구룡가디언 (구룡포 재난 지킴이) — AI part of a disaster-response service for 구룡포 (Pohang), built for the
@@ -49,8 +57,8 @@ Sibling parts (not in this folder): FastAPI server + PostgreSQL/PostGIS + risk e
 Flutter app/web (teammate C). This lane (B) also owns GraphHopper routing and GCP deployment.
 
 ## Tech stack
-- Python ≥3.11 (container 3.12), LangGraph ≥1.0, Pydantic v2, google-genai, FastAPI + uvicorn, pytest (+httpx)
-- LLM: Gemini via AI Studio key (target gemini-3.6-flash); voice planned: Google Cloud STT/TTS (fallback: gemini-3.1-live-preview)
+- Python ≥3.11 (container 3.12), LangGraph ≥1.0, Pydantic v2, openai SDK, FastAPI + uvicorn, pytest (+httpx)
+- LLM: OpenAI `gpt-6-luna` (Responses API, structured outputs); voice planned: Google Cloud STT/TTS (OpenAI GPT-Transcribe/TTS/Realtime is an alternative, decide in B5)
 - Routing (planned): GraphHopper + OSM + 국토지리정보원 DEM
 - Data behind the tools: 포항 디지털 트윈 API, 기상청 API, 재난안전24, 공공데이터포털, 생활안전지도
 
@@ -60,10 +68,11 @@ Flutter app/web (teammate C). This lane (B) also owns GraphHopper routing and GC
 | `guardian_ai/state.py` | Enums, Pydantic domain models, reducers, `GuardianState` (state.py:175), retry limits (state.py:211) |
 | `guardian_ai/graph.py` | Node functions (stubs), routing functions, `build_graph()` (graph.py:400) |
 | `guardian_ai/tools.py` | DB lookup tool specs with mock returns; per-agent tool allowlist `AGENT_TOOLS` (tools.py:143) |
-| `guardian_ai/llm.py` | Gemini client, `GeminiClassifier` (llm.py:109), prompt (`SYSTEM_PROMPT` :50, `build_prompt` :88) |
+| `guardian_ai/usage.py` | OpenAI token/cost ledger per month (`data/openai_usage.json`, volume `ai-data` in compose), warns at 50/80/100% of `OPENAI_BUDGET_KRW`; `GET /api/ai/usage` |
+| `guardian_ai/llm.py` | OpenAI client, `OpenAIClassifier` (llm.py:112), prompt (`SYSTEM_PROMPT` :53, `build_prompt` :91) |
 | `guardian_ai/service.py` | `ChatRequest`/`ChatResponse`, `ChatService` (service.py:49), checkpointer + `STATE_TYPES` allowlist |
 | `guardian_ai/api.py` | FastAPI app for the `ai` container: `/api/chat`, `/api/ai/health` |
-| `tests/` | Topology (stub overrides), manager/API (fakes, offline), `test_routing_live.py` (real Gemini, `live` marker) |
+| `tests/` | Topology (stub overrides), manager/API (fakes, offline), `test_routing_live.py` (real OpenAI, `live` marker) |
 | `Dockerfile` | `ai` container, port 8001 (service defined in `../docker-compose.yml`) |
 | `docs/agent-design.md` | Team-facing design doc (Korean): graph, node I/O, decision tree, tool contract, open questions |
 | `.claude/docs/` | Claude-facing notes: timeline/progress, architectural patterns |
@@ -73,7 +82,7 @@ Run from this directory (`코드/ai`). A project-local venv is used; do not inst
 ```bash
 uv venv .venv && uv pip install -p .venv -e ".[dev]"   # setup (already done once)
 .venv/bin/python -m pytest -q                         # offline tests (live excluded by addopts)
-.venv/bin/python -m pytest -m live -q                 # real Gemini routing, ~3 min, uses 13 quota calls
+.venv/bin/python -m pytest -m live -q                 # real OpenAI routing, 13 calls (paid, tiny)
 docker compose logs -f ai | grep 라우팅                # (from 코드/) per-question routing: [분류기]/[키워드 대체]/[alert 규칙]
 .venv/bin/python -c "from guardian_ai.graph import build_graph; print(build_graph().get_graph().draw_mermaid())"  # dump graph
 ```
@@ -98,7 +107,7 @@ Before debugging a failure, writing or running tests, or reviewing code, read `d
 - Every specialist result must carry `Evidence` for any number it states — the hallucination check depends on it.
 - Action advice is rule-decided (decision tree), LLM only phrases it; never let the LLM invent action steps.
 - Replace stubs one node at a time and add a test per replaced node; existing topology tests must stay green.
-- API keys (Gemini, GCP) go in `.env` only, never committed; provide `.env.example`.
+- API keys (OpenAI, GCP) go in `.env` only, never committed; provide `.env.example`.
 - User-facing text, docs, and code comments are in Korean. The user prefers explanations in Korean.
 
 ## Additional documentation

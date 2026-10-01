@@ -18,7 +18,7 @@ Lanes: **A** server/DB/data collection/risk engine (`server/`, `db/`) · **B** A
 ## Tech stack
 - Python 3.12 containers (local venvs ≥3.11), FastAPI + uvicorn for every HTTP service
 - PostgreSQL 17 + PostGIS 3.5 (`imresamu/postgis`, multi-arch — official image lacks arm64)
-- AI: LangGraph ≥1.0, Pydantic v2, google-genai (Gemini); voice planned: Google Cloud STT/TTS
+- AI: LangGraph ≥1.0, Pydantic v2, openai SDK (`gpt-6-luna`, Responses API; switched from Gemini 2026-10-01); voice planned: Google Cloud STT/TTS
 - Routing (B6 done, B7 in progress): GraphHopper 11 (Java 21, foot profile, flexible mode) + OSM + elevation (SRTM 90m, or 국토지리정보원 DEM via `graphhopper/build_dem.sh`)
 - Client (planned, C2): Flutter; Firebase anonymous auth + FCM
 - Infra: Docker Compose (OrbStack on Mac, Docker Desktop + WSL2 on Windows); GCP project
@@ -54,7 +54,7 @@ docker compose up -d --force-recreate ai     # after editing .env (env is read a
 docker compose down [-v]                     # stop (-v also wipes DB data, re-runs db/init)
 docker compose run --rm loader               # re-apply db/init seeds 02– to an existing DB (keeps observations/users)
 docker compose -f docker-compose.yml up -d   # server mode: no override, DB not exposed
-cd ai && .venv/bin/python -m pytest -q       # AI tests (offline); `-m live` calls real Gemini
+cd ai && .venv/bin/python -m pytest -q       # AI tests (offline); `-m live` calls real OpenAI
 cd route && .venv/bin/python -m pytest -q    # route tests (fake GraphHopper); `-m live` needs graphhopper on :8989
 ./graphhopper/build_dem.sh                   # after putting 국토지리정보원 DEM files in graphhopper/dem/ngii/; then restart graphhopper
 ```
