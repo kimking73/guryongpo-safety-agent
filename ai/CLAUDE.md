@@ -43,7 +43,7 @@
   Every DB tool takes `fetch=` (fake in tests) and returns `{"available": False, "reason"}` on failure.
   `RiskLevel` now = DB 5 levels (`.rank` for comparisons); `ActionGuide` = `action_guides` row. Only
   `get_user_profile` is still a mock.
-- **B3 done criterion met (2026-10-01, awaiting user's "완료" call)**: real `rain_flood_agent` (`flood.py`: code collects
+- **B3 done (2026-10-01, user confirmed)**: real `rain_flood_agent` (`flood.py`: code collects
   data + builds Evidence, `OpenAIWriter` only phrases it, template fallback) and `hallucination_check` (`verify.py`: rule
   number check with unit conversion/rounding, then `OpenAIFactChecker` for non-numeric claims). `ChatService()` wires
   them; `DEFAULT_NODES` keeps the specialist stub and a rule-only check so offline tests need no DB/LLM.
