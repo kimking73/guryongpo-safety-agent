@@ -13,6 +13,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+# 위험 구역 회피 시연 그림 (scripts/avoid_demo.py). 서비스 이미지에는 안 들어간다
+demo = ["matplotlib>=3.8", "pillow>=10", "osmium>=4"]
 
 [build-system]
 requires = ["setuptools>=68"]
