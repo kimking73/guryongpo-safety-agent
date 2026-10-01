@@ -109,6 +109,17 @@ def build_prompt(state: GuardianState) -> str:
     return "\n".join(lines)
 
 
+def make_client() -> OpenAI:
+    """환경 변수로 실제 OpenAI 클라이언트를 만든다. 모든 LLM 단계가 같은 규칙을 쓴다."""
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY가 없습니다. 루트 .env에 OpenAI API 키를 넣으세요.")
+    timeout_ms = int(os.environ.get("OPENAI_TIMEOUT_MS") or DEFAULT_TIMEOUT_MS)
+    # 응답 대기 한도. 넘으면 예외가 나고 호출한 노드가 규칙 대체(키워드 분류·템플릿 문장 등)로 넘어간다.
+    # SDK 기본 재시도(2회)는 한도를 몇 배로 늘리므로 끈다 — 실패하면 바로 대체.
+    return OpenAI(api_key=api_key, timeout=timeout_ms / 1000, max_retries=0)
+
+
 class OpenAIClassifier:
     """관리자 agent용 질문 분류기. graph.make_manager(OpenAIClassifier())로 쓴다."""
 
@@ -116,15 +127,7 @@ class OpenAIClassifier:
                  tracker: UsageTracker | None = None):
         # client를 넘기면 그대로 쓴다(테스트에서 가짜 클라이언트 주입용).
         # 안 넘기면 환경 변수로 실제 OpenAI 클라이언트를 만든다.
-        if client is None:
-            api_key = os.environ.get("OPENAI_API_KEY")
-            if not api_key:
-                raise RuntimeError("OPENAI_API_KEY가 없습니다. 루트 .env에 OpenAI API 키를 넣으세요.")
-            timeout_ms = int(os.environ.get("OPENAI_TIMEOUT_MS") or DEFAULT_TIMEOUT_MS)
-            # 응답 대기 한도. 넘으면 예외가 나고 graph 쪽에서 키워드 분류로 넘어간다.
-            # SDK 기본 재시도(2회)는 한도를 몇 배로 늘리므로 끈다 — 실패하면 바로 키워드 분류.
-            client = OpenAI(api_key=api_key, timeout=timeout_ms / 1000, max_retries=0)
-        self.client = client
+        self.client = client or make_client()
         # 모델 우선순위: 인자 > OPENAI_MODEL 환경 변수 > DEFAULT_MODEL
         self.model = model or os.environ.get("OPENAI_MODEL") or DEFAULT_MODEL
         self.last: Classification | None = None   # 디버깅·로그용 마지막 분류 결과
@@ -148,3 +151,104 @@ class OpenAIClassifier:
             raise ValueError(f"분류 결과를 해석하지 못함: {response.output_text!r}")
         self.last = result
         return list(dict.fromkeys(result.agents))   # 중복 제거, 순서 유지
+
+
+# ---------------------------------------------------------------------------
+# 강수·침수 agent 문장 작성 (B3) — 근거 목록에 있는 숫자만 쓴다
+# ---------------------------------------------------------------------------
+
+class FloodAnswer(BaseModel):
+    summary: str = Field(description="사용자에게 보여 줄 답변 조각 (한국어 2~4문장)")
+
+
+WRITER_PROMPT = """너는 포항 구룡포 재난 대응 서비스 '구룡가디언'의 강수·침수 agent다.
+주어진 근거 목록만 보고 사용자 질문에 대한 강수·침수 상황을 한국어 2~4문장으로 쓴다.
+
+규칙:
+- 숫자는 근거 목록에 있는 값과 단위를 그대로 쓴다. 계산·추정·반올림한 새 숫자를 만들지 않는다.
+- 위험 단계와 특보 이름은 근거에 적힌 그대로 쓴다. 근거에 없는 특보·경보를 말하지 않는다.
+- 근거에 없는 사실(다른 지역 상황, 앞으로의 예보, 피해 규모)을 지어내지 않는다.
+- '확인할 수 없는 정보'가 있으면 그 정보는 지금 확인할 수 없다고 밝힌다. 그 상태에서 "안전하다"고 단정하지 않는다.
+- 위치가 '구룡포읍 중심(위치 정보 없음)'이면 그 기준이라고 밝힌다.
+- 행동요령(대피 방법 등)은 쓰지 않는다. 다른 agent가 공식 행동요령으로 따로 안내한다. 가까운 대피소 이름·거리는 근거에 있으면 써도 된다.
+- 재검증 실패 사유가 주어지면 그 문제를 고쳐서 다시 쓴다."""
+
+
+class OpenAIWriter:
+    """flood.make_rain_flood_agent(writer=OpenAIWriter())로 쓴다. 실패하면 예외 → agent가 템플릿 문장으로 대체."""
+
+    def __init__(self, client: OpenAI | None = None, model: str | None = None,
+                 tracker: UsageTracker | None = None):
+        self.client = client or make_client()
+        self.model = model or os.environ.get("OPENAI_MODEL") or DEFAULT_MODEL
+        self.tracker = tracker or get_tracker()
+
+    def __call__(self, question: str, evidence: str, data, feedback: str = "") -> str:
+        where = (data.location.label or "현재 위치") if data.location_known else "구룡포읍 중심(위치 정보 없음)"
+        body = [f"질문: {question or '(경고 알림 — 질문 없음)'}", f"기준 위치: {where}",
+                f"침수·호우 위험 단계(판정 엔진): {data.level.value}", "근거 목록:", evidence or "(없음)"]
+        if data.unavailable:
+            body.append("확인할 수 없는 정보: " + ", ".join(data.unavailable))
+        if feedback:
+            body.append(f"재검증 실패 사유:\n{feedback}")
+        response = self.client.responses.parse(
+            model=self.model, instructions=WRITER_PROMPT, input="\n".join(body),
+            text_format=FloodAnswer, reasoning={"effort": "low"})
+        self.tracker.record(self.model, getattr(response, "usage", None))
+        result = response.output_parsed
+        if not isinstance(result, FloodAnswer) or not result.summary.strip():
+            raise ValueError(f"답변을 해석하지 못함: {response.output_text!r}")
+        return result.summary.strip()
+
+
+# ---------------------------------------------------------------------------
+# 환각 검증 — 내용 검사 (B3). 숫자는 verify.check_numbers가 규칙으로 이미 확인했다
+# ---------------------------------------------------------------------------
+
+class FactCheck(BaseModel):
+    ok: bool = Field(description="근거와 어긋나는 주장이 하나도 없으면 true")
+    issues: list[str] = Field(description="근거와 어긋나거나 근거에 없는 주장. 한 줄에 하나, 없으면 빈 목록")
+
+
+CHECKER_PROMPT = """너는 재난 안내 답변의 사실 검증자다. 답변 초안의 각 주장이 근거 목록으로 뒷받침되는지 확인한다.
+숫자 값은 이미 다른 단계에서 확인했으니, 숫자가 아닌 주장을 본다.
+
+실패로 볼 것:
+- 근거에 없는 특보·경보·주의보를 있다고 하거나, 특보 종류·단계·발효/해제 상태를 바꿔 말함
+- 위험 단계를 근거보다 높이거나 낮춤 (예: 근거 '주의'를 '경보'로, '경보'를 '정상'으로)
+- 근거에 없는 장소·시설·피해·예보를 사실처럼 말함
+- 근거에서 확인할 수 없다고 한 정보를 두고 "안전하다"고 단정함
+- 관측소·지명을 다른 것과 바꿔 말함
+
+실패가 아닌 것: 표현을 쉽게 바꾸기, 근거 일부만 고르기, "확인할 수 없다"고 밝히기, 일반적인 주의 당부.
+issues에는 무엇이 근거와 어떻게 다른지 짧게 쓴다."""
+
+
+class OpenAIFactChecker:
+    """verify.make_hallucination_check(checker=OpenAIFactChecker())로 쓴다.
+
+    모델은 OPENAI_VERIFY_MODEL(없으면 OPENAI_MODEL). 검증만 gpt-6.1-sol로 올릴 때 이 값만 바꾼다.
+    """
+
+    def __init__(self, client: OpenAI | None = None, model: str | None = None,
+                 tracker: UsageTracker | None = None, reasoning_effort: str = "medium"):
+        self.client = client or make_client()
+        self.model = (model or os.environ.get("OPENAI_VERIFY_MODEL") or os.environ.get("OPENAI_MODEL")
+                      or DEFAULT_MODEL)
+        self.tracker = tracker or get_tracker()
+        # 검증은 놓치면 안 되므로 분류(low)보다 깊게 생각하게 둔다
+        self.reasoning_effort = reasoning_effort
+
+    def __call__(self, draft: str, evidence: str):
+        from .state import CheckResult
+        response = self.client.responses.parse(
+            model=self.model, instructions=CHECKER_PROMPT,
+            input=f"근거 목록:\n{evidence}\n\n답변 초안:\n{draft}",
+            text_format=FactCheck, reasoning={"effort": self.reasoning_effort})
+        self.tracker.record(self.model, getattr(response, "usage", None))
+        result = response.output_parsed
+        if not isinstance(result, FactCheck):
+            raise ValueError(f"검증 결과를 해석하지 못함: {response.output_text!r}")
+        if result.ok:   # ok=true인데 issues가 있으면 사소한 메모로 보고 통과 (오탐으로 안전 안내까지 가지 않게)
+            return CheckResult(ok=True)
+        return CheckResult(ok=False, feedback="근거와 다른 내용: " + " / ".join(result.issues or ["(사유 없음)"]))

@@ -37,6 +37,7 @@ from typing import Callable
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
+from .verify import make_hallucination_check
 from .state import (
     MAX_POLISH_RETRY,   # 다듬기 재시도 한도 (1회)
     MAX_RETRY,          # 검증 실패 시 관리자부터 다시 하는 한도 (2회)
@@ -259,12 +260,9 @@ def intent_check(state: GuardianState) -> dict:
     return {"checks": {"intent": CheckResult(ok=True)}}
 
 
-def hallucination_check(state: GuardianState) -> dict:
-    """환각 검증: 초안의 숫자·사실이 전문 agent가 남긴 evidence와 일치하는지 확인한다 (B3).
-
-    예: 초안에 "수위 30cm"가 있는데 evidence에는 22cm뿐이면 ok=False, feedback에 사유 기록.
-    """
-    return {"checks": {"hallucination": CheckResult(ok=True)}}
+# 환각 검증 (B3): 초안의 숫자·사실이 전문 agent가 남긴 evidence와 일치하는지 확인한다 → verify.py.
+# 기본은 숫자 검사(규칙)만. 서비스는 LLM 내용 검사까지 붙인 것으로 바꿔 끼운다 (service.py).
+hallucination_check = make_hallucination_check()
 
 
 def verify_gate(state: GuardianState) -> dict:

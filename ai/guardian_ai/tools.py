@@ -140,20 +140,33 @@ def get_risk_at(lat: float, lon: float, radius_m: int = 500, fetch: Fetch | None
 
 # --- 관측값 -----------------------------------------------------------------
 
+# 관측소×지표마다 1건: 시연용 모의값(quality='simulated')이 6시간 안에 있으면 그것, 아니면 최신 실측.
+# A의 판정 엔진과 같은 우선순위(risk/engine.py SIM_MAX_AGE_MIN) — 판정은 "경보"인데 근거 수치는 실측 0mm인 모순을 막는다.
+# (v_latest_observations는 최신값만 보므로 쓰지 않는다.) 최근 2일로 범위를 묶어 오래된 행을 훑지 않는다.
+SIM_PRIORITY_HOURS = 6
 OBS_SQL = f"""
-SELECT o.station_id, o.station_name, o.kind AS station_kind, o.metric, o.value, o.unit, o.source_level, o.observed_at,
-       ST_Distance(o.geom::geography, {POINT}::geography) AS distance_m
-FROM v_latest_observations o
-WHERE o.kind = ANY(%(kinds)s) AND o.metric = ANY(%(metrics)s)
-ORDER BY distance_m, o.station_id, o.metric
+SELECT * FROM (
+  SELECT DISTINCT ON (o.station_id, o.metric)
+         s.id AS station_id, s.name AS station_name, s.kind AS station_kind, o.metric, o.value, o.unit,
+         o.source_level, o.observed_at, (o.quality IS NOT DISTINCT FROM 'simulated') AS simulated,
+         ST_Distance(s.geom::geography, {POINT}::geography) AS distance_m
+  FROM observations o JOIN stations s ON s.id = o.station_id
+  WHERE s.is_active AND s.kind = ANY(%(kinds)s) AND o.metric = ANY(%(metrics)s)
+    AND o.observed_at > now() - interval '2 days'
+  ORDER BY o.station_id, o.metric,
+           (o.quality IS NOT DISTINCT FROM 'simulated' AND o.observed_at > now() - interval '{SIM_PRIORITY_HOURS} hours') DESC,
+           o.observed_at DESC
+) latest
+ORDER BY distance_m, station_id, metric
 """
 
 
 def get_observations(kind: ObservationKind, lat: float, lon: float, fetch: Fetch | None = None) -> dict[str, Any]:
-    """관측소별 최신 관측값, 가까운 관측소부터 (뷰: v_latest_observations).
+    """관측소별 최신 관측값, 가까운 관측소부터 (테이블: observations + stations).
 
     kind: water_level(침수심·하천·맨홀, mm), rain(강우량), wind(풍속·돌풍·풍향), uv, air(미세먼지 — 아직 수집 권한 없음).
-    items[].level_label은 포항 디지털 트윈 등급(정상~위험), stale=True면 2시간 넘은 값.
+    items[].level_label은 포항 디지털 트윈 등급(정상~위험), stale=True면 2시간 넘은 값,
+    simulated=True면 시연 시나리오가 넣은 모의값 (6시간 동안 실측보다 우선 — 판정 엔진과 같은 규칙).
     사용: 호우/침수, 강풍/태풍, 생활안전 agent
     """
     source = "observations"
@@ -173,6 +186,8 @@ def get_observations(kind: ObservationKind, lat: float, lon: float, fetch: Fetch
             "observed_at": _iso(r["observed_at"]), "distance_m": round(float(r["distance_m"])),
             "stale": age is None or age > STALE_MIN,
         })
+        if r.get("simulated"):
+            items[-1]["simulated"] = True
     return {"available": True, "kind": kind, "items": items, "source": source}
 
 

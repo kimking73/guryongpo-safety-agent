@@ -71,7 +71,7 @@ def test_risk_without_recent_engine_run_is_stale():
 
 
 def test_observations_mark_level_and_staleness():
-    db = FakeDB({"v_latest_observations": [
+    db = FakeDB({"observations o": [
         {"station_id": 9, "station_name": "구룡포환승센터_지표면 수위계", "station_kind": "road_flood",
          "metric": "flood_depth", "value": 160.0, "unit": "mm", "source_level": 4,
          "observed_at": NOW - timedelta(minutes=10), "distance_m": 22.2},
@@ -99,7 +99,7 @@ def test_warning_status():
 
 
 def test_uv_and_dust_grades():
-    db = FakeDB({"v_latest_observations": [
+    db = FakeDB({"observations o": [
         {"station_id": 21, "station_name": "구룡포 자외선지수 (전역)", "station_kind": "uv", "metric": "uv_index",
          "value": 5.2, "unit": "index", "source_level": None, "observed_at": NOW, "distance_m": 10.0},
     ]})

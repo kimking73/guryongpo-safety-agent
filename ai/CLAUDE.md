@@ -4,8 +4,8 @@
 1. Read `.claude/docs/timeline.md` → status table, "다음 세션 시작점", "이월 항목", work log.
 2. From `코드/`: `git pull` (teammates push to `main`), then `docker compose up -d` and `docker compose ps`
    (db, api, ai all healthy). If `.env` changed since the ai container started: `docker compose up -d --force-recreate ai`.
-3. Baseline tests: `.venv/bin/python -m pytest -q` → **49 passed, 15 deselected**. `-m db` → 2 passed (needs local db +
-   `AI_DB_*` in `.env`). `-m live` → 13 passed on gpt-6-luna (2026-10-01, ~2원, ~1.3 s/call).
+3. Baseline tests: `.venv/bin/python -m pytest -q` → **71 passed, 28 deselected**. `-m db` → 2 passed (needs local db +
+   `AI_DB_*` in `.env`). `-m live` → 26 passed on gpt-6-luna (routing 13 + B3 wrong-answer injection 13, ~5원).
 3a. **OpenAI spend check — warn the user** (user's budget 200,000원/month, user request 2026-10-01): read
    `curl -s localhost:8001/api/ai/usage` (local container), the VM's same URL over ssh, and
    `.venv/bin/python -c "from guardian_ai.usage import UsageTracker; print(UsageTracker().summary())"` (local runs/live
@@ -42,7 +42,14 @@
   `../db/init/07_ai_readonly.sh` (SELECT-only + read-only transactions, run once by hand on existing DBs).
   Every DB tool takes `fetch=` (fake in tests) and returns `{"available": False, "reason"}` on failure.
   `RiskLevel` now = DB 5 levels (`.rank` for comparisons); `ActionGuide` = `action_guides` row. Only
-  `get_user_profile` is still a mock. Next: real `rain_flood_agent` with Evidence, then hallucination check.
+  `get_user_profile` is still a mock.
+- **B3 done criterion met (2026-10-01, awaiting user's "완료" call)**: real `rain_flood_agent` (`flood.py`: code collects
+  data + builds Evidence, `OpenAIWriter` only phrases it, template fallback) and `hallucination_check` (`verify.py`: rule
+  number check with unit conversion/rounding, then `OpenAIFactChecker` for non-numeric claims). `ChatService()` wires
+  them; `DEFAULT_NODES` keeps the specialist stub and a rule-only check so offline tests need no DB/LLM.
+  Live: wrong answers 10/10 caught, right 3/3 passed, twice. E2E with A's `heavy_rain_flood` simulation: ~4–6 s/question.
+  Demo scenario: `docker compose exec api python -c "from app import db; from app.config import settings;
+  db.init_pool(settings.database_url); from risk import simulate; print(simulate.apply('heavy_rain_flood'))"` (`'clear'` to undo).
 - LLM: OpenAI since 2026-10-01 (user decision; Gemini free tier was 20 calls/day). `OPENAI_API_KEY` /
   `OPENAI_MODEL=gpt-6-luna` / `OPENAI_TIMEOUT_MS=10000` in `../.env`. Responses API `responses.parse` with
   `text_format=Classification`; gpt-6-luna is a reasoning model → no `temperature`, classifier uses
@@ -74,9 +81,11 @@ Flutter app/web (teammate C). This lane (B) also owns GraphHopper routing and GC
 | `guardian_ai/state.py` | Enums, Pydantic domain models, reducers, `GuardianState` (state.py:175), retry limits (state.py:211) |
 | `guardian_ai/graph.py` | Node functions (stubs), routing functions, `build_graph()` (graph.py:400) |
 | `guardian_ai/tools.py` | Read-only DB tools (risk, observations, warnings, messages, zones, facilities, life safety, action guides), `request_route`; allowlist `AGENT_TOOLS` |
+| `guardian_ai/flood.py` | Rain/flood agent: `collect` → `build_evidence` → writer or `template_summary`; `make_rain_flood_agent(writer, fetch)` |
+| `guardian_ai/verify.py` | Hallucination check: `check_numbers` (rule), `make_hallucination_check(checker)` |
 | `guardian_ai/db.py` | Read-only PostgreSQL access (`Database`, `default_fetch`, `conninfo()` from `AI_DB_*`) |
 | `guardian_ai/usage.py` | OpenAI token/cost ledger per month (`data/openai_usage.json`, volume `ai-data` in compose), warns at 50/80/100% of `OPENAI_BUDGET_KRW`; `GET /api/ai/usage` |
-| `guardian_ai/llm.py` | OpenAI client, `OpenAIClassifier` (llm.py:112), prompt (`SYSTEM_PROMPT` :53, `build_prompt` :91) |
+| `guardian_ai/llm.py` | `make_client()`, `OpenAIClassifier`, `OpenAIWriter` (flood sentences), `OpenAIFactChecker` (`OPENAI_VERIFY_MODEL`), prompts |
 | `guardian_ai/service.py` | `ChatRequest`/`ChatResponse`, `ChatService` (service.py:49), checkpointer + `STATE_TYPES` allowlist |
 | `guardian_ai/api.py` | FastAPI app for the `ai` container: `/api/chat`, `/api/ai/health` |
 | `tests/` | Topology (stub overrides), manager/API (fakes, offline), `test_tools_db.py` (fake fetch), `test_tools_db_live.py` (local DB, `db` marker), `test_routing_live.py` (real OpenAI, `live` marker) |
