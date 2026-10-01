@@ -54,6 +54,7 @@ B3 완료. 선행 A4·A7·B3 모두 끝나 **B4 시작 가능**: 산사태·강�
   **VM `.env`는 맥 `.env`와 다르다 (2026-10-01~)**: `AI_DB_PASSWORD`가 VM에서 만든 48자 무작위 값(출력·저장 안 함).
   맥 `.env`를 VM에 다시 복사하면 AI의 DB 접속이 끊긴다 → 바뀐 키만 VM `.env`에 `sed`로 넣거나, 복사 후
   `AI_DB_PASSWORD`를 새로 만들고 `exec db sh /docker-entrypoint-initdb.d/07_ai_readonly.sh`로 계정 비밀번호도 맞춘다.
+  `AI_MEM_DB_PASSWORD`(08, 2026-10-02)도 같은 방식의 VM 전용 48자 값.
   VM의 `DB_PASSWORD`(메인 계정)는 아직 로컬 기본값 — DB 포트는 외부에 안 열려 있지만 B10에서 바꾼다.
 
 ## 이월 항목 (끝나면 지운다)
@@ -91,9 +92,7 @@ B3 완료. 선행 A4·A7·B3 모두 끝나 **B4 시작 가능**: 산사태·강�
 - [ ] C와 `/api/chat` 응답 형식 합의 — 목업의 카드형(판정·수치 칩·할 일·출처·버튼)은 B5에서 확장 (`agent-design.md` 8절)
 - [ ] 조위(만조) 데이터: 기획서·목업은 쓰지만 수집 목록에 없음 → A에게 제안 (tools에는 `tide` 종류만 있음)
 - [ ] 조하린 GCP·GitHub 권한, 팀원 로컬 실행 확인 — 사용자가 직접 진행
-- [ ] **VM에 기억 저장 반영** — VM `.env`에 `AI_MEM_DB_USER`·`AI_MEM_DB_PASSWORD`(VM 전용 무작위 값) 추가 → `git pull` →
-      `docker compose -f docker-compose.yml up -d db` → `exec db sh /docker-entrypoint-initdb.d/08_ai_memory.sh` → `up -d --build ai`.
-      B10 Caddy에서 `/api/ai/memory`는 외부에 열지 않는다(인증 전)
+- [ ] B10 Caddy에서 `/api/ai/memory`는 외부에 열지 않는다(인증 전). 지금은 VM 방화벽이 8001을 막아 외부 접근 불가 확인(2026-10-02)
 - [ ] 사용자 기억 정식 서비스 전: 앱 동의 화면·"기억 보기/끄기/지우기"(C), Firebase 인증 연결(A 방식), 익명 로그인은 재설치 시 다른 사용자
 - [ ] A의 `users`·`user_profiles`와 AI 기억(`ai_memory`) 동기화 여부 — A와 결정
 
@@ -133,3 +132,4 @@ B3 완료. 선행 A4·A7·B3 모두 끝나 **B4 시작 가능**: 산사태·강�
 - 2026-10-02 노약자 경사 기준선을 공식 자료로 교체(사용자 결정: 배수는 그대로): ≥6%→**1/18(5.56%) 초과**, ≥10%→**1/12(8.33%) 초과** — 국토해양부 「보도 설치 및 관리 지침」(2011.07) 원문(보도 종단경사 1/18 이하, 곤란 시 1/12, 1/12 = 교통약자 통행 최대). `profiles.py` `SLOPE_SIDEWALK_MAX`·`SLOPE_ACCESSIBLE_MAX`, 상수 이름 `ELDERLY_OVER_SIDEWALK`(×0.5)·`ELDERLY_OVER_ACCESSIBLE`(×0.2). 정수 경사 저장이라 실질 6% 이상·9% 이상(9%가 강한 벌점으로 이동). 시가지 21경로 비교: 7개 경로 변경, 9% 이상 도로 4,184→3,769m(−10%), 총거리 +1.3%. 테스트 route 35 + live 6. 배수(×0.5·×0.2·속도 ×0.75·계단 ×0.5) 근거 조사 결과: 속도는 경찰청 0.8 기준, 선호도 배수는 Valhalla 설계값(연구 근거 없음)뿐 — 보행 경로 선택 관찰 연구 조사는 이월.
 - 2026-10-02 사용자별 기억(사용자 계획 승인): 단기 = LangGraph `PostgresSaver`(대화 안, 재시작해도 이어짐), 장기 = `PostgresStore`(사용자 사실·대화 요약). `db/init/08_ai_memory.sh`(스키마 ai_memory + 전용 계정, public 권한 없음), `memory.py`(DB 못 닿으면 메모리 대체, 대화 주인 확인, 불러오기 → 빈 프로필 칸·분류 프롬프트·침수 근거, 저장 → 백그라운드 `OpenAIMemoryExtractor`), `remember` 기본 켜짐(사용자 결정), `GET/DELETE /api/ai/memory/{uid}`. 로컬 왕복: 무릎 발언 → 새 대화 분류 이유에 "보행 불편도 고려", AI 재시작 후 기억·대화 유지, "거기까지"를 이전 대화로 해석. 발견·수정: 재시작 직전 백그라운드 저장 유실 → 종료 때 대기(`close()`·lifespan), 이어지는 대화가 요약을 덮어씀 → 기존 요약을 넘겨 넓힘. 테스트 ai 87 + db 4 + live 32(추출기 6/6: 직접 말한 사실만, 추측·재난 수치 저장 안 함).
 - 2026-10-02 단기 기억을 InMemorySaver로 되돌림(사용자 결정): 실측 질문 1개당 체크포인트 약 12개·이전 질문 근거까지 DB에 누적, 위치·건강 정보가 상태째 영구 저장 → 대화 기억은 서버 메모리 + 마지막 문답 후 60분 만료(`CONVERSATION_TTL_MIN`, 만료 대화 지우기, 만료·모르는·남의 id는 새 대화), 장기 기억만 PostgresStore. 로컬 확인: 재시작 후 사용자 기억 유지·옛 대화 id는 새 대화, 새 대화에서도 "거기"를 대화 요약(장기 기억)으로 대피소로 해석. 테스트 ai 89 + db 4. 로컬 ai_memory에 오전 PostgresSaver 시험 때 생긴 checkpoint 표 4개(테스트 대화 데이터)가 남아 있음 — 정리 필요.
+- 2026-10-02 정리·배포: 로컬 ai_memory의 옛 checkpoint 표 4개 삭제(사용자 허락), 커밋 5bb0c9a(회피 시연·경사 기준선)·b08d49d(AI 기억) 푸시. VM: `.env`에 AI_MEM_DB_*(VM 전용 무작위 비밀번호)만 추가(맥 .env 덮어쓰지 않음), pull, 08 스크립트, ai 재빌드 → 장기 기억 postgres, 실제 질문으로 보행 불편·나이 저장 확인 후 삭제, 외부에서 8001 접근 차단 확인.
