@@ -93,4 +93,23 @@ void main() {
     await t.pumpWidget(const SizedBox());
     await t.pump(const Duration(seconds: 1));
   });
+
+  testWidgets('큰 창에서 "경로 안내"를 눌러도 지도가 멈추지 않는다 (2026-10-02 웹 오류 회귀)', (t) async {
+    t.view.physicalSize = const Size(2400, 1300);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.reset);
+    final onError = FlutterError.onError;
+    final errors = <String>[];
+    FlutterError.onError = (d) { if (d.library != 'image resource service') errors.add(d.exceptionAsString()); };
+    addTearDown(() => FlutterError.onError = onError);
+    SharedPreferences.setMockInitialValues({'profile_setup_complete': true});
+    await t.pumpWidget(ProviderScope(overrides: [repo.overrideWithValue(MockSafetyRepository())], child: const GuryongpoApp()));
+    for (var i = 0; i < 10; i++) { await t.pump(const Duration(milliseconds: 300)); }
+    await t.tap(find.text('경로 안내').first);
+    for (var i = 0; i < 8; i++) { await t.pump(const Duration(milliseconds: 300)); }
+    expect(errors.where((e) => e.contains('cameraConstraint')), isEmpty);
+    expect(find.byType(RouteMap), findsOneWidget);
+    await t.pumpWidget(const SizedBox());
+    await t.pump(const Duration(seconds: 1));
+  });
 }

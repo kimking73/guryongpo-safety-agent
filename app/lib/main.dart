@@ -577,8 +577,10 @@ class _MapCardState extends ConsumerState<MapCard> {
     final active = ref.watch(floodLayer), time = ref.watch(floodTime);
     return Card(clipBehavior: Clip.antiAlias, child: SizedBox(height: widget.height, child: Stack(children: [
       FlutterMap(options: MapOptions(initialCenter: const LatLng(35.9922, 129.5531), initialZoom: 14.5,
-        // 구룡포읍 전체 (대피소가 읍 남북으로 흩어져 있다)
-        cameraConstraint: CameraConstraint.contain(bounds: LatLngBounds(const LatLng(35.940,129.525), const LatLng(36.035,129.585))),
+        // 지도 중심만 구룡포읍 안으로 (대피소가 읍 남북으로 흩어져 있다). 화면 가장자리까지 묶는 contain은 큰 창에서
+        // 보이는 영역이 범위보다 넓어져 만족할 수 없고, 다시 그릴 때 flutter_map 검사에 걸려 앱이 멈췄다 (2026-10-02 웹)
+        minZoom: 12,
+        cameraConstraint: CameraConstraint.containCenter(bounds: LatLngBounds(const LatLng(35.940,129.525), const LatLng(36.035,129.585))),
         onTap: (_, point) { if (locationNote != null) setState(() { current = point; locationNote = '지도에서 선택한 현재 위치입니다.'; }); if (active) setState(() => selected = gridAt(point)); }), children: [
         TileLayer(urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', subdomains: const ['a','b','c'], userAgentPackageName: 'com.example.guryongpo_safety'),
         if (active) PolygonLayer(polygons: floodGridPolygons(time)),
@@ -959,7 +961,8 @@ class _PlaceFormState extends ConsumerState<_PlaceForm> {
         const SizedBox(height: 6),
         SizedBox(height: 220, child: ClipRRect(borderRadius: BorderRadius.circular(10), child: FlutterMap(
             options: MapOptions(initialCenter: const LatLng(35.9910, 129.5530), initialZoom: 15,
-                cameraConstraint: CameraConstraint.contain(bounds: LatLngBounds(const LatLng(35.940, 129.525), const LatLng(36.035, 129.585))),
+                minZoom: 12,
+                cameraConstraint: CameraConstraint.containCenter(bounds: LatLngBounds(const LatLng(35.940, 129.525), const LatLng(36.035, 129.585))),
                 onTap: (_, p) => setState(() => point = p)),
             children: [
               TileLayer(urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', subdomains: const ['a', 'b', 'c'], userAgentPackageName: 'com.example.guryongpo_safety'),
