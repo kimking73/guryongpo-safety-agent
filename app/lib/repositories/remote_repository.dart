@@ -61,9 +61,8 @@ class RemoteSafetyRepository implements SafetyRepository {
     final r = await _guard(() => _client.route.post<Map<String, dynamic>>('/api/route', data: {
           'origin': {'lat': o.latitude, 'lon': o.longitude},
           'destination': {'lat': facility.position.latitude, 'lon': facility.position.longitude},
-          'profile': routeProfileFor(age, transport),
-          // 가까운 경로는 맨홀 회피를 끈다 (위험 구역 회피는 항상 켜짐)
-          'avoid_manholes': routeType == RouteType.safest,
+          // 위험 영역 회피는 항상 켜짐. 안전 경로 = 사용자 유형(노약자면 급경사 회피), 가까운 경로 = 경사 무시 최단
+          'profile': routeType == RouteType.safest ? routeProfileFor(age, transport) : 'adult',
         }), notFound: '이 시설까지 걸어서 갈 수 있는 길을 찾지 못했습니다.');
     return routeFromJson(r.data!, facility.id, routeType, names: await _routeHazardNames());
   }
@@ -194,6 +193,7 @@ List<RiskArea> riskAreasFromGeoJson(Map<String, dynamic> fc) {
         RiskArea(
           level: levelKo(f['properties']?['level'] as String?),
           label: f['properties']?['label'] as String? ?? '',
+          hazard: f['properties']?['hazard'] as String? ?? '',
           polygons: switch (type) {
             'Polygon' => [ring(coords.first as List)],
             'MultiPolygon' => [for (final p in coords) ring((p as List).first as List)],
@@ -256,6 +256,7 @@ SafetyRoute routeFromJson(Map<String, dynamic> j, String facilityId, RouteType r
     if (inside.isNotEmpty) '주의: 다른 길이 없어 지나는 위험 구역 — ${inside.join(', ')}',
     if (avoided.isEmpty && inside.isEmpty) '경로 위에 알려진 위험 구역이 없습니다.',
     if (j['profile'] == 'elderly') '급경사를 피한 노약자 경로 (최대 경사 $slope%)',
+    if (j['hazards_ok'] == false) '주의: 위험 정보를 확인하지 못해 위험 영역 회피 없이 계산한 경로입니다',
   ].join('\n');
   return SafetyRoute(
     shelterId: facilityId,

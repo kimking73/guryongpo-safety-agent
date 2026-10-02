@@ -92,9 +92,11 @@ def collect(location: Location, location_known: bool, fetch: Fetch | None = None
     flood_items = [i for i in d.risk.get("items", []) if i["hazard"] in FLOOD_HAZARDS]
     if flood_items:
         d.level = max((RiskLevel(i["level"]) for i in flood_items), key=lambda lv: lv.rank)
-    # 주의 이상이면 가까운 대피소를 같이 (침수 지정 대피소가 데이터에 없어 종류를 거르지 않는다)
+    # 주의 이상이면 가까운 대피소를 같이 — 위치·경로 agent와 같은 규칙으로 갈 만한 곳만
+    # (위험 영역 안·침수 중 지하 시설 제외, tools.get_safe_shelters). 침수 지정 대피소가 데이터에 없어 종류는 거르지 않는다
     if d.level.rank >= RiskLevel.ADVISORY.rank:
-        d.shelters = T.get_facilities("shelter", lat, lon, limit=2, fetch=fetch)
+        found = T.get_safe_shelters(lat, lon, limit=8, fetch=fetch)
+        d.shelters = {**found, "items": [x for x in found.get("items", []) if x["safe"]][:2]}
     d.evidence, d.unavailable = build_evidence(d)
     return d
 

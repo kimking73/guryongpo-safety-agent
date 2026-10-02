@@ -41,13 +41,15 @@ final routeProvider = FutureProvider.family<SafetyRoute, String>((ref, facilityI
   return ref.watch(repo).routeFor(facility, ref.watch(mode), ref.watch(routeKind));
 });
 
-/// 지금 불러온 시설 중 가장 가까운 대피소 (아직 못 불러왔으면 예시 대피소)
+/// 가장 가까운 '갈 만한' 대피소 (shelterExclusion 규칙). 모두 위험하면 가장 가까운 곳, 못 불러왔으면 예시 대피소
 String nearestShelterId(WidgetRef ref) {
+  final areas = ref.read(riskAreasProvider).valueOrNull ?? const <RiskArea>[];
   final shelters = [...?ref.read(facilitiesProvider).valueOrNull]
       .where((f) => f.type == FacilityType.shelter)
       .toList()
     ..sort((a, b) => a.distanceKm.compareTo(b.distanceKm));
-  return shelters.isEmpty ? 'gym' : shelters.first.id;
+  if (shelters.isEmpty) return 'gym';
+  return (shelters.where((f) => shelterExclusion(f, areas) == null).firstOrNull ?? shelters.first).id;
 }
 
 /// The only state transition that starts a route. Every shelter picker uses
@@ -613,9 +615,12 @@ class _FacilityListState extends ConsumerState<FacilityList> {
   bool nearest = false;
   @override
   Widget build(BuildContext c) {
+    final areas = ref.watch(riskAreasProvider).valueOrNull ?? const <RiskArea>[];
+    int unsafe(Facility f) => shelterExclusion(f, areas) == null ? 0 : 1;
+    // 안전 추천: 갈 만한 곳 먼저, 그다음 도보 시간 순 / 가까운 순: 거리만
     final fs = [...?ref.watch(facilitiesProvider).valueOrNull]..sort((a, b) => nearest
         ? a.distanceKm.compareTo(b.distanceKm)
-        : a.walkMinutes.compareTo(b.walkMinutes));
+        : unsafe(a) != unsafe(b) ? unsafe(a) - unsafe(b) : a.walkMinutes.compareTo(b.walkMinutes));
     return Column(children: [
       Padding(
           padding: const EdgeInsets.all(12),
@@ -633,18 +638,18 @@ class _FacilityListState extends ConsumerState<FacilityList> {
       Expanded(
           child: ListView(
               children: fs
-                  .map((f) => Card(
+                  .map((f) { final warn = shelterExclusion(f, areas); return Card(
                       child: ListTile(
-                          leading: Icon(f.type == FacilityType.shelter
+                          leading: Icon(warn != null ? Icons.warning_amber_rounded : f.type == FacilityType.shelter
                               ? Icons.home_work_outlined
-                              : Icons.local_hospital),
+                              : Icons.local_hospital, color: warn != null ? Colors.orange.shade800 : null),
                           title: Text(f.name),
                           subtitle: Text(
-                              '${AppConfig.isRemote ? '약 ' : ''}${f.distanceKm}km · 도보 ${f.walkMinutes}분 · ${f.description}'),
+                              '${AppConfig.isRemote ? '약 ' : ''}${f.distanceKm}km · 도보 ${f.walkMinutes}분 · ${warn ?? f.description}'),
                           onTap: () {
                             startRouteToShelter(ref, f.id);
                             c.go('/');
-                          })))
+                          })); })
                   .toList()))
     ]);
   }

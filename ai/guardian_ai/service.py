@@ -80,7 +80,7 @@ class ChatService:
                  overrides: dict[str, G.Node] | None = None, store=None, extractor=None,
                  executor: Executor | None = None, now: Callable[[], datetime] | None = None):
         """classifier를 안 주면 실제 서비스 구성: OpenAI 분류기 + 실제 DB를 읽는 침수 agent(B3)
-        + 숫자·내용 환각 검증 + PostgreSQL 기억(단기·장기) + 기억 추출기 (OPENAI_API_KEY, AI_DB_*, AI_MEM_DB_* 필요).
+        + 위치·경로 agent(대피소·경로) + 숫자·내용 환각 검증 + PostgreSQL 기억(단기·장기) + 기억 추출기 (OPENAI_API_KEY, AI_DB_*, AI_MEM_DB_* 필요).
         classifier를 주면(테스트) 나머지 노드는 stub 그대로, 기억은 메모리 저장, 추출기 없음(넘기면 바로 실행).
         """
         nodes: dict[str, G.Node] = {}
@@ -88,7 +88,8 @@ class ChatService:
         if classifier is None:
             # 키가 없는 테스트 환경에서 import 오류를 피하려고 여기서 import 한다
             from .flood import make_rain_flood_agent
-            from .llm import OpenAIClassifier, OpenAIFactChecker, OpenAIWriter
+            from .location import make_location_route_agent
+            from .llm import OpenAIClassifier, OpenAIFactChecker, OpenAILocationWriter, OpenAIWriter
             from .verify import make_hallucination_check
             from .llm import OpenAIMemoryExtractor
             classifier = OpenAIClassifier()
@@ -97,6 +98,7 @@ class ChatService:
             executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="memory")
             nodes = {
                 S.Specialist.RAIN_FLOOD.value: make_rain_flood_agent(writer=OpenAIWriter()),
+                S.Specialist.LOCATION_ROUTE.value: make_location_route_agent(writer=OpenAILocationWriter()),
                 G.HALLUCINATION_CHECK: make_hallucination_check(checker=OpenAIFactChecker()),
             }
         self.app = G.build_graph(

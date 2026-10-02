@@ -119,6 +119,7 @@ class _RouteMapState extends ConsumerState<RouteMap> {
           : const Column(mainAxisSize: MainAxisSize.min, children: [CircularProgressIndicator(), SizedBox(height: 10), Text('안전 경로를 준비하고 있습니다')]))));
     }
     final bounds = LatLngBounds.fromPoints([current, ...route.polylinePoints]);
+    final warn = shelterExclusion(facility, ref.watch(riskAreasProvider).valueOrNull ?? const []);
     return Card(
         clipBehavior: Clip.antiAlias,
         child: SizedBox(
@@ -192,7 +193,7 @@ class _RouteMapState extends ConsumerState<RouteMap> {
                     Row(children: [
                       Expanded(
                           child: Text(
-                              '${AppConfig.isRemote ? '위험 구역 회피 경로' : '침수 위험 구간 회피 경로'} · ${AppConfig.dataLabel}\n${facility.name} · ${(route.distanceMeters / 1000).toStringAsFixed(1)}km · 도보 ${route.estimatedMinutes}분\n${route.riskAvoidanceSummary}',
+                              '${warn != null ? '⚠ $warn — 갈 만한 대피소가 없을 때만 이용하세요\n' : ''}${AppConfig.isRemote ? '위험 구역 회피 경로' : '침수 위험 구간 회피 경로'} · ${AppConfig.dataLabel}\n${facility.name} · ${(route.distanceMeters / 1000).toStringAsFixed(1)}km · 도보 ${route.estimatedMinutes}분\n${route.riskAvoidanceSummary}',
                               style: const TextStyle(fontSize: 12))),
                       IconButton(
                           tooltip: '경로 안내 종료',
@@ -228,20 +229,27 @@ class ShelterPickerSheet extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final routeType = ref.watch(routeKind);
+    final areas = ref.watch(riskAreasProvider).valueOrNull ?? const <RiskArea>[];
     return SafeArea(
         child: ListView(shrinkWrap: true, children: [
       const ListTile(
           title: Text('다른 대피소 선택'),
           subtitle: Text('선택하면 현재 대시보드 지도에서 새 경로를 바로 표시합니다.')),
-      // 걸어서 갈 만한 곳만 (의료시설은 5km 안). 거리는 경로 계산 전 대략값
-      ...[...?ref.watch(facilitiesProvider).valueOrNull]
+      // 걸어서 갈 만한 곳만 (의료시설은 5km 안), 갈 만한 대피소 먼저. 거리는 경로 계산 전 대략값
+      ...([...?ref.watch(facilitiesProvider).valueOrNull]
           .where((f) => f.type == FacilityType.shelter || f.distanceKm <= 5)
+          .toList()
+            ..sort((a, b) {
+              final ua = shelterExclusion(a, areas) == null ? 0 : 1, ub = shelterExclusion(b, areas) == null ? 0 : 1;
+              return ua != ub ? ua - ub : a.distanceKm.compareTo(b.distanceKm);
+            }))
           .map((facility) {
-        final label = routeType == RouteType.safest ? '가장 안전한 경로' : '가까운 대피소 경로';
+        final warn = shelterExclusion(facility, areas);
+        final label = warn ?? (routeType == RouteType.safest ? '가장 안전한 경로' : '가까운 대피소 경로');
         return ListTile(
-            leading: Icon(facility.type == FacilityType.shelter
+            leading: Icon(warn != null ? Icons.warning_amber_rounded : facility.type == FacilityType.shelter
                 ? Icons.home_work_outlined
-                : Icons.local_hospital),
+                : Icons.local_hospital, color: warn != null ? Colors.orange.shade800 : null),
             title: Text(facility.name),
             subtitle: Text(
                 '약 ${facility.distanceKm}km · 도보 ${facility.walkMinutes}분 · $label'),

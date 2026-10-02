@@ -31,7 +31,10 @@
 - AI path: `POST /api/chat` → `ChatService.chat` (service.py) → graph. Real nodes: manager (`OpenAIClassifier`, keyword
   fallback), `rain_flood_agent` (`flood.py`: code collects DB data + builds Evidence incl. "기준 위치" and user memory,
   `OpenAIWriter` only phrases, template fallback), `hallucination_check` (`verify.py`: rule number check → `OpenAIFactChecker`).
-  Still stubs: other 4 specialists (answers end with "/ location_route_agent stub"), action_advisor, intent_check, polish.
+  `location_route_agent` (`location.py`: nearest safe shelter via `get_safe_shelters` — outside active flood/landslide areas,
+  no underground shelters during floods, same rule as the app — + real route via `request_route`, `OpenAILocationWriter`).
+  Still stubs: landslide/wind/life-safety specialists (return an empty piece; if only stubs are picked the answer is
+  `graph.NOT_READY`), action_advisor, intent_check, polish.
   `ChatService()` wires the real nodes; `DEFAULT_NODES`/`ChatService(classifier=…)` stay offline for tests.
 - Data: tools read PostgreSQL directly with read-only role `AI_DB_*` (`../db/init/07_ai_readonly.sh`); every tool takes
   `fetch=` and returns `{"available": False, "reason"}` on failure; observations prefer A's simulated values for 6 h like

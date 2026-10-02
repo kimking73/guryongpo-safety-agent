@@ -25,7 +25,7 @@ def test_calls_route_service_and_returns_route():
     assert res == {**ROUTE, "available": True}
     assert sent == [("/api/route", {"origin": {"lat": 35.9905, "lon": 129.556},
                                      "destination": {"lat": 35.9868, "lon": 129.548},
-                                     "profile": "elderly", "avoid_manholes": True})]
+                                     "profile": "elderly"})]
 
 
 def test_route_server_down_is_unavailable_not_exception():

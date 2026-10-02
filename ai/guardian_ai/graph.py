@@ -232,9 +232,14 @@ def _specialist_stub(agent: Specialist) -> Node:
     state의 merge_results reducer에 의해 하나의 리스트로 합쳐지기 때문이다.
     """
     def node(state: GuardianState) -> dict:
-        return {"specialist_results": [SpecialistResult(agent=agent, summary=f"{agent.value} stub")]}
+        # 빈 답변 조각: 행동 권고가 초안에서 뺀다 ("… stub" 문구가 사용자 답변에 섞이지 않게, 2026-10-02)
+        return {"specialist_results": [SpecialistResult(agent=agent, summary="")]}
     node.__name__ = agent.value
     return node
+
+
+# 아직 구현 전인 agent(산사태·강풍태풍·생활안전, B4)만 고른 질문의 답
+NOT_READY = "이 질문은 아직 답변을 준비 중입니다. 지금은 침수·호우 상황과 대피소·경로를 안내할 수 있습니다."
 
 
 def action_advisor(state: GuardianState) -> dict:
@@ -246,8 +251,15 @@ def action_advisor(state: GuardianState) -> dict:
     """
     results = state.get("specialist_results", [])
     plan = ActionPlan(phase=state.get("phase", Phase.NONE), risk_level=RiskLevel.NORMAL, steps=[])
-    # stub: 전문 agent 요약을 이어 붙여 초안으로 쓴다. 선택된 agent가 없으면 기본 문구.
-    draft = " / ".join(r.summary for r in results) or "현재 확인된 위험 없음"
+    # stub: 전문 agent 요약을 이어 붙여 초안으로 쓴다. 아직 구현 전인 agent(빈 조각)는 빼고,
+    # 그런 agent만 골랐으면 준비 중이라고 밝힌다. 선택된 agent가 없으면 기본 문구.
+    parts = [r.summary for r in results if r.summary.strip()]
+    if parts:
+        draft = " / ".join(parts)
+    elif results:
+        draft = NOT_READY
+    else:
+        draft = "현재 확인된 위험 없음"
     return {"action_plan": plan, "draft": draft}
 
 

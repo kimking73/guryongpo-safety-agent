@@ -76,12 +76,13 @@ curl -X POST localhost:8002/api/route -H 'Content-Type: application/json' \
      -d '{"origin":{"lat":35.9905,"lon":129.5560},"destination":{"lat":35.9868,"lon":129.5480}}'
 ```
 - API 문서: http://localhost:8000/api/v1/docs (서버, 명세 원본은 `server/spec/openapi.yaml`), http://localhost:8001/docs (AI), http://localhost:8002/docs (경로)
-- 경로는 침수·산사태 구역과 맨홀을 피한다. 응답의 `avoided`는 피한 구역, `still_inside`는 다른 길이 없어 지나는 구역이다.
+- 경로는 위험 판정 엔진이 지금 낸 **침수·산사태 영역(주의 이상)**을 피한다 (앱 지도에 칠해지는 영역과 같음, 호우 영역·맨홀은 회피에 쓰지 않음).
+  응답의 `avoided`는 피한 구역, `still_inside`는 다른 길이 없어 지나는 구역(출발·도착 지점이 영역 안이거나 바로 옆일 때), `hazards_ok: false`면 위험 영역을 못 읽어 회피 없이 계산한 경로다.
 - 요청의 `profile`: `adult`(가장 빠른 길, 경사 무시), `elderly`(급경사 도로를 피하고 느린 걸음, 같은 경사면 비탈길보다 계단을 선호).
   응답에 `ascend_m`·`descend_m`(오르막·내리막 합계), `max_slope_pct`(가장 급한 경사)가 온다. 규칙은 `route/guardian_route/profiles.py`.
 - 이동 중: `POST /api/route/check`에 현재 위치·목적지·지금 경로(`geometry`)를 보내면 재계산이 필요한지(`reroute`)와 새 경로를 준다.
   경로에서 30m 넘게 벗어났거나, 남은 경로에 새 위험 구역이 생겼을 때 재계산한다. 도착지 20m 안이면 `arrived: true`.
-  지금 위험 구역은 **임시 데이터**(`route/data/hazards.sample.geojson`)이며, 목록은 http://localhost:8002/api/route/hazards 에서 볼 수 있다.
+  지금 피하는 구역 목록: http://localhost:8002/api/route/hazards . 고정 구역으로 시연·테스트하려면 `.env`의 `ROUTE_HAZARDS_FILE=/app/data/hazards.sample.geojson`.
 - 위험 구역 회피 시연: `cd route && uv pip install -p .venv -e ".[demo]" && .venv/bin/python scripts/avoid_demo.py` — 가상 침수 구역을 무작위로 켜고 끄며 16회 경로 계산·판정, 그림·GIF·결과 표를 `route/out/avoid_demo/`에 만든다 (graphhopper가 떠 있어야 함)
 - GraphHopper 지도 화면(로컬 확인용): http://localhost:8989/maps/ (끝의 `/` 필수. 없으면 빈 화면)
 - 경로 응답의 `geometry`는 인코딩된 polyline(Google 형식, 정밀도 1e5)이다. 앱에서 풀어서 지도에 그린다.

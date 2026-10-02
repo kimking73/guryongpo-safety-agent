@@ -209,6 +209,48 @@ class OpenAIWriter:
         return result.summary.strip()
 
 
+LOCATION_WRITER_PROMPT = """너는 포항 구룡포 재난 대응 서비스 '구룡가디언'의 위치·경로 agent다.
+주어진 근거 목록만 보고 어디로 대피하면 되는지, 얼마나 걸리는지 한국어 2~4문장으로 쓴다.
+
+규칙:
+- 숫자(거리 m, 소요 시간 분, 영역 수)는 근거 목록 값과 단위를 그대로 쓴다. km로 바꾸거나 반올림하지 않는다.
+- 대피소 이름·종류(실내/실외)는 근거에 적힌 그대로 쓴다. 근거에 없는 대피소·시설·길 이름을 지어내지 않는다.
+- '제외한 더 가까운 대피소'가 있으면 왜 그곳이 아닌지 짧게 밝힌다.
+- '주의' 항목이나 '다른 길이 없어 지나는 위험 영역'이 있으면 반드시 알린다.
+- '확인할 수 없는 정보'가 있으면 그 정보는 지금 확인할 수 없다고 밝힌다. 그 상태에서 "안전하다"고 단정하지 않는다.
+- 위치가 '구룡포읍 중심(위치 정보 없음)'이면 그 기준이라고 밝힌다.
+- 침수 단계·특보·행동요령은 쓰지 않는다. 다른 agent가 따로 안내한다.
+- 재검증 실패 사유가 주어지면 그 문제를 고쳐서 다시 쓴다.
+- '사용자 기억' 항목은 이 사용자가 지난 대화에서 직접 말한 자기 정보다. 답을 그 사람에 맞추는 데만 쓴다."""
+
+
+class OpenAILocationWriter:
+    """location.make_location_route_agent(writer=OpenAILocationWriter())로 쓴다. 실패하면 예외 → 템플릿 문장."""
+
+    def __init__(self, client: OpenAI | None = None, model: str | None = None,
+                 tracker: UsageTracker | None = None):
+        self.client = client or make_client()
+        self.model = model or os.environ.get("OPENAI_MODEL") or DEFAULT_MODEL
+        self.tracker = tracker or get_tracker()
+
+    def __call__(self, question: str, evidence: str, data, feedback: str = "") -> str:
+        from .flood import location_text
+        body = [f"질문: {question or '(경고 알림 — 질문 없음)'}", f"기준 위치: {location_text(data)}",
+                "근거 목록:", evidence or "(없음)"]
+        if data.unavailable:
+            body.append("확인할 수 없는 정보: " + ", ".join(data.unavailable))
+        if feedback:
+            body.append(f"재검증 실패 사유:\n{feedback}")
+        response = self.client.responses.parse(
+            model=self.model, instructions=LOCATION_WRITER_PROMPT, input="\n".join(body),
+            text_format=FloodAnswer, reasoning={"effort": "low"})
+        self.tracker.record(self.model, getattr(response, "usage", None))
+        result = response.output_parsed
+        if not isinstance(result, FloodAnswer) or not result.summary.strip():
+            raise ValueError(f"답변을 해석하지 못함: {response.output_text!r}")
+        return result.summary.strip()
+
+
 # ---------------------------------------------------------------------------
 # 환각 검증 — 내용 검사 (B3). 숫자는 verify.check_numbers가 규칙으로 이미 확인했다
 # ---------------------------------------------------------------------------

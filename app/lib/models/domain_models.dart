@@ -38,9 +38,37 @@ class RiskStatus {
 
 /// 지도에 칠할 현재 위험 영역 (/risk/areas). 폴리곤마다 바깥 고리만 쓴다.
 class RiskArea {
-  const RiskArea({required this.level, required this.label, required this.polygons});
+  const RiskArea({required this.level, required this.label, required this.polygons, this.hazard = 'flood'});
   final String level, label;
+  /// flood, landslide, heavy_rain …
+  final String hazard;
   final List<List<LatLng>> polygons;
+  bool contains(LatLng p) => polygons.any((ring) => _inRing(p, ring));
+}
+
+/// 점이 다각형 고리 안인지 (반직선 교차 수)
+bool _inRing(LatLng p, List<LatLng> ring) {
+  var inside = false;
+  for (var i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    final a = ring[i], b = ring[j];
+    if ((a.latitude > p.latitude) != (b.latitude > p.latitude) &&
+        p.longitude < (b.longitude - a.longitude) * (p.latitude - a.latitude) / (b.latitude - a.latitude) + a.longitude) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/// 대피 후보에서 뺄 이유 (없으면 null). AI 위치·경로 agent(ai/guardian_ai/tools.py get_safe_shelters)와 같은 규칙:
+/// ① 발효 중인 침수·산사태 영역(주의 이상) 안 ② 침수 영역이 하나라도 있을 때 지하 시설.
+/// 호우 영역은 읍 전체라 쓰지 않는다.
+String? shelterExclusion(Facility f, List<RiskArea> areas) {
+  if (f.type != FacilityType.shelter) return null;
+  final active = areas.where((a) => (a.hazard == 'flood' || a.hazard == 'landslide') && const {'주의', '경계', '심각'}.contains(a.level));
+  final hit = active.where((a) => a.contains(f.position)).map((a) => a.label).toSet();
+  if (hit.isNotEmpty) return '위험 영역 안(${hit.join(', ')})';
+  if (f.name.contains('지하') && active.any((a) => a.hazard == 'flood')) return '침수 중 지하 시설';
+  return null;
 }
 
 enum RouteType { safest, nearest }

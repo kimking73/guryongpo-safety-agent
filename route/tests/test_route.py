@@ -52,7 +52,8 @@ def test_route_converts_graphhopper_response():
     assert res.status_code == 200
     assert res.json() == {"profile": "adult", "distance_m": 986, "duration_s": 710,
                           "ascend_m": 10, "descend_m": 2, "max_slope_pct": 8,   # 내리막 7.6%도 급경사로 본다
-                          "avoided": [], "still_inside": [], "geometry": PATH["points"], "source": "graphhopper"}
+                          "avoided": [], "still_inside": [], "geometry": PATH["points"], "source": "graphhopper",
+                          "hazards_ok": True}
     # GraphHopper에는 [lon, lat] 순서, 도보 profile, 인코딩된 polyline으로 요청한다
     sent = json.loads(seen[0].content)
     assert sent["points"] == [[129.5560, 35.9905], [129.5480, 35.9868]]

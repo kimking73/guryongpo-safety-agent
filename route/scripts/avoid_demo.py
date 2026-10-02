@@ -158,7 +158,7 @@ def run_trial(svc: RouteService, mem: MemoryHazards, t: Trial) -> None:
     by_id = {z.hazard.id: z.name for z in t.zones}
     mem.zones = [by_name[n].hazard for n in t.on]
     req = RouteRequest(origin={"lat": t.origin[0], "lon": t.origin[1]},
-                       destination={"lat": t.dest[0], "lon": t.dest[1]}, avoid_manholes=False)
+                       destination={"lat": t.dest[0], "lon": t.dest[1]})
     t0 = time.perf_counter()
     res = svc.route(req)
     t.gh_ms = round((time.perf_counter() - t0) * 1000)
@@ -317,8 +317,7 @@ def main() -> int:
     trials: list[Trial] = []
     for pi, (name, o, d) in enumerate(PAIRS, start=1):
         mem.zones = []
-        base = svc.route(RouteRequest(origin={"lat": o[0], "lon": o[1]}, destination={"lat": d[0], "lon": d[1]},
-                                      avoid_manholes=False))
+        base = svc.route(RouteRequest(origin={"lat": o[0], "lon": o[1]}, destination={"lat": d[0], "lon": d[1]}))
         zones = make_zones(rng, pi, _line(base.geometry))
         prev: tuple[str, ...] = ()
         for _ in range(TRIALS_PER_PAIR):

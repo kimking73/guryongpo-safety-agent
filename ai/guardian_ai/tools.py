@@ -318,6 +318,51 @@ def get_facilities(kind: FacilityKind, lat: float, lon: float, limit: int = 5, s
     return {"available": True, "kind": kind, "items": items, "source": source}
 
 
+# 대피 후보 판단 — 앱(app/lib/repositories/remote_repository.dart shelterSafety)과 같은 규칙:
+#   ① 지금 발효 중인 침수·산사태 영역(주의 이상) 안의 대피소는 뺀다 (호우 영역은 읍 전체라 판단에 쓰지 않는다)
+#   ② 침수 영역이 하나라도 발효 중이면 지하 대피소(이름에 '지하')도 뺀다 — 물이 먼저 차는 곳
+AVOID_HAZARDS = ("flood", "landslide")
+SAFE_SHELTERS_SQL = f"""
+SELECT s.id, s.name, s.shelter_types, s.address, s.is_indoor,
+       ST_Y(s.geom) AS lat, ST_X(s.geom) AS lon, ST_Distance(s.geom::geography, {{POINT}}::geography) AS distance_m,
+       (SELECT string_agg(DISTINCT ra.label, ', ') FROM risk_assessments ra
+         WHERE ra.valid_to IS NULL AND ra.level >= 'advisory' AND ra.hazard::text = ANY(%(hazards)s)
+           AND ST_Intersects(ra.area, s.geom)) AS in_hazard,
+       s.name LIKE '%%지하%%' AS underground,
+       EXISTS (SELECT 1 FROM risk_assessments ra WHERE ra.valid_to IS NULL AND ra.level >= 'advisory'
+               AND ra.hazard = 'flood') AS flood_active
+FROM shelters s
+WHERE s.is_open
+ORDER BY distance_m, s.id
+LIMIT %(limit)s
+""".replace("{POINT}", POINT)
+
+
+def get_safe_shelters(lat: float, lon: float, limit: int = 8, fetch: Fetch | None = None) -> dict[str, Any]:
+    """가까운 대피소 + 지금 갈 만한지 (테이블: shelters, risk_assessments).
+
+    items[]: name, lat, lon, distance_m(직선), is_indoor, underground, safe, excluded_reason(뺀 이유, safe면 None).
+    safe=True인 곳이 없으면 위치·경로 agent가 가장 가까운 곳을 경고와 함께 안내한다.
+    사용: 위치·경로 agent
+    """
+    try:
+        rows = _query(fetch, SAFE_SHELTERS_SQL, {**_point(lat, lon), "limit": limit, "hazards": list(AVOID_HAZARDS)})
+    except Exception as e:  # noqa: BLE001
+        return _unavailable("shelters", e)
+    items = []
+    for r in rows:
+        reason = None
+        if r["in_hazard"]:
+            reason = f"위험 영역 안({r['in_hazard']})"
+        elif r["underground"] and r["flood_active"]:
+            reason = "침수 중 지하 시설"
+        items.append({"facility_id": r["id"], "name": r["name"], "shelter_types": list(r["shelter_types"] or []),
+                      "is_indoor": bool(r["is_indoor"]), "underground": bool(r["underground"]),
+                      "lat": round(float(r["lat"]), 6), "lon": round(float(r["lon"]), 6),
+                      "distance_m": round(float(r["distance_m"])), "safe": reason is None, "excluded_reason": reason})
+    return {"available": True, "items": items, "source": "shelters"}
+
+
 # --- 생활안전 ---------------------------------------------------------------
 
 def _grade(value: float | None, bounds: list[tuple[float, str]], below: bool = False) -> str | None:
@@ -368,12 +413,11 @@ def request_route(
     origin: tuple[float, float],
     destination: tuple[float, float],
     profile: Literal["adult", "elderly"] = "adult",
-    avoid_manholes: bool = True,
     client: httpx.Client | None = None,
 ) -> dict[str, Any]:
     """위험 회피 경로. route 서비스(POST /api/route, B6·B7)를 실제로 호출한다 — 목업이 아닌 첫 tool.
 
-    회피: 침수·산사태 위험지역, (avoid_manholes면) 맨홀. profile: adult 최단 시간(경사 무시), elderly 급경사 회피·같은 경사면 계단 선호.
+    회피: 판정 엔진이 지금 낸 침수·산사태 영역(주의 이상). 맨홀은 회피하지 않는다 (사용자 결정 2026-10-02). profile: adult 최단 시간(경사 무시), elderly 급경사 회피·같은 경사면 계단 선호.
     좌표는 (lat, lon). 반환: route 서비스 응답 키 + available=True.
     경로 서버가 없거나 경로를 못 찾으면 예외 대신 {"available": False, "reason": …}를 돌려준다
     (agent가 "경로 안내를 지금 할 수 없다"고 답하고 대피소 위치만 알려 주도록).
@@ -382,7 +426,7 @@ def request_route(
     body = {
         "origin": {"lat": origin[0], "lon": origin[1]},
         "destination": {"lat": destination[0], "lon": destination[1]},
-        "profile": profile, "avoid_manholes": avoid_manholes,
+        "profile": profile,
     }
     own = client is None
     http = client or httpx.Client(base_url=os.environ.get("ROUTE_URL") or DEFAULT_ROUTE_URL,
@@ -455,6 +499,6 @@ AGENT_TOOLS: dict[str, list] = {
                          get_disaster_messages, get_facilities],
     "wind_typhoon_agent": [get_risk_at, get_observations, get_weather_warnings, get_disaster_messages],
     "life_safety_agent": [get_life_safety],
-    "location_route_agent": [get_risk_at, get_facilities, request_route],
+    "location_route_agent": [get_risk_at, get_safe_shelters, request_route],
     "action_advisor": [get_action_guides, get_facilities],
 }

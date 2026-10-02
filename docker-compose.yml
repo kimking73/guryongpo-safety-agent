@@ -143,6 +143,8 @@ services:
     env_file: .env
     environment:
       GRAPHHOPPER_URL: http://graphhopper:8989
+      # 피할 위험 구역 = 판정 엔진 영역 (GET /api/v1/risk/areas). api가 꺼져 있어도 route는 뜨고, 회피 없이 계산한다
+      ROUTE_RISK_API_URL: http://api:8000
     depends_on:
       graphhopper:
         condition: service_healthy

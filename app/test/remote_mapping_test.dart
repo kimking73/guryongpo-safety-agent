@@ -1,5 +1,6 @@
 // 서버 실제 응답 모양(2026-10-02 로컬 서버에서 받은 값) → 화면 모델 변환
 import 'package:flutter_test/flutter_test.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:guryongpo_safety/models/domain_models.dart';
 import 'package:guryongpo_safety/repositories/remote_repository.dart';
 import 'package:guryongpo_safety/services/polyline.dart';
@@ -75,6 +76,8 @@ void main() {
        'properties': {'level': 'critical', 'label': '침수 심각'}},
     ]});
     expect(areas.single.level, '심각');
+    expect(areas.single.hazard, '');
+    expect(areas.single.contains(const LatLng(35.991, 129.555)), isTrue);
     expect(areas.single.polygons.single.first.latitude, 35.99);
   });
 
@@ -93,5 +96,25 @@ void main() {
     expect(routeProfileFor(30, '휠체어'), 'elderly');
     expect(routeProfileFor(30, '도보'), 'adult');
     expect(routeProfileFor(null, null), 'adult');
+  });
+
+  test('대피소 제외 규칙: 침수·산사태 영역 안, 침수 중 지하 (AI와 같은 규칙)', () {
+    Facility f(String name, double lat, double lng) => Facility(id: name, name: name, type: FacilityType.shelter,
+        position: LatLng(lat, lng), address: '', description: '', distanceKm: 0, walkMinutes: 0, accessible: false);
+    final square = [const LatLng(35.99, 129.55), const LatLng(35.99, 129.56), const LatLng(36.0, 129.56), const LatLng(36.0, 129.55)];
+    final flood = RiskArea(level: '경계', label: '침수 경보', hazard: 'flood', polygons: [square]);
+    final rain = RiskArea(level: '경계', label: '강우 경보', hazard: 'heavy_rain', polygons: [square]);
+    final watch = RiskArea(level: '관심', label: '침수 보통', hazard: 'flood', polygons: [square]);
+    expect(shelterExclusion(f('초등학교 앞', 35.995, 129.555), [flood]), '위험 영역 안(침수 경보)');
+    expect(shelterExclusion(f('초등학교 앞', 35.995, 129.555), [rain]), isNull);        // 호우 영역은 읍 전체라 안 씀
+    expect(shelterExclusion(f('초등학교 앞', 35.995, 129.555), [watch]), isNull);       // 관심 단계는 안 뺌
+    expect(shelterExclusion(f('여의주타워 지하주차장', 35.98, 129.54), [flood]), '침수 중 지하 시설');
+    expect(shelterExclusion(f('여의주타워 지하주차장', 35.98, 129.54), [rain]), isNull);
+  });
+
+  test('경로 응답: 위험 정보를 못 읽었으면 알림', () {
+    final r = routeFromJson({'profile': 'adult', 'distance_m': 100, 'duration_s': 60, 'avoided': [], 'still_inside': [],
+      'hazards_ok': false, 'geometry': '_p~iF~ps|U'}, 'x', RouteType.nearest);
+    expect(r.riskAvoidanceSummary, contains('위험 정보를 확인하지 못해'));
   });
 }

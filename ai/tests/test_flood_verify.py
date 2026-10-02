@@ -17,6 +17,13 @@ HOME = Location(lat=35.9905, lon=129.5560, label="집")
 
 def heavy_rain_db(sql, params):
     """가짜 DB: 구룡포수협 지표면 수위계 침수심 160mm → 침수 경보, 호우주의보 발효, 1시간 강수량 42.5mm."""
+    if "FROM shelters" in sql:     # 대피소 SQL에도 risk_assessments가 들어 있어 먼저 본다
+        return [{"id": 2, "name": "여의주타워 지하주차장 1층", "shelter_types": ["civil_defense"], "address": "구룡포읍",
+                 "is_indoor": True, "lat": 35.99, "lon": 129.555, "distance_m": 220.0,
+                 "in_hazard": None, "underground": True, "flood_active": True},
+                {"id": 3, "name": "구룡포초등학교", "shelter_types": ["tsunami"], "address": "구룡포읍",
+                 "is_indoor": True, "lat": 35.99, "lon": 129.55, "distance_m": 420.4,
+                 "in_hazard": None, "underground": False, "flood_active": True}]
     if "risk_assessments" in sql:
         return [{"id": 1, "hazard": "flood", "level": "warning", "label": "침수 경보", "rule_id": 9,
                  "basis": {"reason": "구룡포수협 지표면 수위계 침수심 160mm (기준 150mm)", "metric": "flood_depth",
@@ -35,10 +42,6 @@ def heavy_rain_db(sql, params):
     if "weather_warnings" in sql:
         return [{"hazard": "heavy_rain", "level": "advisory", "region_name": "포항시", "issued_at": NOW,
                  "effective_at": NOW, "released_at": None, "headline": "포항시 호우주의보"}]
-    if "shelters" in sql:
-        return [{"id": 3, "name": "구룡포초등학교", "shelter_types": ["tsunami"], "address": "구룡포읍",
-                 "capacity": 300, "phone": None, "is_indoor": True, "is_accessible": None,
-                 "lat": 35.99, "lon": 129.55, "distance_m": 420.4}]
     return []
 
 
