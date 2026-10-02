@@ -32,6 +32,7 @@ A 작업 중 B와 맞물리는 것: **A7**(Day 3–6, 정적 데이터 적재)�
 
 ## 다음 세션 시작점 (2026-10-02 갱신, Day 10)
 **현재 상태**: B1·B2·B3·B6·B8 완료 / B7 완료 기준 충족(완료 처리 대기) / B10 진행 중(VM·전 서비스 실행, 고정 IP·Caddy·도메인 남음).
+**J1 연동(2026-10-02)**: 앱 `APP_MODE=remote`로 위험도·위험 영역·대피소·AI 대화·경로가 실서버 연결, 침수 시나리오로 끝까지 확인. 라이브 타임라인 J1 완료 처리는 사용자 확인 대기.
 AI = OpenAI gpt-6-luna, DB 직접 조회(읽기 전용), 침수 agent + 환각 검증, 사용자 기억(단기 메모리 60분·장기 PostgreSQL). 맥·GitHub·VM 모두 ae84b97 이후 최신.
 
 1. **B4 시작** (가장 급함): 산사태·강풍태풍·생활안전·위치경로 agent를 침수 agent(`flood.py`)와 같은 모양
@@ -103,6 +104,8 @@ AI = OpenAI gpt-6-luna, DB 직접 조회(읽기 전용), 침수 agent + 환각 �
 - [ ] B10 Caddy에서 `/api/ai/memory`는 외부에 열지 않는다(인증 전). 지금은 VM 방화벽이 8001을 막아 외부 접근 불가 확인(2026-10-02)
 - [ ] 사용자 기억 정식 서비스 전: 앱 동의 화면·"기억 보기/끄기/지우기"(C), Firebase 인증 연결(A 방식), 익명 로그인은 재설치 시 다른 사용자
 - [ ] A의 `users`·`user_profiles`와 AI 기억(`ai_memory`) 동기화 여부 — A와 결정
+- [ ] J1 이후 앱 연결 남은 것: 알림을 `/api/v1/alerts`로(A5 실구현 후), 등록 장소 위험·`/user`·`/device-token`(Firebase 웹 앱 등록 필요), `/route/check`(C5), 음성(B5). C 레인과 공유
+- [ ] 로컬 `.env`에 `API_INTERNAL_TOKEN` 없고 `API_AUTH_MODE`가 dev가 아니라 `/api/v1/internal/simulate`가 막힘 — 시연 전 토큰 설정 (오늘은 api 컨테이너 안에서 `risk.simulate.apply` 직접 호출)
 
 ## 일정 리스크 (B1 세션 분석)
 - B 과부하: Day 8–10에 B4+B6 동시, Day 11–13에 B5+B7+B10 동시. C는 같은 기간 한 개씩 → B10/B6 일부 이관 검토.
@@ -141,3 +144,4 @@ AI = OpenAI gpt-6-luna, DB 직접 조회(읽기 전용), 침수 agent + 환각 �
 - 2026-10-02 사용자별 기억(사용자 계획 승인): 단기 = LangGraph `PostgresSaver`(대화 안, 재시작해도 이어짐), 장기 = `PostgresStore`(사용자 사실·대화 요약). `db/init/08_ai_memory.sh`(스키마 ai_memory + 전용 계정, public 권한 없음), `memory.py`(DB 못 닿으면 메모리 대체, 대화 주인 확인, 불러오기 → 빈 프로필 칸·분류 프롬프트·침수 근거, 저장 → 백그라운드 `OpenAIMemoryExtractor`), `remember` 기본 켜짐(사용자 결정), `GET/DELETE /api/ai/memory/{uid}`. 로컬 왕복: 무릎 발언 → 새 대화 분류 이유에 "보행 불편도 고려", AI 재시작 후 기억·대화 유지, "거기까지"를 이전 대화로 해석. 발견·수정: 재시작 직전 백그라운드 저장 유실 → 종료 때 대기(`close()`·lifespan), 이어지는 대화가 요약을 덮어씀 → 기존 요약을 넘겨 넓힘. 테스트 ai 87 + db 4 + live 32(추출기 6/6: 직접 말한 사실만, 추측·재난 수치 저장 안 함).
 - 2026-10-02 단기 기억을 InMemorySaver로 되돌림(사용자 결정): 실측 질문 1개당 체크포인트 약 12개·이전 질문 근거까지 DB에 누적, 위치·건강 정보가 상태째 영구 저장 → 대화 기억은 서버 메모리 + 마지막 문답 후 60분 만료(`CONVERSATION_TTL_MIN`, 만료 대화 지우기, 만료·모르는·남의 id는 새 대화), 장기 기억만 PostgresStore. 로컬 확인: 재시작 후 사용자 기억 유지·옛 대화 id는 새 대화, 새 대화에서도 "거기"를 대화 요약(장기 기억)으로 대피소로 해석. 테스트 ai 89 + db 4. 로컬 ai_memory에 오전 PostgresSaver 시험 때 생긴 checkpoint 표 4개(테스트 대화 데이터)가 남아 있음 — 정리 필요.
 - 2026-10-02 정리·배포: 로컬 ai_memory의 옛 checkpoint 표 4개 삭제(사용자 허락), 커밋 5bb0c9a(회피 시연·경사 기준선)·b08d49d(AI 기억) 푸시. VM: `.env`에 AI_MEM_DB_*(VM 전용 무작위 비밀번호)만 추가(맥 .env 덮어쓰지 않음), pull, 08 스크립트, ai 재빌드 → 장기 기억 postgres, 실제 질문으로 보행 불편·나이 저장 확인 후 삭제, 외부에서 8001 접근 차단 확인.
+- 2026-10-02 J1 연동(사용자 계획 승인): 앱 `RemoteSafetyRepository`(api 위험도·위험 영역·시설 GeoJSON, ai /api/chat, route /api/route + 위험 구역 이름), 저장소 인터페이스 비동기화·Riverpod FutureProvider, 실서버 모드에서 예시 그리드·가짜 수치 숨김. ai·route에 CORS(`CORS_ORIGINS`). 테스트: ai 90·route 36·app 10 통과, 실서버 확인(평상시 정상·대피소 24곳·노약자 경로, `heavy_rain_flood` 주입 시 경계·알림 2·위험 영역 8·AI 답변 실제 수치 → clear). AI 답변 끝 "/ location_route_agent stub"은 B4에서 해결.

@@ -28,6 +28,30 @@ iOS 빌드는 macOS와 Xcode가 있는 환경에서만 가능합니다.
 flutter run -d ios
 ```
 
+## 실제 서버에 연결해서 보기 (APP_MODE=remote)
+
+코드 루트에서 `docker compose up -d` 로 서버를 켠 뒤:
+
+```bash
+flutter run -d chrome --dart-define=APP_MODE=remote
+```
+
+| 화면 | 서버 | 상태 |
+|---|---|---|
+| 대시보드 위험도·판정 근거, 알림 | api `GET /api/v1/risk` (반경 300m) | 실데이터. 알림은 `/api/v1/alerts`(A5) 전까지 위험 판정 항목으로 만든다 |
+| 지도 위험 영역 | api `GET /api/v1/risk/areas` | 실데이터 |
+| 대피소·의료시설 | api `GET /api/v1/dashboard/layers/{shelters,medical}` | 실데이터. 거리·도보시간은 직선거리 기반 대략값 |
+| AI 대화 | ai `POST /api/chat` | 실데이터 (기기별 사용자 ID, 대화 이어 쓰기) |
+| 대피 경로 | route `POST /api/route` | GraphHopper. 65세 이상·휠체어면 노약자 경로, "가까운 경로"는 맨홀 회피 끔 |
+
+- 서버 주소 기본값은 `localhost:8000/8001/8002`. 바꾸려면 `--dart-define=API_BASE_URL=... AI_BASE_URL=... ROUTE_BASE_URL=...`
+  (Android 에뮬레이터는 `10.0.2.2`). 배포는 세 값을 같은 도메인으로 준다.
+- 침수 장면 시연: 서버에 `heavy_rain_flood` 시나리오를 넣으면 대시보드가 경계 단계·알림·위험 영역으로 바뀐다
+  (`POST /api/v1/internal/simulate`, `server/README.md`). 끝나면 `clear`.
+- 아직 목업인 것: 등록 장소 위험 요약, 음성, 푸시 알림, 이동 중 경로 재계산(C5), 계정 연결.
+- 연결 코드: `lib/repositories/remote_repository.dart` (서버 응답 → 화면 모델 변환은 `test/remote_mapping_test.dart`에서 검사).
+- 한글 경로에서 `flutter analyze`가 죽는 Flutter 버그가 있다. 영문 경로에 복사해서 돌린다.
+
 ## Firebase와 원격 API 설정
 
 ### 초기 설정과 계정 연결
@@ -59,4 +83,4 @@ flutter run -d chrome --dart-define=APP_MODE=remote --dart-define=API_BASE_URL=h
 - 담당: C 레인. 저장소 경로는 `app/`이다.
 - Firebase 프로젝트: `guryong-guardian-0924` — 앱 등록은 `flutterfire configure --project=guryong-guardian-0924`
 - 익명 인증과 FCM은 이미 켜져 있다 (B8).
-- 로컬 API 주소: `http://localhost:8000/api` (Android 에뮬레이터에서는 `http://10.0.2.2:8000/api`)
+- 로컬 서버 주소: api `http://localhost:8000`, ai `:8001`, route `:8002` (Android 에뮬레이터에서는 `10.0.2.2`)

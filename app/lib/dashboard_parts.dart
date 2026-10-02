@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 import 'main.dart';
 import 'models/domain_models.dart';
-import 'repositories/mock_repository.dart';
+import 'services/app_config.dart';
 
 class FloodGrid {
   const FloodGrid(this.name, this.level, this.south, this.west, this.north, this.east);
@@ -40,6 +40,14 @@ List<FloodGrid> floodGridsFor(int timeIndex) {
 List<Polygon> floodGridPolygons(int timeIndex) => floodGridsFor(timeIndex).map((g) => Polygon(
   points: [LatLng(g.south, g.west), LatLng(g.south, g.east), LatLng(g.north, g.east), LatLng(g.north, g.west)],
   color: g.color.withValues(alpha: .48), borderColor: Colors.white.withValues(alpha: .75), borderStrokeWidth: .6)).toList();
+
+/// 서버 위험 영역(/risk/areas) → 지도 폴리곤. 단계 색은 침수 그리드와 같은 기준
+List<Polygon> riskAreaPolygons(List<RiskArea> areas) => [
+  for (final a in areas)
+    for (final ring in a.polygons)
+      Polygon(points: ring, color: riskColor(a.level == '관심' ? '주의' : a.level).withValues(alpha: .35),
+          borderColor: riskColor(a.level == '관심' ? '주의' : a.level), borderStrokeWidth: 1.5, label: a.label)
+];
 
 class FloodGridLegend extends StatelessWidget {
   const FloodGridLegend({super.key});
@@ -85,8 +93,6 @@ class RouteMap extends ConsumerStatefulWidget {
 
 class _RouteMapState extends ConsumerState<RouteMap> {
   final mapController = MapController();
-  bool loading = true;
-  @override void initState() { super.initState(); Future<void>.delayed(const Duration(milliseconds: 550), () { if (mounted) setState(() => loading = false); }); }
 
   @override
   void dispose() {
@@ -96,17 +102,23 @@ class _RouteMapState extends ConsumerState<RouteMap> {
 
   @override
   Widget build(BuildContext context) {
-    final facility = MockSafetyRepository.facilities
-        .firstWhere((item) => item.id == widget.facilityId);
+    final facility = ref.watch(facilitiesProvider).valueOrNull
+        ?.where((item) => item.id == widget.facilityId).firstOrNull;
     final userMode = ref.watch(mode);
     final routeType = ref.watch(routeKind);
-    final route = MockSafetyRepository()
-        .routeFor(facility.id, userMode, routeType);
-    final current = userMode == UserMode.resident
-        ? const LatLng(35.9918, 129.5507)
-        : const LatLng(35.9907, 129.5526);
-    final bounds = LatLngBounds.fromPoints(route.polylinePoints);
-    final routeLabel = routeType == RouteType.safest ? '가장 안전한 경로' : '가까운 대피소 경로';
+    final routeAsync = ref.watch(routeProvider(widget.facilityId));
+    final route = routeAsync.valueOrNull;
+    final loading = routeAsync.isLoading;
+    final current = originFor(userMode);
+    if (facility == null || route == null) {
+      return Card(child: SizedBox(height: 470, child: Center(child: routeAsync.hasError
+          ? Column(mainAxisSize: MainAxisSize.min, children: [
+              Padding(padding: const EdgeInsets.all(16), child: Text('${routeAsync.error}', textAlign: TextAlign.center)),
+              FilledButton(onPressed: () => ref.invalidate(routeProvider(widget.facilityId)), child: const Text('다시 시도')),
+              TextButton(onPressed: () => ref.read(routeFacilityId.notifier).state = null, child: const Text('경로 안내 종료'))])
+          : const Column(mainAxisSize: MainAxisSize.min, children: [CircularProgressIndicator(), SizedBox(height: 10), Text('안전 경로를 준비하고 있습니다')]))));
+    }
+    final bounds = LatLngBounds.fromPoints([current, ...route.polylinePoints]);
     return Card(
         clipBehavior: Clip.antiAlias,
         child: SizedBox(
@@ -125,7 +137,10 @@ class _RouteMapState extends ConsumerState<RouteMap> {
                           'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
                       subdomains: const ['a', 'b', 'c'],
                       userAgentPackageName: 'com.example.guryongpo_safety'),
-                  PolygonLayer(polygons: floodGridPolygons(0)),
+                  if (AppConfig.isRemote)
+                    PolygonLayer(polygons: riskAreaPolygons(ref.watch(riskAreasProvider).valueOrNull ?? const []))
+                  else
+                    PolygonLayer(polygons: floodGridPolygons(0)),
                   PolylineLayer(polylines: [
                     Polyline(
                         points: route.polylinePoints,
@@ -135,10 +150,11 @@ class _RouteMapState extends ConsumerState<RouteMap> {
                         points: route.polylinePoints,
                         color: Colors.blue.shade700,
                         strokeWidth: 6),
-                    Polyline(points: const [
-                      LatLng(35.9911, 129.5520),
-                      LatLng(35.9919, 129.5530)
-                    ], color: Colors.red.shade200, strokeWidth: 8)
+                    if (!AppConfig.isRemote)
+                      Polyline(points: const [
+                        LatLng(35.9911, 129.5520),
+                        LatLng(35.9919, 129.5530)
+                      ], color: Colors.red.shade200, strokeWidth: 8)
                   ]),
                   MarkerLayer(markers: [
                     Marker(
@@ -165,7 +181,7 @@ class _RouteMapState extends ConsumerState<RouteMap> {
                                       fontWeight: FontWeight.bold)))
                         ]))
                   ]),
-                  const FloodGridLegend(),
+                  if (!AppConfig.isRemote) const FloodGridLegend(),
                   if (loading) const Positioned.fill(child: ColoredBox(color: Color(0x88000000), child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [CircularProgressIndicator(color: Colors.white), SizedBox(height: 10), Text('안전 경로를 준비하고 있습니다', style: TextStyle(color: Colors.white))])))),
                 ],
               )),
@@ -176,7 +192,7 @@ class _RouteMapState extends ConsumerState<RouteMap> {
                     Row(children: [
                       Expanded(
                           child: Text(
-                              '침수 위험 구간 회피 경로 · 예시 데이터\n${facility.name} · ${(route.distanceMeters / 1000).toStringAsFixed(1)}km · 도보 ${route.estimatedMinutes}분\n${route.riskAvoidanceSummary}',
+                              '${AppConfig.isRemote ? '위험 구역 회피 경로' : '침수 위험 구간 회피 경로'} · ${AppConfig.dataLabel}\n${facility.name} · ${(route.distanceMeters / 1000).toStringAsFixed(1)}km · 도보 ${route.estimatedMinutes}분\n${route.riskAvoidanceSummary}',
                               style: const TextStyle(fontSize: 12))),
                       IconButton(
                           tooltip: '경로 안내 종료',
@@ -212,15 +228,15 @@ class ShelterPickerSheet extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final routeType = ref.watch(routeKind);
-    final userMode = ref.watch(mode);
     return SafeArea(
         child: ListView(shrinkWrap: true, children: [
       const ListTile(
           title: Text('다른 대피소 선택'),
           subtitle: Text('선택하면 현재 대시보드 지도에서 새 경로를 바로 표시합니다.')),
-      ...MockSafetyRepository.facilities.map((facility) {
-        final route = MockSafetyRepository()
-            .routeFor(facility.id, userMode, routeType);
+      // 걸어서 갈 만한 곳만 (의료시설은 5km 안). 거리는 경로 계산 전 대략값
+      ...[...?ref.watch(facilitiesProvider).valueOrNull]
+          .where((f) => f.type == FacilityType.shelter || f.distanceKm <= 5)
+          .map((facility) {
         final label = routeType == RouteType.safest ? '가장 안전한 경로' : '가까운 대피소 경로';
         return ListTile(
             leading: Icon(facility.type == FacilityType.shelter
@@ -228,7 +244,7 @@ class ShelterPickerSheet extends ConsumerWidget {
                 : Icons.local_hospital),
             title: Text(facility.name),
             subtitle: Text(
-                '${(route.distanceMeters / 1000).toStringAsFixed(1)}km · 도보 ${route.estimatedMinutes}분 · $label'),
+                '약 ${facility.distanceKm}km · 도보 ${facility.walkMinutes}분 · $label'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () {
               final messenger = ScaffoldMessenger.of(context);
@@ -248,9 +264,11 @@ class ModeCards extends ConsumerWidget {
   final RiskStatus risk;
   @override
   Widget build(BuildContext context, WidgetRef ref) => Column(children: [
-    const PlaceRiskSummary(), const SizedBox(height: 12), const AlertCards(), const SizedBox(height: 12),
+    // 등록 장소 위험은 장소 등록(/user/places, A5) 연결 전이라 목업에서만 보인다
+    if (!AppConfig.isRemote) ...const [PlaceRiskSummary(), SizedBox(height: 12)],
+    const AlertCards(), const SizedBox(height: 12),
     SupportCard(fishing: ref.watch(residentOccupation) == '어업·수산업'),
-    Card(child: ListTile(leading: const Icon(Icons.directions_walk), title: const Text('안전한 대피 안내'), subtitle: Text(risk.guide), trailing: VoiceButton(text: risk.guide), onTap: () => startRouteToShelter(ref, 'gym')))
+    Card(child: ListTile(leading: const Icon(Icons.directions_walk), title: const Text('안전한 대피 안내'), subtitle: Text(risk.guide), trailing: VoiceButton(text: risk.guide), onTap: () => startRouteToShelter(ref, nearestShelterId(ref))))
   ]);
 }
 
@@ -263,8 +281,22 @@ class PlaceRiskSummary extends StatelessWidget { const PlaceRiskSummary({super.k
 class _PlaceTile extends StatelessWidget { const _PlaceTile({required this.icon, required this.name, required this.level, required this.depth, required this.guide}); final IconData icon; final String name, level, depth, guide;
   @override Widget build(BuildContext c) { final color = riskColor(level); return SizedBox(width: 210, child: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: color.withValues(alpha:.08), borderRadius: BorderRadius.circular(10), border: Border.all(color: color.withValues(alpha:.3))), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Row(children:[Icon(icon, color: color), const SizedBox(width:6), Text(name, style: const TextStyle(fontWeight: FontWeight.bold)), const Spacer(), Container(width:8,height:8,decoration:BoxDecoration(color:color,shape:BoxShape.circle))]), const SizedBox(height:7), Row(children:[Container(padding:const EdgeInsets.symmetric(horizontal:7,vertical:3),decoration:BoxDecoration(color:color,borderRadius:BorderRadius.circular(20)),child:Text(level,style:const TextStyle(color:Colors.white,fontSize:11,fontWeight:FontWeight.bold))), const SizedBox(width:7), Text('예상 $depth')]), const SizedBox(height:6), LinearProgressIndicator(value: level=='경계'? .62:level=='주의'? .35:.12, color:color, backgroundColor:color.withValues(alpha:.15)), const SizedBox(height:5), Text(guide,style:const TextStyle(fontSize:11))]))); }
 }
-class AlertCards extends StatelessWidget { const AlertCards({super.key});
-  @override Widget build(BuildContext c) => Column(crossAxisAlignment: CrossAxisAlignment.start, children:[const Text('선제 경고 알림', style: TextStyle(fontSize:17,fontWeight:FontWeight.bold)), const SizedBox(height:8), ...const [('09:20','구룡포항 북측','경계','해안 저지대 침수 확대 가능성','차량 이동 자제 및 고지대 이동 권고','09:15'),('10:05','구룡포 시장 인근','주의','배수로 수위 상승','상가 지하층 및 배수 시설 점검 권고','10:00'),('10:30','병포리 해안도로','심각','도로 일부 침수 진행','해당 구간 진입 금지 및 우회 경로 이용','10:25')].map((a) {final color=riskColor(a.$3); return Card(child: Padding(padding:const EdgeInsets.all(12),child:Row(crossAxisAlignment:CrossAxisAlignment.start,children:[Container(width:4,height:72,color:color),const SizedBox(width:10),Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Row(children:[Text(a.$1,style:const TextStyle(fontWeight:FontWeight.bold)),const SizedBox(width:8),Expanded(child:Text(a.$2,style:const TextStyle(fontWeight:FontWeight.bold))),Chip(label:Text(a.$3),backgroundColor:color.withValues(alpha:.14),labelStyle:TextStyle(color:color,fontSize:11))]),Text(a.$4),const SizedBox(height:3),Text(a.$5,style:const TextStyle(fontWeight:FontWeight.w600,fontSize:12)),Text('${a.$6} 업데이트',style:const TextStyle(fontSize:10,color:Colors.black54))]))]))); })]);
+class AlertCards extends ConsumerWidget { const AlertCards({super.key});
+  @override Widget build(BuildContext c, WidgetRef ref) => AppConfig.isRemote ? _live(ref) : Column(crossAxisAlignment: CrossAxisAlignment.start, children:[const Text('선제 경고 알림', style: TextStyle(fontSize:17,fontWeight:FontWeight.bold)), const SizedBox(height:8), ...const [('09:20','구룡포항 북측','경계','해안 저지대 침수 확대 가능성','차량 이동 자제 및 고지대 이동 권고','09:15'),('10:05','구룡포 시장 인근','주의','배수로 수위 상승','상가 지하층 및 배수 시설 점검 권고','10:00'),('10:30','병포리 해안도로','심각','도로 일부 침수 진행','해당 구간 진입 금지 및 우회 경로 이용','10:25')].map((a) {final color=riskColor(a.$3); return Card(child: Padding(padding:const EdgeInsets.all(12),child:Row(crossAxisAlignment:CrossAxisAlignment.start,children:[Container(width:4,height:72,color:color),const SizedBox(width:10),Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Row(children:[Text(a.$1,style:const TextStyle(fontWeight:FontWeight.bold)),const SizedBox(width:8),Expanded(child:Text(a.$2,style:const TextStyle(fontWeight:FontWeight.bold))),Chip(label:Text(a.$3),backgroundColor:color.withValues(alpha:.14),labelStyle:TextStyle(color:color,fontSize:11))]),Text(a.$4),const SizedBox(height:3),Text(a.$5,style:const TextStyle(fontWeight:FontWeight.w600,fontSize:12)),Text('${a.$6} 업데이트',style:const TextStyle(fontSize:10,color:Colors.black54))]))]))); })]);
+
+  /// 실시간 위험 판정 항목 (/risk items)
+  Widget _live(WidgetRef ref) {
+    final alerts = ref.watch(alertsProvider).valueOrNull ?? const <AlertItem>[];
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('선제 경고 알림', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)), const SizedBox(height: 8),
+      if (alerts.isEmpty) const Card(child: ListTile(leading: Icon(Icons.check_circle_outline), title: Text('현재 위치 주변에 발효 중인 경고가 없습니다'))),
+      ...alerts.map((a) { final color = riskColor(a.level == '관심' ? '주의' : a.level); return Card(child: ListTile(
+        leading: Container(width: 4, height: 40, color: color),
+        title: Text(a.title, style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: Text('${a.summary}\n${a.guide}'), isThreeLine: true,
+        trailing: Text(a.time, style: const TextStyle(fontSize: 11)))); }),
+    ]);
+  }
 }
 
 class SupportCard extends StatefulWidget { const SupportCard({super.key, required this.fishing}); final bool fishing; @override State<SupportCard> createState()=>_SupportCardState(); }
@@ -299,14 +331,14 @@ class _AiPanelState extends ConsumerState<AiPanel> {
       (question, true)
     ];
     setState(() => loading = true);
-    final answer = await ref.read(repo).ask(question);
+    final answer = await ref.read(repo).ask(question, ref.read(mode));
     final personaGuide = widget.resident
         ? '주민 예시 안내: 등록 장소와 현재 위치를 함께 확인하고 안전한 실내로 이동하세요.'
         : '관광객 예시 안내: 현재 위치 주변의 위험 구간을 피하고 안전한 실내를 확인하세요.';
     if (mounted)
       ref.read(chatMessages.notifier).state = [
         ...ref.read(chatMessages),
-        ('$answer\n$personaGuide\n예시 AI 안내', false)
+        (AppConfig.isRemote ? answer : '$answer\n$personaGuide\n예시 AI 안내', false)
       ];
     if (mounted) setState(() => loading = false);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -325,7 +357,7 @@ class _AiPanelState extends ConsumerState<AiPanel> {
             Padding(
                 padding: const EdgeInsets.all(12),
                 child:
-                    Text('${widget.resident ? '주민' : '관광객'} AI 대화 · 예시 데이터')),
+                    Text('${widget.resident ? '주민' : '관광객'} AI 대화 · ${AppConfig.dataLabel}')),
             Wrap(
                 spacing: 4,
                 children: [

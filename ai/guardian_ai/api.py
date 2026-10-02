@@ -7,10 +7,12 @@ Firebase 토큰 검증은 A2에서 A가 정하는 방식에 맞춰 추가한다.
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from functools import lru_cache
 
 from fastapi import Depends, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from . import memory as M
 from .service import ChatRequest, ChatResponse, ChatService
@@ -29,6 +31,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="구룡가디언 AI", lifespan=lifespan)
+# 브라우저(Flutter 웹)가 이 포트를 직접 부를 때 필요 (로컬). 배포에서는 Caddy가 같은 도메인으로 묶는다
+app.add_middleware(CORSMiddleware, allow_origins=[o.strip() for o in (os.environ.get("CORS_ORIGINS") or "*").split(",") if o.strip()],
+                   allow_methods=["*"], allow_headers=["*"])
 
 
 @lru_cache

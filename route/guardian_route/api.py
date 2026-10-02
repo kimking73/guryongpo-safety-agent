@@ -6,9 +6,11 @@
 from __future__ import annotations
 
 import logging
+import os
 from functools import lru_cache
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 from .gh import GraphHopperUnavailable, RouteNotFound
 from .service import RouteCheckRequest, RouteCheckResponse, RouteRequest, RouteResponse, RouteService
@@ -18,6 +20,9 @@ log = logging.getLogger("guardian_route")
 log.setLevel(logging.INFO)
 
 app = FastAPI(title="구룡가디언 경로 안내")
+# 브라우저(Flutter 웹)가 이 포트를 직접 부를 때 필요 (로컬). 배포에서는 Caddy가 같은 도메인으로 묶는다
+app.add_middleware(CORSMiddleware, allow_origins=[o.strip() for o in (os.environ.get("CORS_ORIGINS") or "*").split(",") if o.strip()],
+                   allow_methods=["*"], allow_headers=["*"])
 
 
 @lru_cache

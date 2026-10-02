@@ -1,12 +1,14 @@
 import 'package:latlong2/latlong.dart';
 import '../models/domain_models.dart';
 
+/// 화면이 쓰는 데이터 창구. 목업(MockSafetyRepository)과 실제 서버(RemoteSafetyRepository)가 같은 형식으로 돌려준다.
 abstract class SafetyRepository {
-  Future<RiskStatus> risk();
-  Future<List<Facility>> getFacilities();
-  Future<List<AlertItem>> alerts();
-  MockRoute routeFor(String facilityId, UserMode userMode, RouteType routeType);
-  Future<String> ask(String question);
+  Future<RiskStatus> risk(UserMode userMode);
+  Future<List<RiskArea>> riskAreas();
+  Future<List<Facility>> getFacilities(UserMode userMode);
+  Future<List<AlertItem>> alerts(UserMode userMode);
+  Future<SafetyRoute> routeFor(Facility facility, UserMode userMode, RouteType routeType);
+  Future<String> ask(String question, UserMode userMode);
 }
 
 class MockSafetyRepository implements SafetyRepository {
@@ -56,7 +58,7 @@ class MockSafetyRepository implements SafetyRepository {
   /// Every selectable example facility has a bent, in-service-area walking
   /// polyline for each user origin and route preference. There is deliberately
   /// no text-only fallback route.
-  static final _routes = <String, MockRoute>{
+  static final _routes = <String, SafetyRoute>{
     // Visitor origin: 35.9907, 129.5526
     'visitor/safest/gym': _route('gym', RouteType.safest, 800, 12,
         '침수 예시 구간과 맨홀 주변을 우회합니다.', [
@@ -139,9 +141,9 @@ class MockSafetyRepository implements SafetyRepository {
     ]),
   };
 
-  static MockRoute _route(String shelterId, RouteType routeType,
+  static SafetyRoute _route(String shelterId, RouteType routeType,
       int distanceMeters, int estimatedMinutes, String avoidance,
-      List<(double, double)> points) => MockRoute(
+      List<(double, double)> points) => SafetyRoute(
           shelterId: shelterId,
           routeType: routeType,
           distanceMeters: distanceMeters,
@@ -149,8 +151,8 @@ class MockSafetyRepository implements SafetyRepository {
           riskAvoidanceSummary: avoidance,
           polylinePoints: points.map((point) => LatLng(point.$1, point.$2)).toList());
 
-  @override
-  MockRoute routeFor(
+  /// 예시 경로 조회 (동기). 테스트와 [routeFor]가 쓴다.
+  SafetyRoute exampleRoute(
       String facilityId, UserMode userMode, RouteType routeType) {
     final route = _routes['${userMode.name}/${routeType.name}/$facilityId'];
     if (route == null) {
@@ -159,16 +161,24 @@ class MockSafetyRepository implements SafetyRepository {
     return route;
   }
   @override
-  Future<RiskStatus> risk() async { await Future<void>.delayed(const Duration(milliseconds: 450)); return const RiskStatus(
+  Future<SafetyRoute> routeFor(
+      Facility facility, UserMode userMode, RouteType routeType) async {
+    await Future<void>.delayed(const Duration(milliseconds: 550));
+    return exampleRoute(facility.id, userMode, routeType);
+  }
+  @override
+  Future<List<RiskArea>> riskAreas() async => const [];
+  @override
+  Future<RiskStatus> risk(UserMode userMode) async { await Future<void>.delayed(const Duration(milliseconds: 450)); return const RiskStatus(
       level: '경계',
       title: '호우·침수 위험 예시',
       summary: '예시 데이터: 저지대 보행 시 침수 구간과 맨홀을 피하세요.',
       updatedAt: '10:42',
       guide: '안전한 실내 또는 지정 대피소로 이동하고, 물이 고인 도로와 해안가에 접근하지 마세요.'); }
   @override
-  Future<List<Facility>> getFacilities() async { await Future<void>.delayed(const Duration(milliseconds: 350)); return facilities; }
+  Future<List<Facility>> getFacilities(UserMode userMode) async { await Future<void>.delayed(const Duration(milliseconds: 350)); return facilities; }
   @override
-  Future<List<AlertItem>> alerts() async { await Future<void>.delayed(const Duration(milliseconds: 350)); return const [
+  Future<List<AlertItem>> alerts(UserMode userMode) async { await Future<void>.delayed(const Duration(milliseconds: 350)); return const [
         AlertItem(
             id: 'work-flood',
             title: '선제 경고: 등록된 직장 침수 위험',
@@ -192,7 +202,7 @@ class MockSafetyRepository implements SafetyRepository {
             guide: '외출 시 모자와 자외선 차단을 사용하세요.')
       ]; }
   @override
-  Future<String> ask(String question) async {
+  Future<String> ask(String question, UserMode userMode) async {
     if (question.contains('대피소'))
       return '예시 데이터: 가장 안전한 대피소는 구룡포 실내체육관입니다. 0.8km, 도보 12분이며 침수 예시 구간을 피합니다.';
     if (question.contains('침수') || question.contains('위험'))

@@ -7,11 +7,15 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:geolocator/geolocator.dart';
 import 'models/domain_models.dart';
 import 'repositories/mock_repository.dart';
+import 'repositories/remote_repository.dart';
+import 'services/app_config.dart';
 import 'services/auth_service.dart';
 import 'services/account_service.dart';
 import 'dashboard_parts.dart';
 
-final repo = Provider<SafetyRepository>((_) => MockSafetyRepository());
+/// APP_MODE=remote면 실제 서버, 아니면 예시 데이터
+final repo = Provider<SafetyRepository>(
+    (_) => AppConfig.isRemote ? RemoteSafetyRepository() : MockSafetyRepository());
 /// The prototype opens as the fishing-resident scenario. Visitors can switch
 /// modes in the profile, where the same flood layer is centred on their origin.
 final mode = StateProvider<UserMode>((_) => UserMode.resident);
@@ -26,6 +30,25 @@ final autoVoiceAlerts = StateProvider<bool>((_) => false);
 final voiceLanguage = StateProvider<String>((_) => '한국어');
 final floodLayer = StateProvider<bool>((_) => false);
 final floodTime = StateProvider<int>((_) => 0);
+
+// 서버 데이터. 사용자 유형(출발 위치)이 바뀌면 다시 불러온다. 새로고침은 ref.invalidate.
+final riskProvider = FutureProvider<RiskStatus>((ref) => ref.watch(repo).risk(ref.watch(mode)));
+final riskAreasProvider = FutureProvider<List<RiskArea>>((ref) => ref.watch(repo).riskAreas());
+final facilitiesProvider = FutureProvider<List<Facility>>((ref) => ref.watch(repo).getFacilities(ref.watch(mode)));
+final alertsProvider = FutureProvider<List<AlertItem>>((ref) => ref.watch(repo).alerts(ref.watch(mode)));
+final routeProvider = FutureProvider.family<SafetyRoute, String>((ref, facilityId) async {
+  final facility = (await ref.watch(facilitiesProvider.future)).firstWhere((f) => f.id == facilityId);
+  return ref.watch(repo).routeFor(facility, ref.watch(mode), ref.watch(routeKind));
+});
+
+/// 지금 불러온 시설 중 가장 가까운 대피소 (아직 못 불러왔으면 예시 대피소)
+String nearestShelterId(WidgetRef ref) {
+  final shelters = [...?ref.read(facilitiesProvider).valueOrNull]
+      .where((f) => f.type == FacilityType.shelter)
+      .toList()
+    ..sort((a, b) => a.distanceKm.compareTo(b.distanceKm));
+  return shelters.isEmpty ? 'gym' : shelters.first.id;
+}
 
 /// The only state transition that starts a route. Every shelter picker uses
 /// this so a selected destination always opens the dashboard map route mode.
@@ -201,7 +224,7 @@ class StatusLine extends ConsumerWidget {
               Expanded(
                   child: Text(isOffline
                       ? '오프라인 · 저장된 예시 정보 · 10:42'
-                      : '온라인 · 예시 데이터 · 10:42')),
+                      : '온라인 · ${AppConfig.dataLabel}${AppConfig.isRemote ? '' : ' · 10:42'}')),
               TextButton(
                   onPressed: () =>
                       ref.read(offline.notifier).state = !isOffline,
@@ -213,11 +236,10 @@ class StatusLine extends ConsumerWidget {
 class Dashboard extends ConsumerWidget {
   const Dashboard({super.key});
   @override
-  Widget build(BuildContext c, WidgetRef ref) => FutureBuilder<RiskStatus>(
-      future: ref.read(repo).risk(),
-      builder: (_, s) {
-        final risk = s.data;
-        if (risk == null) return const DashboardLoading();
+  Widget build(BuildContext c, WidgetRef ref) => ref.watch(riskProvider).when(
+      loading: () => const DashboardLoading(),
+      error: (e, _) => LoadError(message: '$e', onRetry: () => ref.invalidate(riskProvider)),
+      data: (risk) {
         final resident = ref.watch(mode) == UserMode.resident;
         final route = ref.watch(routeFacilityId);
         final selectedRouteType = ref.watch(routeKind);
@@ -244,7 +266,7 @@ class Dashboard extends ConsumerWidget {
                               FilledButton.icon(
                                   onPressed: () {
                                     startRouteToShelter(ref,
-                                        ref.read(routeFacilityId) ?? 'gym');
+                                        ref.read(routeFacilityId) ?? nearestShelterId(ref));
                                   },
                                   icon: const Icon(Icons.directions_walk),
                                   label: const Text('경로 안내')),
@@ -269,7 +291,7 @@ class Dashboard extends ConsumerWidget {
                                 FilledButton.icon(
                                     onPressed: () {
                                       startRouteToShelter(ref,
-                                          ref.read(routeFacilityId) ?? 'gym');
+                                          ref.read(routeFacilityId) ?? nearestShelterId(ref));
                                     },
                                     icon: const Icon(Icons.directions_walk),
                                     label: const Text('경로 안내')),
@@ -340,7 +362,7 @@ class FloodWarningBanner extends StatelessWidget {
   final RiskStatus risk;
   final bool resident;
   @override
-  Widget build(BuildContext context) => Card(
+  Widget build(BuildContext context) => AppConfig.isRemote ? _live() : Card(
       color: risk.color,
       child: Padding(
           padding: const EdgeInsets.all(16),
@@ -363,13 +385,44 @@ class FloodWarningBanner extends StatelessWidget {
             const Text('예시 데이터 기준, 저지대·침수 구간·맨홀 주변 접근을 피하고 안전한 장소를 확인하세요.',
                 style: TextStyle(color: Colors.white)),
           ])));
+
+  /// 실제 위험도 판정 (/api/v1/risk)
+  Widget _live() => Card(
+      color: risk.color,
+      child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Icon(risk.level == '정상' || risk.level == '관심' ? Icons.verified_user_outlined : Icons.warning_amber_rounded, color: Colors.white),
+              const SizedBox(width: 8),
+              Expanded(child: Text('${risk.level} · ${risk.title} · ${risk.updatedAt} 판정',
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+              VoiceButton(text: '${risk.title}. ${risk.summary}. ${risk.guide}')
+            ]),
+            const SizedBox(height: 8),
+            Text(risk.summary, style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            Text(risk.guide, style: const TextStyle(color: Colors.white)),
+          ])));
+}
+
+/// 서버에서 못 불러왔을 때 (연결 실패 등)
+class LoadError extends StatelessWidget {
+  const LoadError({super.key, required this.message, required this.onRetry});
+  final String message;
+  final VoidCallback onRetry;
+  @override
+  Widget build(BuildContext context) => Center(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Icon(Icons.cloud_off, size: 48), const SizedBox(height: 12),
+        Text(message, textAlign: TextAlign.center), const SizedBox(height: 12),
+        FilledButton.icon(onPressed: onRetry, icon: const Icon(Icons.refresh), label: const Text('다시 시도'))])));
 }
 
 class RainWaterInfographic extends StatelessWidget {
   const RainWaterInfographic({super.key, required this.risk});
   final RiskStatus risk;
   @override
-  Widget build(BuildContext context) => Card(
+  Widget build(BuildContext context) => AppConfig.isRemote ? _live() : Card(
       child: Padding(padding: const EdgeInsets.all(14), child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -387,6 +440,24 @@ class RainWaterInfographic extends StatelessWidget {
           Row(children: [const SizedBox(width: 96), Expanded(child: LinearProgressIndicator(value: .82, minHeight: 12, color: Colors.red, backgroundColor: Colors.blue.shade100)), const SizedBox(width: 8), const Text('경계')]),
         ],
       )));
+
+  /// 판정 근거 목록 (관측값·기준). 수치는 서버 판정 문구 그대로
+  Widget _live() => Card(
+      child: Padding(padding: const EdgeInsets.all(14), child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [const Icon(Icons.water_drop, color: Colors.blue), const SizedBox(width: 6),
+            const Text('현재 위험 판정 근거', style: TextStyle(fontWeight: FontWeight.bold)),
+            const Spacer(), Text('${risk.updatedAt} 판정${risk.stale ? ' · 갱신 지연' : ''}', style: const TextStyle(fontSize: 12))]),
+          const SizedBox(height: 10),
+          if (risk.details.isEmpty) const Text('발효 중인 호우·침수 등 위험 판정이 없습니다.'),
+          ...risk.details.map((d) => Padding(padding: const EdgeInsets.only(bottom: 4), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Icon(Icons.circle, size: 8, color: risk.color), const SizedBox(width: 8), Expanded(child: Text(d))]))),
+          const SizedBox(height: 8),
+          Row(children: [const Text('현재 위험 단계  '), Chip(label: Text(risk.level)), const SizedBox(width: 8),
+            Expanded(child: LinearProgressIndicator(value: const {'정상': .05, '관심': .25, '주의': .5, '경계': .75, '심각': 1.0}[risk.level] ?? .05, minHeight: 12, color: risk.color, backgroundColor: Colors.blue.shade100))]),
+        ],
+      )));
 }
 
 class _Metric extends StatelessWidget {
@@ -399,7 +470,7 @@ class DashboardLoading extends StatelessWidget {
   const DashboardLoading({super.key});
   @override Widget build(BuildContext context) => const Padding(padding: EdgeInsets.all(16), child: Column(children: [LinearProgressIndicator(), SizedBox(height: 16), _LoadingCard(height: 110), SizedBox(height: 12), _LoadingCard(height: 300)]));
 }
-class _LoadingCard extends StatelessWidget { const _LoadingCard({required this.height}); final double height; @override Widget build(BuildContext context) => Card(child: SizedBox(height: height, child: Center(child: Text('예시 데이터 준비 중…')))); }
+class _LoadingCard extends StatelessWidget { const _LoadingCard({required this.height}); final double height; @override Widget build(BuildContext context) => Card(child: SizedBox(height: height, child: Center(child: Text('${AppConfig.dataLabel} 준비 중…')))); }
 
 class DashboardInfo extends ConsumerWidget {
   const DashboardInfo({super.key, required this.risk, required this.userMode});
@@ -426,7 +497,7 @@ class DashboardInfo extends ConsumerWidget {
                       const SizedBox(height: 12),
                       FilledButton.icon(
                           onPressed: () {
-                            startRouteToShelter(ref, 'gym');
+                            startRouteToShelter(ref, nearestShelterId(ref));
                             c.go('/');
                           },
                           icon: const Icon(Icons.directions_walk),
@@ -476,18 +547,21 @@ class _MapCardState extends ConsumerState<MapCard> {
     final active = ref.watch(floodLayer), time = ref.watch(floodTime);
     return Card(clipBehavior: Clip.antiAlias, child: SizedBox(height: widget.height, child: Stack(children: [
       FlutterMap(options: MapOptions(initialCenter: const LatLng(35.9922, 129.5531), initialZoom: 14.5,
-        cameraConstraint: CameraConstraint.contain(bounds: LatLngBounds(const LatLng(35.984,129.543), const LatLng(36.001,129.562))),
+        // 구룡포읍 전체 (대피소가 읍 남북으로 흩어져 있다)
+        cameraConstraint: CameraConstraint.contain(bounds: LatLngBounds(const LatLng(35.940,129.525), const LatLng(36.035,129.585))),
         onTap: (_, point) { if (locationNote != null) setState(() { current = point; locationNote = '지도에서 선택한 현재 위치입니다.'; }); if (active) setState(() => selected = gridAt(point)); }), children: [
         TileLayer(urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', subdomains: const ['a','b','c'], userAgentPackageName: 'com.example.guryongpo_safety'),
         if (active) PolygonLayer(polygons: floodGridPolygons(time)),
+        if (AppConfig.isRemote) PolygonLayer(polygons: riskAreaPolygons(ref.watch(riskAreasProvider).valueOrNull ?? const [])),
         MarkerLayer(markers: [
           Marker(point: current, width: 46, height: 46, child: const Icon(Icons.my_location, color: Colors.blue, size: 34)),
           Marker(point: const LatLng(35.9935,129.5498), width: 46, height: 46, child: const Icon(Icons.home, color: Colors.indigo, size: 32)),
           Marker(point: const LatLng(35.9879,129.5548), width: 46, height: 46, child: const Icon(Icons.business, color: Color(0xffe56717), size: 32)),
-          ...MockSafetyRepository.facilities.map((f) => Marker(point: f.position, width: 55, height: 45, child: Icon(f.type == FacilityType.shelter ? Icons.home_work_outlined : Icons.local_hospital, color: f.type == FacilityType.shelter ? Colors.teal : Colors.red)))
+          ...?ref.watch(facilitiesProvider).valueOrNull?.map((f) => Marker(point: f.position, width: 55, height: 45, child: Icon(f.type == FacilityType.shelter ? Icons.home_work_outlined : Icons.local_hospital, color: f.type == FacilityType.shelter ? Colors.teal : Colors.red)))
         ])
       ]),
-      Positioned(left: 10, top: 10, child: FilledButton.icon(style: FilledButton.styleFrom(backgroundColor: active ? const Color(0xff16803c) : Colors.white, foregroundColor: active ? Colors.white : Colors.black87), onPressed: () => ref.read(floodLayer.notifier).state = !active, icon: const Icon(Icons.grid_on), label: const Text('침수 위험도 확인'))),
+      // 예시 침수 그리드는 목업 전용 (실제 모드는 서버 위험 영역을 항상 표시)
+      if (!AppConfig.isRemote) Positioned(left: 10, top: 10, child: FilledButton.icon(style: FilledButton.styleFrom(backgroundColor: active ? const Color(0xff16803c) : Colors.white, foregroundColor: active ? Colors.white : Colors.black87), onPressed: () => ref.read(floodLayer.notifier).state = !active, icon: const Icon(Icons.grid_on), label: const Text('침수 위험도 확인'))),
       Positioned(left: 12, top: 58, child: IconButton.filledTonal(tooltip: 'GPS 현재 위치 확인', onPressed: locate, icon: const Icon(Icons.gps_fixed))),
       if (active) const FloodGridLegend(),
       if (active) Positioned(left: 10, right: 10, bottom: 8, child: Material(color: Colors.white.withValues(alpha: .94), borderRadius: BorderRadius.circular(12), child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5), child: Row(children: [
@@ -504,8 +578,8 @@ void showPlaceInfo(BuildContext context, WidgetRef ref, String type, String name
     showModalBottomSheet<void>(context: context, showDragHandle: true, builder: (_) => Padding(
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 28), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(name, style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 8), Text('유형: $type · $detail'), const SizedBox(height: 4), const Text('모든 시설·거리·운영 상태는 예시 데이터입니다.'),
-        if (type == '대피소') ...[const SizedBox(height: 12), FilledButton.icon(onPressed: () { Navigator.pop(context); final f = MockSafetyRepository.facilities.firstWhere((f) => f.name == name); startRouteToShelter(ref, f.id); context.go('/'); }, icon: const Icon(Icons.directions_walk), label: const Text('경로 안내'))]
+        const SizedBox(height: 8), Text('유형: $type · $detail'), const SizedBox(height: 4), Text(AppConfig.isRemote ? '거리는 직선거리 기준 대략값입니다.' : '모든 시설·거리·운영 상태는 예시 데이터입니다.'),
+        if (type == '대피소') ...[const SizedBox(height: 12), FilledButton.icon(onPressed: () { Navigator.pop(context); final f = ref.read(facilitiesProvider).requireValue.firstWhere((f) => f.name == name); startRouteToShelter(ref, f.id); context.go('/'); }, icon: const Icon(Icons.directions_walk), label: const Text('경로 안내'))]
       ])));
 class FacilitiesScreen extends StatelessWidget {
   const FacilitiesScreen({super.key});
@@ -539,7 +613,7 @@ class _FacilityListState extends ConsumerState<FacilityList> {
   bool nearest = false;
   @override
   Widget build(BuildContext c) {
-    final fs = [...MockSafetyRepository.facilities]..sort((a, b) => nearest
+    final fs = [...?ref.watch(facilitiesProvider).valueOrNull]..sort((a, b) => nearest
         ? a.distanceKm.compareTo(b.distanceKm)
         : a.walkMinutes.compareTo(b.walkMinutes));
     return Column(children: [
@@ -547,12 +621,15 @@ class _FacilityListState extends ConsumerState<FacilityList> {
           padding: const EdgeInsets.all(12),
           child: Row(children: [
             Expanded(
-                child: Text('예시 시설', style: Theme.of(c).textTheme.titleLarge)),
+                child: Text(AppConfig.isRemote ? '주변 대피·의료 시설' : '예시 시설', style: Theme.of(c).textTheme.titleLarge)),
             FilterChip(
                 label: Text(nearest ? '가까운 순' : '안전 추천'),
                 selected: true,
                 onSelected: (_) => setState(() => nearest = !nearest))
           ])),
+      if (ref.watch(facilitiesProvider).hasError)
+        Padding(padding: const EdgeInsets.all(12), child: Text('${ref.watch(facilitiesProvider).error}')),
+      if (ref.watch(facilitiesProvider).isLoading) const LinearProgressIndicator(),
       Expanded(
           child: ListView(
               children: fs
@@ -563,7 +640,7 @@ class _FacilityListState extends ConsumerState<FacilityList> {
                               : Icons.local_hospital),
                           title: Text(f.name),
                           subtitle: Text(
-                              '${f.distanceKm}km · 도보 ${f.walkMinutes}분 · 가장 안전한 경로'),
+                              '${AppConfig.isRemote ? '약 ' : ''}${f.distanceKm}km · 도보 ${f.walkMinutes}분 · ${f.description}'),
                           onTap: () {
                             startRouteToShelter(ref, f.id);
                             c.go('/');
@@ -578,26 +655,35 @@ class FacilityScreen extends ConsumerWidget {
   final String id;
   @override
   Widget build(BuildContext c, WidgetRef ref) {
-    final f = MockSafetyRepository.facilities.firstWhere((x) => x.id == id);
+    final fs = ref.watch(facilitiesProvider).valueOrNull;
+    final f = fs?.where((x) => x.id == id).firstOrNull;
+    if (f == null) {
+      return Scaffold(appBar: AppBar(title: const Text('시설 상세')),
+          body: fs == null ? const Center(child: CircularProgressIndicator()) : const Center(child: Text('시설 정보를 찾지 못했습니다.')));
+    }
+    final label = AppConfig.isRemote ? '' : '예시 ';
     return Scaffold(
         appBar: AppBar(title: const Text('시설 상세')),
         body: ListView(padding: const EdgeInsets.all(20), children: [
           Text(f.name, style: Theme.of(c).textTheme.headlineSmall),
           Chip(
               label:
-                  Text(f.type == FacilityType.shelter ? '예시 대피소' : '예시 의료시설')),
+                  Text(f.type == FacilityType.shelter ? '$label대피소' : '$label의료시설')),
           const MapCard(height: 240),
           Card(
               child: Column(children: [
             ListTile(title: const Text('주소'), subtitle: Text(f.address)),
+            ListTile(title: const Text('구분'), subtitle: Text(f.description)),
             ListTile(
                 title: const Text('거리 및 도보 시간'),
                 subtitle: Text('${f.distanceKm}km · ${f.walkMinutes}분')),
             ListTile(
                 title: const Text('접근성'),
-                subtitle: Text(f.accessible ? '휠체어 접근 가능 (예시)' : '확인 필요 (예시)')),
-            const ListTile(
-                title: Text('연락처'), subtitle: Text('054-000-0000 (예시)'))
+                subtitle: Text(AppConfig.isRemote
+                    ? (f.accessible ? '휠체어 접근 가능' : '확인 필요')
+                    : (f.accessible ? '휠체어 접근 가능 (예시)' : '확인 필요 (예시)'))),
+            ListTile(
+                title: const Text('연락처'), subtitle: Text(f.phone ?? (AppConfig.isRemote ? '정보 없음' : '054-000-0000 (예시)')))
           ])),
           FilledButton.icon(
               onPressed: () {
@@ -613,13 +699,18 @@ class FacilityScreen extends ConsumerWidget {
 class AlertsScreen extends ConsumerWidget {
   const AlertsScreen({super.key});
   @override
-  Widget build(BuildContext c, WidgetRef ref) => FutureBuilder<List<AlertItem>>(
-      future: ref.read(repo).alerts(),
-      builder: (_, s) => ListView(padding: const EdgeInsets.all(16), children: [
+  Widget build(BuildContext c, WidgetRef ref) {
+    final s = ref.watch(alertsProvider);
+    return ListView(padding: const EdgeInsets.all(16), children: [
             Text('알림', style: Theme.of(c).textTheme.headlineSmall),
-            const Text('모든 항목은 예시 알림이며 실제 재난 경보가 아닙니다.'),
+            Text(AppConfig.isRemote
+                ? '현재 위치 주변의 실시간 위험 판정입니다. 공식 재난 문자를 함께 확인하세요.'
+                : '모든 항목은 예시 알림이며 실제 재난 경보가 아닙니다.'),
             const SizedBox(height: 10),
-            ...?(s.data?.where((a) => a.id != 'work-flood' || ref.watch(mode) == UserMode.resident).map((a) => Card(
+            if (s.isLoading) const LinearProgressIndicator(),
+            if (s.hasError) LoadError(message: '${s.error}', onRetry: () => ref.invalidate(alertsProvider)),
+            if (s.valueOrNull?.isEmpty ?? false) const Card(child: ListTile(leading: Icon(Icons.check_circle_outline), title: Text('현재 알림이 없습니다'))),
+            ...?(s.valueOrNull?.where((a) => a.id != 'work-flood' || ref.watch(mode) == UserMode.resident).map((a) => Card(
                 child: ListTile(
                     leading: Icon(a.read
                         ? Icons.notifications_none
@@ -628,20 +719,20 @@ class AlertsScreen extends ConsumerWidget {
                     subtitle: Text('${a.summary}\n${a.time}'),
                     isThreeLine: true,
                     onTap: () => c.go('/alert/${a.id}')))))
-          ]));
+          ]);
+  }
 }
 
 class AlertScreen extends ConsumerWidget {
   const AlertScreen({super.key, required this.id});
   final String id;
   @override
-  Widget build(BuildContext c, WidgetRef ref) => FutureBuilder<List<AlertItem>>(
-      future: MockSafetyRepository().alerts(),
-      builder: (_, s) {
-        final a = s.data?.firstWhere((x) => x.id == id);
+  Widget build(BuildContext c, WidgetRef ref) {
+        final s = ref.watch(alertsProvider);
+        final a = s.valueOrNull?.where((x) => x.id == id).firstOrNull;
         if (a == null)
-          return const Scaffold(
-              body: Center(child: CircularProgressIndicator()));
+          return Scaffold(appBar: AppBar(title: const Text('알림 상세')),
+              body: Center(child: s.isLoading ? const CircularProgressIndicator() : const Text('이미 해제된 알림입니다.')));
         return Scaffold(
             appBar: AppBar(title: const Text('알림 상세')),
             body: Padding(
@@ -649,7 +740,7 @@ class AlertScreen extends ConsumerWidget {
                 child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Chip(label: Text('${a.level} · 예시 알림')),
+                      Chip(label: Text('${a.level} · ${AppConfig.isRemote ? a.time : '예시 알림'}')),
                       Text(a.title, style: Theme.of(c).textTheme.headlineSmall),
                       const SizedBox(height: 12),
                       Text(a.summary),
@@ -661,13 +752,13 @@ class AlertScreen extends ConsumerWidget {
                       if (id == 'work-flood') SupportCard(fishing: ref.watch(residentOccupation) == '어업·수산업'),
                       const Spacer(),
                       FilledButton(
-                          onPressed: () { startRouteToShelter(ref, 'gym'); c.go('/'); },
+                          onPressed: () { startRouteToShelter(ref, nearestShelterId(ref)); c.go('/'); },
                           child: const Text('침수 위험 그리드·안전 경로 보기')),
                       OutlinedButton(
                           onPressed: () => c.go('/ai'),
                           child: const Text('AI에게 묻기'))
                     ])));
-      });
+  }
 }
 
 class AiScreen extends ConsumerStatefulWidget {
@@ -679,7 +770,7 @@ class AiScreen extends ConsumerStatefulWidget {
 class _AiScreenState extends ConsumerState<AiScreen> {
   final input = TextEditingController();
   final messages = <(String, bool)>[
-    ('예시 AI 안내입니다. 현재 위험과 대피소에 대해 물어보세요.', false)
+    (AppConfig.isRemote ? '구룡가디언 AI입니다. 현재 위험과 대피소에 대해 물어보세요.' : '예시 AI 안내입니다. 현재 위험과 대피소에 대해 물어보세요.', false)
   ];
   Future<void> send([String? q]) async {
     final question = q ?? input.text;
@@ -688,15 +779,15 @@ class _AiScreenState extends ConsumerState<AiScreen> {
       messages.add((question, true));
       input.clear();
     });
-    final answer = await ref.read(repo).ask(question);
+    final answer = await ref.read(repo).ask(question, ref.read(mode));
     if (mounted) setState(() => messages.add((answer, false)));
   }
 
   @override
   Widget build(BuildContext c) => Column(children: [
-        const Padding(
-            padding: EdgeInsets.all(12),
-            child: Text('목업 데이터 기반 답변 · 실제 재난 지시가 아닙니다.')),
+        Padding(
+            padding: const EdgeInsets.all(12),
+            child: Text(AppConfig.isRemote ? '실시간 데이터 기반 AI 답변 · 공식 재난 안내를 함께 확인하세요.' : '목업 데이터 기반 답변 · 실제 재난 지시가 아닙니다.')),
         Expanded(
             child: ListView(padding: const EdgeInsets.all(16), children: [
           Wrap(

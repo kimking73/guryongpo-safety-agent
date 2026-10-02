@@ -127,3 +127,9 @@ def test_live_route_in_guryongpo():
     pts = decode_polyline(res["geometry"])
     assert len(pts) > 5                                             # 직선이 아니라 도로를 따라 꺾인다
     assert abs(pts[0][0] - 35.9905) < 0.002 and abs(pts[-1][1] - 129.5480) < 0.002
+
+
+def test_cors_preflight_allows_browser_app():
+    r = TestClient(app).options("/api/route", headers={"Origin": "http://localhost:5000", "Access-Control-Request-Method": "POST"})
+    assert r.status_code == 200
+    assert r.headers["access-control-allow-origin"] in ("*", "http://localhost:5000")

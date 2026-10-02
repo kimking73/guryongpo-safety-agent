@@ -33,7 +33,7 @@ Lanes: **A** server/DB/data collection/risk engine (`server/`, `db/`) · **B** A
 | `ai/` | LangGraph multi-agent + `POST /api/chat`; reads the DB directly with a read-only role (B3). See `ai/CLAUDE.md` |
 | `route/` | Route server (lane B): `POST /api/route` (hazard avoidance + per-profile slope/steps rules, route/guardian_route/service.py:85, profiles.py), `POST /api/route/check` (reroute while moving, service.py:116); mock hazards `route/data/hazards.sample.geojson`; elderly slope thresholds 1/18·1/12 (profiles.py); avoidance demo `route/scripts/avoid_demo.py` (outputs `route/out/`, gitignored); tests in `route/tests/` |
 | `graphhopper/` | GraphHopper 11 image + `config.yml` (foot, no CH); `fetch_osm.sh` builds `data/guryongpo.osm.pbf`; `build_dem.sh` turns 국토지리정보원 DEM in `dem/ngii/` into `data/dem-hgt/`; `entrypoint.sh` picks DEM (NGII if present, else SRTM) and rebuilds the graph when it changes (data/ and dem/ngii/ gitignored) |
-| `app/` | Lane C: Flutter app/web prototype (mock mode by default, `APP_MODE`/`API_BASE_URL` via `--dart-define`; see `app/README.md`, `app/docs/INTEGRATION_POINTS.md`) |
+| `app/` | Lane C: Flutter app/web. Mock by default; `--dart-define=APP_MODE=remote` connects to api/ai/route (J1, `lib/repositories/remote_repository.dart`; base URLs `API_BASE_URL`/`AI_BASE_URL`/`ROUTE_BASE_URL`). See `app/README.md` |
 | `db/init/` | SQL run once on an empty DB volume: 00 PostGIS, 01 schema, 02–06 seeds (rules/stations/manholes, landslide zones, knowledge, shelters, medical); seeds are re-runnable and re-applied to an existing DB by `server/loader` (A7) — lane A. `07_ai_readonly.sh` (lane B) creates the AI's SELECT-only role from `AI_DB_*`; `08_ai_memory.sh` (lane B) creates schema `ai_memory` + role `AI_MEM_DB_*` for the AI's long-term memory (LangGraph PostgresStore; no access to public) |
 | `secrets/` | Credential files, gitignored except `.gitkeep` (e.g. `firebase-admin.json`) |
 | `.env.example` | Every env key with local defaults; rules in its header (.env.example:2-8) |
@@ -57,6 +57,8 @@ docker compose exec db sh /docker-entrypoint-initdb.d/07_ai_readonly.sh  # AI re
 docker compose -f docker-compose.yml up -d   # server mode: no override, DB not exposed
 cd ai && .venv/bin/python -m pytest -q       # AI tests (offline); `-m live` calls real OpenAI
 cd route && .venv/bin/python -m pytest -q    # route tests (fake GraphHopper); `-m live` needs graphhopper on :8989
+cd app && flutter run -d chrome --dart-define=APP_MODE=remote   # app on real servers (omit the define for mock data)
+cd app && flutter test                       # app tests (analyze crashes on the Korean path — run it on a copy in an ASCII path)
 ./graphhopper/build_dem.sh                   # after putting 국토지리정보원 DEM files in graphhopper/dem/ngii/; then restart graphhopper
 ```
 

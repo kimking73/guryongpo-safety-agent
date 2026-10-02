@@ -34,3 +34,9 @@ def test_chat_roundtrip_and_conversation_continues():
 
 def test_chat_rejects_missing_question():
     assert client().post("/api/chat", json={"user_id": "u1"}).status_code == 422
+
+
+def test_cors_preflight_allows_browser_app():
+    r = client().options("/api/chat", headers={"Origin": "http://localhost:5000", "Access-Control-Request-Method": "POST"})
+    assert r.status_code == 200
+    assert r.headers["access-control-allow-origin"] in ("*", "http://localhost:5000")

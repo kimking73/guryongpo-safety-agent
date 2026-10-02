@@ -8,7 +8,7 @@ void main() {
     for (final facility in MockSafetyRepository.facilities) {
       for (final userMode in UserMode.values) {
         for (final routeType in RouteType.values) {
-          final route = repository.routeFor(facility.id, userMode, routeType);
+          final route = repository.exampleRoute(facility.id, userMode, routeType);
           expect(route.shelterId, facility.id);
           expect(route.routeType, routeType);
           expect(route.polylinePoints.length, greaterThanOrEqualTo(3));
