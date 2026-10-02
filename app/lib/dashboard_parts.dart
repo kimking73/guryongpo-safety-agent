@@ -77,6 +77,15 @@ class _VoiceButtonState extends ConsumerState<VoiceButton> {
   );
 }
 
+/// AI 답 아래 "지도에서 경로 보기" 버튼
+class RouteButton extends StatelessWidget {
+  const RouteButton({super.key, required this.onPressed});
+  final VoidCallback onPressed;
+  @override
+  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.only(top: 6),
+      child: FilledButton.tonalIcon(onPressed: onPressed, icon: const Icon(Icons.map_outlined), label: const Text('지도에서 경로 보기')));
+}
+
 class ServiceMap extends StatelessWidget {
   const ServiceMap({super.key});
   @override
@@ -102,8 +111,7 @@ class _RouteMapState extends ConsumerState<RouteMap> {
 
   @override
   Widget build(BuildContext context) {
-    final facility = ref.watch(facilitiesProvider).valueOrNull
-        ?.where((item) => item.id == widget.facilityId).firstOrNull;
+    final facility = routeDestination(ref, widget.facilityId);
     final userMode = ref.watch(mode);
     final routeType = ref.watch(routeKind);
     final routeAsync = ref.watch(routeProvider(widget.facilityId));
@@ -336,7 +344,7 @@ class _AiPanelState extends ConsumerState<AiPanel> {
     if (question.trim().isEmpty) return;
     ref.read(chatMessages.notifier).state = [
       ...ref.read(chatMessages),
-      (question, true)
+      ChatMessage(question, true)
     ];
     setState(() => loading = true);
     final answer = await ref.read(repo).ask(question, ref.read(mode));
@@ -346,7 +354,7 @@ class _AiPanelState extends ConsumerState<AiPanel> {
     if (mounted)
       ref.read(chatMessages.notifier).state = [
         ...ref.read(chatMessages),
-        (AppConfig.isRemote ? answer : '$answer\n$personaGuide\n예시 AI 안내', false)
+        ChatMessage(AppConfig.isRemote ? answer.text : '${answer.text}\n$personaGuide\n예시 AI 안내', false, answer: answer)
       ];
     if (mounted) setState(() => loading = false);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -390,18 +398,20 @@ class _AiPanelState extends ConsumerState<AiPanel> {
                         ]
                   : [...messages
                           .map((m) => Align(
-                              alignment: m.$2
+                              alignment: m.mine
                                   ? Alignment.centerRight
                                   : Alignment.centerLeft,
                               child: Container(
                                   margin: const EdgeInsets.all(6),
                                   padding: const EdgeInsets.all(10),
                                   decoration: BoxDecoration(
-                                      color: m.$2
+                                      color: m.mine
                                           ? Colors.teal.shade100
                                           : Colors.grey.shade200,
                                       borderRadius: BorderRadius.circular(12)),
-                                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(m.$1), if (!m.$2) VoiceButton(text: m.$1)]))))
+                                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(m.text),
+                                    if (m.answer?.route != null) RouteButton(onPressed: () => showAiRoute(ref, m.answer!)),
+                                    if (!m.mine) VoiceButton(text: m.text)]))))
                           .toList(), if (loading) const Padding(padding: EdgeInsets.all(10), child: _FloodChatLoader())]);
             })),
             Padding(

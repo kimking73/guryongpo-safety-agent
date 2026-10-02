@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:math';
+import '../models/domain_models.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 enum SignInMethod { anonymous, google, naver, email }
@@ -32,6 +33,20 @@ class AccountService {
     await prefs.setString('device_user_id', id);
     return id;
   }
+  /// 선택 정보 '보행 능력'에 무엇이든 적었으면 보행 불편으로 본다 (노약자 경로)
+  Future<bool> walkingImpaired() async => ((await optionalProfile())['보행 능력'] ?? '').trim().isNotEmpty;
+
+  static const _placesKey = 'saved_places';
+  Future<List<SavedPlace>> places() async {
+    final raw = (await SharedPreferences.getInstance()).getString(_placesKey);
+    if (raw == null) return [];
+    return (jsonDecode(raw) as List).map((j) => SavedPlace.fromJson(j as Map<String, dynamic>)).toList();
+  }
+  Future<void> _savePlaces(List<SavedPlace> places) async =>
+      (await SharedPreferences.getInstance()).setString(_placesKey, jsonEncode(places.map((p) => p.toJson()).toList()));
+  Future<void> addPlace(SavedPlace place) async => _savePlaces([...await places(), place]);
+  Future<void> removePlace(String id) async => _savePlaces([...(await places()).where((p) => p.id != id)]);
+
   Future<bool> hasCompletedSetup() async => (await SharedPreferences.getInstance()).getBool('profile_setup_complete') ?? false;
   Future<Map<String, String>> optionalProfile() async {
     final raw = (await SharedPreferences.getInstance()).getString('optional_profile');

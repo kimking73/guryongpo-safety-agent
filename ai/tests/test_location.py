@@ -100,7 +100,8 @@ def test_template_used_when_writer_fails():
     out = L.make_location_route_agent(writer=broken, fetch=flood_db, route_client=route_server())(state())
     r = out["specialist_results"][0]
     assert r.agent == Specialist.LOCATION_ROUTE and "충혼탑 앞" in r.summary and "1024m" in r.summary
-    assert r.route["distance_m"] == 1024 and "geometry" not in r.route
+    assert r.route["distance_m"] == 1024 and r.route["geometry"] == "abc"          # 앱이 지도에 그린다
+    assert r.route["destination"] == {"name": "충혼탑 앞", "lat": 35.993, "lon": 129.55, "kind": "shelter"}
 
 
 def service_with(writer):
@@ -119,3 +120,155 @@ def test_stub_agents_never_leak_stub_text():
     """구현 전 agent만 고른 질문은 'stub' 대신 준비 중 안내."""
     res = ChatService(classifier=G.keyword_classify).chat(ChatRequest(user_id="u1", question="태풍 오면 어떡해?"))
     assert "stub" not in res.answer and res.answer == G.NOT_READY
+
+
+# --- 목적지 지정 (등록 장소 → DB 시설 → 카카오) ---------------------------------
+
+from types import SimpleNamespace  # noqa: E402
+
+from guardian_ai.llm import Classification, OpenAIClassifier  # noqa: E402
+from guardian_ai.tools import find_place  # noqa: E402
+
+HOME = Location(lat=35.9935, lon=129.5498, label="집")
+WORK = Location(lat=35.9879, lon=129.5548, label="직장")
+
+
+def kakao(docs=None, status=200, seen=None):
+    def handler(req):
+        if seen is not None:
+            seen.append(req)
+        return httpx.Response(status, json={"documents": docs if docs is not None else [
+            {"place_name": "구룡포항", "x": "129.5560", "y": "35.9905", "road_address_name": "경북 포항시 남구 구룡포읍 호미로"}]})
+    return httpx.Client(base_url="http://kakao", transport=httpx.MockTransport(handler))
+
+
+def place_db(sql, params):
+    """시설 이름 검색: '충혼탑'만 대피소로 있음. 위험 영역: 구룡포항 좌표만 침수 경보 안."""
+    if "ILIKE" in sql:
+        return [{"name": "충혼탑 앞", "lat": 35.99144, "lon": 129.56073, "kind": "shelter"}] if "충혼탑" in params["q"] else []
+    if "string_agg(DISTINCT ra.label" in sql and "FROM shelters" not in sql:
+        return [{"labels": "침수 경보" if abs(params["lat"] - 35.9905) < 1e-6 else None}]
+    return flood_db(sql, params)
+
+
+def user(**kw):
+    return UserProfile(user_id="u1", age=40, home=HOME, frequent_places=[WORK], **kw)
+
+
+def test_find_place_prefers_registered_places():
+    assert find_place("집", user(), fetch=place_db)["kind"] == "home"
+    w = find_place("회사", user(), fetch=place_db)
+    assert (w["kind"], w["name"], w["source"]) == ("work", "직장", "user")
+
+
+def test_find_place_home_without_registration_says_so():
+    r = find_place("집", UserProfile(user_id="u1"), fetch=place_db)
+    assert not r["available"] and "등록" in r["reason"]
+
+
+def test_find_place_db_facility_before_kakao():
+    seen = []
+    r = find_place("충혼탑", user(), fetch=place_db, client=kakao(seen=seen))
+    assert (r["name"], r["source"]) == ("충혼탑 앞", "db") and seen == []
+
+
+def test_find_place_kakao_uses_fixed_center_not_user_location():
+    seen = []
+    r = find_place("구룡포항", user(), fetch=place_db, client=kakao(seen=seen))
+    assert (r["name"], r["source"], r["kind"]) == ("구룡포항", "kakao", "place") and r["address"]
+    assert seen[0].url.params["y"] == "35.9858" and seen[0].url.params["x"] == "129.5481"
+
+
+def test_find_place_kakao_outside_route_area_and_errors():
+    far = kakao(docs=[{"place_name": "서울역", "x": "126.97", "y": "37.55"}])
+    assert find_place("서울역", user(), fetch=place_db, client=far)["out_of_area"]
+    assert not find_place("구룡포항", user(), fetch=place_db, client=kakao(status=500))["available"]
+    assert not find_place("없는곳", user(), fetch=place_db, client=kakao(docs=[]))["available"]
+
+
+def test_find_place_without_kakao_key_skips_search(monkeypatch):
+    monkeypatch.delenv("KAKAO_REST_KEY", raising=False)
+    r = find_place("구룡포항", user(), fetch=place_db)
+    assert not r["available"] and "키 없음" in r["reason"]
+
+
+def dest_state(dest, question="거기까지 어떻게 가?", **kw):
+    return {**state(question=question, age=40), "destination_query": dest, "user": user(**kw)}
+
+
+def test_routes_to_destination_and_returns_it_for_the_map():
+    sent = []
+    out = L.make_location_route_agent(fetch=place_db, route_client=route_server(sent), place_client=kakao())(
+        dest_state("직장"))["specialist_results"][0]
+    assert sent[0]["destination"] == {"lat": WORK.lat, "lon": WORK.lon}
+    assert out.route["destination"]["kind"] == "work" and "직장까지 안내" in out.summary
+
+
+def test_destination_in_hazard_area_recommends_shelter_instead():
+    d = L.collect(dest_state("구룡포항"), fetch=place_db, route_client=route_server(), place_client=kakao())
+    ev = {e.key: e.value for e in d.evidence}
+    assert ev["목적지"] == "구룡포항" and ev["목적지를 찾은 곳"] == "카카오 장소 검색"
+    assert "위험 영역 안(침수 경보)" in ev["목적지 위험"]
+    assert ev["대신 갈 수 있는 가까운 대피소"] == "충혼탑 앞"
+    assert ev["경로 도착지"] == "충혼탑 앞"              # 위험한 목적지로는 길을 그리지 않는다
+    assert L.route_info(d)["destination"] == {"name": "충혼탑 앞", "lat": 35.993, "lon": 129.55, "kind": "shelter"}
+    assert "가지 않는 것이 좋습니다" in L.template_summary(d) and "충혼탑 앞까지" in L.template_summary(d)
+
+
+def test_unknown_destination_falls_back_to_nearest_safe_shelter():
+    d = L.collect(dest_state("없는곳"), fetch=place_db, route_client=route_server(), place_client=kakao(docs=[]))
+    assert d.place is None and d.chosen["name"] == "충혼탑 앞"
+    assert "찾지 못함" in {e.key: e.value for e in d.evidence}["요청한 목적지"]
+    assert L.route_info(d)["destination"]["kind"] == "shelter"
+
+
+# --- 관리자: 목적지·보행 불편 뽑기 ------------------------------------------------
+
+def test_keyword_extraction_when_llm_is_unavailable():
+    assert G.keyword_destination("구룡포항까지 어떻게 가?") == "구룡포항"
+    assert G.keyword_destination("대피소로 가야 해?") is None
+    assert G.keyword_mobility_limited("무릎이 안 좋은데 대피소 어디야?")
+
+
+def test_manager_takes_destination_and_mobility_from_llm_classifier():
+    parsed = Classification(agents=[Specialist.LOCATION_ROUTE], reason="경로", destination="구룡포항", mobility_limited=True)
+    clf = OpenAIClassifier(client=SimpleNamespace(responses=SimpleNamespace(
+        parse=lambda **kw: SimpleNamespace(output_parsed=parsed, output_text="", usage=None))), model="t")
+    out = G.make_manager(clf)({"mode": "chat", "question": "다리가 불편한데 항구 가는 길", "user": UserProfile(user_id="u1")})
+    assert out["destination_query"] == "구룡포항"
+    assert out["user"].walking_impaired is True
+
+
+def test_mobility_from_question_does_not_override_app_value():
+    out = G.manager({"mode": "chat", "question": "무릎이 아파요 어디로 대피해?",
+                     "user": UserProfile(user_id="u1", walking_impaired=False)})
+    assert "user" not in out
+
+
+def test_same_question_mobility_gives_elderly_route():
+    """기억 저장(답변 뒤) 전에도, 이번 질문에서 말한 보행 불편으로 노약자 경로."""
+    sent = []
+    svc = ChatService(classifier=G.keyword_classify, overrides={
+        Specialist.LOCATION_ROUTE.value: L.make_location_route_agent(fetch=flood_db, route_client=route_server(sent))})
+    svc.chat(ChatRequest(user_id="u1", question="무릎이 안 좋은데 어디로 대피해야 해?", current_location=HERE,
+                         profile=UserProfile(user_id="u1", age=40)))
+    assert sent[0]["profile"] == "elderly"
+
+
+# --- 채팅 응답에 경로 -----------------------------------------------------------
+
+def test_chat_response_carries_route_for_the_app():
+    svc = ChatService(classifier=G.keyword_classify, overrides={
+        Specialist.LOCATION_ROUTE.value: L.make_location_route_agent(fetch=flood_db, route_client=route_server())})
+    res = svc.chat(ChatRequest(user_id="u1", question="어디로 대피해야 해?", current_location=HERE))
+    assert res.route is not None and res.route.geometry == "abc"
+    assert res.route.destination.name == "충혼탑 앞" and res.route.distance_m == 1024
+
+
+def test_no_route_in_response_when_answer_fell_back():
+    def always_wrong(*a):
+        return "충혼탑 앞까지 999m입니다."
+    svc = ChatService(classifier=G.keyword_classify, overrides={
+        Specialist.LOCATION_ROUTE.value: L.make_location_route_agent(writer=always_wrong, fetch=flood_db, route_client=route_server())})
+    res = svc.chat(ChatRequest(user_id="u1", question="어디로 대피해야 해?", current_location=HERE))
+    assert res.used_fallback and res.route is None

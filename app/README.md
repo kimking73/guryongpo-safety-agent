@@ -48,6 +48,9 @@ flutter run -d chrome --dart-define=APP_MODE=remote
   (Android 에뮬레이터는 `10.0.2.2`). 배포는 세 값을 같은 도메인으로 준다.
 - 침수 장면 시연: 서버에 `heavy_rain_flood` 시나리오를 넣으면 대시보드가 경계 단계·알림·위험 영역으로 바뀐다
   (`POST /api/v1/internal/simulate`, `server/README.md`). 끝나면 `clear`.
+- AI 답에 경로가 있으면 "지도에서 경로 보기" 버튼이 붙고, 누르면 대시보드 지도에 AI가 계산한 경로를 그대로 그린다.
+- 장소 등록(프로필): 이름·유형(집·직장·기타)을 적고 작은 지도에서 눌러 위치를 고른다. 이 기기에만 저장(서버 `/user/places`는 A5 이후)되고, AI 요청에 실려 "집까지", "직장까지" 질문에 쓰인다.
+- 선택 정보 '보행 능력'에 무엇이든 적으면 보행 불편으로 보고 '안전 경로'를 노약자 경로로 요청한다.
 - 아직 목업인 것: 등록 장소 위험 요약, 음성, 푸시 알림, 이동 중 경로 재계산(C5), 계정 연결.
 - 연결 코드: `lib/repositories/remote_repository.dart` (서버 응답 → 화면 모델 변환은 `test/remote_mapping_test.dart`에서 검사).
 - 한글 경로에서 `flutter analyze`가 죽는 Flutter 버그가 있다. 영문 경로에 복사해서 돌린다.

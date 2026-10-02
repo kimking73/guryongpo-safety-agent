@@ -8,7 +8,7 @@ abstract class SafetyRepository {
   Future<List<Facility>> getFacilities(UserMode userMode);
   Future<List<AlertItem>> alerts(UserMode userMode);
   Future<SafetyRoute> routeFor(Facility facility, UserMode userMode, RouteType routeType);
-  Future<String> ask(String question, UserMode userMode);
+  Future<ChatAnswer> ask(String question, UserMode userMode);
 }
 
 class MockSafetyRepository implements SafetyRepository {
@@ -202,7 +202,9 @@ class MockSafetyRepository implements SafetyRepository {
             guide: '외출 시 모자와 자외선 차단을 사용하세요.')
       ]; }
   @override
-  Future<String> ask(String question, UserMode userMode) async {
+  Future<ChatAnswer> ask(String question, UserMode userMode) async => ChatAnswer(_mockAnswer(question));
+
+  String _mockAnswer(String question) {
     if (question.contains('대피소'))
       return '예시 데이터: 가장 안전한 대피소는 구룡포 실내체육관입니다. 0.8km, 도보 12분이며 침수 예시 구간을 피합니다.';
     if (question.contains('침수') || question.contains('위험'))

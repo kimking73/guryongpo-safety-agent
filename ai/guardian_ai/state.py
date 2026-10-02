@@ -199,6 +199,7 @@ class GuardianState(TypedDict, total=False):
     phase: Phase
     selected_agents: list[Specialist]
     manager_feedback: str                # 검증 실패 사유 (재시도 시)
+    destination_query: str | None        # 질문에서 뽑은 목적지 이름 ("구룡포항", "집"). 없으면 가까운 대피소로 안내
 
     # 전문 agent → 행동 권고
     specialist_results: Annotated[list[SpecialistResult], merge_results]

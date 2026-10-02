@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 
 enum UserMode { visitor, resident }
-enum FacilityType { shelter, medical }
+/// place: AI가 안내한 일반 목적지(구룡포항·집 등)
+enum FacilityType { shelter, medical, place }
 
 /// 사용자 유형별 출발 위치 (GPS 연동 전까지 구룡포 예시 좌표). 위험도 조회·경로·AI 질문이 같은 값을 쓴다.
 LatLng originFor(UserMode mode) => mode == UserMode.resident
@@ -72,6 +73,34 @@ String? shelterExclusion(Facility f, List<RiskArea> areas) {
 }
 
 enum RouteType { safest, nearest }
+
+/// AI 답변 한 개. 경로 안내가 있으면 route·목적지가 함께 온다 ("지도에서 경로 보기").
+class ChatAnswer {
+  const ChatAnswer(this.text, {this.route, this.destinationName, this.destinationPos, this.destinationKind});
+  final String text;
+  final SafetyRoute? route;
+  final String? destinationName, destinationKind;
+  final LatLng? destinationPos;
+}
+
+/// 채팅 화면의 말풍선 하나
+class ChatMessage {
+  const ChatMessage(this.text, this.mine, {this.answer});
+  final String text;
+  final bool mine;
+  final ChatAnswer? answer;
+}
+
+/// 사용자가 등록한 장소 (기기에 저장, AccountService). type: 집·직장·기타
+class SavedPlace {
+  const SavedPlace({required this.id, required this.name, required this.type, required this.position, this.alert = true});
+  final String id, name, type;
+  final LatLng position;
+  final bool alert;
+  Map<String, Object> toJson() => {'id': id, 'name': name, 'type': type, 'lat': position.latitude, 'lon': position.longitude, 'alert': alert};
+  factory SavedPlace.fromJson(Map<String, dynamic> j) => SavedPlace(id: '${j['id']}', name: '${j['name']}', type: '${j['type']}',
+      position: LatLng((j['lat'] as num).toDouble(), (j['lon'] as num).toDouble()), alert: j['alert'] != false);
+}
 
 class SafetyRoute {
   const SafetyRoute({

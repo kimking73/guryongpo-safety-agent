@@ -58,11 +58,12 @@ class RemoteSafetyRepository implements SafetyRepository {
   Future<SafetyRoute> routeFor(Facility facility, UserMode userMode, RouteType routeType) async {
     final o = originFor(userMode);
     final (age, transport) = await _account.requiredSetup();
+    final walking = await _account.walkingImpaired();
     final r = await _guard(() => _client.route.post<Map<String, dynamic>>('/api/route', data: {
           'origin': {'lat': o.latitude, 'lon': o.longitude},
           'destination': {'lat': facility.position.latitude, 'lon': facility.position.longitude},
           // 위험 영역 회피는 항상 켜짐. 안전 경로 = 사용자 유형(노약자면 급경사 회피), 가까운 경로 = 경사 무시 최단
-          'profile': routeType == RouteType.safest ? routeProfileFor(age, transport) : 'adult',
+          'profile': routeType == RouteType.safest ? routeProfileFor(age, transport, walkingImpaired: walking) : 'adult',
         }), notFound: '이 시설까지 걸어서 갈 수 있는 길을 찾지 못했습니다.');
     return routeFromJson(r.data!, facility.id, routeType, names: await _routeHazardNames());
   }
@@ -82,10 +83,12 @@ class RemoteSafetyRepository implements SafetyRepository {
   }
 
   @override
-  Future<String> ask(String question, UserMode userMode) async {
+  Future<ChatAnswer> ask(String question, UserMode userMode) async {
     final o = originFor(userMode);
     final uid = await _account.deviceUserId();
     final (age, transport) = await _account.requiredSetup();
+    final walking = await _account.walkingImpaired();
+    final places = await _account.places();
     try {
       final r = await _guard(() => _client.ai.post<Map<String, dynamic>>('/api/chat', data: {
             'user_id': uid,
@@ -97,12 +100,14 @@ class RemoteSafetyRepository implements SafetyRepository {
               'user_type': userMode == UserMode.resident ? 'resident' : 'tourist',
               if (age != null) 'age': age,
               'mobility': transport == '휠체어' ? 'wheelchair' : 'walk',
+              if (walking) 'walking_impaired': true,
+              ...placesForProfile(places),
             },
           }));
       _conversationId = r.data!['conversation_id'] as String?;
-      return r.data!['answer'] as String;
+      return chatAnswerFromJson(r.data!, names: await _routeHazardNames());
     } on RemoteError catch (e) {
-      return e.message;
+      return ChatAnswer(e.message);
     }
   }
 
@@ -243,9 +248,29 @@ List<Facility> facilitiesFromGeoJson(Map<String, dynamic> fc, FacilityType type,
   ];
 }
 
-/// 65세 이상이거나 휠체어면 급경사를 피하는 노약자 경로
-String routeProfileFor(int? age, String? transport) =>
-    (age != null && age >= 65) || transport == '휠체어' ? 'elderly' : 'adult';
+/// 65세 이상·휠체어·보행 불편이면 급경사를 피하는 노약자 경로 (AI tools.route_profile과 같은 기준)
+String routeProfileFor(int? age, String? transport, {bool walkingImpaired = false}) =>
+    (age != null && age >= 65) || transport == '휠체어' || walkingImpaired ? 'elderly' : 'adult';
+
+/// 등록 장소 → AI 요청 profile (집 → home, 나머지 → frequent_places). AI가 "집까지", "직장까지"를 찾는다
+Map<String, Object> placesForProfile(List<SavedPlace> places) {
+  Map<String, Object> loc(SavedPlace p, String label) => {'lat': p.position.latitude, 'lon': p.position.longitude, 'label': label};
+  final home = places.where((p) => p.type == '집').firstOrNull;
+  final others = places.where((p) => p != home).map((p) => loc(p, p.type == '직장' ? '직장' : p.name)).toList();
+  return {if (home != null) 'home': loc(home, '집'), if (others.isNotEmpty) 'frequent_places': others};
+}
+
+/// /api/chat 응답 → 답변 + (있으면) 지도에 그릴 경로
+ChatAnswer chatAnswerFromJson(Map<String, dynamic> j, {Map<String, String> names = const {}}) {
+  final r = j['route'] as Map<String, dynamic>?;
+  if (r == null) return ChatAnswer(j['answer'] as String);
+  final dest = r['destination'] as Map<String, dynamic>;
+  return ChatAnswer(j['answer'] as String,
+      route: routeFromJson(r, 'ai', RouteType.safest, names: names),
+      destinationName: dest['name'] as String,
+      destinationKind: dest['kind'] as String?,
+      destinationPos: LatLng((dest['lat'] as num).toDouble(), (dest['lon'] as num).toDouble()));
+}
 
 SafetyRoute routeFromJson(Map<String, dynamic> j, String facilityId, RouteType routeType, {Map<String, String> names = const {}}) {
   final avoided = [for (final id in (j['avoided'] as List? ?? const []).cast<String>()) names[id] ?? id];

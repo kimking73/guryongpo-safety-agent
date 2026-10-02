@@ -32,6 +32,7 @@ LangGraph 기본 개념
 from __future__ import annotations
 
 import logging
+import re
 from typing import Callable
 
 from langgraph.graph import END, START, StateGraph
@@ -102,6 +103,22 @@ def keyword_classify(state: GuardianState) -> list[Specialist]:
     """질문에 키워드가 들어 있는 agent만 고른다."""
     q = state.get("question") or ""
     return [s for s, kws in _KEYWORDS.items() if any(k in q for k in kws)]
+
+
+# 분류기(LLM)가 실패했을 때 목적지·보행 불편을 뽑는 규칙. LLM 결과가 있으면 그쪽을 쓴다.
+_DEST_RE = re.compile(r"([0-9A-Za-z가-힣·]+?)(?:까지|에|으로|로)\s*(?:어떻게|걸어서|가|갈|걸|이동|대피)")
+# 장소가 아닌 말 ("대피소로 가"는 가까운 대피소 안내와 같다)
+_NOT_PLACE = {"대피소", "대피", "안전한", "어디", "여기", "거기", "그쪽", "밖", "어디로", "빨리", "지금", "걸어서"}
+_MOBILITY_WORDS = ("무릎", "다리가", "다리를", "지팡이", "휠체어", "거동", "걷기 힘", "걷기가 힘", "잘 못 걸", "보행이")
+
+
+def keyword_destination(question: str) -> str | None:
+    m = _DEST_RE.search(question or "")
+    return m.group(1) if m and m.group(1) not in _NOT_PLACE else None
+
+
+def keyword_mobility_limited(question: str) -> bool:
+    return any(w in (question or "") for w in _MOBILITY_WORDS)
 
 
 # alert 모드: 경고 재난 종류 → 담당 전문 agent (규칙, LLM을 쓰지 않는다)
@@ -203,9 +220,27 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
                     state.get("question") or getattr(state.get("risk_event"), "disaster", ""),
                     [s.value for s in selected], f"({reason})" if reason else "")
 
-        # ── 4) state에서 바꿀 필드만 반환 ───────────────────────────────────
+        # ── 4) 위치·경로 agent용: 목적지, 이번 질문의 보행 불편 ─────────────
+        # OpenAI 분류기는 같은 호출에서 함께 뽑는다(llm.Classification). 그 외(키워드 분류·테스트)는 규칙으로.
+        extra = getattr(classify, "last", None) if how == "분류기" else None
+        question = state.get("question") or ""
+        if state.get("mode") == "alert":
+            destination, limited = None, False
+        elif extra is not None and hasattr(extra, "destination"):
+            destination, limited = extra.destination, bool(extra.mobility_limited)
+        else:
+            destination, limited = keyword_destination(question), keyword_mobility_limited(question)
+        # 앱이 보낸 값·기억이 이미 있으면 그대로 (memory.apply_to_profile과 같은 우선순위). 기억 저장은 답변 뒤 따로 한다.
+        user = state.get("user")
+        user_update = {}
+        if limited and user is not None and user.walking_impaired is None:
+            user_update = {"user": user.model_copy(update={"walking_impaired": True})}
+
+        # ── 5) state에서 바꿀 필드만 반환 ───────────────────────────────────
         return {
             **turn,                         # 새 질문이면 초기화 값들, 재시도면 아무것도 없음
+            **user_update,
+            "destination_query": destination or None,
             "phase": Phase.DURING,          # stub: 항상 "재난 중". B4에서 특보·위험 판정으로 계산
             "selected_agents": selected,    # 다음 route_specialists가 이 목록을 보고 병렬 실행한다
             # 재시도로 다시 들어온 경우를 대비해 이전 시도의 결과를 비운다.

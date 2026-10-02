@@ -45,6 +45,25 @@ class ChatRequest(BaseModel):
     remember: bool = True
 
 
+class RouteDestination(BaseModel):
+    name: str
+    lat: float
+    lon: float
+    kind: str                     # shelter, medical, home, work, place
+
+
+class RouteInfo(BaseModel):
+    """위치·경로 agent가 안내한 경로. 앱이 "지도에서 경로 보기"로 그린다 (geometry는 경로 서버와 같은 인코딩 polyline)."""
+    destination: RouteDestination
+    profile: str
+    distance_m: int
+    duration_s: int
+    avoided: list[str] = Field(default_factory=list)
+    still_inside: list[str] = Field(default_factory=list)
+    hazards_ok: bool = True
+    geometry: str
+
+
 class ChatResponse(BaseModel):
     """AI → 앱. 카드형 답변(수치 칩·할 일·출처)은 B5 다듬기에서 확장한다."""
     conversation_id: str
@@ -52,6 +71,7 @@ class ChatResponse(BaseModel):
     selected_agents: list[S.Specialist] = Field(default_factory=list)
     phase: S.Phase = S.Phase.NONE
     used_fallback: bool = False
+    route: RouteInfo | None = None   # 답에 경로 안내가 있을 때만 (안전 안내로 끝난 답에는 없음)
 
 
 def make_serde() -> JsonPlusSerializer:
@@ -169,12 +189,17 @@ class ChatService:
             {"role": "user", "content": req.question},
             {"role": "assistant", "content": answer},
         ]})
+        used_fallback = bool(result.get("used_fallback"))
+        route = None if used_fallback else next(
+            (r.route for r in result.get("specialist_results") or []
+             if r.agent == S.Specialist.LOCATION_ROUTE and r.route and r.route.get("geometry")), None)
         return ChatResponse(
             conversation_id=conversation_id,
             answer=answer,
             selected_agents=result.get("selected_agents") or [],
             phase=result.get("phase") or S.Phase.NONE,
-            used_fallback=bool(result.get("used_fallback")),
+            used_fallback=used_fallback,
+            route=RouteInfo.model_validate(route) if route else None,
         )
 
     def close(self) -> None:

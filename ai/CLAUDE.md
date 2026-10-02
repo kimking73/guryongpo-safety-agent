@@ -32,7 +32,10 @@
   fallback), `rain_flood_agent` (`flood.py`: code collects DB data + builds Evidence incl. "기준 위치" and user memory,
   `OpenAIWriter` only phrases, template fallback), `hallucination_check` (`verify.py`: rule number check → `OpenAIFactChecker`).
   `location_route_agent` (`location.py`: nearest safe shelter via `get_safe_shelters` — outside active flood/landslide areas,
-  no underground shelters during floods, same rule as the app — + real route via `request_route`, `OpenAILocationWriter`).
+  no underground shelters during floods, same rule as the app — + real route via `request_route`, `OpenAILocationWriter`;
+  destination from the classifier's `destination` (keyword fallback) → `find_place` user places > DB names > Kakao
+  (`KAKAO_REST_KEY`); hazardous destination → route to the safe shelter instead; route returned as `ChatResponse.route`).
+  Classifier's `mobility_limited` sets `user.walking_impaired` for the same question (memory still saves it for later).
   Still stubs: landslide/wind/life-safety specialists (return an empty piece; if only stubs are picked the answer is
   `graph.NOT_READY`), action_advisor, intent_check, polish.
   `ChatService()` wires the real nodes; `DEFAULT_NODES`/`ChatService(classifier=…)` stay offline for tests.

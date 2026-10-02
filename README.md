@@ -87,6 +87,7 @@ curl -X POST localhost:8002/api/route -H 'Content-Type: application/json' \
 - GraphHopper 지도 화면(로컬 확인용): http://localhost:8989/maps/ (끝의 `/` 필수. 없으면 빈 화면)
 - 경로 응답의 `geometry`는 인코딩된 polyline(Google 형식, 정밀도 1e5)이다. 앱에서 풀어서 지도에 그린다.
 - AI가 OpenAI(`gpt-6-luna`)를 쓰려면 `.env`의 `OPENAI_API_KEY`가 필요하다. 없으면 키워드 분류로 동작한다.
+- AI의 목적지 찾기("구룡포항까지 어떻게 가?")는 `.env`의 `KAKAO_REST_KEY`(카카오 로컬 REST 키)로 장소를 검색한다. 없으면 등록 장소(집·직장)와 대피소·의료시설 이름만 찾는다. 키를 넣은 뒤 `docker compose up -d --force-recreate ai`.
 - DB 접속: `localhost:5433`, 사용자·비밀번호·DB 이름은 `.env`의 `DB_*`
 - AI는 DB를 **읽기 전용 계정**(`.env`의 `AI_DB_USER`·`AI_DB_PASSWORD`)으로 직접 읽는다. 이 계정은 SELECT만 할 수 있다.
   (5432는 로컬에 설치된 PostgreSQL과 겹칠 수 있어 5433을 쓴다)

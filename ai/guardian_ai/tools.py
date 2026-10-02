@@ -363,6 +363,115 @@ def get_safe_shelters(lat: float, lon: float, limit: int = 8, fetch: Fetch | Non
     return {"available": True, "items": items, "source": "shelters"}
 
 
+HAZARDS_AT_SQL = f"""
+SELECT string_agg(DISTINCT ra.label, ', ') AS labels
+FROM risk_assessments ra
+WHERE ra.valid_to IS NULL AND ra.level >= 'advisory' AND ra.hazard::text = ANY(%(hazards)s)
+  AND ST_Intersects(ra.area, {POINT})
+"""
+
+
+def hazards_at(lat: float, lon: float, fetch: Fetch | None = None) -> dict[str, Any]:
+    """이 지점이 지금 발효 중인 침수·산사태 영역(주의 이상) 안인지 (대피소 규칙과 같은 기준). labels: "침수 경보, …" 또는 None"""
+    try:
+        rows = _query(fetch, HAZARDS_AT_SQL, {**_point(lat, lon), "hazards": list(AVOID_HAZARDS)})
+    except Exception as e:  # noqa: BLE001
+        return _unavailable("risk_assessments", e)
+    return {"available": True, "labels": (rows or [{}])[0].get("labels"), "source": "risk_assessments"}
+
+
+# --- 목적지 찾기 (위치·경로 agent) ---------------------------------------------
+
+# 카카오 로컬 키워드 검색. 기준점은 구룡포읍 중심으로 고정한다 — 사용자 위치를 외부 서비스로 보내지 않는다.
+KAKAO_URL = "https://dapi.kakao.com"
+KAKAO_TIMEOUT_S = 3.0
+KAKAO_RADIUS_M = 20000
+GURYONGPO_CENTER = (35.9858, 129.5481)
+# 경로 서버(GraphHopper) 도로망 범위 (graphhopper/fetch_osm.sh BBOX). 이 밖은 걸어서 안내할 수 없다
+ROUTE_BOUNDS = (35.92, 129.48, 36.04, 129.60)   # 남, 서, 북, 동
+HOME_WORDS = ("집", "우리집", "우리 집", "자택")
+WORK_WORDS = ("직장", "회사", "일터", "작업장")
+
+PLACE_SQL = """
+(SELECT name, ST_Y(geom) AS lat, ST_X(geom) AS lon, 'shelter' AS kind FROM shelters
+  WHERE is_open AND name ILIKE %(q)s ORDER BY length(name) LIMIT 1)
+UNION ALL
+(SELECT name, ST_Y(geom) AS lat, ST_X(geom) AS lon, 'medical' AS kind FROM medical_facilities
+  WHERE name ILIKE %(q)s ORDER BY length(name) LIMIT 1)
+"""
+
+
+def _in_route_bounds(lat: float, lon: float) -> bool:
+    s, w, n, e = ROUTE_BOUNDS
+    return s <= lat <= n and w <= lon <= e
+
+
+def _user_place(query: str, user: UserProfile | None) -> dict[str, Any] | None:
+    if user is None:
+        return None
+    q = query.replace(" ", "")
+    if user.home and (q in [w.replace(" ", "") for w in HOME_WORDS] or (user.home.label and q == user.home.label.replace(" ", ""))):
+        return {"name": user.home.label or "집", "lat": user.home.lat, "lon": user.home.lon, "kind": "home"}
+    for p in user.frequent_places:
+        label = (p.label or "").replace(" ", "")
+        if label and (label in q or q in label or (q in WORK_WORDS and label == "직장")):
+            return {"name": p.label, "lat": p.lat, "lon": p.lon, "kind": "work" if label == "직장" else "place"}
+    return None
+
+
+def find_place(query: str, user: UserProfile | None = None, fetch: Fetch | None = None,
+               client: httpx.Client | None = None) -> dict[str, Any]:
+    """목적지 이름 → 좌표. 순서: ① 사용자 등록 장소(집·직장·등록 이름) ② DB 시설 이름(대피소·의료시설) ③ 카카오 장소 검색.
+
+    반환: available, name, lat, lon, kind(home·work·place·shelter·medical), source(user·db·kakao), address(카카오만).
+    카카오는 KAKAO_REST_KEY가 없으면 건너뛴다. 결과가 경로 서버 범위 밖이면 out_of_area=True로 돌려준다.
+    client: 테스트에서 가짜 카카오 서버를 넣을 때만.
+    사용: 위치·경로 agent
+    """
+    query = (query or "").strip()
+    if not query:
+        return {"available": False, "reason": "목적지 없음"}
+    if (p := _user_place(query, user)) is not None:
+        return {"available": True, **p, "source": "user"}
+    if query.replace(" ", "") in [w.replace(" ", "") for w in (*HOME_WORDS, *WORK_WORDS)]:
+        return {"available": False, "reason": f"등록된 '{query}' 위치가 없음 (앱 프로필에서 장소 등록)"}
+    try:
+        rows = _query(fetch, PLACE_SQL, {"q": f"%{query}%"})
+    except Exception as e:  # noqa: BLE001 — DB가 없어도 카카오로 이어 간다
+        logger.warning("시설 이름 검색 실패 (%s)", type(e).__name__)
+        rows = []
+    if rows:
+        r = rows[0]
+        return {"available": True, "name": r["name"], "lat": round(float(r["lat"]), 6), "lon": round(float(r["lon"]), 6),
+                "kind": r["kind"], "source": "db"}
+
+    key = os.environ.get("KAKAO_REST_KEY")
+    if not key and client is None:
+        return {"available": False, "reason": f"'{query}'을(를) 등록 장소·시설에서 찾지 못함 (장소 검색 키 없음)"}
+    own = client is None
+    http = client or httpx.Client(base_url=os.environ.get("KAKAO_URL") or KAKAO_URL, timeout=KAKAO_TIMEOUT_S)
+    try:
+        res = http.get("/v2/local/search/keyword.json", headers={"Authorization": f"KakaoAK {key}"} if key else {},
+                       params={"query": query, "x": GURYONGPO_CENTER[1], "y": GURYONGPO_CENTER[0],
+                               "radius": KAKAO_RADIUS_M, "size": 5, "sort": "accuracy"})
+        res.raise_for_status()
+        docs = res.json().get("documents") or []
+    except (httpx.HTTPError, ValueError) as e:
+        logger.warning("카카오 장소 검색 실패 (%s)", type(e).__name__)
+        return {"available": False, "reason": f"장소 검색을 지금 할 수 없음 ({type(e).__name__})", "source": "kakao"}
+    finally:
+        if own:
+            http.close()
+    if not docs:
+        return {"available": False, "reason": f"'{query}'을(를) 구룡포 근처에서 찾지 못함", "source": "kakao"}
+    places = [{"name": d["place_name"], "lat": round(float(d["y"]), 6), "lon": round(float(d["x"]), 6),
+               "address": d.get("road_address_name") or d.get("address_name")} for d in docs]
+    inside = [p for p in places if _in_route_bounds(p["lat"], p["lon"])]
+    if not inside:
+        return {"available": True, **places[0], "kind": "place", "source": "kakao", "out_of_area": True}
+    return {"available": True, **inside[0], "kind": "place", "source": "kakao"}
+
+
 # --- 생활안전 ---------------------------------------------------------------
 
 def _grade(value: float | None, bounds: list[tuple[float, str]], below: bool = False) -> str | None:
@@ -499,6 +608,6 @@ AGENT_TOOLS: dict[str, list] = {
                          get_disaster_messages, get_facilities],
     "wind_typhoon_agent": [get_risk_at, get_observations, get_weather_warnings, get_disaster_messages],
     "life_safety_agent": [get_life_safety],
-    "location_route_agent": [get_risk_at, get_safe_shelters, request_route],
+    "location_route_agent": [get_risk_at, get_safe_shelters, find_place, hazards_at, request_route],
     "action_advisor": [get_action_guides, get_facilities],
 }

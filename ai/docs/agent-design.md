@@ -149,6 +149,8 @@ A의 FastAPI는 앱·웹이 부르는 창구로 남고, AI는 거치지 않는�
 | `get_action_guides` | disaster, phase, level, targets | `ActionGuide`와 같은 키: id, min_level, targets, priority, title, content, voice_text, source_name | action_guides (51건) |
 | `get_user_profile` | user_id | UserProfile 키 | **목업** — 지금은 앱이 요청에 프로필을 실어 보낸다 |
 | `get_safe_shelters` | lat, lon, limit=8 | name, lat, lon, distance_m, is_indoor, underground, safe, excluded_reason(위험 영역 안·침수 중 지하) | shelters, risk_assessments (앱과 같은 규칙) |
+| `find_place` | query, user | available, name, lat, lon, kind(home·work·place·shelter·medical), source(user·db·kakao), address, out_of_area | profile 등록 장소, shelters·medical_facilities, 카카오 로컬 키워드 검색 |
+| `hazards_at` | lat, lon | labels(지점이 들어 있는 침수·산사태 영역, 주의 이상) | risk_assessments |
 | `request_route` | origin, destination, profile(adult·elderly) | available, distance_m, duration_s, ascend_m, descend_m, max_slope_pct, avoided, still_inside, hazards_ok, geometry | route 서비스 HTTP (B6·B7). 회피: 판정 엔진의 침수·산사태 영역(주의 이상), 맨홀 없음 |
 
 데이터에서 알게 된 것 (2026-10-01): 구룡포 대피소 19곳은 지진해일(17)·민방위(2)만 지정, **침수 지정 대피소 없음** →
@@ -208,7 +210,9 @@ AI는 별도 컨테이너(`ai`, 포트 8001)로 운영한다. 배포 시 Caddy�
 {
   "user_id": "firebase-uid",
   "question": "비 오는데 지금 걸어서 집에 가도 되나요?",
-  "profile": { "user_id": "firebase-uid", "user_type": "resident", "age": 72, "walking_impaired": true },
+  "profile": { "user_id": "firebase-uid", "user_type": "resident", "age": 72, "walking_impaired": true,
+               "home": { "lat": 35.9935, "lon": 129.5498, "label": "집" },
+               "frequent_places": [{ "lat": 35.9879, "lon": 129.5548, "label": "직장" }] },
   "current_location": { "lat": 35.99, "lon": 129.556 },
   "conversation_id": null
 }
@@ -218,9 +222,20 @@ AI는 별도 컨테이너(`ai`, 포트 8001)로 운영한다. 배포 시 Caddy�
   "answer": "…",
   "selected_agents": ["rain_flood_agent", "location_route_agent"],
   "phase": "during",
-  "used_fallback": false
+  "used_fallback": false,
+  "route": {                       // 위치·경로 agent가 경로를 안내했을 때만 (안전 안내로 끝난 답이면 null)
+    "destination": { "name": "충혼탑 앞", "lat": 35.99144, "lon": 129.56073, "kind": "shelter" },  // kind: shelter·medical·home·work·place
+    "profile": "elderly", "distance_m": 1024, "duration_s": 984,
+    "avoided": ["flood-67"], "still_inside": [], "hazards_ok": true,
+    "geometry": "…"                // 경로 서버와 같은 인코딩 polyline → 앱 "지도에서 경로 보기"
+  }
 }
 ```
+
+- 목적지: 관리자 분류기가 질문에서 `destination`("구룡포항", "집")과 `mobility_limited`(이번 질문에서 보행 불편을 말함)를 같은 호출로 뽑는다
+  (LLM 실패 시 규칙: `graph.keyword_destination`·`keyword_mobility_limited`). 목적지 찾기 `find_place`: 등록 장소 → DB 시설 이름 →
+  카카오 장소 검색(`KAKAO_REST_KEY`, 기준점 구룡포읍 중심 고정). 목적지가 발효 중인 침수·산사태 영역 안이면 경로는 가장 가까운
+  안전한 대피소로 낸다(위험한 곳으로 길을 그리지 않음). 못 찾으면 그렇다고 밝히고 가장 가까운 안전한 대피소.
 
 - `conversation_id`가 없으면 새 대화를 시작하고 응답에 id를 돌려준다. 같은 id를 보내면 이전 대화를 기억한다("거기는요?" 해석).
 - `profile`·`current_location`은 선택. 사용자 정보 저장 주체는 열린 질문 5번.
