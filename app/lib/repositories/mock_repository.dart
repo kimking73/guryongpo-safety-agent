@@ -2,13 +2,14 @@ import 'package:latlong2/latlong.dart';
 import '../models/domain_models.dart';
 
 /// 화면이 쓰는 데이터 창구. 목업(MockSafetyRepository)과 실제 서버(RemoteSafetyRepository)가 같은 형식으로 돌려준다.
+/// origin = 사용자 현재 위치 (구룡포 안 GPS, 아니면 사용자 유형별 예시 좌표 — main.dart userLocation).
 abstract class SafetyRepository {
-  Future<RiskStatus> risk(UserMode userMode);
+  Future<RiskStatus> risk(LatLng origin);
   Future<List<RiskArea>> riskAreas();
-  Future<List<Facility>> getFacilities(UserMode userMode);
-  Future<List<AlertItem>> alerts(UserMode userMode);
-  Future<SafetyRoute> routeFor(Facility facility, UserMode userMode, RouteType routeType);
-  Future<ChatAnswer> ask(String question, UserMode userMode);
+  Future<List<Facility>> getFacilities(LatLng origin);
+  Future<List<AlertItem>> alerts(LatLng origin);
+  Future<SafetyRoute> routeFor(Facility facility, UserMode userMode, RouteType routeType, LatLng origin);
+  Future<ChatAnswer> ask(String question, UserMode userMode, LatLng origin);
 }
 
 class MockSafetyRepository implements SafetyRepository {
@@ -162,23 +163,23 @@ class MockSafetyRepository implements SafetyRepository {
   }
   @override
   Future<SafetyRoute> routeFor(
-      Facility facility, UserMode userMode, RouteType routeType) async {
+      Facility facility, UserMode userMode, RouteType routeType, LatLng origin) async {
     await Future<void>.delayed(const Duration(milliseconds: 550));
     return exampleRoute(facility.id, userMode, routeType);
   }
   @override
   Future<List<RiskArea>> riskAreas() async => const [];
   @override
-  Future<RiskStatus> risk(UserMode userMode) async { await Future<void>.delayed(const Duration(milliseconds: 450)); return const RiskStatus(
+  Future<RiskStatus> risk(LatLng origin) async { await Future<void>.delayed(const Duration(milliseconds: 450)); return const RiskStatus(
       level: '경계',
       title: '호우·침수 위험 예시',
       summary: '예시 데이터: 저지대 보행 시 침수 구간과 맨홀을 피하세요.',
       updatedAt: '10:42',
       guide: '안전한 실내 또는 지정 대피소로 이동하고, 물이 고인 도로와 해안가에 접근하지 마세요.'); }
   @override
-  Future<List<Facility>> getFacilities(UserMode userMode) async { await Future<void>.delayed(const Duration(milliseconds: 350)); return facilities; }
+  Future<List<Facility>> getFacilities(LatLng origin) async { await Future<void>.delayed(const Duration(milliseconds: 350)); return facilities; }
   @override
-  Future<List<AlertItem>> alerts(UserMode userMode) async { await Future<void>.delayed(const Duration(milliseconds: 350)); return const [
+  Future<List<AlertItem>> alerts(LatLng origin) async { await Future<void>.delayed(const Duration(milliseconds: 350)); return const [
         AlertItem(
             id: 'work-flood',
             title: '선제 경고: 등록된 직장 침수 위험',
@@ -202,7 +203,7 @@ class MockSafetyRepository implements SafetyRepository {
             guide: '외출 시 모자와 자외선 차단을 사용하세요.')
       ]; }
   @override
-  Future<ChatAnswer> ask(String question, UserMode userMode) async => ChatAnswer(_mockAnswer(question));
+  Future<ChatAnswer> ask(String question, UserMode userMode, LatLng origin) async => ChatAnswer(_mockAnswer(question));
 
   String _mockAnswer(String question) {
     if (question.contains('대피소'))

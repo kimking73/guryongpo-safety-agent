@@ -1,16 +1,17 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:geolocator/geolocator.dart';
 import 'models/domain_models.dart';
 import 'repositories/mock_repository.dart';
 import 'repositories/remote_repository.dart';
 import 'services/app_config.dart';
 import 'services/auth_service.dart';
 import 'services/account_service.dart';
+import 'services/location_service.dart';
 import 'dashboard_parts.dart';
 
 /// APP_MODE=remote면 실제 서버, 아니면 예시 데이터
@@ -31,11 +32,53 @@ final voiceLanguage = StateProvider<String>((_) => '한국어');
 final floodLayer = StateProvider<bool>((_) => false);
 final floodTime = StateProvider<int>((_) => 0);
 
-// 서버 데이터. 사용자 유형(출발 위치)이 바뀌면 다시 불러온다. 새로고침은 ref.invalidate.
-final riskProvider = FutureProvider<RiskStatus>((ref) => ref.watch(repo).risk(ref.watch(mode)));
+// --- 사용자 위치 ---------------------------------------------------------------
+/// 사용자가 있는 곳. fromGps=false면 사용자 유형별 예시 좌표 (GPS가 없거나, 권한이 없거나, 구룡포 밖)
+class UserLocation {
+  const UserLocation(this.position, {required this.fromGps, this.manual = false});
+  final LatLng position;
+  final bool fromGps, manual;
+}
+
+final locationService = Provider<LocationService>((_) => LocationService());
+/// 마지막으로 받은 위치 (GPS 또는 지도에서 직접 고른 곳). 구룡포 밖이어도 그대로 둔다 — 쓸지는 userLocation이 정한다
+final gpsPosition = StateProvider<(LatLng, bool)?>((_) => null);   // (위치, 지도에서 직접 고름)
+final gpsNote = StateProvider<String?>((_) => null);
+final userLocation = Provider<UserLocation>((ref) {
+  final g = ref.watch(gpsPosition);
+  if (g != null && inServiceArea(g.$1)) return UserLocation(g.$1, fromGps: true, manual: g.$2);
+  return UserLocation(originFor(ref.watch(mode)), fromGps: false);
+});
+
+/// 30m 넘게 움직였을 때만 위치를 바꾼다 (첫 위치·지도 선택은 바로)
+void setPosition(WidgetRef ref, LatLng p, {bool manual = false}) {
+  final prev = ref.read(gpsPosition);
+  if (manual || prev == null || prev.$2 || const Distance().as(LengthUnit.Meter, prev.$1, p) > moveThresholdM) {
+    ref.read(gpsPosition.notifier).state = (p, manual);
+  }
+}
+
+/// 앱이 켜져 있는 동안 GPS를 따라간다 (Shell이 watch). 권한 거부·실패면 예시 위치 그대로
+final gpsTracker = Provider<void>((ref) {
+  StreamSubscription<LatLng>? sub;
+  try {
+    sub = ref.watch(locationService).watch().listen((p) {
+      final prev = ref.read(gpsPosition);
+      if (prev != null && prev.$2) return;               // 지도에서 직접 고른 위치가 우선
+      if (prev == null || const Distance().as(LengthUnit.Meter, prev.$1, p) > moveThresholdM) {
+        ref.read(gpsPosition.notifier).state = (p, false);
+      }
+      ref.read(gpsNote.notifier).state = inServiceArea(p) ? null : '현재 위치가 구룡포 밖이라 예시 위치를 씁니다.';
+    }, onError: (Object e) => ref.read(gpsNote.notifier).state = e is LocationUnavailable ? e.message : '위치를 읽지 못해 예시 위치를 씁니다.');
+  } catch (_) {}
+  ref.onDispose(() => sub?.cancel());
+});
+
+// 서버 데이터. 사용자 위치가 바뀌면(30m 넘게) 다시 불러온다. 새로고침은 ref.invalidate.
+final riskProvider = FutureProvider<RiskStatus>((ref) => ref.watch(repo).risk(ref.watch(userLocation).position));
 final riskAreasProvider = FutureProvider<List<RiskArea>>((ref) => ref.watch(repo).riskAreas());
-final facilitiesProvider = FutureProvider<List<Facility>>((ref) => ref.watch(repo).getFacilities(ref.watch(mode)));
-final alertsProvider = FutureProvider<List<AlertItem>>((ref) => ref.watch(repo).alerts(ref.watch(mode)));
+final facilitiesProvider = FutureProvider<List<Facility>>((ref) => ref.watch(repo).getFacilities(ref.watch(userLocation).position));
+final alertsProvider = FutureProvider<List<AlertItem>>((ref) => ref.watch(repo).alerts(ref.watch(userLocation).position));
 /// AI 답의 "지도에서 경로 보기"로 고른 경로 (routeFacilityId == aiRouteId일 때 지도에 그린다)
 const aiRouteId = 'ai';
 final aiRoute = StateProvider<ChatAnswer?>((_) => null);
@@ -47,7 +90,7 @@ final routeProvider = FutureProvider.family<SafetyRoute, String>((ref, facilityI
     return route;
   }
   final facility = (await ref.watch(facilitiesProvider.future)).firstWhere((f) => f.id == facilityId);
-  return ref.watch(repo).routeFor(facility, ref.watch(mode), ref.watch(routeKind));
+  return ref.watch(repo).routeFor(facility, ref.watch(mode), ref.watch(routeKind), ref.watch(userLocation).position);
 });
 
 /// AI가 안내한 경로를 대시보드 지도에 띄운다 (서버를 다시 부르지 않고 AI가 계산한 경로 그대로)
@@ -210,6 +253,7 @@ class Shell extends ConsumerWidget {
     final wide = MediaQuery.sizeOf(c).width >= 840;
     final here = GoRouterState.of(c).uri.path;
     final selected = nav.indexWhere((x) => x.$3 == here).clamp(0, 2) as int;
+    ref.watch(gpsTracker);
     final body = Column(children: [const StatusLine(), Expanded(child: child)]);
     return Scaffold(
         appBar: wide ? null : AppBar(title: const Text('구룡포 안전')),
@@ -244,6 +288,7 @@ class StatusLine extends ConsumerWidget {
   @override
   Widget build(BuildContext c, WidgetRef ref) {
     final isOffline = ref.watch(offline);
+    final here = ref.watch(userLocation);
     return Material(
         color: isOffline ? Colors.amber.shade100 : Colors.teal.shade50,
         child: Padding(
@@ -254,7 +299,7 @@ class StatusLine extends ConsumerWidget {
               Expanded(
                   child: Text(isOffline
                       ? '오프라인 · 저장된 예시 정보 · 10:42'
-                      : '온라인 · ${AppConfig.dataLabel}${AppConfig.isRemote ? '' : ' · 10:42'}')),
+                      : '온라인 · ${AppConfig.dataLabel}${AppConfig.isRemote ? '' : ' · 10:42'} · ${here.fromGps ? (here.manual ? '지도에서 고른 위치' : 'GPS 위치') : '예시 위치'} 기준${!here.fromGps && ref.watch(gpsNote) != null ? ' (${ref.watch(gpsNote)})' : ''}')),
               TextButton(
                   onPressed: () =>
                       ref.read(offline.notifier).state = !isOffline,
@@ -560,17 +605,23 @@ class MapCard extends ConsumerStatefulWidget {
   @override ConsumerState<MapCard> createState() => _MapCardState();
 }
 class _MapCardState extends ConsumerState<MapCard> {
-  LatLng current = const LatLng(35.9907, 129.5526); String? locationNote; FloodGrid? selected;
+  String? locationNote; FloodGrid? selected;
+  /// GPS 버튼: 지금 위치를 한 번 읽어 앱 전체 위치(userLocation)에 반영. 못 읽으면 지도를 눌러 고를 수 있게 한다
   Future<void> locate() async {
     try {
-      var permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
-        setState(() => locationNote = 'GPS 권한이 없어 지도에서 위치를 선택할 수 있습니다.'); return;
+      final p = await ref.read(locationService).current();
+      if (!mounted) return;
+      if (inServiceArea(p)) {
+        ref.read(gpsPosition.notifier).state = (p, false);
+        setState(() => locationNote = 'GPS 현재 위치를 반영했습니다.');
+      } else {
+        setState(() => locationNote = '현재 위치가 구룡포 밖이라 예시 위치를 씁니다. 지도를 눌러 위치를 고를 수 있습니다.');
       }
-      final p = await Geolocator.getCurrentPosition();
-      if (mounted) setState(() { current = LatLng(p.latitude, p.longitude); locationNote = 'GPS 현재 위치를 반영했습니다.'; });
-    } catch (_) { if (mounted) setState(() => locationNote = '위치를 읽지 못했습니다. 지도를 눌러 현재 위치를 선택하세요.'); }
+    } on LocationUnavailable catch (e) {
+      if (mounted) setState(() => locationNote = '${e.message} 지도를 눌러 현재 위치를 고를 수 있습니다.');
+    } catch (_) {
+      if (mounted) setState(() => locationNote = '위치를 읽지 못했습니다. 지도를 눌러 현재 위치를 고르세요.');
+    }
   }
   FloodGrid? gridAt(LatLng p) { for (final g in floodGridsFor(ref.read(floodTime))) { if (p.latitude >= g.south && p.latitude <= g.north && p.longitude >= g.west && p.longitude <= g.east) return g; } return null; }
   @override Widget build(BuildContext c) {
@@ -581,12 +632,12 @@ class _MapCardState extends ConsumerState<MapCard> {
         // 보이는 영역이 범위보다 넓어져 만족할 수 없고, 다시 그릴 때 flutter_map 검사에 걸려 앱이 멈췄다 (2026-10-02 웹)
         minZoom: 12,
         cameraConstraint: CameraConstraint.containCenter(bounds: LatLngBounds(const LatLng(35.940,129.525), const LatLng(36.035,129.585))),
-        onTap: (_, point) { if (locationNote != null) setState(() { current = point; locationNote = '지도에서 선택한 현재 위치입니다.'; }); if (active) setState(() => selected = gridAt(point)); }), children: [
+        onTap: (_, point) { if (locationNote != null) { setPosition(ref, point, manual: true); setState(() => locationNote = '지도에서 선택한 현재 위치입니다.'); } if (active) setState(() => selected = gridAt(point)); }), children: [
         TileLayer(urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', subdomains: const ['a','b','c'], userAgentPackageName: 'com.example.guryongpo_safety'),
         if (active) PolygonLayer(polygons: floodGridPolygons(time)),
         if (AppConfig.isRemote) PolygonLayer(polygons: riskAreaPolygons(ref.watch(riskAreasProvider).valueOrNull ?? const [])),
         MarkerLayer(markers: [
-          Marker(point: current, width: 46, height: 46, child: const Icon(Icons.my_location, color: Colors.blue, size: 34)),
+          Marker(point: ref.watch(userLocation).position, width: 46, height: 46, child: const Icon(Icons.my_location, color: Colors.blue, size: 34)),
           // 등록 장소 (없고 목업 모드면 예시 집·직장)
           ...[for (final p in ref.watch(placesProvider).valueOrNull ?? const <SavedPlace>[]) (p.position, p.type)]
               .followedBy((ref.watch(placesProvider).valueOrNull?.isEmpty ?? true) && !AppConfig.isRemote
@@ -818,7 +869,7 @@ class _AiScreenState extends ConsumerState<AiScreen> {
       messages.add(ChatMessage(question, true));
       input.clear();
     });
-    final answer = await ref.read(repo).ask(question, ref.read(mode));
+    final answer = await ref.read(repo).ask(question, ref.read(mode), ref.read(userLocation).position);
     if (mounted) setState(() => messages.add(ChatMessage(answer.text, false, answer: answer)));
   }
 
@@ -968,7 +1019,7 @@ class _PlaceFormState extends ConsumerState<_PlaceForm> {
               TileLayer(urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', subdomains: const ['a', 'b', 'c'], userAgentPackageName: 'com.example.guryongpo_safety'),
               if (point != null) MarkerLayer(markers: [Marker(point: point!, width: 40, height: 40, child: const Icon(Icons.location_on, color: Colors.red, size: 36))]),
             ]))),
-        TextButton.icon(onPressed: () => setState(() => point = originFor(ref.read(mode))), icon: const Icon(Icons.my_location), label: const Text('지금 출발 위치로')),
+        TextButton.icon(onPressed: () => setState(() => point = ref.read(userLocation).position), icon: const Icon(Icons.my_location), label: const Text('지금 출발 위치로')),
         SwitchListTile(contentPadding: EdgeInsets.zero, value: alert, title: const Text('알림 수신'), onChanged: (v) => setState(() => alert = v)),
         FilledButton(onPressed: point == null ? null : save, child: const Text('등록하기')),
       ]))));

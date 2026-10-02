@@ -117,7 +117,7 @@ class _RouteMapState extends ConsumerState<RouteMap> {
     final routeAsync = ref.watch(routeProvider(widget.facilityId));
     final route = routeAsync.valueOrNull;
     final loading = routeAsync.isLoading;
-    final current = originFor(userMode);
+    final current = ref.watch(userLocation).position;
     if (facility == null || route == null) {
       return Card(child: SizedBox(height: 470, child: Center(child: routeAsync.hasError
           ? Column(mainAxisSize: MainAxisSize.min, children: [
@@ -347,7 +347,7 @@ class _AiPanelState extends ConsumerState<AiPanel> {
       ChatMessage(question, true)
     ];
     setState(() => loading = true);
-    final answer = await ref.read(repo).ask(question, ref.read(mode));
+    final answer = await ref.read(repo).ask(question, ref.read(mode), ref.read(userLocation).position);
     final personaGuide = widget.resident
         ? '주민 예시 안내: 등록 장소와 현재 위치를 함께 확인하고 안전한 실내로 이동하세요.'
         : '관광객 예시 안내: 현재 위치 주변의 위험 구간을 피하고 안전한 실내를 확인하세요.';

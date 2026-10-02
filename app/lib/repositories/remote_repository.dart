@@ -24,18 +24,17 @@ class RemoteSafetyRepository implements SafetyRepository {
   /// 사용자 위치 주변 이 거리(m) 안의 위험 영역까지 위험도에 넣는다
   static const riskRadiusM = 300;
 
-  Future<Map<String, dynamic>> _risk(UserMode userMode) async {
-    final o = originFor(userMode);
+  Future<Map<String, dynamic>> _risk(LatLng o) async {
     final r = await _guard(() => _client.api.get<Map<String, dynamic>>('/api/v1/risk',
         queryParameters: {'lat': o.latitude, 'lng': o.longitude, 'radius_m': riskRadiusM}));
     return r.data!;
   }
 
   @override
-  Future<RiskStatus> risk(UserMode userMode) async => riskFromJson(await _risk(userMode));
+  Future<RiskStatus> risk(LatLng origin) async => riskFromJson(await _risk(origin));
 
   @override
-  Future<List<AlertItem>> alerts(UserMode userMode) async => alertsFromRiskJson(await _risk(userMode));
+  Future<List<AlertItem>> alerts(LatLng origin) async => alertsFromRiskJson(await _risk(origin));
 
   @override
   Future<List<RiskArea>> riskAreas() async {
@@ -44,8 +43,7 @@ class RemoteSafetyRepository implements SafetyRepository {
   }
 
   @override
-  Future<List<Facility>> getFacilities(UserMode userMode) async {
-    final o = originFor(userMode);
+  Future<List<Facility>> getFacilities(LatLng o) async {
     final shelters = await _guard(() => _client.api.get<Map<String, dynamic>>('/api/v1/dashboard/layers/shelters'));
     final medical = await _guard(() => _client.api.get<Map<String, dynamic>>('/api/v1/dashboard/layers/medical'));
     return [
@@ -55,8 +53,7 @@ class RemoteSafetyRepository implements SafetyRepository {
   }
 
   @override
-  Future<SafetyRoute> routeFor(Facility facility, UserMode userMode, RouteType routeType) async {
-    final o = originFor(userMode);
+  Future<SafetyRoute> routeFor(Facility facility, UserMode userMode, RouteType routeType, LatLng o) async {
     final (age, transport) = await _account.requiredSetup();
     final walking = await _account.walkingImpaired();
     final r = await _guard(() => _client.route.post<Map<String, dynamic>>('/api/route', data: {
@@ -83,8 +80,7 @@ class RemoteSafetyRepository implements SafetyRepository {
   }
 
   @override
-  Future<ChatAnswer> ask(String question, UserMode userMode) async {
-    final o = originFor(userMode);
+  Future<ChatAnswer> ask(String question, UserMode userMode, LatLng o) async {
     final uid = await _account.deviceUserId();
     final (age, transport) = await _account.requiredSetup();
     final walking = await _account.walkingImpaired();

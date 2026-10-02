@@ -24,7 +24,7 @@ const _chat = {
 /// 목업 저장소 + AI 답에 경로가 오는 가짜
 class RouteAnsweringRepo extends MockSafetyRepository {
   @override
-  Future<ChatAnswer> ask(String question, UserMode userMode) async => chatAnswerFromJson(_chat);
+  Future<ChatAnswer> ask(String question, UserMode userMode, LatLng origin) async => chatAnswerFromJson(_chat);
 }
 
 void main() {
