@@ -59,6 +59,7 @@ cd ai && .venv/bin/python -m pytest -q       # AI tests (offline); `-m live` cal
 cd route && .venv/bin/python -m pytest -q    # route tests (fake GraphHopper); `-m live` needs graphhopper on :8989
 cd app && flutter run -d chrome --dart-define=APP_MODE=remote   # app on real servers (omit the define for mock data)
 cd app && flutter test                       # app tests (analyze crashes on the Korean path — run it on a copy in an ASCII path)
+cd app && flutter test --platform chrome      # same tests in Chrome — web-only bugs (e.g. `~` is unsigned 32-bit in JS) show only here
 ./graphhopper/build_dem.sh                   # after putting 국토지리정보원 DEM files in graphhopper/dem/ngii/; then restart graphhopper
 ```
 

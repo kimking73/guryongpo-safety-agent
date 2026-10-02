@@ -28,6 +28,12 @@ void main() {
     expect(pts[2].longitude, closeTo(-126.453, 1e-9));
   });
 
+  test('polyline: 좌표가 줄어드는(음수 변화량) 경로도 웹에서 맞게 — flutter test --platform chrome 로도 돌린다', () {
+    final pts = decodePolyline('istzEmzuuWh@y@XgAl@Uc@qCGaA?_@');   // 실제 경로 서버 응답 (남동쪽으로 감)
+    expect(pts.first.latitude, closeTo(35.99173, 1e-9));
+    expect(pts.every((p) => p.latitude > 35.9 && p.latitude < 36.1 && p.longitude > 129.5 && p.longitude < 129.6), isTrue);
+  });
+
   test('위험도: 판정 단계를 한국어로, 근거를 항목별로', () {
     final r = riskFromJson(_warningRisk);
     expect(r.level, '경계');
