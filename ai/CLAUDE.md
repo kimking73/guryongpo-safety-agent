@@ -12,7 +12,7 @@
    tests). Sum `cost_krw`; if ≥50% of 200,000원, or a single session/test run burned unusually much, tell the user
    first thing. Also grep ai logs for `OpenAI 사용량 경고`. These are estimates — the key owner's dashboard is the truth.
 4. If the user mentions timeline changes, re-read the live timeline artifact
-   (https://claude.ai/artifact/S1CWwQbkt9mA7TpQbYbbgB, Artifact tool `action: "read"`) and sync `timeline.md`.
+   (https://claude.ai/artifact/H3ofVAbENCmCvRtAvaGLAi — 28-day version since 2026-10-03, Artifact tool `action: "read"`) and sync `timeline.md`.
    Its downloaded file may come wrapped in an extra host `<html>` shell — strip it before republishing.
 5. Check `docs/agent-design.md` §7 (open questions) and `docs/code_check_list.md` (open: #3, target B5).
 6. Route work (B6·B7): `cd ../route && .venv/bin/python -m pytest -q` → **34 passed, 6 deselected** (live 6). Needs
@@ -25,9 +25,10 @@
 - Commit; if `git push` is blocked for Claude, ask the user to run `! git push`.
 
 ## Current status (2026-10-02, Day 10)
-- **Done: B1, B8, B2, B3, B6.** In progress: **B7** (done criterion met, awaiting user's completion call), **B10** (VM up;
-  static IP·Caddy·domain left). Next: **B4** (landslide·wind/typhoon·life-safety·location/route agents + rule-based action
-  advisor). Plan, carry-overs and work log: `.claude/docs/timeline.md`.
+- Timeline is now 28 days (Day 1 = 2026-09-23; Day 21 = extra features integration). **Done: B1, B8, B2, B3, B6, B7.**
+  In progress: **B4** (location/route agent done; landslide·wind/typhoon·life-safety agents + rule-based action advisor +
+  alert message left — overdue), **B10** (VM up; static IP·Caddy·domain left). Next: B5 (11–13), then new B11 sea→port→land
+  route (15–17), B12 voice evacuation check (17–18), B13 patrol priority (19–20), B9 (22–23). See `.claude/docs/timeline.md`.
 - AI path: `POST /api/chat` → `ChatService.chat` (service.py) → graph. Real nodes: manager (`OpenAIClassifier`, keyword
   fallback), `rain_flood_agent` (`flood.py`: code collects DB data + builds Evidence incl. "기준 위치" and user memory,
   `OpenAIWriter` only phrases, template fallback), `hallucination_check` (`verify.py`: rule number check → `OpenAIFactChecker`).
