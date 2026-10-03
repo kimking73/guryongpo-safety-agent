@@ -142,3 +142,5 @@ docker compose run --rm loader                        # 정적 데이터(대피�
 
 - GCP 콘솔: https://console.cloud.google.com/home/dashboard?project=guryong-guardian-0924
 - Firebase 콘솔: https://console.firebase.google.com/project/guryong-guardian-0924/overview
+
+김다인바보
