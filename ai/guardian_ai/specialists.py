@@ -14,7 +14,7 @@ from typing import Any, Callable
 
 from . import tools as T
 from .db import Fetch
-from .flood import LEVEL_KO, RISK_RADIUS_M, _fmt, _ts, location_text, pick_location
+from .flood import FORECAST_HOURS, LEVEL_KO, RISK_RADIUS_M, _fmt, _ts, forecast_evidence, location_text, pick_location
 from .state import Evidence, GuardianState, Location, RiskLevel, Specialist, SpecialistResult
 
 logger = logging.getLogger(__name__)
@@ -184,6 +184,10 @@ def collect_wind_typhoon(state: GuardianState, fetch: Fetch | None = None) -> Co
                     d.facts.setdefault("wind", []).append((f"{i['station']} {name}", i["value"], i["unit"]))
     related = _warning_evidence(d, warnings, hazards, "강풍·태풍·풍랑")
     d.facts["warnings"] = [w["headline"] for w in related if w["status"] != "lifted"]
+    fc = T.get_forecast(lat, lon, hours=FORECAST_HOURS, fetch=fetch) if risk.get("available") else {"available": False}
+    if not fc.get("available"):
+        d.unavailable.append("예보")
+    d.evidence += forecast_evidence(fc, rain=False, wind=True)
     return d
 
 

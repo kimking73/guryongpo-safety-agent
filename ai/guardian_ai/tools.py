@@ -191,6 +191,69 @@ def get_observations(kind: ObservationKind, lat: float, lon: float, fetch: Fetch
     return {"available": True, "kind": kind, "items": items, "source": source}
 
 
+# --- 예보 (기상청 초단기·단기, A가 수집 — forecasts / v_latest_forecasts) ---------------
+
+# 구룡포 격자 (A의 collector KMA_GRIDS): (105,94) 읍 중심, (106,94) 구룡포항. 경도로 가까운 쪽을 고른다
+FORECAST_GRIDS = {(105, 94): 129.5481, (106, 94): 129.5650}
+FORECAST_SQL = """
+SELECT kind, fcst_time, category, value, value_num
+FROM v_latest_forecasts
+WHERE kind = ANY(%(kinds)s) AND grid_nx = %(nx)s AND grid_ny = %(ny)s
+  AND fcst_time > now() AND fcst_time <= now() + make_interval(hours => %(hours)s)
+  AND category = ANY(%(categories)s)
+ORDER BY fcst_time, category
+"""
+PTY_KO = {1: "비", 2: "비/눈", 3: "눈", 4: "소나기", 5: "빗방울", 6: "빗방울눈날림", 7: "눈날림"}
+
+
+def get_forecast(lat: float, lon: float, hours: int = 48, fetch: Fetch | None = None) -> dict[str, Any]:
+    """앞으로 hours시간 예보 요약 (초단기 6시간 + 단기 ~3일, 가까운 시각은 초단기 우선).
+
+    반환: grid, periods(날짜별: max_pop 강수확률 %, rain_types 강수형태, rain_hours 비 예보 시각 수, max_rain 1시간 강수량 문구,
+    max_wind m/s, max_wave m), next_rain(가장 이른 비 예보 시각·형태), issued(발표 시각).
+    사용: 재난 전 판단(행동 권고), 호우·침수, 강풍·태풍 agent
+    """
+    grid = min(FORECAST_GRIDS, key=lambda g: abs(FORECAST_GRIDS[g] - lon))
+    try:
+        rows = _query(fetch, FORECAST_SQL, {"kinds": ["ultra_short", "short"], "nx": grid[0], "ny": grid[1], "hours": hours,
+                                            "categories": ["POP", "PTY", "PCP", "RN1", "WSD", "WAV"]})
+    except Exception as e:  # noqa: BLE001
+        return _unavailable("forecasts", e)
+    if not rows:
+        return {"available": False, "reason": "예보 없음 (수집 확인)", "source": "forecasts"}
+    # 같은 시각·항목은 초단기가 단기보다 우선
+    best: dict[tuple, dict] = {}
+    for r in rows:
+        key = (r["fcst_time"], "RN1" if r["category"] == "PCP" else r["category"])
+        if key not in best or r["kind"] == "ultra_short":
+            best[key] = r
+    days: dict[str, dict[str, Any]] = {}
+    next_rain = None
+    for (t, cat), r in sorted(best.items(), key=lambda kv: kv[0][0]):
+        local = t.astimezone(KST) if hasattr(t, "astimezone") else datetime.fromisoformat(str(t)).astimezone(KST)
+        d = days.setdefault(local.strftime("%m-%d"), {"date": local.strftime("%m-%d"), "max_pop": None, "rain_types": [],
+                                                      "rain_hours": 0, "max_rain": None, "max_wind": None, "max_wave": None})
+        v = r["value_num"]
+        if cat == "POP" and v is not None:
+            d["max_pop"] = max(d["max_pop"] or 0, int(v))
+        elif cat == "PTY" and v:
+            kind = PTY_KO.get(int(v))
+            if kind and kind not in d["rain_types"]:
+                d["rain_types"].append(kind)
+            d["rain_hours"] += 1
+            if next_rain is None:
+                next_rain = {"at": _iso(t), "type": kind}
+        elif cat == "RN1" and r["value"] not in ("강수없음", "0"):
+            if d["max_rain"] is None or (v or 0) > d.get("_rain_num", -1):
+                d["max_rain"], d["_rain_num"] = r["value"], v or 0
+        elif cat == "WSD" and v is not None:
+            d["max_wind"] = max(d["max_wind"] or 0, round(float(v), 1))
+        elif cat == "WAV" and v is not None:
+            d["max_wave"] = max(d["max_wave"] or 0, round(float(v), 1))
+    periods = [{k: v for k, v in d.items() if not k.startswith("_")} for d in days.values()]
+    return {"available": True, "grid": list(grid), "periods": periods, "next_rain": next_rain, "source": "forecasts"}
+
+
 # --- 특보·재난문자 ----------------------------------------------------------
 
 WARNINGS_SQL = """

@@ -72,7 +72,9 @@ class ChatResponse(BaseModel):
     phase: S.Phase = S.Phase.NONE
     used_fallback: bool = False
     route: RouteInfo | None = None   # 답에 경로 안내가 있을 때만 (안전 안내로 끝난 답에는 없음)
-    call_emergency: bool = False     # 위험 지역에서 이동이 어려움 → 앱이 119 연결 버튼을 크게 (행동 권고 규칙)
+    call_emergency: bool = False     # 판단 로직 '재난 중 > 위험 지역 > 이동 불가능' → 앱이 119 연결 버튼을 크게
+    decision_path: str = ""          # 행동 권고 판단 로직에서 도달한 분기 (예: "재난 중 > 위험 지역 > 이동 가능")
+    follow_up: str | None = None     # 근거가 없어 사용자에게 물은 질문 (답변 끝에도 있음). 다음 질문에서 대화로 이어진다
 
 
 def make_serde() -> JsonPlusSerializer:
@@ -200,9 +202,11 @@ class ChatService:
             {"role": "assistant", "content": answer},
         ]})
         used_fallback = bool(result.get("used_fallback"))
+        plan = result.get("action_plan")
         route = None if used_fallback else next(
             (r.route for r in result.get("specialist_results") or []
-             if r.agent == S.Specialist.LOCATION_ROUTE and r.route and r.route.get("geometry")), None)
+             if r.agent == S.Specialist.LOCATION_ROUTE and r.route and r.route.get("geometry")),
+            plan.route if plan is not None and plan.route and plan.route.get("geometry") else None)
         return ChatResponse(
             conversation_id=conversation_id,
             answer=answer,
@@ -210,7 +214,9 @@ class ChatService:
             phase=result.get("phase") or S.Phase.NONE,
             used_fallback=used_fallback,
             route=RouteInfo.model_validate(route) if route else None,
-            call_emergency=bool(getattr(result.get("action_plan"), "call_emergency", False)),
+            call_emergency=bool(getattr(plan, "call_emergency", False)),
+            decision_path=" > ".join(getattr(plan, "decision_path", None) or []),
+            follow_up=getattr(plan, "question", None),
         )
 
     def close(self) -> None:

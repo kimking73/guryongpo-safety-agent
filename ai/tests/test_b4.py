@@ -45,9 +45,10 @@ LEVELS = ["normal", "watch", "advisory", "warning", "critical"]
 class FakeDB:
     """SQL 문자열로 어떤 조회인지 구분하는 가짜 DB. 시나리오별로 값만 바꾼다."""
 
-    def __init__(self, risk=(), zones=(), observations=(), warnings=(), guides=GUIDES, down=False):
+    def __init__(self, risk=(), zones=(), observations=(), warnings=(), guides=GUIDES, down=False, hazard_labels=None):
         self.risk, self.zones, self.observations, self.warnings, self.guides, self.down = \
             list(risk), list(zones), list(observations), list(warnings), list(guides), down
+        self.hazard_labels = hazard_labels      # 사용자 위치가 들어 있는 위험 영역 (hazards_at)
         self.guide_calls = []
 
     def __call__(self, sql, params):
@@ -58,6 +59,8 @@ class FakeDB:
             level = LEVELS.index(params["level"])
             return [g for g in self.guides if g["disaster"] == params["hazard"] and g["phase"] == params["phase"]
                     and LEVELS.index(g["min_level"]) <= level and set(g["targets"]) & set(params["targets"])]
+        if "AS labels" in sql:
+            return [{"labels": self.hazard_labels}]
         if "FROM hazard_zones" in sql:
             return self.zones
         if "FROM weather_warnings" in sql:
@@ -224,14 +227,79 @@ def test_writer_personalizes_from_guides():
     assert "72세" in seen["situation"] and "보행 불편" in seen["situation"] and "태풍이 시작되면" in seen["guides"]
 
 
-def test_call_emergency_only_when_danger_immobile_and_no_safe_route():
-    danger = [result(Specialist.RAIN_FLOOD, RiskLevel.WARNING),
-              result(Specialist.LOCATION_ROUTE, RiskLevel.NORMAL, route={"still_inside": ["flood-1"], "distance_m": 300})]
-    out = A.make_action_advisor(fetch=FakeDB())(advisor_state(danger, walking_impaired=True))
-    assert out["action_plan"].call_emergency and "1. " + A.EMERGENCY_STEP in out["draft"]
-    assert not A.needs_emergency(danger, UserProfile(user_id="u"))                                    # 걸을 수 있음
-    safe_route = [danger[0], result(Specialist.LOCATION_ROUTE, RiskLevel.NORMAL, route={"still_inside": []})]
-    assert not A.needs_emergency(safe_route, UserProfile(user_id="u", walking_impaired=True))         # 안전한 길 있음
+# --- 판단 로직 분기 (사용자 정의 트리) -------------------------------------------------
+
+def tree_state(phase, can_move="unknown", damage="unknown", **user):
+    return {**state(), "phase": phase, "can_move": can_move, "damage": damage, "user": UserProfile(user_id="u1", **user)}
+
+
+def test_before_asks_dependents_then_checklist():
+    d = A.decide(tree_state(Phase.BEFORE), fetch=FakeDB())
+    assert d.path == ["재난 전", "사용자 정보 확인"] and d.question == A.QUESTIONS["dependents"]
+    assert A.decide(tree_state(Phase.NONE, has_dependents=False), fetch=FakeDB()).path == ["평시(대비)", "체크리스트"]
+
+
+def test_during_safe_when_outside_hazard_areas():
+    d = A.decide(tree_state(Phase.DURING), fetch=FakeDB(hazard_labels=None))
+    assert d.path == ["재난 중", "안전"] and not d.need_route
+
+
+def test_during_danger_healthy_user_can_move_gets_route():
+    d = A.decide(tree_state(Phase.DURING, age=30), fetch=FakeDB(hazard_labels="침수 경보"))
+    assert d.path == ["재난 중", "위험 지역", "이동 가능"] and d.need_route and not d.question
+
+
+def test_during_danger_unknown_mobility_asks_one_question_but_still_guides():
+    d = A.decide(tree_state(Phase.DURING, age=80, walking_impaired=True), fetch=FakeDB(hazard_labels="침수 경보"))
+    assert d.path[-1] == "이동 가능 여부 확인" and d.question == A.QUESTIONS["can_move"] and d.need_route
+
+
+def test_during_danger_cannot_move_is_119():
+    d = A.decide(tree_state(Phase.DURING, can_move="no"), fetch=FakeDB(hazard_labels="침수 경보"))
+    assert d.path == ["재난 중", "위험 지역", "이동 불가능"] and d.emergency
+
+
+def test_hazard_check_unavailable_counts_as_danger():
+    d = A.decide(tree_state(Phase.DURING, age=30), fetch=FakeDB(down=True))
+    assert d.path[:2] == ["재난 중", "위험 지역"]
+
+
+def test_after_damage_branches():
+    assert A.decide(tree_state(Phase.AFTER), fetch=FakeDB()).question == A.QUESTIONS["damage"]
+    assert A.decide(tree_state(Phase.AFTER, damage="no"), fetch=FakeDB()).path == ["재난 후", "피해 없음"]
+    d = A.decide(tree_state(Phase.AFTER, damage="yes"), fetch=FakeDB())
+    assert d.path == ["재난 후", "피해 존재"] and {n.key for n in d.notes} >= {"통제 도로", "보험·법률 정보"}
+
+
+def test_cannot_move_puts_119_first_in_answer():
+    out = A.make_action_advisor(fetch=FakeDB(hazard_labels="침수 경보"))(
+        {**tree_state(Phase.DURING, can_move="no"), "specialist_results": [result(Specialist.RAIN_FLOOD, RiskLevel.WARNING, "침수 경보")]})
+    assert out["draft"].startswith(A.EMERGENCY_STEP) and out["action_plan"].call_emergency
+    assert out["action_plan"].decision_path == ["재난 중", "위험 지역", "이동 불가능"]
+
+
+def test_can_move_branch_uses_location_route_and_asks_when_unknown():
+    route = {"destination": {"name": "충혼탑 앞", "lat": 35.99, "lon": 129.56, "kind": "shelter"}, "distance_m": 902,
+             "duration_s": 650, "still_inside": [], "geometry": "abc", "profile": "adult"}
+    out = A.make_action_advisor(fetch=FakeDB(hazard_labels="침수 경보"))(
+        {**tree_state(Phase.DURING, age=80, walking_impaired=True),
+         "specialist_results": [result(Specialist.RAIN_FLOOD, RiskLevel.WARNING, "침수 경보"),
+                                result(Specialist.LOCATION_ROUTE, RiskLevel.NORMAL, "경로", route=route)]})
+    assert "충혼탑 앞(으)로 대피하세요. 902m, 도보 약 11분" in out["draft"]
+    assert out["draft"].endswith("확인할게요: " + A.QUESTIONS["can_move"])
+
+
+def test_chat_response_exposes_path_follow_up_and_emergency():
+    svc = ChatService(classifier=G.keyword_classify, overrides={
+        Specialist.RAIN_FLOOD.value: lambda s: {"specialist_results": [result(Specialist.RAIN_FLOOD, RiskLevel.WARNING, "침수 경보")]},
+        G.ACTION_ADVISOR: A.make_action_advisor(fetch=FakeDB(hazard_labels="침수 경보"))})
+    res = svc.chat(ChatRequest(user_id="u1", question="비 와요, 집에 갇혔어요", current_location=HERE))
+    assert res.decision_path == "재난 중 > 위험 지역 > 이동 불가능" and res.call_emergency and res.follow_up is None
+
+
+def test_keyword_situation_fallback():
+    assert G.keyword_situation("물이 들어와서 못 나가요") == ("no", "yes")
+    assert G.keyword_situation("피해는 없어요") == ("unknown", "no")
 
 
 def test_no_guides_means_no_todo_list():
@@ -253,16 +321,23 @@ def test_invented_action_is_caught_then_rewritten():
     assert "대피하세요" in res.answer and "테이프" not in res.answer and not res.used_fallback
 
 
-def test_chat_response_exposes_call_emergency():
-    svc = ChatService(classifier=G.keyword_classify, overrides={
-        Specialist.RAIN_FLOOD.value: lambda s: {"specialist_results": [result(Specialist.RAIN_FLOOD, RiskLevel.WARNING, "침수 경보")]},
-        G.ACTION_ADVISOR: A.make_action_advisor(fetch=FakeDB())})
-    res = svc.chat(ChatRequest(user_id="u1", question="비 와요", profile=UserProfile(user_id="u1", walking_impaired=True)))
-    assert res.call_emergency
-
-
 def test_tourist_place_specific_guide_is_not_put_first():
     beach = {**GUIDES[0], "id": 14, "priority": 15, "targets": ["tourist"], "title": "호우·태풍이 올 때 (해수욕장·낚시터·야영장)"}
     _, guides = A.pick_guides([result(Specialist.WIND_TYPHOON, RiskLevel.ADVISORY)], Phase.DURING,
                               UserProfile(user_id="u", user_type="tourist"), fetch=FakeDB(guides=[GUIDES[0], beach]))
     assert [g["id"] for g in guides] == [11, 14]          # 우선순위대로 (관광객 장소별 원문을 앞에 두지 않음)
+
+
+def test_forecast_evidence_names_today_and_tomorrow():
+    from guardian_ai.flood import forecast_evidence
+    tomorrow = (NOW + timedelta(days=1)).strftime("%m-%d")
+    ev = forecast_evidence({"available": True, "periods": [{"date": tomorrow, "max_pop": 60, "rain_types": ["비"], "rain_hours": 5,
+                                                            "max_rain": "2.0mm", "max_wind": 5.4, "max_wave": 0.5}]})
+    keys = {e.key: e.value for e in ev}
+    assert keys[f"내일({tomorrow}) 예보 최고 강수확률"] == 60 and keys[f"내일({tomorrow}) 예보 강수"] == "비 5시간, 1시간 최대 2.0mm"
+
+
+def test_calm_info_question_gets_no_action_list_or_question():
+    out = A.make_action_advisor(fetch=FakeDB())(
+        {**tree_state(Phase.NONE), "question": "내일 비 와?", "specialist_results": [result(Specialist.RAIN_FLOOD, RiskLevel.NORMAL, "내일 비 예보")]})
+    assert out["draft"] == "내일 비 예보" and out["action_plan"].decision_path == ["평시", "정보 안내"]

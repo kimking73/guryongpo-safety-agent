@@ -30,6 +30,8 @@ LEVEL_KO = {"normal": "정상", "watch": "관심", "advisory": "주의", "warnin
 HAZARD_KO = {"flood": "침수", "heavy_rain": "호우", "typhoon": "태풍"}
 METRIC_KO = {"flood_depth": "침수심", "river_level": "하천 수위", "manhole_level": "맨홀 수위",
              "rain_15m": "15분 강수량", "rain_1h": "1시간 강수량", "rain_12h": "12시간 강수량", "rain_day": "오늘 강수량"}
+# 예보를 볼 시간 (오늘·내일). 기상청 초단기(6시간) + 단기
+FORECAST_HOURS = 48
 # 근거로 남길 관측소 수 (가까운 순). 너무 많으면 LLM이 헷갈린다
 MAX_WATER_STATIONS = 4
 STATUS_KO = {"planned": "예비특보", "active": "발효 중", "lifted": "해제"}
@@ -45,6 +47,7 @@ class FloodData:
     warnings: dict[str, Any]
     messages: dict[str, Any]
     shelters: dict[str, Any] | None = None
+    forecast: dict[str, Any] | None = None
     level: RiskLevel = RiskLevel.NORMAL
     evidence: list[Evidence] = field(default_factory=list)
     unavailable: list[str] = field(default_factory=list)   # 못 읽었거나 오래된 데이터 (답변에 밝힌다)
@@ -88,6 +91,7 @@ def collect(location: Location, location_known: bool, fetch: Fetch | None = None
             rain=T.get_observations("rain", lat, lon, fetch=fetch),
             warnings=T.get_weather_warnings(fetch=fetch),
             messages=T.get_disaster_messages(fetch=fetch),
+            forecast=T.get_forecast(lat, lon, hours=FORECAST_HOURS, fetch=fetch),
         )
     flood_items = [i for i in d.risk.get("items", []) if i["hazard"] in FLOOD_HAZARDS]
     if flood_items:
@@ -181,6 +185,12 @@ def build_evidence(d: FloodData) -> tuple[list[Evidence], list[str]]:
                 ev.append(Evidence(source="disaster_messages", key=f"재난문자({m['sender']})", value=m["text"],
                                    observed_at=_ts(m["sent_at"])))
 
+    # 예보 (기상청 초단기·단기)
+    if d.forecast is not None:
+        if not d.forecast.get("available"):
+            missing.append("예보")
+        ev += forecast_evidence(d.forecast, wind=False)
+
     # 대피소 (주의 이상일 때만)
     if d.shelters is not None:
         if not d.shelters.get("available"):
@@ -189,6 +199,34 @@ def build_evidence(d: FloodData) -> tuple[list[Evidence], list[str]]:
             ev.append(Evidence(source="shelters", key="가까운 대피소", value=s["name"]))
             ev.append(Evidence(source="shelters", key=f"{s['name']}까지 거리", value=s["distance_m"], unit="m"))
     return ev, missing
+
+
+def forecast_evidence(fc: dict[str, Any], rain: bool = True, wind: bool = True) -> list[Evidence]:
+    """예보 요약(tools.get_forecast) → 날짜별 근거. 비·바람(파고) 중 필요한 것만."""
+    ev: list[Evidence] = []
+    today = datetime.now(KST).date()
+    for p in fc.get("periods", []) if fc.get("available") else []:
+        # "내일"이 며칠인지 LLM이 모른다 → 오늘·내일·모레를 이름에 (2026-10-03 실측: "내일 예보 확인되지 않음"으로 검증 실패)
+        month, dd = (int(x) for x in p["date"].split("-"))
+        try:
+            delta = (today.replace(month=month, day=dd) - today).days
+        except ValueError:
+            delta = None
+        rel = {0: "오늘", 1: "내일", 2: "모레"}.get(delta)
+        day = f"{rel}({p['date']}) 예보" if rel else f"{p['date']} 예보"
+        if rain:
+            if p["max_pop"] is not None:
+                ev.append(Evidence(source="forecasts", key=f"{day} 최고 강수확률", value=p["max_pop"], unit="%"))
+            ev.append(Evidence(source="forecasts", key=f"{day} 강수",
+                               value=(f"{'·'.join(p['rain_types'])} {p['rain_hours']}시간"
+                                      + (f", 1시간 최대 {p['max_rain']}" if p["max_rain"] else ""))
+                               if p["rain_hours"] else "비 예보 없음"))
+        if wind:
+            if p["max_wind"] is not None:
+                ev.append(Evidence(source="forecasts", key=f"{day} 최대 풍속", value=p["max_wind"], unit="m/s"))
+            if p["max_wave"] is not None:
+                ev.append(Evidence(source="forecasts", key=f"{day} 최대 파고", value=p["max_wave"], unit="m"))
+    return ev
 
 
 def evidence_lines(evidence: list[Evidence]) -> str:

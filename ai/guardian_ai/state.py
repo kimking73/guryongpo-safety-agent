@@ -133,6 +133,9 @@ class ActionPlan(BaseModel):
     guide_ids: list[int] = Field(default_factory=list)  # 인용한 ActionGuide.id
     call_emergency: bool = False         # 이동 불가 → 119 연결 버튼 표시
     evidence: list[Evidence] = Field(default_factory=list)  # 인용한 원문(·119 권고) — 환각 검증이 '지금 할 일'을 대조한다
+    decision_path: list[str] = Field(default_factory=list)  # 판단 로직에서 도달한 분기 (예: 재난 중 > 위험 지역 > 이동 가능)
+    question: str | None = None          # 근거가 없어 사용자에게 묻는 질문 하나
+    route: dict[str, Any] | None = None  # 이동 가능 분기에서 안내한 대피소 경로 (위치·경로 agent가 없을 때 여기서 계산)
 
 
 class CheckResult(BaseModel):
@@ -201,6 +204,8 @@ class GuardianState(TypedDict, total=False):
     selected_agents: list[Specialist]
     manager_feedback: str                # 검증 실패 사유 (재시도 시)
     destination_query: str | None        # 질문에서 뽑은 목적지 이름 ("구룡포항", "집"). 없으면 가까운 대피소로 안내
+    can_move: Literal["yes", "no", "unknown"]   # 대화로 본 스스로 이동 가능 여부 (행동 권고 판단 로직)
+    damage: Literal["yes", "no", "unknown"]     # 대화로 본 거주지 피해 유무 (재난 후 분기)
 
     # 전문 agent → 행동 권고
     specialist_results: Annotated[list[SpecialistResult], merge_results]

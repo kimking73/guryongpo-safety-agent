@@ -121,6 +121,19 @@ def keyword_mobility_limited(question: str) -> bool:
     return any(w in (question or "") for w in _MOBILITY_WORDS)
 
 
+_CANNOT_MOVE = ("못 움직", "못 나가", "갇혔", "갇혀", "고립", "다쳤", "다쳐서", "거동이 안", "못 걷", "움직일 수 없")
+_DAMAGE_YES = ("물이 찼", "물이 들어", "침수됐", "침수되었", "부서졌", "파손", "무너졌", "정전", "피해가 있", "피해를 입")
+_DAMAGE_NO = ("피해 없", "피해는 없", "괜찮아요", "멀쩡")
+
+
+def keyword_situation(question: str) -> tuple[str, str]:
+    """(이동 가능, 피해 유무) — 분류기 LLM이 실패했을 때만 쓰는 규칙. 근거 없으면 unknown."""
+    q = question or ""
+    can_move = "no" if any(w in q for w in _CANNOT_MOVE) else "unknown"
+    damage = "yes" if any(w in q for w in _DAMAGE_YES) else ("no" if any(w in q for w in _DAMAGE_NO) else "unknown")
+    return can_move, damage
+
+
 # alert 모드: 경고 재난 종류 → 담당 전문 agent (규칙, LLM을 쓰지 않는다)
 ALERT_AGENT = {
     DisasterType.LANDSLIDE: Specialist.LANDSLIDE,
@@ -227,11 +240,13 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
         extra = getattr(classify, "last", None) if how == "분류기" else None
         question = state.get("question") or ""
         if state.get("mode") == "alert":
-            destination, limited = None, False
+            destination, limited, can_move, damage = None, False, "unknown", "unknown"
         elif extra is not None and hasattr(extra, "destination"):
             destination, limited = extra.destination, bool(extra.mobility_limited)
+            can_move, damage = getattr(extra, "can_move", "unknown"), getattr(extra, "damage", "unknown")
         else:
             destination, limited = keyword_destination(question), keyword_mobility_limited(question)
+            can_move, damage = keyword_situation(question)
         # 앱이 보낸 값·기억이 이미 있으면 그대로 (memory.apply_to_profile과 같은 우선순위). 기억 저장은 답변 뒤 따로 한다.
         user = state.get("user")
         user_update = {}
@@ -252,6 +267,8 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
             **turn,                         # 새 질문이면 초기화 값들, 재시도면 아무것도 없음
             **user_update,
             "destination_query": destination or None,
+            "can_move": can_move,
+            "damage": damage,
             "phase": _phase(view),          # 특보·위험 판정으로 (action.decide_phase), 없으면 '재난 중'
             "selected_agents": selected,    # 다음 route_specialists가 이 목록을 보고 병렬 실행한다
             # 재시도로 다시 들어온 경우를 대비해 이전 시도의 결과를 비운다.

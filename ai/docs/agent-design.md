@@ -125,6 +125,19 @@ flowchart TD
 "이동 가능"은 `UserProfile`(보행 장애, 휠체어, 동반자)과 경로 존재 여부로 판단. 정보가 없으면 질문한다.
 행동 권고 agent는 `get_action_guides`로 가져온 원문만 인용하고, 인용한 id를 `ActionPlan.guide_ids`에 남긴다.
 
+판단 로직 (사용자 정의, 2026-10-03 — `action.decide`가 코드로 따라간다):
+- 재난 전·평시(대비): 대비 행동요령 + 예보(`get_forecast`) → 동반자 정보가 없으면 "함께 대피해야 할 가족이 있나요?" → 있으면 체크리스트
+- 재난 중: 사용자 위치가 발효 중인 침수·산사태 영역(주의 이상) 안인가(`hazards_at`, 판정 불가·위치 모름 → 위험 지역)
+  - 안전: 재난 중 행동요령 + 실시간 정보
+  - 위험 지역: 이동 가능? 분류기의 `can_move`(대화) → 모르면 프로필(보행 불편·휠체어·75세 이상·동반자면 질문, 아니면 가능)
+    - 불가능: 119 구조 요청을 답변 맨 앞 + `call_emergency` / 가능: 가장 가까운 안전한 대피소 경로(위치·경로 agent 결과 또는 직접 계산)
+    - 모름: 안내(경로 포함) + "지금 스스로 안전한 곳까지 이동하실 수 있나요?"
+- 재난 후: 재난 후 행동요령 → 분류기의 `damage`(대화) → 모름: 질문 / 없음: 실시간 현황 / 있음: 현황·임시 거주·주의사항·보험·법률
+  (통제 도로·보험·법률은 데이터가 없어 "확인되지 않음")
+- 평시에 정보만 묻는 질문("내일 비 와?")은 행동 권고·질문을 붙이지 않는다.
+- 응답: `decision_path`("재난 중 > 위험 지역 > 이동 가능"), `follow_up`(질문), `call_emergency`, `route`. 사용자가 답하면 다음 질문에서
+  분류기가 대화로 `can_move`·`damage`를 판정해 다음 분기로 간다.
+
 구현 (B4, 2026-10-03, `action.py`):
 - 단계 판정 `decide_phase`: 위 표 그대로. DB 장애면 '중'. 관리자가 `phase_of`로 부른다(기본 그래프·테스트는 '중' 고정).
 - 원문 고르기(규칙): 단계가 가장 높은 전문 agent(같으면 침수·호우 > 강풍·태풍 > 산사태 > 생활안전, 위치·경로 제외)의 재난들
@@ -159,6 +172,7 @@ A의 FastAPI는 앱·웹이 부르는 창구로 남고, AI는 거치지 않는�
 | `get_life_safety` | lat, lon | uv·pm10·pm25 각 value·grade (미세먼지는 수집 권한 전까지 None) | v_latest_observations |
 | `get_action_guides` | disaster, phase, level, targets | `ActionGuide`와 같은 키: id, min_level, targets, priority, title, content, voice_text, source_name | action_guides (51건) |
 | `get_user_profile` | user_id | UserProfile 키 | **목업** — 지금은 앱이 요청에 프로필을 실어 보낸다 |
+| `get_forecast` | lat, lon, hours=48 | periods(날짜별 최고 강수확률·강수형태·비 시간 수·1시간 최대 강수량·최대 풍속·파고), next_rain | v_latest_forecasts (기상청 초단기·단기, 구룡포 격자 2곳) |
 | `get_safe_shelters` | lat, lon, limit=8 | name, lat, lon, distance_m, is_indoor, underground, safe, excluded_reason(위험 영역 안·침수 중 지하) | shelters, risk_assessments (앱과 같은 규칙) |
 | `find_place` | query, user | available, name, lat, lon, kind(home·work·place·shelter·medical), source(user·db·kakao), address, out_of_area | profile 등록 장소, shelters·medical_facilities, 카카오 로컬 키워드 검색 |
 | `hazards_at` | lat, lon | labels(지점이 들어 있는 침수·산사태 영역, 주의 이상) | risk_assessments |
@@ -234,7 +248,10 @@ AI는 별도 컨테이너(`ai`, 포트 8001)로 운영한다. 배포 시 Caddy�
   "selected_agents": ["rain_flood_agent", "location_route_agent"],
   "phase": "during",
   "used_fallback": false,
-  "route": {                       // 위치·경로 agent가 경로를 안내했을 때만 (안전 안내로 끝난 답이면 null)
+  "decision_path": "재난 중 > 위험 지역 > 이동 가능",   // 행동 권고 판단 로직에서 도달한 분기
+  "follow_up": null,               // 근거가 없어 물은 질문 하나 (답변 끝에도 있음)
+  "call_emergency": false,         // 이동 불가능 분기 → 앱 119 버튼
+  "route": {                       // 경로를 안내했을 때만 — 위치·경로 agent 또는 '이동 가능' 분기 (안전 안내로 끝난 답이면 null)
     "destination": { "name": "충혼탑 앞", "lat": 35.99144, "lon": 129.56073, "kind": "shelter" },  // kind: shelter·medical·home·work·place
     "profile": "elderly", "distance_m": 1024, "duration_s": 984,
     "avoided": ["flood-67"], "still_inside": [], "hazards_ok": true,
