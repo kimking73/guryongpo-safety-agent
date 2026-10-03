@@ -1,4 +1,4 @@
-"""포항시 재난안전 홈페이지 → action_guides / support_programs / public_hotlines 적재 SQL (db/seed_knowledge.sql)
+"""포항시 재난안전 홈페이지 (+ 자외선: 기상청 날씨누리, 미세먼지: 에어코리아) → action_guides / support_programs / public_hotlines 적재 SQL (db/seed_knowledge.sql)
 원문: https://www.pohang.go.kr/safe/contents.do?mid=… (2026-09-26 확인). 문장은 원문을 요약·정리, 의미는 바꾸지 않음.
 재난 종류가 스키마 hazard_type 에 없는 지진해일·응급처치는 제외 (README 남은 확인 참고)
 """
@@ -156,6 +156,45 @@ H = [  # public_hotlines (name, phone, scope, hazards, targets, priority, note, 
 ]
 
 
+# ── 포항시 페이지에 없는 생활안전 재난 (출처가 달라 source 를 행마다 지정, G 뒤에 붙여 기존 id 1~51 유지) ──
+UV_SRC = ("기상청 날씨누리 생활기상지수 (자외선지수 단계 및 주의사항)", "https://www.weather.go.kr/w/forecast/life/index-info.do")
+DUST_SRC = ("에어코리아 고농도 미세먼지 7가지 대응요령", "https://www.air.go.kr/contents/view.do?contentsId=13&menuId=45")
+DUST = ["fine_dust", "ultrafine_dust"]
+# (hazards, phase, min_level, targets, priority, title, content, voice_text, (source_name, source_url))
+#  자외선 단계 ↔ risk_level: 보통 3~5 = watch · 높음 6~7 = advisory · 매우높음 8~10 = warning · 위험 11+ = critical (낮음 2이하는 위험 낮음 → 행동요령 없음)
+#  미세먼지: 에어코리아 대응요령은 단계 구분 없이 '고농도' 공통 → 나쁨(watch, risk_rules 29·30) 이상에서 노출
+G_EXT = [
+ (["uv"], "during", "critical", "{all}", 5, "자외선지수 위험 (11 이상)",
+  "태양에 노출 시 극도로 위험하여 모든 예방조치가 필요합니다. 노출된 피부는 몇 분 내에 탈 수 있습니다. 11시와 4시 사이에는 태양에의 노출을 피하고, 그늘에 있거나 긴 옷을 입고 모자와 선글라스를 쓰고 적어도 SPF-15의 자외선 차단제를 2시간마다 충분히 발라야 합니다.",
+  "자외선지수 위험 단계입니다. 오전 11시부터 오후 4시까지는 햇볕을 피하고, 자외선 차단제를 2시간마다 바르세요.", UV_SRC),
+ (["uv"], "during", "warning", "{all}", 10, "자외선지수 매우 높음 (8~10)",
+  "태양에 노출 시 매우 위험하여 추가적인 예방조치가 필요합니다. 노출된 피부는 빠르게 타서 위험해질 수 있습니다. 11시부터 4시 사이인 한낮 동안 태양에의 노출을 최소화하고, 그늘에 있거나 긴 옷을 입고 모자와 선글라스를 쓰고 적어도 SPF-15의 자외선 차단제를 충분히 발라 피부를 보호해야 합니다.",
+  "자외선이 매우 강합니다. 한낮에는 햇볕을 최소한으로 쬐고, 모자와 자외선 차단제로 피부를 보호하세요.", UV_SRC),
+ (["uv"], "during", "advisory", "{all}", 20, "자외선지수 높음 (6~7)",
+  "태양에 노출 시 위험하여 햇볕에 노출 시 보호가 필요합니다. 11시부터 4시 사이의 시간에 태양에 노출되는 시간을 줄이고, 긴 옷을 입고 모자와 선글라스를 쓰고 적어도 SPF-15의 자외선 차단제를 발라야 합니다.",
+  "자외선이 강합니다. 한낮 외출을 줄이고 모자와 선글라스, 자외선 차단제를 챙기세요.", UV_SRC),
+ (["uv"], "during", "watch", "{all}", 30, "자외선지수 보통 (3~5)",
+  "태양에 노출 시 위험은 보통입니다. 외출을 한다면 긴 옷을 입고 자외선 차단제를 바르는 등 노출에 주의하고, 태양이 강한 한낮에는 그늘에 머물러야 합니다.",
+  None, UV_SRC),
+ (DUST, "during", "watch", "{all}", 10, "외출은 가급적 자제하기",
+  "야외모임, 캠프, 스포츠 등 실외활동을 최소화합니다.",
+  "미세먼지 농도가 높습니다. 외출과 실외활동을 줄이세요.", DUST_SRC),
+ (DUST, "during", "watch", "{all}", 20, "외출 시 보건용 마스크(식약처 인증) 착용하기",
+  "외출 시 식약처 인증 보건용 마스크(KF80, KF94, KF99)를 올바르게 착용합니다. 마스크 착용 시 호흡이 불편할 경우 사용을 중지하고 전문가와 상담합니다.",
+  "외출할 때는 KF80 이상 보건용 마스크를 쓰세요.", DUST_SRC),
+ (DUST, "during", "watch", "{all}", 30, "외출 시 대기오염이 심한 곳은 피하고, 활동량 줄이기",
+  "미세먼지 농도가 높은 도로변, 공사장 등에서 머무는 시간을 줄입니다. 호흡량 증가로 미세먼지 흡입이 우려되는 격렬한 외부활동을 줄입니다.", None, DUST_SRC),
+ (DUST, "during", "watch", "{all}", 40, "외출 후 깨끗이 씻기",
+  "온몸을 구석구석 씻고, 특히 손·발·눈·코를 흐르는 물에 씻고 양치질합니다.", None, DUST_SRC),
+ (DUST, "during", "watch", "{all}", 50, "물과 비타민C가 풍부한 과일·야채 섭취하기",
+  "노폐물 배출 효과가 있는 물, 항산화 효과가 있는 과일·야채 등을 충분히 섭취합니다.", None, DUST_SRC),
+ (DUST, "during", "watch", "{all}", 60, "환기, 실내 물청소 등 실내 공기질 관리하기",
+  "실내 오염도가 높을 때는 자연환기 또는 기계환기를 실시합니다. 하루 3번 30분 이상(오전 10시 ~ 오후 9시) 환기하고, 주방후드 가동과 자연환기를 동시에 실시하며, 조리 후에도 30분 이상 환기합니다.", None, DUST_SRC),
+ (DUST, "during", "watch", "{all}", 70, "대기오염 유발행위 자제하기",
+  "자가용 운전 대신 대중교통을 이용하는 등 대기오염 유발행위를 자제합니다.", None, DUST_SRC),
+]
+
+
 def q(v):
     return "NULL" if v is None else "'" + str(v).replace("'", "''") + "'"
 
@@ -168,6 +207,9 @@ rows = []
 for hz, ph, lv, tg, pr, ti, co, vo, mid in G:
     for h in hz:
         rows.append(f"  ('{h}', '{ph}', '{lv}', '{tg}', {pr}, {q(ti)}, {q(co)}, {q(vo)}, '{SRC}', '{U}{mid}')")
+for hz, ph, lv, tg, pr, ti, co, vo, (sn, su) in G_EXT:
+    for h in hz:
+        rows.append(f"  ('{h}', '{ph}', '{lv}', '{tg}', {pr}, {q(ti)}, {q(co)}, {q(vo)}, {q(sn)}, {q(su)})")
 out += ["INSERT INTO action_guides (hazard, phase, min_level, targets, priority, title, content, voice_text, source_name, source_url) VALUES",
         ",\n".join(rows) + ";", ""]
 rows = [f"  ('{c}', '{hz}', '{tg}', {q(n)}, {q(s)}, {q(e)}, {q(a)}, {q(p)}, {q(d)}, {q(ct)}, '{U}{m}')"
@@ -179,4 +221,4 @@ rows = [f"  ({q(n)}, {q(ph)}, '{sc}', '{hz}', '{tg}', {pr}, {q(no)}, '{SRC}', {q
 out += ["INSERT INTO public_hotlines (name, phone, scope, hazards, targets, priority, note, source_name, source_url) VALUES",
         ",\n".join(rows) + ";", ""]
 Path(__file__).resolve().parent.parent.parent.joinpath("db/init/04_seed_knowledge.sql").write_text("\n".join(out), encoding="utf-8")
-print(f"action_guides {sum(len(g[0]) for g in G)}행 ({len(G)}개 항목) · support_programs {len(P)} · public_hotlines {len(H)}")
+print(f"action_guides {sum(len(g[0]) for g in G + G_EXT)}행 ({len(G) + len(G_EXT)}개 항목, 생활안전 {sum(len(g[0]) for g in G_EXT)}행) · support_programs {len(P)} · public_hotlines {len(H)}")
