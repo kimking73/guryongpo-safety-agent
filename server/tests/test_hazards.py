@@ -21,11 +21,19 @@ WIND_RULES = [
 ]
 LANDSLIDE_RULES = [
     {"id": 10, "hazard": "landslide", "level": "advisory", "label": "산사태 주의",
-     "condition": {"all": [{"risk": "heavy_rain", "min_level": "advisory"}, {"within": "hazard_zones.landslide", "buffer_m": 100}]}},
+     "condition": {"all": [{"risk": "heavy_rain", "min_level": "advisory"},
+                           {"within": "hazard_zones.landslide", "buffer_m": 100, "riskmap_area": "riskmap_g1_buf100"}]}},
     {"id": 11, "hazard": "landslide", "level": "warning", "label": "산사태 경고",
-     "condition": {"all": [{"risk": "heavy_rain", "min_level": "warning"}, {"within": "hazard_zones.landslide", "buffer_m": 0}]}},
+     "condition": {"all": [{"risk": "heavy_rain", "min_level": "warning"},
+                           {"within": "hazard_zones.landslide", "buffer_m": 100, "riskmap_area": "riskmap_g12_buf100"}]}},
 ]
 ZONE = {"id": 1, "name": "포항시 남구 연일읍 자명리 산42임", "meta": {"emd": "연일읍"}, "lng": 129.31, "lat": 36.01}
+ZONE_WITH_REASON = {"id": 2, "name": "포항시 남구 구룡포읍 삼정리 산126-2임",
+                    "meta": {"emd": "구룡포읍", "reason": "과거 월류 피해 이력이 있으며, 계류 내 붕괴지가 관찰됨"}, "lng": 129.55, "lat": 36.01}
+RISK_G1 = {"id": 901, "external_id": "riskmap_g1_buf100", "name": "산사태 주의 범위", "meta": {"role": "trigger_area"},
+           "lng": 129.55, "lat": 35.99}
+RISK_G12 = {"id": 902, "external_id": "riskmap_g12_buf100", "name": "산사태 경고 범위", "meta": {"role": "trigger_area"},
+            "lng": 129.55, "lat": 35.99}
 TYPHOON_RULES = [
     {"id": 7, "hazard": "typhoon", "level": "advisory", "label": "태풍주의보/영향권"},
     {"id": 8, "hazard": "typhoon", "level": "warning", "label": "태풍경보"},
@@ -98,10 +106,36 @@ def test_landslide_advisory_uses_wider_buffer():
     assert len(out) == 1 and (out[0].rule_id, out[0].buffer_m) == (10, 100)
 
 
-def test_landslide_warning_uses_zone_itself():
+def test_landslide_warning_keeps_same_100m_buffer():
+    """주의·경고 모두 100m — 흘러내리는 거리는 비의 세기가 아니라 지형으로 정해짐 (2026-10-02 개편)"""
     from risk.hazards import evaluate_landslide
     out = evaluate_landslide("warning", [ZONE], LANDSLIDE_RULES)
-    assert (out[0].rule_id, out[0].buffer_m) == (11, 0)
+    assert (out[0].rule_id, out[0].buffer_m) == (11, 100)
+
+
+def test_landslide_advisory_uses_grade1_riskmap_area_only():
+    from risk.hazards import evaluate_landslide
+    out = evaluate_landslide("advisory", [RISK_G1, RISK_G12], LANDSLIDE_RULES)
+    assert len(out) == 1
+    r = out[0]
+    assert (r.rule_id, r.zone_id, r.key) == (10, 901, "landslide:riskmap")
+    assert "1등급" in r.reason and "산림청" in r.reason and "발생 가능성" in r.reason
+
+
+def test_landslide_warning_uses_grade12_riskmap_area():
+    from risk.hazards import evaluate_landslide
+    out = evaluate_landslide("warning", [RISK_G1, RISK_G12], LANDSLIDE_RULES)
+    assert [(r.rule_id, r.zone_id) for r in out] == [(11, 902)]
+
+
+def test_landslide_designated_zone_and_riskmap_together():
+    """지정 취약지역은 위험지도 범위와 함께(합집합) 판정되고, 지정사유가 근거 문장에 들어감"""
+    from risk.hazards import evaluate_landslide
+    out = evaluate_landslide("advisory", [RISK_G1, ZONE_WITH_REASON], LANDSLIDE_RULES)
+    kinds = sorted(r.basis["kind"] for r in out)
+    assert kinds == ["designated", "riskmap"]
+    d = next(r for r in out if r.basis["kind"] == "designated")
+    assert d.zone_id is None and d.buffer_m == 100 and "지정사유: 과거 월류 피해 이력" in d.reason
 
 
 def test_landslide_critical_still_uses_warning_rule():

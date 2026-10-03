@@ -52,22 +52,26 @@ INSERT INTO risk_rules (id, hazard, level, label, metric, operator, threshold, t
    '{"any":[{"weather_warning":"typhoon","level":"advisory"},{"within":"typhoon_tracks.radius_15ms_km"}]}', '기상청 기상특보 / 재난안전24'),
   (8, 'typhoon', 'warning',  '태풍경보',          NULL, 'composite', NULL, NULL, NULL,
    '{"any":[{"weather_warning":"typhoon","level":"warning"},{"within":"typhoon_tracks.radius_25ms_km"}]}', '기상청 기상특보 / 재난안전24'),
--- 침수: 지표면 수위계(ROAD) 침수심 150mm(15cm) 이상이면 침수로 판단 (포항 DT 등급 기준은 파일 끝 21~28번)
+-- 침수: 지표면 수위계(ROAD) 침수심 150mm(15cm) 이상이면 침수로 판단
+--   15cm 근거: 한강홍수통제소 도시침수 예보의 노면수위 침수 기준 15cm, 서울시 침수 경보 도로수위 15cm,
+--   호주 빅토리아주 SES "15cm of water is enough for a vehicle to start to float" (포항 DT 등급 기준은 파일 끝 21~28번)
   (9, 'flood', 'advisory', '침수 발생', 'flood_depth', '>=', 150, NULL, NULL,
-   '{"station_kind":"road_flood","unit":"mm","buffer_m":150,"note":"영향 범위 = 수위계 반경 150m"}', '정부 침수 판단 기준(15cm) / 포항 디지털 트윈 지표면 수위계'),
--- 산사태: 호우 특보 중 + 사용자/지점이 산사태 위험지역 내부 또는 인접(100m)
--- 100m 버퍼 근거: 김경수 외(2006), "자연사면에서 발생된 토석류산사태의 기하양상", KIGAM
--- (https://data.kigam.re.kr/ieg/cmmn/downloadFile.do?fileName=Y3061006.PDF). 1998년 집중호우 산사태
--- 1,582건을 지질별 3개 지역(편마암류=장흥·화강암류=상주·제3기퇴적암류=포항)으로 분석했는데, 그 중
--- 구룡포와 같은 지질조건인 "제3기퇴적암류(포항)" 지역 산사태의 진행방향 길이는 평균 36m, 91%가
--- 60m 이내에서 멈췄다(화강암류=상주 지역은 평균 82m, 78%가 100m 미만). 지정 취약지역 자체가
--- 점+면적을 원으로 근사한 폴리곤이라 경계 오차가 있어, 실측된 진행거리보다 넉넉한 100m를 주의보
--- 단계의 안전 마진으로 채택하고, 경보 단계에서는 지정 영역 내부로 좁혀 판단한다.
+   '{"station_kind":"road_flood","unit":"mm","buffer_m":150,"note":"영향 범위 = 수위계 반경 150m"}', '도시침수 예보 노면수위 15cm 기준(한강홍수통제소, 도시하천유역 침수피해방지대책법) / 포항 디지털 트윈 지표면 수위계'),
+-- 산사태 (2026-10-02 개편): 호우 특보 단계 x (산림청 산사태위험지도 등급 비탈 100m 이내 OR 지정 취약지역 100m 이내)
+--   주의(10) = 호우주의보 + 1등급 비탈 100m (riskmap_g1_buf100), 경고(11) = 호우경보 + 1·2등급 비탈 100m (riskmap_g12_buf100)
+--   등급: 산림청 산사태위험판정기준표(산림보호법 시행규칙 별표1) — 1등급 180점 이상 '집중강우 시' 발생 확률 대단히 높음,
+--         2등급 120~180점 '폭우 시' 쉽게 무너질 수 있음 → 주의보↔1등급, 경보↔1·2등급 으로 연결 (등급 정의의 강우 조건에 맞춘 자체 설계)
+--   100m 근거: 김경수 외(2006), "자연사면에서 발생된 토석류산사태의 기하양상", KIGAM
+--     (https://data.kigam.re.kr/ieg/cmmn/downloadFile.do?fileName=Y3061006.PDF) — 구룡포와 같은 제3기퇴적암류(포항) 지역
+--     산사태 진행방향 길이 평균 36m, 91%가 60m 이내. 주의·경고 모두 같은 100m (흘러내리는 거리는 지형으로 정해짐)
+--   위험지도 폴리곤: 09_seed_landslide_riskmap.sql (생활안전지도 IF_0046_WMS, 격자 1칸짜리 고립 조각 제외)
+--   산림청 산사태예측정보 API 는 2012~2026 이력에 포항 0건 → 사용하지 않음 (단계는 기상청 호우특보)
   (10, 'landslide', 'advisory', '산사태 주의', NULL, 'composite', NULL, NULL, NULL,
-   '{"all":[{"risk":"heavy_rain","min_level":"advisory"},{"within":"hazard_zones.landslide","buffer_m":100}]}',
-   '공공데이터포털 산사태 위험지역 + 기상특보 / 버퍼 100m 근거: KIGAM 김경수 외(2006) 포항(제3기퇴적암류) 산사태 진행거리 평균 36m·91%가 60m 이내'),
+   '{"all":[{"risk":"heavy_rain","min_level":"advisory"},{"within":"hazard_zones.landslide","buffer_m":100,"riskmap_area":"riskmap_g1_buf100"}]}',
+   '기상청 호우특보 + 산림청 산사태위험지도 1등급 100m / 지정 취약지역 100m · 100m 근거 KIGAM 김경수 외(2006)'),
   (11, 'landslide', 'warning',  '산사태 경고', NULL, 'composite', NULL, NULL, NULL,
-   '{"all":[{"risk":"heavy_rain","min_level":"warning"},{"within":"hazard_zones.landslide","buffer_m":0}]}', '공공데이터포털 산사태 위험지역 + 기상특보'),
+   '{"all":[{"risk":"heavy_rain","min_level":"warning"},{"within":"hazard_zones.landslide","buffer_m":100,"riskmap_area":"riskmap_g12_buf100"}]}',
+   '기상청 호우특보 + 산림청 산사태위험지도 1·2등급 100m / 지정 취약지역 100m · 100m 근거 KIGAM 김경수 외(2006)'),
 -- 미세먼지 · 초미세먼지 (포항 DT 대기환경 측정기 24대, 원천 측정 시각 60분 이내 값만 사용)
 --   advisory/warning = 대기환경보전법 경보 발령기준 (시간평균 농도 2시간 이상 지속 → DUST_SUSTAINED_SQL)
   (12, 'fine_dust',      'advisory', '미세먼지 주의보',   'pm10', '>=',      150, NULL, 120,  '{"max_age_min":60,"buffer_m":300,"agg":"hourly_avg"}', '대기환경보전법 시행규칙 (경보 발령기준)'),

@@ -62,6 +62,7 @@ class Result:
     buffer_m: float               # 영향 범위 반경
     observed_at: Optional[datetime]
     basis: dict = field(default_factory=dict)
+    zone_id: Optional[int] = None  # 있으면 영향 범위 = hazard_zones(id) 폴리곤 그대로 (원 대신, 예: 산사태위험지도 100m 범위)
 
 
 def _kinds(cond: dict) -> list[str]:
@@ -160,6 +161,12 @@ INSERT INTO risk_assessments (hazard, level, label, area, rule_id, basis, valid_
 VALUES (%(hazard)s, %(level)s, %(label)s, {AREA_SQL}, %(rule_id)s, %(basis)s::jsonb, now(), now())
 RETURNING id
 """
+INSERT_ZONE_SQL = """
+INSERT INTO risk_assessments (hazard, level, label, area, rule_id, basis, valid_from, computed_at)
+SELECT %(hazard)s, %(level)s, %(label)s, ST_Multi(z.geom), %(rule_id)s, %(basis)s::jsonb, now(), now()
+FROM hazard_zones z WHERE z.id = %(zone_id)s
+RETURNING id
+"""
 UPDATE_SQL = """
 UPDATE risk_assessments SET label = %(label)s, basis = %(basis)s::jsonb, computed_at = now() WHERE id = %(id)s
 """
@@ -181,7 +188,7 @@ def sync(results: list[Result], seen_station_ids: set[int]) -> dict[str, int]:
         to_close: list[int] = []
         for res in results:
             row = {"hazard": res.hazard, "level": res.level, "label": res.label, "rule_id": res.rule_id,
-                   "lng": res.lng, "lat": res.lat, "buffer_m": res.buffer_m,
+                   "lng": res.lng, "lat": res.lat, "buffer_m": res.buffer_m, "zone_id": res.zone_id,
                    "basis": json.dumps({**res.basis, "reason": res.reason}, ensure_ascii=False)}
             cur = active.pop(res.key, None)
             if cur and cur["level"] == res.level and cur["rule_id"] == res.rule_id:
@@ -190,7 +197,7 @@ def sync(results: list[Result], seen_station_ids: set[int]) -> dict[str, int]:
                 continue
             if cur:
                 to_close.append(cur["id"])
-            conn.execute(INSERT_SQL, row)
+            conn.execute(INSERT_ZONE_SQL if res.zone_id is not None else INSERT_SQL, row)
             stats["opened"] += 1
         for r in active.values():                                # 이번 판정에 없는 기존 영역
             if r["station_id"] in seen_station_ids or r["expired"]:
