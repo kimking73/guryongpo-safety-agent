@@ -11,7 +11,7 @@ from guardian_route import polyline
 from guardian_route.api import app, get_service
 from guardian_route.gh import GraphHopperClient
 from guardian_route.hazards import GeoJsonHazardSource, Hazard
-from guardian_route.profiles import PROFILE_RULES
+from guardian_route.profiles import PROFILE_RULES, SLOPE_ACCESSIBLE_MAX, SLOPE_SIDEWALK_MAX
 from guardian_route.service import RouteService
 
 # 동서로 곧은 경로 (35.9905, 129.5490) → (35.9905, 129.5520), 약 270m
@@ -88,9 +88,16 @@ def test_elderly_prefers_steps_over_equally_steep_road():
         return 3.6 / (base_kmh * speed) / (base_prio * mult)
     steps = cost_per_m(3.0, 1.2, float(rules[0]["multiply_by"]))
     for road_prio in (0.8, 1.0, 1.2, 1.5):
-        steep_road = cost_per_m(5.0, road_prio, float(rules[1]["multiply_by"]))    # ≥10%
+        steep_road = cost_per_m(5.0, road_prio, float(rules[1]["multiply_by"]))    # 1/12 초과
         assert steps < steep_road                   # 같은 경사면 계단이 싸다
-    assert steps > cost_per_m(5.0, 1.2, float(rules[2]["multiply_by"]))   # 완만한(6~10%) 주택가 길보다는 비싸다
+    assert steps > cost_per_m(5.0, 1.2, float(rules[2]["multiply_by"]))   # 완만한(1/18~1/12) 주택가 길보다는 비싸다
+
+
+def test_elderly_slope_thresholds_follow_sidewalk_guideline():
+    """노약자 경사 기준선 = 「보도 설치 및 관리 지침」 1/18(보도 권장 상한)·1/12(교통약자 최대). 오르막·내리막 모두."""
+    assert (SLOPE_SIDEWALK_MAX, SLOPE_ACCESSIBLE_MAX) == (5.56, 8.33)
+    conds = [r["else_if"] for r in PROFILE_RULES["elderly"]["priority"][1:]]
+    assert conds == ["average_slope > 8.33 || average_slope < -8.33", "average_slope > 5.56 || average_slope < -5.56"]
 
 
 def test_hazard_penalty_outweighs_every_profile_penalty():
@@ -215,11 +222,11 @@ PARK_STEPS = ({"lat": 35.9908295, "lon": 129.5606355}, {"lat": 35.9911047, "lon"
 
 
 def _steep_road_m(p, seg):
-    """계단이 아닌 도로 중 경사 10% 이상인 구간 길이(m). 노약자 규칙이 피하려는 대상."""
+    """계단이 아닌 도로 중 경사가 1/12(8.33%)를 넘는 구간 길이(m). 노약자 규칙이 가장 강하게 피하는 대상."""
     steps = [(s, e) for s, e, v in p["details"]["road_class"] if v == "steps"]
     total = 0.0
     for s, e, v in p["details"]["average_slope"]:
-        if v is None or abs(v) < 10:
+        if v is None or abs(v) <= SLOPE_ACCESSIBLE_MAX:
             continue
         for i in range(s, e):
             if not any(a <= i < b for a, b in steps):
@@ -261,7 +268,7 @@ def test_live_elderly_takes_park_steps_instead_of_steep_road():
 
 @pytest.mark.live
 def test_live_rules_hold_over_random_trips():
-    """시가지 무작위 20개 경로: 노약자가 항상 느리고, 계단이 아닌 급경사(≥10%) 도로 합계는 성인보다 적다."""
+    """시가지 무작위 20개 경로: 노약자가 항상 느리고, 계단이 아닌 급경사(1/12 초과) 도로 합계는 성인보다 적다."""
     import random
     rnd = random.Random(7)
     pt = lambda: {"lat": rnd.uniform(35.975, 36.0), "lon": rnd.uniform(129.54, 129.572)}

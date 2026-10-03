@@ -1,7 +1,7 @@
 """경로 안내: 요청 형식, 사용자 유형별 규칙, 위험 구역 회피, 이동 중 재계산 판단.
 
 응답 키는 AI tool `request_route`(ai/guardian_ai/tools.py)와 같은 계약이다 (ai/docs/agent-design.md 5절).
-B6: 도보 경로 + 침수·산사태 구역·맨홀 회피. B7: 노약자 경사·계단 규칙(profiles.py), /api/route/check.
+B6: 도보 경로 + 침수·산사태 구역 회피 (판정 엔진 영역, hazards.py). B7: 노약자 경사·계단 규칙(profiles.py), /api/route/check.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from shapely.ops import substring, transform
 
 from . import polyline
 from .gh import GraphHopperClient
-from .hazards import GeoJsonHazardSource, Hazard, HazardSource
+from .hazards import Hazard, HazardSource, default_source
 from .profiles import PROFILE_RULES
 
 Profile = Literal["adult", "elderly"]
@@ -27,6 +27,11 @@ CheckReason = Literal["off_route", "hazard_on_route"]
 # 0.001이면 1000배 비싼 길이 되어 다른 길이 있으면 반드시 돌아가고, 없을 때만 최소한으로 지난다 (still_inside로 알린다).
 # 사용자 유형 규칙의 가장 강한 벌점(노약자 급경사 ×0.2)보다 훨씬 세야 "급경사를 피하려다 위험 구역을 지나는" 일이 없다.
 AVOID_PRIORITY = 0.001
+# GraphHopper가 구역을 가로지르는 일부 도로를 구역 안으로 보지 못한다 (2026-10-02 확인: 긴 도로 구간이 작은 구역을
+# 꼭짓점 없이 가로지를 때, 구역을 80m 넓혀야 잡힘). 그래서 받은 경로를 직접 검사해 피할 수 있는 구역을 지나면
+# 그 구역만 이만큼(m) 넓혀 다시 요청한다. 출발지·도착지(또는 GraphHopper가 붙인 가장 가까운 도로 위 점)가
+# 들어 있는 구역은 빠져나가거나 들어가야 하니 넓히지 않는다.
+WIDEN_STEPS_M = (50.0, 100.0)
 # 이동 중 확인: 경로에서 이만큼 벗어나면 다시 계산한다. GPS 오차(보통 5~20m)보다 크게 둔다.
 OFF_ROUTE_M = 30.0
 # 도착지에서 이 거리 안이면 도착으로 본다.
@@ -42,8 +47,6 @@ class RouteRequest(BaseModel):
     origin: LatLon
     destination: LatLon
     profile: Profile = "adult"      # adult(최단 시간, 경사 무시), elderly(급경사 회피·같은 경사면 계단 선호, 느린 속도)
-    # 맨홀은 침수 때 뚜껑이 열려 위험하다. 침수 판정(A3·Risk engine)과 연결되기 전까지는 요청으로 켜고 끈다.
-    avoid_manholes: bool = True
 
 
 class RouteResponse(BaseModel):
@@ -57,6 +60,7 @@ class RouteResponse(BaseModel):
     still_inside: list[str] = Field(default_factory=list)  # 다른 길이 없어 이 경로도 지나는 위험 구역 (경고용)
     geometry: str                                           # 인코딩된 polyline (Google 형식, 정밀도 1e5, lat·lon 순)
     source: str = "graphhopper"
+    hazards_ok: bool = True                                 # False면 위험 영역을 못 읽어 회피 없이 계산한 경로
 
 
 class RouteCheckRequest(BaseModel):
@@ -65,7 +69,6 @@ class RouteCheckRequest(BaseModel):
     destination: LatLon
     geometry: str                   # 지금 안내 중인 경로 (직전 /api/route 응답의 geometry)
     profile: Profile = "adult"
-    avoid_manholes: bool = True
 
 
 class RouteCheckResponse(BaseModel):
@@ -80,7 +83,7 @@ class RouteCheckResponse(BaseModel):
 class RouteService:
     def __init__(self, client: GraphHopperClient | None = None, hazards: HazardSource | None = None):
         self.gh = client or GraphHopperClient()
-        self.hazards = hazards or GeoJsonHazardSource()
+        self.hazards = hazards or default_source()
 
     def route(self, req: RouteRequest) -> RouteResponse:
         """사용자 유형 규칙 + 위험 구역 회피 경로. GraphHopperUnavailable, RouteNotFound는 api.py가 HTTP 오류로 바꾼다.
@@ -89,13 +92,14 @@ class RouteService:
         위험 구역만 뺀 기본 경로(avoided 계산용).
         """
         points = [(req.origin.lat, req.origin.lon), (req.destination.lat, req.destination.lon)]
-        zones = self._zones(req.avoid_manholes)
+        zones = self._zones()
         rules = PROFILE_RULES[req.profile]
 
         safe = self.gh.route(points, custom_model=build_model(rules, zones))
         avoided: list[str] = []
         still_inside: list[str] = []
         if zones:
+            safe = self._widen_until_clear(points, rules, zones, safe)
             base = self.gh.route(points, custom_model=build_model(rules, []))
             safe_line, base_line = _line(safe["points"]), _line(base["points"])
             still_inside = [z.id for z in zones if safe_line.intersects(z.geometry)]
@@ -111,7 +115,28 @@ class RouteService:
             avoided=avoided,
             still_inside=still_inside,
             geometry=safe["points"],
+            hazards_ok=getattr(self.hazards, "ok", True),
         )
+
+    def _widen_until_clear(self, points, rules, zones: list[Hazard], path: dict[str, Any]) -> dict[str, Any]:
+        """경로가 피할 수 있는 구역을 지나면 그 구역을 넓혀 다시 요청한다 (WIDEN_STEPS_M 설명). 못 피하면 처음 경로."""
+        # 요청 좌표 + GraphHopper가 붙인 도로 위 시작·끝점 (좌표는 구역 밖이어도 가장 가까운 길이 구역 안일 수 있다)
+        snapped = polyline.decode(path["points"])
+        ends = [Point(lon, lat) for lat, lon in [*points, snapped[0], snapped[-1]]]
+        avoidable = [z for z in zones if not any(z.geometry.intersects(p) for p in ends)]
+        crossed = [z for z in avoidable if _line(path["points"]).intersects(z.geometry)]
+        if not crossed:
+            return path
+        to_m = _meters_projector(points[0][0])
+        to_deg = _degrees_projector(points[0][0])
+        for widen_m in WIDEN_STEPS_M:
+            wide = {z.id for z in crossed}
+            widened = [Hazard(z.id, z.kind, transform(to_deg, transform(to_m, z.geometry).buffer(widen_m)), z.grade, z.source, z.name)
+                       if z.id in wide else z for z in zones]
+            retry = self.gh.route(points, custom_model=build_model(rules, widened))
+            if not any(_line(retry["points"]).intersects(z.geometry) for z in crossed):
+                return retry
+        return path
 
     def check(self, req: RouteCheckRequest) -> RouteCheckResponse:
         """이동 중 재계산이 필요한지 판단한다. 필요하면 현재 위치에서 새 경로를 계산해 함께 돌려준다.
@@ -131,7 +156,7 @@ class RouteService:
         off_m = pos.distance(line)
         # 남은 경로: 현재 위치에서 가장 가까운 경로 지점부터 끝까지
         ahead = substring(line, line.project(pos), line.length) if line.length > 0 else line
-        hazards_ahead = [z.id for z in self._zones(req.avoid_manholes)
+        hazards_ahead = [z.id for z in self._zones()
                          if ahead.intersects(transform(to_m, z.geometry))]
 
         reasons: list[CheckReason] = []
@@ -139,8 +164,7 @@ class RouteService:
             reasons.append("off_route")
         new_route = None
         if reasons or hazards_ahead:
-            new_route = self.route(RouteRequest(origin=req.current, destination=req.destination,
-                                                profile=req.profile, avoid_manholes=req.avoid_manholes))
+            new_route = self.route(RouteRequest(origin=req.current, destination=req.destination, profile=req.profile))
             # 새 경로가 피할 수 있는 구역이 있을 때만 위험 사유로 재계산한다 (없으면 같은 경로를 계속 주게 된다)
             if set(hazards_ahead) - set(new_route.still_inside):
                 reasons.append("hazard_on_route")
@@ -152,8 +176,8 @@ class RouteService:
     def health(self) -> dict:
         return {"status": "ok", "graphhopper": "ok" if self.gh.ping() else "error"}
 
-    def _zones(self, avoid_manholes: bool) -> list[Hazard]:
-        return [h for h in self.hazards.hazards() if h.kind != "manhole" or avoid_manholes]
+    def _zones(self) -> list[Hazard]:
+        return self.hazards.hazards()
 
 
 def build_model(rules: dict[str, list[dict[str, Any]]], zones: list[Hazard]) -> dict[str, Any] | None:
@@ -204,3 +228,13 @@ def _meters_projector(lat0: float):
     def to_m(x, y, z=None):
         return x * kx, y * ky
     return to_m
+
+
+def _degrees_projector(lat0: float):
+    """_meters_projector의 역변환 (m 좌표 → [lon, lat])."""
+    kx = 111_320 * math.cos(math.radians(lat0))
+    ky = 110_540
+
+    def to_deg(x, y, z=None):
+        return x / kx, y / ky
+    return to_deg

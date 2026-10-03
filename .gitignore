@@ -38,3 +38,5 @@ server/mock/external/kma_aws_min_all.txt
 server/mock/external/kma_aws_stnlist_*.json
 server/mock/external/kma_awsh_wind.txt
 server/mock/external/geocode_log.json
+# 경로 시연 산출물 (route/scripts/avoid_demo.py)
+route/out/

@@ -52,7 +52,8 @@ def test_route_converts_graphhopper_response():
     assert res.status_code == 200
     assert res.json() == {"profile": "adult", "distance_m": 986, "duration_s": 710,
                           "ascend_m": 10, "descend_m": 2, "max_slope_pct": 8,   # 내리막 7.6%도 급경사로 본다
-                          "avoided": [], "still_inside": [], "geometry": PATH["points"], "source": "graphhopper"}
+                          "avoided": [], "still_inside": [], "geometry": PATH["points"], "source": "graphhopper",
+                          "hazards_ok": True}
     # GraphHopper에는 [lon, lat] 순서, 도보 profile, 인코딩된 polyline으로 요청한다
     sent = json.loads(seen[0].content)
     assert sent["points"] == [[129.5560, 35.9905], [129.5480, 35.9868]]
@@ -127,3 +128,9 @@ def test_live_route_in_guryongpo():
     pts = decode_polyline(res["geometry"])
     assert len(pts) > 5                                             # 직선이 아니라 도로를 따라 꺾인다
     assert abs(pts[0][0] - 35.9905) < 0.002 and abs(pts[-1][1] - 129.5480) < 0.002
+
+
+def test_cors_preflight_allows_browser_app():
+    r = TestClient(app).options("/api/route", headers={"Origin": "http://localhost:5000", "Access-Control-Request-Method": "POST"})
+    assert r.status_code == 200
+    assert r.headers["access-control-allow-origin"] in ("*", "http://localhost:5000")

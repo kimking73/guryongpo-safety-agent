@@ -1,7 +1,7 @@
-"""B2 완료 기준: 질문 유형별로 올바른 agent가 호출되는가 (실제 Gemini 호출).
+"""B2 완료 기준: 질문 유형별로 올바른 agent가 호출되는가 (실제 OpenAI 호출).
 
 실행: cd 코드/ai && .venv/bin/python -m pytest -m live -q
-키는 환경 변수 또는 루트 .env의 GEMINI_API_KEY를 쓴다.
+키는 환경 변수 또는 루트 .env의 OPENAI_API_KEY를 쓴다.
 """
 
 import os
@@ -28,15 +28,14 @@ def _load_root_env() -> None:
 
 
 _load_root_env()
-if not os.environ.get("GEMINI_API_KEY"):
-    pytest.skip("GEMINI_API_KEY 없음", allow_module_level=True)
+if not os.environ.get("OPENAI_API_KEY"):
+    pytest.skip("OPENAI_API_KEY 없음", allow_module_level=True)
 
 import time  # noqa: E402
 
-import httpx  # noqa: E402
-from google.genai import errors as genai_errors  # noqa: E402
+import openai  # noqa: E402
 
-from guardian_ai.llm import GeminiClassifier  # noqa: E402  키 확인 뒤 import
+from guardian_ai.llm import OpenAIClassifier  # noqa: E402  키 확인 뒤 import
 
 # (질문, 반드시 포함할 agent, 포함하면 안 되는 agent)
 CASES = [
@@ -55,14 +54,14 @@ CASES = [
 ]
 
 
-MIN_INTERVAL_S = 60 / int(os.environ.get("GEMINI_LIVE_RPM", "5"))   # 무료 등급: 모델당 분당 5회
+MIN_INTERVAL_S = 60 / int(os.environ.get("OPENAI_LIVE_RPM", "60"))   # 분당 호출 상한 (Tier 1은 500 RPM이라 여유)
 
 
 class PacedClassifier:
     """분당 호출 한도를 지키고, 일시적 오류(429 한도·503 과부하)는 기다렸다 다시 시도한다."""
 
     def __init__(self):
-        self.inner, self.next_at = GeminiClassifier(), 0.0
+        self.inner, self.next_at = OpenAIClassifier(), 0.0
 
     @property
     def last(self):
@@ -74,13 +73,13 @@ class PacedClassifier:
             self.next_at = time.monotonic() + MIN_INTERVAL_S
             try:
                 return self.inner(state)
-            except httpx.TimeoutException:
+            except openai.APITimeoutError:
                 if attempt == 3:
                     raise
-            except genai_errors.APIError as e:
-                if e.code not in (429, 503) or attempt == 3:
+            except openai.APIStatusError as e:
+                if e.status_code not in (429, 500, 503) or attempt == 3:
                     raise
-                time.sleep(60 if e.code == 429 else 5)
+                time.sleep(20 if e.status_code == 429 else 5)
 
 
 @pytest.fixture(scope="module")

@@ -62,15 +62,15 @@ both visited node order and final state from a single execution — do not call 
 separately (stateful override counters would run twice). Always pass `recursion_limit` to catch runaway loops.
 - Multi-turn behavior needs a checkpointer: build through `ChatService` (service.py) or pass
   `checkpointer=make_checkpointer()`; plain `build_graph()` runs each invoke from fresh state and hides turn bugs.
-- Real Gemini tests are marked `live` and excluded by default (`pyproject.toml` addopts); unit tests fake the
-  client (`FakeModels` in tests/test_manager.py) instead of calling the API.
+- Real OpenAI tests are marked `live` and excluded by default (`pyproject.toml` addopts); unit tests fake the
+  client (`FakeResponses` in tests/test_manager.py) instead of calling the API.
 
 ## 11. LLM calls: injectable, with a rule fallback
 - LLM-backed decisions are injected callables, not hard-wired: `make_manager(classify)` (graph.py:144) takes any
   `Classifier` (graph.py:88). `DEFAULT_NODES` keeps the keyword classifier so tests run offline; `ChatService`
-  injects `GeminiClassifier` (llm.py).
+  injects `OpenAIClassifier` (llm.py).
 - If the LLM raises (timeout, bad JSON), the node falls back to a rule result (`keyword_classify`, graph.py:100)
-  and logs — a disaster answer must not fail because Gemini did. Follow this for later LLM nodes.
+  and logs — a disaster answer must not fail because the LLM did. Follow this for later LLM nodes.
 - Where the answer is fully determined by data, use rules only: alert routing is the `ALERT_AGENT` table (graph.py:107).
 - A node that starts a new turn clears per-turn fields (`_NEW_TURN_RESET`, graph.py:132) unless `verdict == "retry"`.
 - New Pydantic models/enums in state.py must be added to `STATE_TYPES` (service.py) or checkpoint restore warns/blocks.

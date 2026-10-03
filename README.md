@@ -12,7 +12,7 @@
 | `route/` | 경로 안내 서버 (`/api/route`, GraphHopper 앞단) | B |
 | `graphhopper/` | GraphHopper 경로 엔진 설정, 구룡포 OSM 도로망 받기 스크립트 | B |
 | `app/` | Flutter 앱·웹 | C |
-| `db/init/` | DB 최초 생성 시 실행되는 SQL: PostGIS 확장, 스키마(01), 판단 기준·관측소·맨홀(02), 산사태 취약지역(03), 행동요령(04), 대피소(05), 응급의료(06). 이후 바뀐 시드는 `docker compose run --rm loader`로 다시 적재 | A |
+| `db/init/` | DB 최초 생성 시 실행되는 SQL: PostGIS 확장, 스키마(01), 판단 기준·관측소·맨홀(02), 산사태 취약지역(03), 행동요령(04), 대피소(05), 응급의료(06), AI 읽기 전용 계정(07, B). 이후 바뀐 시드는 `docker compose run --rm loader`로 다시 적재 | A (07은 B) |
 | `secrets/` | 서비스 계정 키 등 비밀 파일 (커밋 안 됨) | - |
 
 ## 처음 설정
@@ -76,16 +76,20 @@ curl -X POST localhost:8002/api/route -H 'Content-Type: application/json' \
      -d '{"origin":{"lat":35.9905,"lon":129.5560},"destination":{"lat":35.9868,"lon":129.5480}}'
 ```
 - API 문서: http://localhost:8000/api/v1/docs (서버, 명세 원본은 `server/spec/openapi.yaml`), http://localhost:8001/docs (AI), http://localhost:8002/docs (경로)
-- 경로는 침수·산사태 구역과 맨홀을 피한다. 응답의 `avoided`는 피한 구역, `still_inside`는 다른 길이 없어 지나는 구역이다.
+- 경로는 위험 판정 엔진이 지금 낸 **침수·산사태 영역(주의 이상)**을 피한다 (앱 지도에 칠해지는 영역과 같음, 호우 영역·맨홀은 회피에 쓰지 않음).
+  응답의 `avoided`는 피한 구역, `still_inside`는 다른 길이 없어 지나는 구역(출발·도착 지점이 영역 안이거나 바로 옆일 때), `hazards_ok: false`면 위험 영역을 못 읽어 회피 없이 계산한 경로다.
 - 요청의 `profile`: `adult`(가장 빠른 길, 경사 무시), `elderly`(급경사 도로를 피하고 느린 걸음, 같은 경사면 비탈길보다 계단을 선호).
   응답에 `ascend_m`·`descend_m`(오르막·내리막 합계), `max_slope_pct`(가장 급한 경사)가 온다. 규칙은 `route/guardian_route/profiles.py`.
 - 이동 중: `POST /api/route/check`에 현재 위치·목적지·지금 경로(`geometry`)를 보내면 재계산이 필요한지(`reroute`)와 새 경로를 준다.
   경로에서 30m 넘게 벗어났거나, 남은 경로에 새 위험 구역이 생겼을 때 재계산한다. 도착지 20m 안이면 `arrived: true`.
-  지금 위험 구역은 **임시 데이터**(`route/data/hazards.sample.geojson`)이며, 목록은 http://localhost:8002/api/route/hazards 에서 볼 수 있다.
+  지금 피하는 구역 목록: http://localhost:8002/api/route/hazards . 고정 구역으로 시연·테스트하려면 `.env`의 `ROUTE_HAZARDS_FILE=/app/data/hazards.sample.geojson`.
+- 위험 구역 회피 시연: `cd route && uv pip install -p .venv -e ".[demo]" && .venv/bin/python scripts/avoid_demo.py` — 가상 침수 구역을 무작위로 켜고 끄며 16회 경로 계산·판정, 그림·GIF·결과 표를 `route/out/avoid_demo/`에 만든다 (graphhopper가 떠 있어야 함)
 - GraphHopper 지도 화면(로컬 확인용): http://localhost:8989/maps/ (끝의 `/` 필수. 없으면 빈 화면)
 - 경로 응답의 `geometry`는 인코딩된 polyline(Google 형식, 정밀도 1e5)이다. 앱에서 풀어서 지도에 그린다.
-- AI가 Gemini를 쓰려면 `.env`의 `GEMINI_API_KEY`가 필요하다. 없으면 키워드 분류로 동작한다.
+- AI가 OpenAI(`gpt-6-luna`)를 쓰려면 `.env`의 `OPENAI_API_KEY`가 필요하다. 없으면 키워드 분류로 동작한다.
+- AI의 목적지 찾기("구룡포항까지 어떻게 가?")는 `.env`의 `KAKAO_REST_KEY`(카카오 로컬 REST 키)로 장소를 검색한다. 없으면 등록 장소(집·직장)와 대피소·의료시설 이름만 찾는다. 키를 넣은 뒤 `docker compose up -d --force-recreate ai`.
 - DB 접속: `localhost:5433`, 사용자·비밀번호·DB 이름은 `.env`의 `DB_*`
+- AI는 DB를 **읽기 전용 계정**(`.env`의 `AI_DB_USER`·`AI_DB_PASSWORD`)으로 직접 읽는다. 이 계정은 SELECT만 할 수 있다.
   (5432는 로컬에 설치된 PostgreSQL과 겹칠 수 있어 5433을 쓴다)
 
 ## 자주 쓰는 명령
@@ -100,6 +104,12 @@ docker compose logs -f collector                      # 수집·위험 판정 �
 docker compose exec api python -m collector --once    # 수집 전체 1회 즉시 실행 (결과 표)
 docker compose run --rm loader                        # 정적 데이터(대피소·위험지역·행동요령·판단 기준) 다시 적재, 관측값은 유지
 ```
+- **AI 읽기 전용 계정 만들기 (2026-10-01 이전에 만든 DB 한 번만)**: `.env`에 `.env.example`의 `AI_DB_USER`·`AI_DB_PASSWORD` 두 줄을 넣고
+  `docker compose up -d db` → `docker compose exec db sh /docker-entrypoint-initdb.d/07_ai_readonly.sh`. 새로 만드는 DB는 자동.
+- **AI 기억 저장 계정 만들기 (2026-10-02 이전에 만든 DB 한 번만)**: `.env`에 `.env.example`의 `AI_MEM_DB_USER`·`AI_MEM_DB_PASSWORD` 두 줄을 넣고
+  `docker compose up -d db` → `docker compose exec db sh /docker-entrypoint-initdb.d/08_ai_memory.sh` → `docker compose up -d --build ai`.
+  AI의 사용자 기억(사용자가 말한 사실·대화 요약)은 `ai_memory` 스키마에 남아 AI를 재시작해도 이어진다. 대화 기억(진행 중인 대화)은
+  AI 서버 메모리에만 있어 마지막 문답 후 1시간 또는 재시작 때 사라진다. 확인: `curl localhost:8001/api/ai/memory/<user_id>`
 - **`db/init`의 시드(02~)가 바뀌었으면** `docker compose run --rm loader` (DB 데이터 유지). **스키마(01)가 바뀌었으면** loader가 알려 주고 멈추므로 `docker compose down -v` 후 다시 `up`.
 - 서버 API 대부분은 아직 목업(응답 헤더 `X-Mock: true`)이다. 실데이터: `/api/health`, `/api/v1/risk*`, 지도 레이어 `stations`·`landslide_zones`·`risk_areas`·`shelters`·`medical`·`manholes`. 자세한 건 `server/README.md`.
 - `server/app/`·`server/collector/`·`server/risk/`(api), `ai/guardian_ai/`, `route/guardian_route/` 코드를 고치면 해당 서버가 자동으로 재시작된다 (재빌드 불필요).
@@ -110,7 +120,7 @@ docker compose run --rm loader                        # 정적 데이터(대피�
 
 - `.env`는 절대 커밋하지 않는다. `.env.example`은 항상 모든 키를 담는다.
 - 새 키를 추가하면 **같은 커밋에서** `.env.example`에도 추가한다 (값은 비우거나 로컬 기본값).
-- 이름은 대문자 스네이크 + 영역 접두사: `DB_`, `API_`, `GCP_`, `FIREBASE_`, `GEMINI_`, `ROUTE_`, `GRAPHHOPPER_`, `KMA_`, `POHANG_TWIN_`, `SAFETY24_`
+- 이름은 대문자 스네이크 + 영역 접두사: `DB_`, `API_`, `GCP_`, `FIREBASE_`, `OPENAI_`, `ROUTE_`, `GRAPHHOPPER_`, `KMA_`, `POHANG_TWIN_`, `SAFETY24_`
 - 파일로 된 비밀은 `secrets/`에 두고 `.env`에는 경로만 쓴다.
 - 주석은 반드시 별도 줄에 쓴다. `KEY=  # 설명`처럼 값 뒤에 붙이면 docker가 주석까지 값으로 읽는다.
 - 실제 키 값은 팀 비공개 채널로만 공유한다. 저장소·이슈·PR·공개 채팅에 붙이지 않는다.
@@ -132,3 +142,5 @@ docker compose run --rm loader                        # 정적 데이터(대피�
 
 - GCP 콘솔: https://console.cloud.google.com/home/dashboard?project=guryong-guardian-0924
 - Firebase 콘솔: https://console.firebase.google.com/project/guryong-guardian-0924/overview
+
+김다인바보

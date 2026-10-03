@@ -32,16 +32,18 @@ LangGraph 기본 개념
 from __future__ import annotations
 
 import logging
+import re
 from typing import Callable
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
+from .action import NOT_READY, make_action_advisor  # noqa: F401 — NOT_READY는 테스트·밖에서 G.NOT_READY로 쓴다
+from .verify import make_hallucination_check
 from .state import (
     MAX_POLISH_RETRY,   # 다듬기 재시도 한도 (1회)
     MAX_RETRY,          # 검증 실패 시 관리자부터 다시 하는 한도 (2회)
     RESET,              # reducer에 보내면 누적된 값을 비우는 신호
-    ActionPlan,
     CheckResult,
     DisasterType,
     GuardianState,
@@ -84,10 +86,10 @@ Node = Callable[[GuardianState], dict]
 # ===========================================================================
 
 # 질문 분류기의 형태: state를 받아 호출할 전문 agent 목록을 돌려준다.
-# 실제 서비스는 Gemini 분류기(llm.py)를, 테스트·장애 대비는 키워드 분류기를 쓴다.
+# 실제 서비스는 OpenAI 분류기(llm.py)를, 테스트·장애 대비는 키워드 분류기를 쓴다.
 Classifier = Callable[[GuardianState], list[Specialist]]
 
-# 키워드 분류: Gemini가 없거나 실패했을 때 쓰는 대체 수단. 테스트의 기본 분류기이기도 하다.
+# 키워드 분류: LLM이 없거나 실패했을 때 쓰는 대체 수단. 테스트의 기본 분류기이기도 하다.
 _KEYWORDS = {
     Specialist.LANDSLIDE: ["산사태", "산", "토사"],
     Specialist.RAIN_FLOOD: ["비", "호우", "침수", "물", "수위"],
@@ -103,6 +105,22 @@ def keyword_classify(state: GuardianState) -> list[Specialist]:
     return [s for s, kws in _KEYWORDS.items() if any(k in q for k in kws)]
 
 
+# 분류기(LLM)가 실패했을 때 목적지·보행 불편을 뽑는 규칙. LLM 결과가 있으면 그쪽을 쓴다.
+_DEST_RE = re.compile(r"([0-9A-Za-z가-힣·]+?)(?:까지|에|으로|로)\s*(?:어떻게|걸어서|가|갈|걸|이동|대피)")
+# 장소가 아닌 말 ("대피소로 가"는 가까운 대피소 안내와 같다)
+_NOT_PLACE = {"대피소", "대피", "안전한", "어디", "여기", "거기", "그쪽", "밖", "어디로", "빨리", "지금", "걸어서"}
+_MOBILITY_WORDS = ("무릎", "다리가", "다리를", "지팡이", "휠체어", "거동", "걷기 힘", "걷기가 힘", "잘 못 걸", "보행이")
+
+
+def keyword_destination(question: str) -> str | None:
+    m = _DEST_RE.search(question or "")
+    return m.group(1) if m and m.group(1) not in _NOT_PLACE else None
+
+
+def keyword_mobility_limited(question: str) -> bool:
+    return any(w in (question or "") for w in _MOBILITY_WORDS)
+
+
 # alert 모드: 경고 재난 종류 → 담당 전문 agent (규칙, LLM을 쓰지 않는다)
 ALERT_AGENT = {
     DisasterType.LANDSLIDE: Specialist.LANDSLIDE,
@@ -110,10 +128,12 @@ ALERT_AGENT = {
     DisasterType.FLOOD: Specialist.RAIN_FLOOD,
     DisasterType.STRONG_WIND: Specialist.WIND_TYPHOON,
     DisasterType.TYPHOON: Specialist.WIND_TYPHOON,
+    DisasterType.HIGH_SEAS: Specialist.WIND_TYPHOON,
     DisasterType.FINE_DUST: Specialist.LIFE_SAFETY,
+    DisasterType.ULTRAFINE_DUST: Specialist.LIFE_SAFETY,
     DisasterType.UV: Specialist.LIFE_SAFETY,
 }
-# 대피 경로가 필요한 재난. 이 재난이 경보(WARNING) 단계일 때만 위치·경로 agent를 붙인다.
+# 대피 경로가 필요한 재난. 이 재난이 경보(WARNING) 이상일 때만 위치·경로 agent를 붙인다.
 EVACUATION_DISASTERS = {
     DisasterType.LANDSLIDE, DisasterType.HEAVY_RAIN, DisasterType.FLOOD,
     DisasterType.STRONG_WIND, DisasterType.TYPHOON,
@@ -122,7 +142,7 @@ EVACUATION_DISASTERS = {
 
 def alert_agents(event: RiskEvent) -> list[Specialist]:
     selected = [ALERT_AGENT[event.disaster]]
-    if event.level == RiskLevel.WARNING and event.disaster in EVACUATION_DISASTERS:
+    if event.level.rank >= RiskLevel.WARNING.rank and event.disaster in EVACUATION_DISASTERS:
         selected.append(Specialist.LOCATION_ROUTE)
     return selected
 
@@ -141,14 +161,16 @@ _NEW_TURN_RESET = {
 }
 
 
-def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_classify) -> Node:
+def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_classify,
+                 phase_of: Callable[[GuardianState], Phase] | None = None) -> Node:
     """관리자 agent를 만든다. classify가 예외를 내면 fallback_classify로 대체한다.
 
     왜 함수를 반환하는가 (공장 함수):
         LangGraph 노드는 state 하나만 받는 함수여야 한다. 그런데 manager는 "어떤 분류기를 쓸지"도
         알아야 한다. 그래서 바깥 함수가 분류기를 받아 두고, 안쪽 manager가 그것을 기억해서 쓴다(클로저).
         - 테스트·기본값: make_manager(keyword_classify)          → 이 함수 바로 아래 `manager = ...`
-        - 서비스:       make_manager(GeminiClassifier())         → service.py
+        - 서비스:       make_manager(OpenAIClassifier(), phase_of=action.decide_phase)  → service.py
+    phase_of: 재난 단계(전·중·후·평시) 판정. 없으면 '재난 중'(DB 없이 도는 테스트·기본 그래프).
     """
 
     def manager(state: GuardianState) -> dict:
@@ -179,11 +201,11 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
             # alert 모드: 사용자 질문이 없다 → LLM 없이 규칙표(ALERT_AGENT)로 고른다.
             selected, how = alert_agents(state["risk_event"]), "alert 규칙"
         else:
-            # chat 모드: 분류기(서비스에서는 Gemini)가 질문을 읽고 고른다.
+            # chat 모드: 분류기(서비스에서는 OpenAI)가 질문을 읽고 고른다.
             try:
                 selected, how = classify(view), "분류기"
             except Exception:
-                # Gemini 시간 초과·키 오류·응답 형식 오류 등 무엇이든 → 키워드 분류로 대체.
+                # LLM 시간 초과·키 오류·응답 형식 오류 등 무엇이든 → 키워드 분류로 대체.
                 # LLM이 죽어도 답변은 나가야 하므로 예외를 위로 올리지 않는다.
                 logger.exception("질문 분류 실패, 키워드 분류로 대체")
                 selected, how = fallback_classify(view), "키워드 대체"
@@ -191,7 +213,7 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
         # ── 3) 라우팅 로그 (질문마다 한 줄) ─────────────────────────────────
         # `docker compose logs -f ai | grep 라우팅`으로 볼 수 있다.
         # 예) 라우팅 [분류기] '비 많이 와요?' → ['rain_flood_agent'] (강수 관련 질문)
-        # reason: GeminiClassifier는 마지막 분류 결과를 .last에 저장한다(llm.py). 거기서 선택 이유를 꺼낸다.
+        # reason: OpenAIClassifier는 마지막 분류 결과를 .last에 저장한다(llm.py). 거기서 선택 이유를 꺼낸다.
         #   getattr를 두 번 쓰는 이유: keyword_classify 같은 일반 함수에는 .last가 없고,
         #   .last가 None일 수도 있다. 어느 경우든 오류 없이 ""가 되게 한다.
         reason = getattr(getattr(classify, "last", None), "reason", "") if how == "분류기" else ""
@@ -200,10 +222,37 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
                     state.get("question") or getattr(state.get("risk_event"), "disaster", ""),
                     [s.value for s in selected], f"({reason})" if reason else "")
 
-        # ── 4) state에서 바꿀 필드만 반환 ───────────────────────────────────
+        # ── 4) 위치·경로 agent용: 목적지, 이번 질문의 보행 불편 ─────────────
+        # OpenAI 분류기는 같은 호출에서 함께 뽑는다(llm.Classification). 그 외(키워드 분류·테스트)는 규칙으로.
+        extra = getattr(classify, "last", None) if how == "분류기" else None
+        question = state.get("question") or ""
+        if state.get("mode") == "alert":
+            destination, limited = None, False
+        elif extra is not None and hasattr(extra, "destination"):
+            destination, limited = extra.destination, bool(extra.mobility_limited)
+        else:
+            destination, limited = keyword_destination(question), keyword_mobility_limited(question)
+        # 앱이 보낸 값·기억이 이미 있으면 그대로 (memory.apply_to_profile과 같은 우선순위). 기억 저장은 답변 뒤 따로 한다.
+        user = state.get("user")
+        user_update = {}
+        if limited and user is not None and user.walking_impaired is None:
+            user_update = {"user": user.model_copy(update={"walking_impaired": True})}
+
+        def _phase(v: GuardianState) -> Phase:
+            if phase_of is None or v.get("mode") == "alert":
+                return Phase.DURING
+            try:
+                return phase_of(v)
+            except Exception:  # noqa: BLE001 — 단계 판정 실패로 답이 끊기면 안 된다 (안전 쪽)
+                logger.exception("재난 단계 판정 실패 → 재난 중")
+                return Phase.DURING
+
+        # ── 5) state에서 바꿀 필드만 반환 ───────────────────────────────────
         return {
             **turn,                         # 새 질문이면 초기화 값들, 재시도면 아무것도 없음
-            "phase": Phase.DURING,          # stub: 항상 "재난 중". B4에서 특보·위험 판정으로 계산
+            **user_update,
+            "destination_query": destination or None,
+            "phase": _phase(view),          # 특보·위험 판정으로 (action.decide_phase), 없으면 '재난 중'
             "selected_agents": selected,    # 다음 route_specialists가 이 목록을 보고 병렬 실행한다
             # 재시도로 다시 들어온 경우를 대비해 이전 시도의 결과를 비운다.
             # (이걸 안 하면 1차 시도 결과와 2차 시도 결과가 섞여 쌓인다)
@@ -216,7 +265,7 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
     return manager
 
 
-# 기본 manager: 키워드 분류. 서비스는 service.py에서 Gemini 분류기를 넣은 manager로 바꿔 끼운다.
+# 기본 manager: 키워드 분류. 서비스는 service.py에서 OpenAI 분류기를 넣은 manager로 바꿔 끼운다.
 manager = make_manager(keyword_classify)
 
 
@@ -229,23 +278,15 @@ def _specialist_stub(agent: Specialist) -> Node:
     state의 merge_results reducer에 의해 하나의 리스트로 합쳐지기 때문이다.
     """
     def node(state: GuardianState) -> dict:
-        return {"specialist_results": [SpecialistResult(agent=agent, summary=f"{agent.value} stub")]}
+        # 빈 답변 조각: 행동 권고가 초안에서 뺀다 ("… stub" 문구가 사용자 답변에 섞이지 않게, 2026-10-02)
+        return {"specialist_results": [SpecialistResult(agent=agent, summary="")]}
     node.__name__ = agent.value
     return node
 
 
-def action_advisor(state: GuardianState) -> dict:
-    """행동 권고 agent: 전문 agent 결과를 모아 행동 우선순위와 답변 초안을 만든다.
-
-    실제 구현(B4): 판단 트리(재난 전/중/후 → 위험도 → 이동 가능 여부)를 규칙 코드로 돌려
-    행동 목록(ActionPlan.steps)을 먼저 확정하고, LLM은 이를 문장으로 풀어 쓰기만 한다.
-    → AI가 잘못된 행동요령을 지어내는 것을 막는다.
-    """
-    results = state.get("specialist_results", [])
-    plan = ActionPlan(phase=state.get("phase", Phase.NONE), risk_level=RiskLevel.SAFE, steps=[])
-    # stub: 전문 agent 요약을 이어 붙여 초안으로 쓴다. 선택된 agent가 없으면 기본 문구.
-    draft = " / ".join(r.summary for r in results) or "현재 확인된 위험 없음"
-    return {"action_plan": plan, "draft": draft}
+# 행동 권고 (B4): 규칙이 고른 행동요령 원문 → (서비스는) LLM이 사용자 상황에 맞춘 '지금 할 일' → action.py.
+# 기본 그래프는 원문을 찾지 않는다(DB 없이 도는 테스트용). 서비스가 원문·작성기를 붙인 것으로 바꿔 끼운다 (service.py).
+action_advisor = make_action_advisor(use_guides=False)
 
 
 def intent_check(state: GuardianState) -> dict:
@@ -257,12 +298,9 @@ def intent_check(state: GuardianState) -> dict:
     return {"checks": {"intent": CheckResult(ok=True)}}
 
 
-def hallucination_check(state: GuardianState) -> dict:
-    """환각 검증: 초안의 숫자·사실이 전문 agent가 남긴 evidence와 일치하는지 확인한다 (B3).
-
-    예: 초안에 "수위 30cm"가 있는데 evidence에는 22cm뿐이면 ok=False, feedback에 사유 기록.
-    """
-    return {"checks": {"hallucination": CheckResult(ok=True)}}
+# 환각 검증 (B3): 초안의 숫자·사실이 전문 agent가 남긴 evidence와 일치하는지 확인한다 → verify.py.
+# 기본은 숫자 검사(규칙)만. 서비스는 LLM 내용 검사까지 붙인 것으로 바꿔 끼운다 (service.py).
+hallucination_check = make_hallucination_check()
 
 
 def verify_gate(state: GuardianState) -> dict:

@@ -6,10 +6,13 @@ requires-python = ">=3.11"
 dependencies = [
     "langgraph>=1.0",
     "pydantic>=2.7",
-    "google-genai>=1.0",
+    "openai>=3.22",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "httpx>=0.27",
+    "psycopg[binary]>=3.2",
+    "psycopg-pool>=3.2",
+    "langgraph-checkpoint-postgres>=3.1",
 ]
 
 [project.optional-dependencies]
@@ -24,6 +27,7 @@ packages = ["guardian_ai"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# live: 실제 Gemini를 부르는 테스트. 기본 실행에서 제외, `pytest -m live`로 따로 돌린다 (GEMINI_API_KEY 필요)
-markers = ["live: 실제 Gemini API 호출 (GEMINI_API_KEY 필요)"]
-addopts = "-m 'not live'"
+# live: 실제 OpenAI를 부르는 테스트. 기본 실행에서 제외, `pytest -m live`로 따로 돌린다 (OPENAI_API_KEY 필요)
+# db: 로컬 DB(docker compose의 db, localhost:5433)에 실제로 붙는 테스트. `pytest -m db`로 따로 돌린다
+markers = ["live: 실제 OpenAI API 호출 (OPENAI_API_KEY 필요)", "db: 로컬 DB 필요 (docker compose up -d db)"]
+addopts = "-m 'not live and not db'"
