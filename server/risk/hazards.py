@@ -3,13 +3,23 @@
 입력
   호우 : 구룡포 AWS(816) rain_1h 스냅샷을 RAIN_SUM_SQL 로 3·12시간 누적 (judge_source 로 유효성 확인)
   강풍 : 구룡포 AWS(816) wind_speed·wind_gust 최신값
-  산사태 : 이번 판정에서 나온 heavy_rain 단계 + hazard_zones(landslide) 488곳 중 구룡포 포함 전체
+  산사태 : 이번 판정에서 나온 heavy_rain 단계
+           + 산림청 산사태위험지도 100m 범위(hazard_zones external_id riskmap_g1_buf100 / riskmap_g12_buf100, 09_seed)
+           + 지정 산사태 취약지역(hazard_zones, 포항 488곳) 100m
 
 기준 : risk_rules 1~4(호우·강풍), 10~11(산사태) — 전부 기상청 발표기준을 그대로 우리 관측값에 적용한 것.
   강풍은 stations.is_mountain 으로 육상/산지 기준을 나눈다 (구룡포 AWS 는 해안 저지대 → 육상 기준)
 
+산사태 기준 (2026-10-02 개편)
+  주의(10) = 호우주의보 이상 AND (위험지도 1등급 비탈 100m 이내 OR 지정 취약지역 100m 이내)
+  경고(11) = 호우경보 이상   AND (위험지도 1·2등급 비탈 100m 이내 OR 지정 취약지역 100m 이내)
+  - 등급: 산림청 산사태위험판정기준표(산림보호법 시행규칙 별표1) 1등급 '집중강우 시', 2등급 '폭우 시' → 주의보↔1등급, 경보↔1·2등급 (자체 설계)
+  - 100m: KIGAM 김경수 외(2006) 포항(제3기퇴적암류) 산사태 진행거리 평균 36m, 91%가 60m 이내
+  - 위험지도 범위는 미리 계산한 폴리곤(Result.zone_id)을 그대로 영향 범위로 씀. 취약지역은 지정사유를 근거 문장에 넣음
+  - 산림청 산사태예측정보 API 는 2012~2026 이력에 포항 0건 → 사용하지 않음
+
 산사태 표기 원칙 (2026-09-29 팀 결정)
-  이건 토양수분을 실측/예측한 결과가 아니라 "호우 단계 + 이미 지정된 취약지역"이라는 대리 지표다.
+  이건 토양수분을 실측/예측한 결과가 아니라 "호우 단계 + 위험 비탈·취약지역"이라는 대리 지표다.
   그래서 근거 문장에 "산사태가 발생함"처럼 확정된 사실인 것처럼 쓰지 않고, 대비가 필요한 가능성으로만 표기한다.
 
 출력 : risk_assessments (engine='hazards_v1'). risk/engine.sync() 를 그대로 재사용 —
@@ -166,35 +176,56 @@ def evaluate_typhoon(active_warnings: list[dict], impacts: dict[str, dict], rule
 
 
 # ------------------------------------------------------------------ 산사태 (rules 10·11)
+RISKMAP_AREA = {"advisory": "riskmap_g1_buf100", "warning": "riskmap_g12_buf100"}   # 규칙 condition 에 없을 때 기본값
+RISKMAP_GRADE_KO = {"riskmap_g1_buf100": "1등급(매우 높음)", "riskmap_g12_buf100": "1·2등급(매우 높음·높음)"}
+
+
 def evaluate_landslide(heavy_rain_level: Optional[str], zones: list[dict], rules: list[dict]) -> list[Result]:
-    """heavy_rain_level=None 이면 호우 판정 자체가 불가한 상태 → 산사태도 판단 불가로 보고 빈 목록 반환"""
+    """heavy_rain_level=None 이면 호우 판정 자체가 불가한 상태 → 산사태도 판단 불가로 보고 빈 목록 반환
+    zones: hazard_zones(landslide) — external_id 가 riskmap_* 이면 위험지도 100m 범위, 아니면 지정 취약지역"""
     if heavy_rain_level is None:
         return []
-    r10 = next((r for r in rules if r["id"] == 10), None)   # advisory, buffer 100m
-    r11 = next((r for r in rules if r["id"] == 11), None)   # warning, buffer 0m (지역 안)
+    r10 = next((r for r in rules if r["id"] == 10), None)   # advisory: 1등급 100m + 취약지역 100m
+    r11 = next((r for r in rules if r["id"] == 11), None)   # warning : 1·2등급 100m + 취약지역 100m
     lvl = LEVEL_NUM.get(heavy_rain_level, 0)
+    if r11 and lvl >= LEVEL_NUM["warning"]:
+        rule = r11
+    elif r10 and lvl >= LEVEL_NUM["advisory"]:
+        rule = r10
+    else:
+        return []
+    within = next((c for c in _cond(rule).get("all", []) if "within" in c), {})
+    buffer_m = float(within.get("buffer_m", 0))
+    area_ext = within.get("riskmap_area") or RISKMAP_AREA.get(rule["level"])
+    rain_ko = heavy_rain_level_ko(heavy_rain_level)
+    tail = f" · 현재 호우 {rain_ko} 수준 강우 · 산사태 발생 가능성에 대비가 필요합니다 (실제 발생을 뜻하지 않음)"
     out: list[Result] = []
     for z in zones:
-        rule = None
-        if r11 and lvl >= LEVEL_NUM["warning"]:
-            rule = r11
-        elif r10 and lvl >= LEVEL_NUM["advisory"]:
-            rule = r10
-        if rule is None:
+        ext = z.get("external_id") or ""
+        if ext.startswith("riskmap_"):
+            if ext != area_ext:
+                continue
+            out.append(Result(
+                key="landslide:riskmap", hazard="landslide", level=rule["level"], rule_id=rule["id"],
+                label=rule["label"], lng=z["lng"], lat=z["lat"], buffer_m=0, observed_at=None, zone_id=z["id"],
+                reason=f"산림청 산사태위험지도 {RISKMAP_GRADE_KO.get(ext, '')} 비탈에서 {buffer_m:.0f}m 이내 지역" + tail,
+                basis={"engine": ENGINE, "key": "landslide:riskmap", "station_id": _zone_sentinel(z["id"]),
+                       "kind": "riskmap", "zone_id": z["id"], "area": ext, "buffer_m": buffer_m,
+                       "heavy_rain_level": heavy_rain_level,
+                       "note": "호우 단계 + 산림청 산사태위험지도 등급 — 토양수분 실측/예측 아님"},
+            ))
             continue
-        cond = _cond(rule)
-        within = next((c for c in cond.get("all", []) if "within" in c), {})
-        buffer_m = float(within.get("buffer_m", 0))
-        emd = (z.get("meta") or {}).get("emd", "")
-        reason = (f"{z['name']}{'(' + emd + ')' if emd else ''} 산사태 취약지역 지정 · 현재 호우 {heavy_rain_level_ko(heavy_rain_level)} 수준 강우"
-                  " · 산사태 발생 가능성에 대비가 필요합니다 (실제 발생을 뜻하지 않음)")
+        meta = z.get("meta") or {}
+        emd, why = meta.get("emd", ""), (meta.get("reason") or "").strip()
+        why_txt = f" (지정사유: {why[:60]}{'…' if len(why) > 60 else ''})" if why else ""
         out.append(Result(
             key=f"landslide:zone:{z['id']}", hazard="landslide", level=rule["level"], rule_id=rule["id"],
-            label=rule["label"], reason=reason, lng=z["lng"], lat=z["lat"], buffer_m=buffer_m,
-            observed_at=None,
+            label=rule["label"], lng=z["lng"], lat=z["lat"], buffer_m=buffer_m, observed_at=None,
+            reason=f"{z['name']}{'(' + emd + ')' if emd else ''} 산사태 취약지역 지정{why_txt}" + tail,
             basis={"engine": ENGINE, "key": f"landslide:zone:{z['id']}", "station_id": _zone_sentinel(z["id"]),
-                   "zone_id": z["id"], "zone_name": z["name"], "emd": emd, "heavy_rain_level": heavy_rain_level,
-                   "buffer_m": buffer_m, "note": "호우 단계 + 지정 취약지역 조합 — 토양수분 실측/예측 아님"},
+                   "kind": "designated", "priority": "designated", "zone_id": z["id"], "zone_name": z["name"],
+                   "emd": emd, "heavy_rain_level": heavy_rain_level, "buffer_m": buffer_m,
+                   "note": "호우 단계 + 지정 취약지역 조합 — 토양수분 실측/예측 아님"},
         ))
     return out
 
@@ -218,8 +249,9 @@ ORDER BY metric, (quality IS NOT DISTINCT FROM 'simulated') DESC, observed_at DE
 """
 STATION_ID_SQL = "SELECT id, is_mountain FROM stations WHERE source_code = %(source_code)s AND external_id = %(external_id)s"
 ZONES_SQL = """
-SELECT id, name, meta, ST_X(ST_Centroid(geom)) AS lng, ST_Y(ST_Centroid(geom)) AS lat
-FROM hazard_zones WHERE hazard = 'landslide'
+SELECT id, external_id, name, meta, ST_X(ST_PointOnSurface(geom)) AS lng, ST_Y(ST_PointOnSurface(geom)) AS lat
+FROM hazard_zones
+WHERE hazard = 'landslide' AND COALESCE(meta->>'role', '') <> 'display'   -- 위험지도 등급 원본(표시용)은 판정에서 제외
 """
 RULES_SQL = ("SELECT id, hazard::text AS hazard, level::text AS level, label, condition FROM risk_rules "
              "WHERE is_active AND hazard::text = ANY(%(hazards)s) ORDER BY id")

@@ -1,0 +1,26 @@
+{
+  "id": "e7f8a9b0-c1d2-4e3f-9a4b-5c6d7e8f9a0b",
+  "label": "하린 댁",
+  "address": "경북 포항시 남구 구룡포읍 (예시 주소)",
+  "location": {
+    "lat": 35.9862,
+    "lng": 129.5489
+  },
+  "phone": "010-0000-0000",
+  "members": 1,
+  "needs": [
+    "elderly",
+    "mobility_limited"
+  ],
+  "has_app": true,
+  "caregiver": null,
+  "source": "self",
+  "consent": {
+    "at": "2026-10-01T09:20:00+09:00",
+    "method": "app",
+    "by": "본인"
+  },
+  "landslide_zone": "산사태위험지도 1등급 비탈 40m",
+  "note": null,
+  "updated_at": "2026-10-01T09:20:00+09:00"
+}

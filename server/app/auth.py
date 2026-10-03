@@ -8,8 +8,10 @@
     uid 필수   : user: AuthUser = Depends(current_user)
     uid 선택   : user: Optional[AuthUser] = Depends(optional_user)
     /internal  : Depends(require_internal)
+    /admin     : staff: StaffUser = Depends(require_staff)   (역할 responder·caregiver·admin, 아니면 403 FORBIDDEN)
 
 AUTH_MODE=dev 이면 'Bearer dev:<아무 uid>' 도 통과 (Firebase 없이 C·B 가 목업 API 를 호출할 때).
+  역할 시험: uid 가 responder· caregiver· admin 으로 시작하면 그 역할 (예 'Bearer dev:responder-1' → 방재단 화면)
 운영(배포 VM)에서는 반드시 AUTH_MODE=firebase.
 """
 from __future__ import annotations
@@ -18,7 +20,7 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
-from fastapi import Header, Request
+from fastapi import Depends, Header, Request
 
 from .config import settings
 from .errors import ApiError
@@ -120,3 +122,36 @@ def require_internal(x_internal_token: Optional[str] = Header(default=None)) -> 
             raise ApiError("UNAUTHORIZED", detail="internal_token")
     elif settings.auth_mode != "dev":
         raise ApiError("UNAUTHORIZED", detail="internal_token_not_configured")
+
+
+# ------------------------------------------------------------------ 역할 (v0.3)
+STAFF_ROLES = ("responder", "caregiver", "admin")
+
+
+@dataclass(frozen=True)
+class StaffUser:
+    uid: str
+    role: str
+    dev: bool = False
+
+
+def user_role(user: AuthUser) -> str:
+    """users.role (초대 코드로 받은 역할). dev 토큰은 uid 앞부분으로 역할을 정할 수 있음. 행이 없으면 resident"""
+    if user.dev:
+        for r in STAFF_ROLES:
+            if user.uid.startswith(r):
+                return r
+    try:
+        from . import db
+        row = db.fetch_one("SELECT role::text AS role FROM users WHERE firebase_uid = %(uid)s", {"uid": user.uid})
+    except Exception:  # noqa: BLE001 — DB 장애 시 권한 없음으로 (안전 쪽)
+        log.warning("역할 조회 실패 — resident 로 처리")
+        return "resident"
+    return (row or {}).get("role") or "resident"
+
+
+def require_staff(user: AuthUser = Depends(current_user)) -> StaffUser:
+    role = user_role(user)
+    if role not in STAFF_ROLES:
+        raise ApiError("FORBIDDEN", detail={"role": role})
+    return StaffUser(uid=user.uid, role=role, dev=user.dev)

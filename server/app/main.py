@@ -3,7 +3,9 @@
 실행 (server/ 에서)
   uvicorn app.main:app --reload                   # 로컬
   AUTH_MODE=dev uvicorn app.main:app --reload     # Firebase 없이 'Bearer dev:<uid>' 로 호출
-문서: http://localhost:8000/api/v1/docs  (배포 시 Caddy 가 /api/* 만 FastAPI 로 넘기므로 /api 아래에 둠)  (명세 원본은 1주차_DB_API명세/api/openapi.yaml)
+문서: http://localhost:8000/api/v1/docs  (배포 시 Caddy 가 /api/* 만 FastAPI 로 넘기므로 /api 아래에 둠)
+명세 원본: server/spec/openapi.yaml (api·ai·route 3개 서비스 규약, tests/test_spec.py 가 코드·목업과 대조)
+AI 대화·음성은 ai 서비스(/api/chat), 경로는 route 서비스(/api/route) — 이 서버에는 없음 (v0.3)
 """
 from __future__ import annotations
 
@@ -15,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import auth, db, errors
 from .config import settings
-from .routers import alerts, chat, dashboard, internal, risk, route, system, user
+from .routers import admin, alerts, dashboard, internal, risk, system, user
 
 log = logging.getLogger("app")
 API_PREFIX = "/api/v1"
@@ -48,7 +50,7 @@ def create_app() -> FastAPI:
     app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["*"],
                        allow_headers=["*"], expose_headers=["X-Mock"])
     errors.install(app)
-    for r in (system, user, dashboard, risk, alerts, chat, route, internal):
+    for r in (system, user, dashboard, risk, alerts, admin, internal):
         app.include_router(r.router, prefix=API_PREFIX)
     # 배포 헬스체크 경로 (B10: https://도메인/api/health) — /api/v1/health 와 같은 응답
     app.add_api_route("/api/health", system.get_health, methods=["GET"], include_in_schema=False)

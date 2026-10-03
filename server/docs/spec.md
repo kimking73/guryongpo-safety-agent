@@ -1,3 +1,6 @@
+> **v0.3 (2026-10-03)** — 추가 기능 7종용 데이터 구조·통신 규약은 [`spec-v0.3.md`](spec-v0.3.md) 가 최신이다.
+> 아래는 1주차(v0.2) 기록. 명세 원본은 언제나 `server/spec/openapi.yaml`.
+
 > **저장소 안 위치 (2026-09-27 이관)** — 이 문서는 1주차 작업 폴더 기준으로 쓰였다. 경로는 아래처럼 읽는다.
 > `db/schema.sql` → `db/init/01_schema.sql` · `db/seed.sql` → `02_seed.sql` · `seed_landslide` → `03` · `seed_knowledge` → `04` · `seed_shelters` → `05` · `seed_medical` → `06` ·
 > `db/erd.*` → `db/erd.*` (저장소 루트) · `api/openapi.yaml` → `server/spec/openapi.yaml` · `mock/` → `server/mock/` · `tools/` → `server/tools/` ·

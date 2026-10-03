@@ -1,0 +1,9 @@
+{
+  "alert_id": "d1e2f3a4-b5c6-4d7e-8f90-a1b2c3d4e5f6",
+  "incident_id": "c0ffee00-1d2e-4f30-9a41-5b6c7d8e9f01",
+  "status": "evacuating",
+  "recorded_at": "2026-10-05T14:31:20+09:00",
+  "recheck_after_min": 10,
+  "message": "대피 중으로 기록했어요. 10분 뒤 다시 확인할게요. 도착하면 '대피 완료'를 눌러 주세요.",
+  "call_suggested": false
+}

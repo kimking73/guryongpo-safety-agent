@@ -15,7 +15,7 @@ server/
     layers.py          지도 레이어 (stations·landslide_zones 실데이터)
     mocks.py           목업 응답 (X-Mock: true)
     schemas.py         요청 본문 모델 (spec/openapi.yaml 과 같은 제약)
-    routers/           system · user · dashboard · risk · alerts · chat · route · internal
+    routers/           system · user · dashboard · risk · alerts · admin · internal   (대화는 ai, 경로는 route 서비스)
   collector/           수집기 (collector 서비스 — 같은 이미지, `python -m collector`)
     jobs.py            작업 12개 정의 (호출 → 변환 → 적재 → ingest_runs)
     fetch.py           live 호출 / replay(저장 원문) · 기상청 발표시각 계산
@@ -27,8 +27,9 @@ server/
     engine.py          최신 관측값 + risk_rules → risk_assessments 동기화
     queries.py         /risk (좌표), /risk/areas (영역 GeoJSON)
     simulate.py        시연 시나리오 (모의 관측값 주입)
-  spec/openapi.yaml    API 명세 (https://editor.swagger.io 에 붙여넣으면 문서)
+  spec/openapi.yaml    API 명세 v0.3 — api·ai·route 3개 서비스 규약 (https://editor.swagger.io 에 붙여넣으면 문서)
   mock/                목업 응답 JSON · mock/external = 원천 API 저장 원문 (replay·테스트용)
+  docs/spec-v0.3.md    v0.3 데이터 구조·통신 규약 (역할·취약 가구·대피 확인·방재단, 2026-10-03 확정 사항)
   docs/spec.md         1주차 DB 스키마·API 명세·데이터 연동 상세 (ERD: ../db/erd.png)
   tools/               개발 스크립트 (API 일괄 호출, 시드 SQL 생성, 목업 검증) — tools/README.md
   data/                산사태 취약지역 CSV 원본 (공공데이터포털)
@@ -50,11 +51,12 @@ docker compose exec api python -m collector --once kma.aws      # 작업 하나�
 - DB 는 볼륨이 비어 있을 때만 `db/init/*.sql` 을 이름 순서대로 실행한다.
 - **시드(02~)가 바뀌면** `docker compose run --rm loader` — 수집한 관측값·사용자 데이터는 두고 정적 데이터만 다시 적재 (여러 번 실행해도 결과 같음)
 - **스키마(01)가 바뀌면** loader 가 없는 테이블을 알려 주고 멈춘다 → 로컬은 `docker compose down -v` 후 다시 up, 배포 DB 는 해당 CREATE 문 직접 적용
+- **스키마 추가분(`01m_*.sql`, v0.3~)** 은 loader 가 매번 먼저 적용한다 (IF NOT EXISTS) → 볼륨 초기화 없이 `docker compose run --rm loader` 한 번이면 된다
 
 ### 정적 데이터 적재 — loader (A7)
 
 ```bash
-docker compose run --rm loader              # 02 판단 기준·관측소·맨홀 · 03 산사태 · 04 행동요령 · 05 대피소 · 06 응급의료
+docker compose run --rm loader              # 01m 스키마 추가분 · 02 판단 기준·관측소·맨홀 · 03 산사태 · 04 행동요령 · 05 대피소 · 06 응급의료 · 09 산사태 위험지도
 docker compose run --rm loader --dry-run    # 적용해 보고 되돌림 (행 수만 확인)
 docker compose run --rm loader --check      # 적용 없이 행 수 확인 — 최소 행 수 미달이면 종료 코드 1
 ```
@@ -124,7 +126,12 @@ DATABASE_URL=postgresql://guardian:guardian-local-only@localhost:5433/guardian .
 | `GET /risk/rules` | **실데이터** — risk_rules 30개 |
 | `GET /dashboard/layers/stations` | **실데이터** — 관측소 + 최신값 (`level` 은 포항 DT 등급, 대기 60분·자외선 90분 넘으면 `stale: true`) |
 | `GET /dashboard/layers/landslide_zones` | **실데이터** — 산사태 취약지역 |
-| 그 외 (`/user`, `/dashboard`, `/risk`, `/alerts`, `/chat`, `/voice`, `/route` …) | 목업 (`X-Mock: true`) — 요청 검증·인증은 실제와 동일 |
+| `GET /dashboard/layers/{shelters,medical,manholes}` | **실데이터** — 대피소(산사태 때 비추천 `unsuitable_for` 포함)·의료시설(응급실 가용병상 `er`)·맨홀 |
+| `GET /hotlines` | **실데이터** — 긴급 전화 (public_hotlines) |
+| `POST /user/role`, `POST /internal/invites` | **실데이터** — 초대 코드 발급·확인 → users.role (dev 모드는 `DEMO-RESPONDER` 등도 허용) |
+| 그 외 (`/user`, `/user/household`, `/dashboard`, `/alerts`, `/alerts/{id}/response`, `/admin/*` …) | 목업 (`X-Mock: true`) — 요청 검증·인증·권한은 실제와 동일. 방재단 화면은 `Bearer dev:responder-1` |
+
+대화(`/api/chat`)는 ai 서비스, 경로(`/api/route`)는 route 서비스 — v0.3 에서 이 서버의 목업 `/chat`·`/voice`·`/route` 는 삭제했다.
 
 ### 침수 판정 (A3)
 
@@ -168,15 +175,16 @@ cd server && .venv/bin/python -m pytest -q        # DB·네트워크 없이
 docker compose exec db sh -c 'createdb -U "$POSTGRES_USER" guardian_test'
 docker compose run --rm -e DATABASE_URL=postgresql://guardian:guardian-local-only@db:5432/guardian_test loader   # 빈 DB → 스키마+시드
 cd server && TEST_DATABASE_URL=postgresql://guardian:guardian-local-only@localhost:5433/guardian_test .venv/bin/python -m pytest -q
-cd server/tools && python3 validate.py            # 명세(spec/openapi.yaml) ↔ 목업(mock/) 검증
+cd server/tools && python3 validate.py            # 명세(spec/openapi.yaml) ↔ 목업(mock/) 검증 (pytest 의 tests/test_spec.py 와 같은 내용)
 ```
 
 ## 6. 다음 단계에서 바꿀 곳
 
 - A4 (재난 확장): `risk/engine.py` 에 호우(AWS 3·12시간 누적, 1·2번)·강풍·태풍·산사태·미세먼지·자외선 판정 추가, 시나리오 추가
 - A5 (경고): `/user`, `/device-token`, `/alerts` 를 users·user_devices·user_alerts 로 → `routers/user.py`, `routers/alerts.py`
-- A7 이후: 위험지역 고정 영역은 산사태 취약지역만 사용 (침수·해안 영역 레이어는 제거, 침수는 실시간 판정 영역 risk_areas). 새 정적 데이터는 `db/init/07_*.sql` 로 추가 → loader 가 자동 포함. route 서비스가 임시 GeoJSON 대신 hazard_zones·manholes 를 읽도록 B 와 합의
-- B: `/api/chat` 은 ai 서비스, `/api/route` 는 route 서비스가 실제 구현 — 여기 `/api/v1/chat`·`/api/v1/route` 목업은 앱 개발용 (Caddy 경로 정리 시 합의)
+- A12·A13·A14 (대피 응답·취약 가구·방문): `routers/alerts.py`(response), `routers/admin.py`, `routers/user.py`(household) 를 care 스키마로 — 규약은 `docs/spec-v0.3.md`
+- A7 이후: 위험지역 고정 영역은 산사태 취약지역만 사용 (침수·해안 영역 레이어는 제거, 침수는 실시간 판정 영역 risk_areas). 새 정적 데이터는 `db/init/1x_*.sql` 로 추가 → loader 가 자동 포함 (스키마 추가분은 `01m_*.sql`, IF NOT EXISTS 로). route 서비스가 임시 GeoJSON 대신 hazard_zones·manholes 를 읽도록 B 와 합의
+- B: `/api/chat` 은 ai 서비스, `/api/route` 는 route 서비스가 실제 구현 (형식은 spec/openapi.yaml 의 ai·route 태그)
 
 ## 자료 신선도 규칙 (`risk/freshness.py`)
 - **표시**: 수집이 실패해도 가장 최근 성공값을 보여 줌. 지도 레이어 `stations` 에 `age_min`, `age_label`("14:10 기준 · 50분 전 자료"), `stale` 포함 → 앱·Agent 는 stale 이면 "오래된 자료"로 안내

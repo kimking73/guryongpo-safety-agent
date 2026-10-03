@@ -8,7 +8,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 # 00_extensions · 01_schema : 스키마 (빈 DB 에서만 실행). 02~ : 시드 (매번 실행, 재적용 안전)
+# 01m_* : 스키마 추가분 (IF NOT EXISTS 로 재실행 안전) — 기존 DB 에도 매번, 스키마 확인보다 먼저 적용 (v0.3~)
 SCHEMA_PREFIXES = ("00_", "01_")
+MIGRATION_PREFIXES = ("01m_",)
 
 # 적재 후 비어 있으면 안 되는 정적 테이블 → 최소 행 수 (시연 데이터 기준, 줄어들면 원천·생성 스크립트 확인)
 REQUIRED: dict[str, int] = {
@@ -37,14 +39,20 @@ def find_seed_dir(explicit: str | None = None) -> Path:
 def split_files(seed_dir: Path) -> tuple[list[Path], list[Path]]:
     files = sorted(seed_dir.glob("*.sql"))
     schema = [f for f in files if f.name.startswith(SCHEMA_PREFIXES)]
-    seeds = [f for f in files if f not in schema]
+    seeds = [f for f in files if f not in schema and not f.name.startswith(MIGRATION_PREFIXES)]
     return schema, seeds
 
 
+def migration_files(seed_dir: Path) -> list[Path]:
+    return [f for f in sorted(seed_dir.glob("*.sql")) if f.name.startswith(MIGRATION_PREFIXES)]
+
+
 def schema_tables(schema_files: list[Path]) -> list[str]:
+    """CREATE TABLE 이름 목록. public 이 아닌 스키마는 'care.households' 처럼 스키마를 붙여 반환"""
     names: list[str] = []
     for f in schema_files:
-        names += re.findall(r"^CREATE TABLE\s+(?:IF NOT EXISTS\s+)?(\w+)", f.read_text(encoding="utf-8"), re.M)
+        found = re.findall(r"^CREATE TABLE\s+(?:IF NOT EXISTS\s+)?((?:\w+\.)?\w+)", f.read_text(encoding="utf-8"), re.M)
+        names += [n[len("public."):] if n.startswith("public.") else n for n in found]
     return names
 
 
@@ -72,8 +80,9 @@ def counts(conn, tables=REQUIRED) -> dict[str, int]:
 
 
 def _existing_tables(conn) -> set[str]:
-    rows = conn.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'public'").fetchall()
-    return {r[0] for r in rows}
+    rows = conn.execute("SELECT schemaname, tablename FROM pg_tables "
+                        "WHERE schemaname NOT IN ('pg_catalog', 'information_schema')").fetchall()
+    return {r[1] if r[0] == "public" else f"{r[0]}.{r[1]}" for r in rows}
 
 
 def apply(conn, seed_dir: Path, dry_run: bool = False, log=print) -> Report:
@@ -84,7 +93,8 @@ def apply(conn, seed_dir: Path, dry_run: bool = False, log=print) -> Report:
     t0 = time.monotonic()
     rep = Report(dry_run=dry_run)
     schema_files, seed_files = split_files(seed_dir)
-    wanted = schema_tables(schema_files)
+    migrations = migration_files(seed_dir)
+    wanted = schema_tables(schema_files + migrations)
     try:
         existing = _existing_tables(conn)
         if not existing & set(wanted):
@@ -93,7 +103,11 @@ def apply(conn, seed_dir: Path, dry_run: bool = False, log=print) -> Report:
                 conn.execute(f.read_text(encoding="utf-8"))
                 rep.applied.append(f.name)
             rep.created_schema = True
-            existing = _existing_tables(conn)
+        for f in migrations:                      # 스키마 추가분 (재실행 안전) — 기존 DB 에도 먼저 적용
+            log(f"스키마 추가분: {f.name}")
+            conn.execute(f.read_text(encoding="utf-8"))
+            rep.applied.append(f.name)
+        existing = _existing_tables(conn)
         rep.missing_tables = [t for t in wanted if t not in existing]
         if rep.missing_tables:
             raise RuntimeError(

@@ -29,7 +29,7 @@ def test_kma_times():
 @pytest.mark.parametrize("key", ["pohang_dt.water_level", "pohang_dt.air_realtime", "pohang_dt.uv",
                                  "pohang_dt.air_devices", "kma.warnings", "kma.aws", "kma.ncst", "kma.ultra_fcst",
                                  "kma.vilage_fcst", "kma.mid_fcst", "kma.typhoon",
-                                 "safety24.disaster_messages"])
+                                 "safety24.disaster_messages", "nmc.er_beds"])
 def test_jobs_replay(fake_db, replay, key):
     from collector import jobs
     fake_db.rows["INSERT INTO ingest_runs"] = [{"id": 1}]
@@ -119,3 +119,15 @@ def test_freshness_rules():
     j = judge_source("wind_speed", rows, now)
     assert j["external_id"] == "grid_105_94" and j["fallback_rank"] == 1         # AWS 실패 → 격자로 대체
     assert judge_source("wind_gust", rows, now) is None                          # 순간풍속은 대체 출처 없음 → 판단 불가
+
+
+def test_nmc_er_beds():
+    from pathlib import Path
+    from collector.converters import nmc_er
+    text = (Path(__file__).resolve().parent.parent / "mock/external/nmc_er_beds_pohang.txt").read_text(encoding="utf-8")
+    rows = nmc_er.availability(text)
+    assert len(rows) == 5 and all(r["observed_at"].endswith("+09:00") for r in rows)
+    assert {r["external_id"] for r in rows} >= {"A2700016", "A2700002"}          # 성모·세명기독
+    with pytest.raises(nmc_er.NmcError, match="12"):                             # 오퍼레이션 철자 오류 응답
+        nmc_er.availability('<OpenAPI_ServiceResponse><cmmMsgHeader><returnReasonCode>12</returnReasonCode>'
+                            '<returnAuthMsg>NO_OPENAPI_SERVICE_ERROR</returnAuthMsg></cmmMsgHeader></OpenAPI_ServiceResponse>')

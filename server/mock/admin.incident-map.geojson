@@ -1,0 +1,134 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "id": "area",
+      "geometry": {
+        "type": "MultiPolygon",
+        "coordinates": [
+          [
+            [
+              [
+                129.5544,
+                35.9896
+              ],
+              [
+                129.5577,
+                35.9896
+              ],
+              [
+                129.5577,
+                35.992
+              ],
+              [
+                129.5544,
+                35.992
+              ],
+              [
+                129.5544,
+                35.9896
+              ]
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "kind": "area",
+        "incident_id": "c0ffee00-1d2e-4f30-9a41-5b6c7d8e9f01",
+        "hazard": "flood",
+        "level": "warning"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "7a000000-0000-4000-8000-000000000001",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          129.5561,
+          35.9906
+        ]
+      },
+      "properties": {
+        "kind": "target",
+        "target_id": "7a000000-0000-4000-8000-000000000001",
+        "label": "앱 사용자 (가구 미등록)",
+        "status": "need_help",
+        "priority_rank": 1,
+        "needs": [],
+        "assigned_to_me": true
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "7a000000-0000-4000-8000-000000000003",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          129.5566,
+          35.9908
+        ]
+      },
+      "properties": {
+        "kind": "target",
+        "target_id": "7a000000-0000-4000-8000-000000000003",
+        "label": "병포리 최OO 댁 (예시)",
+        "status": "no_response",
+        "priority_rank": 2,
+        "needs": [
+          "elderly",
+          "wheelchair"
+        ],
+        "assigned_to_me": false
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "7a000000-0000-4000-8000-000000000004",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          129.5489,
+          35.9862
+        ]
+      },
+      "properties": {
+        "kind": "target",
+        "target_id": "7a000000-0000-4000-8000-000000000004",
+        "label": "하린 댁",
+        "status": "evacuating",
+        "priority_rank": 3,
+        "needs": [
+          "elderly",
+          "mobility_limited"
+        ],
+        "assigned_to_me": false
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "7a000000-0000-4000-8000-000000000002",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          129.5552,
+          35.9898
+        ]
+      },
+      "properties": {
+        "kind": "target",
+        "target_id": "7a000000-0000-4000-8000-000000000002",
+        "label": "구룡포리 박OO 어르신 댁 (예시)",
+        "status": "evacuated",
+        "priority_rank": 4,
+        "needs": [
+          "elderly",
+          "living_alone",
+          "hearing"
+        ],
+        "assigned_to_me": false
+      }
+    }
+  ]
+}

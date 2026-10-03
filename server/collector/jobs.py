@@ -19,7 +19,7 @@ from typing import Callable
 
 from app.config import settings
 from . import fetch, store
-from .converters import kma_typhoon, kma_vilage, kma_warn_aws, pohang_dt_air, pohang_dt_water, safety_msg
+from .converters import kma_typhoon, kma_vilage, kma_warn_aws, nmc_er, pohang_dt_air, pohang_dt_water, safety_msg
 
 log = logging.getLogger("collector")
 KST = timezone(timedelta(hours=9))
@@ -208,6 +208,21 @@ def run_disaster_messages(run_id: int) -> int:
     return store.upsert_disaster_messages(rows)
 
 
+# ------------------------------------------------------------------ 응급실 실시간 가용병상 (국립중앙의료원)
+NMC_BEDS_URL = "https://apis.data.go.kr/B552657/ErmctInfoInqireService/getEmrrmRltmUsefulSckbdInfoInqire"
+
+
+def run_er_beds(run_id: int) -> int:
+    """포항 응급의료기관 5곳 가용병상. 병원이 입력한 시각(hvidate) 기준이라 같은 값은 PK 로 중복 저장 안 됨"""
+    text = fetch.get("nmc_er_beds_pohang", NMC_BEDS_URL,
+                     {"serviceKey": _need(settings.data_go_kr_key, "DATA_GO_KR_KEY"), "STAGE1": "경상북도",
+                      "STAGE2": "포항시", "pageNo": "1", "numOfRows": "50"}).text
+    rows = nmc_er.availability(text)
+    if not rows:
+        raise fetch.FetchError("응급실 가용병상 0건")
+    return store.insert_er_availability(rows)
+
+
 # ------------------------------------------------------------------ 판정 (A3)
 def run_flood_risk(run_id: int) -> int:
     from risk import engine
@@ -233,6 +248,7 @@ JOBS: list[Job] = [
     Job("kma", "vilage_fcst", run_vilage_fcst, {"hour": "2,5,8,11,14,17,20,23", "minute": "20"}, stale_after_min=7 * 60),
     Job("kma", "mid_fcst", run_mid_fcst, {"hour": "6,18", "minute": "30"}, stale_after_min=26 * 60),
     # 재난문자: 일일 호출 한도 1,000회 → 2분 = 720회/일 (재시작·수동 테스트·개발 PC 여유 280회). 86초 미만은 한도 초과
+    Job("nmc", "er_beds", run_er_beds, EVERY_10, stale_after_min=40),    # 응급실 가용병상 (일 144회)
     Job("safety24", "disaster_messages", run_disaster_messages, {"minute": "*/2"}, stale_after_min=10),
     Job("kma", "typhoon", run_typhoon, {"hour": "*/3", "minute": "10"}, stale_after_min=7 * 60),
     # 판정은 수위 수집(매 10분 정각) 1분 뒤 — 수집 직후 값으로 판정

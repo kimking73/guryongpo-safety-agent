@@ -1,38 +1,55 @@
 openapi: 3.1.0
 info:
   title: 구룡가디언 API
-  version: 0.2.0
+  version: 0.3.0
   description: |
-    구룡포 재난 지킴이 — FastAPI 서버 명세 (1주차 A1, 전 팀 공유용)
+    구룡포 재난 지킴이 — 서버 3개(api · ai · route)의 통신 규약 (전 팀 공유용, 2026-10-03 v0.3 고정)
+
+    ## 서비스 구성
+    | 서비스 | 담당 | 로컬 주소 | 배포 (Caddy, 같은 도메인) | 이 문서의 경로 |
+    |---|---|---|---|---|
+    | api — 데이터·위험 판정·사용자·대피 | A | `localhost:8000/api/v1` | `/api/v1/*` | `/health` … `/admin/*` (기본 서버) |
+    | ai — LangGraph 대화·음성 | B | `localhost:8001` | `/api/chat`, `/api/voice` | `/api/chat` (경로별 servers) |
+    | route — GraphHopper 경로 | B | `localhost:8002` | `/api/route*` | `/api/route`, `/api/route/check`, `/api/route/sea` |
+
+    ai·route 의 요청·응답은 각 서비스 코드(Pydantic 모델)가 원본이다. 이 문서는 그 모양을 그대로 옮겨 적은 것이며,
+    바뀌면 B 가 이 문서도 같이 고친다. (v0.2 까지 api 에 있던 목업 `/chat`·`/voice`·`/route` 는 실제 서비스와 형식이 달라 v0.3 에서 삭제)
 
     ## 공통 규약
-    - Base URL: `/api/v1`
-    - 인증: Firebase 익명 로그인 → 앱이 받은 **Firebase ID 토큰**을 `Authorization: Bearer <idToken>` 로 전송.
-      서버는 firebase-admin 으로 검증하고 `uid` 로 사용자를 식별한다. 별도 회원가입/비밀번호 없음.
-      (기기 간 동기화가 필요하면 Firebase 계정 연결(linkWithCredential)로 같은 uid 유지 — 2주차 이후)
-      `security: []` 로 표시된 엔드포인트만 토큰 없이 호출 가능.
-    - 실시간 전달: 백그라운드는 **FCM 푸시**, 앱이 켜져 있을 때는 **`GET /alerts` 폴링**.
-      폴링 간격은 서버가 응답의 `next_poll_sec` 로 지정한다 (평상시 60초, 재난 모드 15초).
-    - 음성: 앱은 녹음 파일만 `POST /voice` 로 올린다. **STT·TTS 호출은 서버가 담당** (Google Cloud). 앱에 Google 키를 두지 않는다.
-    - 좌표: 요청은 `lat`,`lng` (쿼리) 또는 `{ "lat", "lng" }` 객체. 지도 도형은 GeoJSON 이며 좌표 순서는 `[lng, lat]`.
+    - 인증: Firebase 익명 로그인 → **Firebase ID 토큰**을 `Authorization: Bearer <idToken>` 로 전송.
+      api 는 firebase-admin 으로 검증해 `uid` 로 사용자를 찾는다. `security: []` 인 경로만 토큰 없이 호출 가능.
+      개발: api 를 `AUTH_MODE=dev` 로 띄우면 `Bearer dev:<uid>` 허용 (배포 금지).
+    - 역할(role): `resident` 주민(기본) / `responder` 자율방재단 / `caregiver` 생활지원사 / `admin` 읍 담당자.
+      주민이 앱에서 **초대 코드**를 입력하면(`POST /user/role`) 역할이 붙는다. `/admin/*` 는 responder·caregiver·admin 만.
+      caregiver 는 자신이 담당(`caregiver_user_id`)인 가구만 본다. 권한이 없으면 403 `FORBIDDEN`.
+    - 실시간 전달: 앱이 꺼져 있으면 **FCM 푸시**(`FcmPayload`), 켜져 있으면 **폴링**.
+      주민 `GET /alerts` — 간격은 응답의 `next_poll_sec` (평상시 60초, 재난 모드 15초)
+      방재단 `GET /admin/incidents/{id}` — `next_poll_sec` 10초. 같은 내용이 푸시와 폴링으로 모두 올 수 있으니 앱은 `id` 로 중복을 없앤다.
+    - 대피 확인: 경고 중 `response_required=true` 인 것은 버튼 3개 — **대피 완료**(`evacuated`) / **대피 중**(`evacuating`) / **도움 필요**(`need_help`).
+      알림 버튼·앱 대시보드·음성(B12) 모두 `POST /alerts/{alert_id}/response` 하나로 기록한다 (`via` 로 수단 구분).
+    - 음성: 앱은 녹음 파일만 ai 서비스로 보낸다. STT·TTS 호출은 서버가 한다 (앱에 Google 키 없음). 음성 API 형식은 B5 에서 확정 후 추가.
+    - 좌표: api 는 `{ "lat", "lng" }`, **ai·route 는 `{ "lat", "lon" }`** (서비스별로 다르니 주의). 지도 도형은 GeoJSON `[lng, lat]`.
+      route 의 경로 선(`geometry`)은 GeoJSON 이 아니라 **인코딩된 polyline** (Google 형식, 정밀도 1e5).
     - 시각: ISO 8601, KST (`2026-10-05T14:30:00+09:00`)
-    - 위험도 표기: 모든 응답에서 `RiskItem` 형식 하나만 사용 (hazard 코드 + level 코드 + level_num 0~4)
-    - 에러: 모든 4xx/5xx 는 `Error` 형식. 목업 JSON 은 `mock/` 폴더 참고
+    - 위험도 표기: api 응답은 `RiskItem` 하나만 사용 (hazard 코드 + level 코드 + level_num 0~4)
+    - 개인정보: 취약 가구·대피 응답·방문 기록은 DB `care` 스키마 — api 만 읽고 쓴다 (AI 읽기 전용 계정은 접근 불가)
+    - 에러: api 의 4xx/5xx 는 모두 `Error` 형식. 목업 응답에는 `X-Mock: true` 헤더. 목업 JSON 은 `server/mock/`
 servers:
   - url: http://localhost:8000/api/v1
-    description: 로컬 개발
+    description: api (A) 로컬. 배포는 https://<도메인>/api/v1
 
 tags:
   - { name: health }
-  - { name: user, description: 사용자 등록·인적사항·장소·비상연락처 }
+  - { name: user, description: 사용자 등록·인적사항·장소·비상연락처·역할 }
+  - { name: household, description: '취약 가구 본인 등록 (주민 앱, 민감정보 동의 필수)' }
   - { name: device-token, description: FCM 토큰 등록 }
-  - { name: dashboard, description: 맞춤형 대시보드와 지도 레이어 }
+  - { name: dashboard, description: '맞춤형 대시보드, 지도 레이어, 긴급 전화' }
   - { name: risk, description: Risk engine 판정 결과 }
-  - { name: alerts, description: 선제적 경고 (폴링) }
-  - { name: chat, description: AI Agent 텍스트 대화 }
-  - { name: voice, description: 음성 대화 (서버 측 STT·TTS) }
-  - { name: route, description: 안전 대피 경로 (GraphHopper) }
-  - { name: internal, description: 운영·시연용 (관리자 전용) }
+  - { name: alerts, description: '선제적 경고 (폴링) · 대피 확인 응답 (A5·A12)' }
+  - { name: admin, description: '방재단·생활지원사 — 대피 현황·가구 관리·방문 기록 (A12~A14, B13)' }
+  - { name: internal, description: '운영·시연용 (X-Internal-Token)' }
+  - { name: ai, description: 'ai 서비스 (B) — 실제 경로 /api/chat, 서버 localhost:8001' }
+  - { name: route, description: 'route 서비스 (B) — 실제 경로 /api/route*, 서버 localhost:8002' }
 
 security:
   - firebaseAuth: []
@@ -189,6 +206,76 @@ paths:
       responses:
         '204': { description: OK }
 
+  /user/role:
+    post:
+      tags: [user]
+      summary: 초대 코드로 역할 받기 (방재단·생활지원사·관리자)
+      description: |
+        읍사무소가 발급한 초대 코드를 입력하면 역할이 바뀐다. 코드는 서버에 해시로만 저장된다 (`care.invite_codes`).
+        목업(AUTH_MODE=dev): `DEMO-RESPONDER` · `DEMO-CAREGIVER` · `DEMO-ADMIN` 이 각 역할, 그 외는 400 INVALID_INVITE.
+      operationId: claimRole
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [invite_code]
+              properties:
+                invite_code: { type: string, minLength: 4, maxLength: 64 }
+      responses:
+        '200':
+          description: 역할 부여됨  (mock/role.json)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleGrant' }
+        '400': { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [user]
+      summary: 역할 내려놓기 (주민으로 돌아감)
+      operationId: dropRole
+      responses:
+        '204': { description: 주민(resident)으로 변경됨 }
+
+  # ================================================================ household (주민 본인 등록)
+  /user/household:
+    get:
+      tags: [household]
+      summary: 내가 등록한 취약 가구 정보 (없으면 404)
+      operationId: getMyHousehold
+      responses:
+        '200':
+          description: OK  (mock/household.json)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Household' }
+        '404': { $ref: '#/components/responses/Error' }
+    put:
+      tags: [household]
+      summary: 취약 가구로 본인 등록·수정 (민감정보 수집 동의 필수)
+      description: |
+        `consent=true` 가 없으면 422. 등록하면 대피 상황 때 방재단 화면에 표시되고 방문 우선순위 계산에 쓰인다.
+        위치는 보통 등록 장소 '집'의 좌표를 그대로 보낸다.
+      operationId: putMyHousehold
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SelfHouseholdInput' }
+      responses:
+        '200':
+          description: 등록·수정됨
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Household' }
+        '422': { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [household]
+      summary: 동의 철회 — 가구 정보와 그 가구의 대피 응답·방문 기록을 즉시 삭제
+      operationId: deleteMyHousehold
+      responses:
+        '204': { description: 삭제됨 }
+
   # ================================================================ device-token
   /device-token:
     post:
@@ -248,11 +335,22 @@ paths:
       tags: [dashboard]
       summary: 지도 레이어 GeoJSON (대피소·의료시설·위험지역·맨홀·관측소·위험영역)
       description: |
-        stations 레이어의 properties = { name, kind, source, metric, value, unit, source_level, source_level_label, level, observed_at } (최신값 포함)
-        shelters: { id, name, shelter_types, address, capacity, phone, is_indoor, is_accessible, in_risk_area } — in_risk_area = 현재 주의 이상 위험 영역 안
-        medical: { id, name, kind, address, phone, er_phone, emergency_class } — 구룡포 안에 응급의료기관이 없어 bbox 생략 시 포항 전체
-        manholes: { id, kind(smart = 포항 DT 스마트맨홀), name, source }
-        위험지역 고정 영역은 landslide_zones(산사태 취약지역)만. 침수는 실시간 판정 영역 risk_areas
+        레이어별 Feature.properties
+        - stations: { name, kind, source, metric, value, unit, source_level, source_level_label, level, observed_at, observed_label,
+          stale, age_min, age_label, metrics, simulated }
+          — 자료 신선도: 값은 수집 실패 때도 최근 성공값을 보여 주고 `age_label`("14:10 기준 · 50분 전 자료")을 같이 표시.
+            유효 시간(수위계 40·대기 60·자외선 90·AWS 30분)을 넘으면 `stale=true` → 앱은 회색·"오래된 자료"
+        - shelters: { id, name, shelter_types, address, capacity, phone, is_indoor, is_accessible, in_risk_area, unsuitable_for, unsuitable_reason }
+          — in_risk_area = 대피소가 현재 주의 이상 위험 영역 안 (안내에서 제외)
+          — unsuitable_for = 그 재난 때 권하지 않음. 지금은 ["landslide"] 만: 산사태위험지도 1등급 비탈 100m 안 (예 "1등급 비탈 35m")
+        - medical: { id, name, kind, address, phone, er_phone, emergency_class, er } — er = { beds, ambulance, observed_at, stale } 응급실 가용병상
+          (국립중앙의료원, 10분 수집, 40분 지나면 stale). 구룡포 안에 응급의료기관이 없어 bbox 생략 시 포항 전체
+        - manholes: { id, kind(smart = 포항 DT 스마트맨홀), name, source }
+        - landslide_zones: { name, hazard, grade, kind, reason, area_m2, shelter_distance_m }
+          — kind = riskmap (산림청 산사태위험지도 1·2등급, 지도 표시용) | designated (지정 산사태 취약지역, reason = 지정사유)
+          — 판정용 100m 범위(riskmap_g1_buf100 등)는 이 레이어에 나오지 않고, 판정되면 risk_areas 로 보임
+        - risk_areas: /risk/areas 와 같음
+        위험지역 고정 영역은 산사태만 (침수·해안 고정 영역 없음 — 침수는 실시간 판정 영역 risk_areas)
       operationId: getLayer
       security: []
       parameters:
@@ -265,6 +363,24 @@ paths:
             application/geo+json:
               schema: { $ref: '#/components/schemas/FeatureCollection' }
         '404': { $ref: '#/components/responses/Error' }
+
+  /hotlines:
+    get:
+      tags: [dashboard]
+      summary: 긴급 전화 목록 (119·포항시 재난안전상황실·구룡포읍 등, 실데이터)
+      description: 재난 종류를 주면 그 재난용 번호와 전 재난 공통 번호를 priority 순으로 반환
+      operationId: getHotlines
+      security: []
+      parameters:
+        - { name: hazard, in: query, schema: { $ref: '#/components/schemas/Hazard' } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Hotline' }
 
   # ================================================================ risk
   /risk:
@@ -326,8 +442,9 @@ paths:
       description: |
         앱이 포그라운드일 때 `next_poll_sec` 간격으로 호출한다.
         lat/lng 를 함께 보내면 서버가 기기의 마지막 위치를 갱신하고 그 위치로 즉시 위험 판정을 한다.
-        `since` 이후 생성된 경고만 반환한다 (첫 호출은 생략 → 최근 24시간).
+        `since` 이후 생성되거나 상태가 바뀐 경고를 반환한다 (첫 호출은 생략 → 최근 24시간).
         같은 경고가 FCM 으로도 오므로, 앱은 `id` 로 중복을 제거한다.
+        `evacuation` = 지금 진행 중인 대피 상황에서 내 대피 확인 상태 (없으면 null) — 대시보드 상단 카드.
       operationId: pollAlerts
       parameters:
         - { name: since, in: query, schema: { type: string, format: date-time } }
@@ -347,6 +464,7 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/Alert' }
                   mode: { type: string, enum: [normal, emergency] }
+                  evacuation: { oneOf: [ { $ref: '#/components/schemas/MyEvacuation' }, { type: 'null' } ] }
                   server_time: { type: string, format: date-time, description: '다음 폴링의 since 로 사용' }
                   next_poll_sec: { type: integer, examples: [60, 15] }
   /alerts/{alert_id}/read:
@@ -358,48 +476,229 @@ paths:
         - { name: alert_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         '204': { description: OK }
-
-  # ================================================================ chat
-  /chat:
+  /alerts/{alert_id}/response:
     post:
-      tags: [chat]
-      summary: 질문 → AI Agent 답변 (session_id 생략 시 새 대화 생성)
+      tags: [alerts]
+      summary: 대피 확인 응답 — 대피 완료 / 대피 중 / 도움 필요 (알림 버튼·대시보드·음성 공통)
       description: |
-        동기 응답. 서버 타임아웃 30초. 검증 agent 가 재생성을 요청하면 시간이 늘어날 수 있으므로
-        앱은 "답변 생성 중" 상태를 표시한다. 30초 초과 시 504 와 함께 안전한 기본 안내가 담긴 Error.detail 을 받는다.
-      operationId: postChat
+        `response_required=true` 인 경고에만 쓸 수 있다. 같은 경고에 여러 번 보내면 마지막 상태로 바뀌고 이력이 남는다.
+        - `need_help` 이면 서버가 즉시 방재단에게 FCM(`kind=escalation`)을 보낸다. `location` 을 꼭 함께 보낸다.
+        - `evacuating` 이면 `recheck_after_min` 뒤 다시 확인 알림(`kind=reminder`)이 온다.
+        - 음성(B12): 앱이 ai 서비스의 음성 분류 결과를 받아 `via=voice` 로 이 API 를 호출한다 (서버 간 호출 없음).
+        대피 상황이 이미 종료됐으면 409 CONFLICT.
+      operationId: respondAlert
+      parameters:
+        - { name: alert_id, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/ChatRequest' }
+            schema: { $ref: '#/components/schemas/EvacuationResponseInput' }
       responses:
         '200':
-          description: OK  (mock/chat.json)
+          description: 기록됨  (mock/alert-response.json)
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ChatResponse' }
-        '504': { $ref: '#/components/responses/Error' }
-  /chat/sessions:
+              schema: { $ref: '#/components/schemas/EvacuationResponseResult' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+
+  # ================================================================ admin (방재단·생활지원사)
+  /admin/overview:
     get:
-      tags: [chat]
-      summary: 내 대화 목록
-      operationId: listChatSessions
+      tags: [admin]
+      summary: 전체 요약 — 등록 가구 수, 사정별 수, 진행 중인 대피 상황과 상태별 수
+      description: 방재단 메인 페이지 맨 위. caregiver 는 담당 가구만 센다.
+      operationId: adminOverview
       responses:
         '200':
-          description: OK
+          description: OK  (mock/admin.overview.json)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminOverview' }
+        '403': { $ref: '#/components/responses/Error' }
+
+  /admin/incidents:
+    get:
+      tags: [admin]
+      summary: 대피 상황 목록 (기본 진행 중)
+      operationId: listIncidents
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [active, closed, all], default: active } }
+      responses:
+        '200':
+          description: OK  (mock/admin.incidents.json)
           content:
             application/json:
               schema:
                 type: array
-                items: { $ref: '#/components/schemas/ChatSession' }
-  /chat/sessions/{session_id}:
+                items: { $ref: '#/components/schemas/Incident' }
+        '403': { $ref: '#/components/responses/Error' }
+    post:
+      tags: [admin]
+      summary: 대피 상황 수동 시작 (판정 엔진이 못 잡은 상황 — 예 읍 대피 명령)
+      description: |
+        보통은 판정 엔진이 위험 영역(주의 이상)을 만들면 자동으로 생긴다 (source=auto).
+        수동 시작 시 영역 안 등록 가구와 영역 안 앱 사용자에게 대피 확인 경고(response_required)가 나간다.
+      operationId: createIncident
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IncidentInput' }
+      responses:
+        '201':
+          description: 생성됨
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IncidentDetail' }
+        '403': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+
+  /admin/incidents/{incident_id}:
+    parameters:
+      - { name: incident_id, in: path, required: true, schema: { type: string, format: uuid } }
     get:
-      tags: [chat]
-      summary: 대화 내역
-      operationId: getChatSession
+      tags: [admin]
+      summary: 대피 현황 — 상태별 수 + 대상 목록(방문 우선순위 순) · 10초 폴링
+      description: |
+        범위(2026-10-03 확정): **위험 영역 안 대상만** 목록으로, 전체 수는 `summary` 와 `/admin/overview` 로.
+        정렬: `priority_rank` 오름차순. B13 점수가 없으면 기본 순서 — 도움 필요 > 미응답 > 대피 중 > 대피 완료,
+        같은 상태 안에서는 사정(needs) 개수가 많은 순.
+      operationId: getIncident
+      responses:
+        '200':
+          description: OK  (mock/admin.incident.json)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IncidentDetail' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /admin/incidents/{incident_id}/map:
+    get:
+      tags: [admin]
+      summary: 대피 현황 지도 — 상황 영역(Polygon) + 대상 점(Point)
+      description: |
+        Feature.properties.kind = `area` | `target`.
+        target 의 properties = { target_id, label, status, priority_rank, needs, assigned_to_me }.
+        대피소·위험 영역은 `/dashboard/layers/*` 를 같이 쓴다.
+      operationId: getIncidentMap
       parameters:
-        - { name: session_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: incident_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK  (mock/admin.incident-map.geojson)
+          content:
+            application/geo+json:
+              schema: { $ref: '#/components/schemas/FeatureCollection' }
+        '403': { $ref: '#/components/responses/Error' }
+
+  /admin/incidents/{incident_id}/targets/{target_id}:
+    patch:
+      tags: [admin]
+      summary: 방재단이 대상 상태 대신 기록 · 방문 담당 지정 (스마트폰 없는 가구 등)
+      operationId: updateTarget
+      parameters:
+        - { name: incident_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: target_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TargetPatch' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IncidentTarget' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  /admin/incidents/{incident_id}/targets/{target_id}/visits:
+    post:
+      tags: [admin]
+      summary: 방문 기록 (A14) — 결과와 방문 후 상태
+      operationId: addVisit
+      parameters:
+        - { name: incident_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: target_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VisitInput' }
+      responses:
+        '201':
+          description: 기록됨  (mock/admin.visit.json)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VisitLog' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /admin/incidents/{incident_id}/close:
+    post:
+      tags: [admin]
+      summary: 대피 상황 종료 (admin·responder) — 대상자에게 kind=incident_closed 푸시
+      operationId: closeIncident
+      parameters:
+        - { name: incident_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: 종료됨
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Incident' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /admin/households:
+    get:
+      tags: [admin]
+      summary: 취약 가구 목록 (caregiver 는 담당 가구만)
+      operationId: listHouseholds
+      parameters:
+        - { name: q, in: query, description: '표시명·주소 검색', schema: { type: string } }
+        - { name: needs, in: query, description: '쉼표 구분, 모두 포함하는 가구만 (예 living_alone,mobility_limited)', schema: { type: string } }
+        - $ref: '#/components/parameters/Bbox'
+      responses:
+        '200':
+          description: OK  (mock/admin.households.json)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Household' }
+        '403': { $ref: '#/components/responses/Error' }
+    post:
+      tags: [admin]
+      summary: 취약 가구 대리 등록 (방재단·생활지원사, 동의 방법 기록 필수)
+      operationId: createHousehold
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HouseholdInput' }
+      responses:
+        '201':
+          description: 등록됨
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Household' }
+        '403': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+
+  /admin/households/{household_id}:
+    parameters:
+      - { name: household_id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [admin]
+      summary: 가구 상세 + 최근 방문 기록
+      operationId: getHousehold
       responses:
         '200':
           description: OK
@@ -407,114 +706,38 @@ paths:
             application/json:
               schema:
                 allOf:
-                  - $ref: '#/components/schemas/ChatSession'
+                  - $ref: '#/components/schemas/Household'
                   - type: object
                     properties:
-                      messages:
+                      recent_visits:
                         type: array
-                        items: { $ref: '#/components/schemas/ChatMessage' }
+                        items: { $ref: '#/components/schemas/VisitLog' }
+        '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
-
-  # ================================================================ voice
-  /voice:
-    post:
-      tags: [voice]
-      summary: 음성 질문 → (서버) Google STT → Agent → Google TTS
-      description: |
-        앱은 녹음 파일만 올린다. 응답의 `message.audio_url` 을 바로 재생하면 된다.
-        STT 결과가 비었거나 신뢰도가 낮으면 422 `STT_FAILED` → 앱은 "다시 말씀해 주세요" 안내.
-      operationId: postVoice
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              required: [audio]
-              properties:
-                audio: { type: string, format: binary, description: 'm4a(AAC), webm(opus), wav · 최대 30초 · 16kHz 이상' }
-                session_id: { type: string, format: uuid }
-                lat: { type: number }
-                lng: { type: number }
-      responses:
-        '200':
-          description: OK  (mock/voice.json)
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/ChatResponse'
-                  - type: object
-                    required: [transcript]
-                    properties:
-                      transcript: { type: string, description: STT 결과 (화면에 사용자 말풍선으로 표시) }
-                      stt_confidence: { type: number }
-        '422': { $ref: '#/components/responses/Error' }
-  /voice/audio/{audio_id}:
-    get:
-      tags: [voice]
-      summary: TTS 음성 파일 (audio_url 이 가리키는 주소, 1시간 후 만료)
-      operationId: getVoiceAudio
-      security: []
-      parameters:
-        - { name: audio_id, in: path, required: true, schema: { type: string } }
-      responses:
-        '200':
-          description: 음성
-          content:
-            audio/mpeg:
-              schema: { type: string, format: binary }
-        '404': { $ref: '#/components/responses/Error' }
-
-  # ================================================================ route
-  /route:
-    post:
-      tags: [route]
-      summary: 안전 대피 경로 계산
-      description: |
-        - destination 과 shelter_id 를 모두 생략하면 서버가 **가장 안전하게 도달 가능한 대피소**를 고른다.
-        - profile 생략 시 사용자 프로필로 결정: 휠체어 → wheelchair, 보행 제한 또는 70세 이상 → elderly, 그 외 safe.
-        - avoid 생략 시 현재 위험 상황으로 결정: 침수 위험 → flood + manhole, 호우 특보 → landslide.
-      operationId: postRoute
+    patch:
+      tags: [admin]
+      summary: 가구 정보 수정
+      operationId: updateHousehold
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/RouteRequest' }
+            schema: { $ref: '#/components/schemas/HouseholdPatch' }
       responses:
         '200':
-          description: OK  (mock/route.json)
+          description: OK
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Route' }
-        '422': { $ref: '#/components/responses/Error' }
-        '503':
-          description: GraphHopper 사용 불가 → 앱은 가까운 대피소 목록과 직선 방향으로 폴백
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-  /route/check:
-    post:
-      tags: [route]
-      summary: 이동 중 재검사 (30초 간격) — 경로 이탈·새 위험 발생 시 재탐색한 경로 반환
-      operationId: checkRoute
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [route_id, location]
-              properties:
-                route_id: { type: string, format: uuid }
-                location: { $ref: '#/components/schemas/LatLng' }
-      responses:
-        '200':
-          description: OK  (mock/route-check.json)
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/RouteCheck' }
+              schema: { $ref: '#/components/schemas/Household' }
+        '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [admin]
+      summary: 가구 삭제 (동의 철회 등) — 그 가구의 대피 응답·방문 기록도 삭제
+      operationId: deleteHousehold
+      responses:
+        '204': { description: 삭제됨 }
+        '403': { $ref: '#/components/responses/Error' }
 
   # ================================================================ internal
   /internal/simulate:
@@ -530,12 +753,75 @@ paths:
               type: object
               required: [scenario]
               properties:
-                scenario: { type: string, enum: [typhoon_hinnamnor_2022, heavy_rain_flood, landslide, fine_dust, clear] }
+                scenario: { type: string, enum: [heavy_rain_flood, clear] }
       description: |
         모의 관측값(observations.quality='simulated')을 넣고 즉시 판정. 모의값은 6시간 동안 실측보다 우선하고 clear 로 지운다.
-        구현: heavy_rain_flood, clear (A3). 나머지는 A4 — 지금은 accepted=false.
+        구현된 시나리오: heavy_rain_flood, clear. 새 시나리오를 만들면 이 목록에 추가한다.
+        A12 이후: 위험 영역이 생기면 대피 상황(source=simulated)과 대피 확인 경고도 함께 만들어진다.
       responses:
         '202': { description: '적용됨 — 응답 필드 scenario, accepted, observations, assessments, risk_run' }
+  /internal/ingest:
+    get:
+      tags: [internal]
+      summary: 수집 작업 목록과 각 작업의 최근 실행 결과
+      operationId: listIngest
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    source: { type: string }
+                    job: { type: string }
+                    cron: { type: string }
+                    stale_after_min: { type: integer }
+                    last_run:
+                      oneOf:
+                        - type: 'null'
+                        - type: object
+                          properties:
+                            id: { type: integer }
+                            status: { type: string, enum: [running, success, failed] }
+                            started_at: { type: string, format: date-time }
+                            finished_at: { type: [string, 'null'], format: date-time }
+                            row_count: { type: [integer, 'null'] }
+                            error: { type: [string, 'null'] }
+  /internal/invites:
+    post:
+      tags: [internal]
+      summary: 초대 코드 발급 (읍사무소·운영자) — 코드 원문은 이 응답에서 한 번만 보인다
+      operationId: createInvite
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { type: string, enum: [responder, caregiver, admin] }
+                label: { type: string, examples: ['구룡포읍 자율방재단 2026'] }
+                max_uses: { type: [integer, 'null'], minimum: 1 }
+                expires_in_days: { type: integer, minimum: 1, maximum: 365, default: 60 }
+      responses:
+        '201':
+          description: 발급됨
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, role]
+                properties:
+                  code: { type: string, examples: ['GRY-7K4M-2QX9'] }
+                  role: { type: string }
+                  label: { type: [string, 'null'] }
+                  max_uses: { type: [integer, 'null'] }
+                  expires_at: { type: string, format: date-time }
+
   /internal/ingest/{source}/{job}:
     post:
       tags: [internal]
@@ -553,6 +839,99 @@ paths:
                 type: object
                 properties:
                   ingest_run_id: { type: integer }
+
+  # ================================================================ ai 서비스 (B) — servers 가 다름
+  /api/chat:
+    servers:
+      - { url: 'http://localhost:8001', description: 'ai 로컬. 배포는 https://<도메인> (Caddy 가 /api/chat 을 ai 로)' }
+    post:
+      tags: [ai]
+      summary: AI 대화 (LangGraph) — 원본 ai/guardian_ai/service.py ChatRequest·ChatResponse
+      description: |
+        응답 시간 9~13초, 검증 재시도 시 30초 이상 (2026-10-03 실측) → 앱은 대기 표시.
+        인증: 아직 없음 (Firebase 토큰 검증은 B 가 A 방식에 맞춰 추가 예정 — user_id 는 기기별 ID).
+        답에 경로가 있으면 `route` 를 주고, 앱은 "지도에서 경로 보기"로 그린다 (`geometry` = 인코딩 polyline).
+      operationId: aiChat
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AiChatRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AiChatResponse' }
+
+  # ================================================================ route 서비스 (B) — servers 가 다름
+  /api/route:
+    servers:
+      - { url: 'http://localhost:8002', description: 'route 로컬. 배포는 https://<도메인>' }
+    post:
+      tags: [route]
+      summary: 안전 대피 경로 — 원본 route/guardian_route/service.py RouteRequest·RouteResponse
+      description: |
+        판정 엔진의 위험 영역(주의 이상, api `/risk/areas`)을 피한다. 피할 수 없으면 `still_inside` 에 남긴다.
+        `hazards_ok=false` 면 위험 영역을 못 읽어 회피 없이 계산한 경로 → 앱은 경고 문구 표시.
+        경로 엔진 장애 503, 도로망 범위 밖 404.
+      operationId: route
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RouteRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RouteResponse' }
+  /api/route/check:
+    servers:
+      - { url: 'http://localhost:8002' }
+    post:
+      tags: [route]
+      summary: 이동 중 재검사 (약 30초마다) — 30m 이탈·남은 경로의 새 위험 → 재계산, 20m 안 도착
+      operationId: routeCheck
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RouteCheckRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RouteCheckResponse' }
+  /api/route/sea:
+    servers:
+      - { url: 'http://localhost:8002' }
+    post:
+      tags: [route]
+      summary: '[B11 제안] 해상 → 최근접 항 → 대피소 경로'
+      description: |
+        **제안 (B11 Day 15–17 에서 확정)**. 해상 구간은 도로가 없으므로 직선 거리·방위로 안내하고,
+        항구의 육상 연결 지점(`ports.land_point`)부터는 `/api/route` 와 같은 계산을 한다.
+        출발 좌표가 육지면 `at_sea=false` 와 함께 일반 경로만 돌려준다.
+        항구 데이터: DB `ports` (berth = 배 댈 곳, land_point = 도로와 이어지는 곳) — B11 이 출처 확인 후 적재.
+      operationId: routeSea
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SeaRouteRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SeaRouteResponse' }
 
 # ======================================================================
 components:
@@ -595,7 +974,10 @@ components:
       properties:
         code:
           type: string
-          enum: [UNAUTHORIZED, NOT_FOUND, VALIDATION_ERROR, STT_FAILED, AGENT_TIMEOUT, UPSTREAM_UNAVAILABLE, INTERNAL]
+          enum: [UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, INVALID_INVITE, VALIDATION_ERROR, STT_FAILED, AGENT_TIMEOUT, UPSTREAM_UNAVAILABLE, INTERNAL]
+          description: |
+            401 UNAUTHORIZED / 403 FORBIDDEN 역할 없음 / 404 NOT_FOUND / 409 CONFLICT 이미 종료된 대피 상황 등 /
+            400 INVALID_INVITE 초대 코드 틀림·만료 / 422 VALIDATION_ERROR, STT_FAILED / 504 AGENT_TIMEOUT / 503 UPSTREAM_UNAVAILABLE / 500 INTERNAL
         message: { type: string, description: 사용자에게 그대로 보여줘도 되는 한국어 문장 }
         detail: {}
     LatLng:
@@ -697,13 +1079,24 @@ components:
         dependents_note: { type: [string, 'null'] }
         medical_note: { type: [string, 'null'] }
         prefers_voice: { type: boolean }
+        alert_prefs: { $ref: '#/components/schemas/AlertPrefs' }
     User:
       type: object
-      required: [id, firebase_uid, is_anonymous, profile, places, contacts, onboarding]
+      required: [id, firebase_uid, is_anonymous, role, profile, places, contacts, onboarding]
       properties:
         id: { type: string, format: uuid }
         firebase_uid: { type: string }
         is_anonymous: { type: boolean }
+        role: { $ref: '#/components/schemas/Role' }
+        household:
+          description: 본인이 등록한 취약 가구 (없으면 null) — 상세는 GET /user/household
+          oneOf:
+            - type: 'null'
+            - type: object
+              required: [id, needs]
+              properties:
+                id: { type: string, format: uuid }
+                needs: { type: array, items: { $ref: '#/components/schemas/HouseholdNeed' } }
         profile: { $ref: '#/components/schemas/ProfileInput' }
         places:
           type: array
@@ -738,7 +1131,7 @@ components:
             id: { type: string, format: uuid }
             in_hazard_zones:
               type: array
-              description: 이 장소가 포함된 정적 위험지역 (산사태 위험지역, 침수 이력, 해안 위험구역)
+              description: 이 장소가 포함된 정적 위험지역 (지금은 산사태만 — 위험지도 1·2등급 100m·지정 취약지역)
               items: { $ref: '#/components/schemas/Hazard' }
     EmergencyContact:
       type: object
@@ -789,7 +1182,13 @@ components:
           items: { $ref: '#/components/schemas/LayerId' }
         nearest_shelters:
           type: array
+          description: '현재 재난에 맞지 않는 대피소(unsuitable_for)는 뒤로, 위험 영역 안(in_risk_area)은 제외'
           items: { $ref: '#/components/schemas/Shelter' }
+        evacuation:
+          description: 진행 중인 대피 상황에서 내 대피 확인 상태 — 있으면 상단에 버튼 3개 카드 (대시보드에서도 상태 변경)
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/MyEvacuation'
         updated_at: { type: string, format: date-time }
     Widget:
       type: object
@@ -827,6 +1226,8 @@ components:
         location: { $ref: '#/components/schemas/LatLng' }
         distance_m: { type: number, description: 요청 좌표 기준 직선거리 }
         in_risk_area: { type: boolean, description: 대피소 자체가 현재 위험 영역 안이면 true (안내 대상에서 제외됨) }
+        unsuitable_for: { type: array, items: { $ref: '#/components/schemas/Hazard' }, description: '이 재난 때는 권하지 않음 (지금은 landslide 만)' }
+        unsuitable_reason: { type: [string, 'null'], examples: ['산사태위험지도 1등급 비탈 35m'] }
     FeatureCollection:
       type: object
       required: [type, features]
@@ -870,166 +1271,478 @@ components:
             type: object
             required: [type, label]
             properties:
-              type: { type: string, enum: [open_route, open_chat, open_checklist, call] }
+              type: { type: string, enum: [open_route, open_chat, open_checklist, call, respond] }
               label: { type: string }
               params: { type: object }
+        response_required: { type: boolean, description: 'true 면 대피 확인 버튼 3개 (POST /alerts/{id}/response)' }
+        incident_id: { type: [string, 'null'], format: uuid }
+        my_status: { oneOf: [ { $ref: '#/components/schemas/EvacStatus' }, { type: 'null' } ], description: '내가 마지막으로 보낸 대피 상태' }
+        tts_text: { type: [string, 'null'], description: '음성으로 읽어 줄 짧은 문장 (접근성 tts·음성 대피 확인)' }
         created_at: { type: string, format: date-time }
         read_at: { type: [string, 'null'], format: date-time }
-    FcmAlertPayload:
+    FcmPayload:
       type: object
       description: |
-        FCM 메시지 형식 (API 응답이 아니라 푸시 규약). notification 에 title/body,
-        data 에는 아래 필드가 모두 **문자열**로 들어간다. 앱은 알림 탭 시 GET /alerts 로 전체 내용을 받는다.
-      required: [kind, alert_id, hazard, level, level_num]
+        FCM 메시지 형식 (API 응답이 아니라 푸시 규약). notification 에 title/body, data 에 아래 필드가 모두 **문자열**로 들어간다.
+        앱은 알림을 누르면 kind 에 맞는 API 로 전체 내용을 다시 받는다 (주민 GET /alerts, 방재단 GET /admin/incidents/{id}).
+        kind
+        - alert: 일반 선제 경고
+        - evacuation: 대피 확인 경고 — 알림에 버튼 3개(대피 완료·대피 중·도움 필요)를 붙이고 누르면 POST /alerts/{alert_id}/response (via=button)
+        - reminder: 미응답 재알림 / 대피 중 재확인 (같은 alert_id)
+        - escalation: 방재단·담당 생활지원사에게 — 도움 요청·장시간 미응답 대상 (incident_id, target_id)
+        - incident_closed: 대피 상황 종료
+        접근성(C7): 앱이 사용자 alert_prefs 에 따라 tts_text 읽기·강한 진동·화면 깜빡임을 한다.
+      required: [kind]
       properties:
-        kind: { const: alert }
+        kind: { type: string, enum: [alert, evacuation, reminder, escalation, incident_closed] }
         alert_id: { type: string }
+        incident_id: { type: string }
+        target_id: { type: string, description: escalation 만 }
         hazard: { type: string }
         level: { type: string }
         level_num: { type: string, examples: ['3'] }
-        action: { type: string, examples: [open_route] }
+        action: { type: string, examples: [open_route, respond, open_incident] }
+        tts_text: { type: string }
 
-    # ------------------------------------------------------------ chat / voice
-    ChatRequest:
+    # ------------------------------------------------------------ 긴급 전화
+    Hotline:
       type: object
-      required: [content]
+      required: [id, name, phone, scope]
       properties:
-        session_id: { type: string, format: uuid }
-        content: { type: string, maxLength: 2000 }
+        id: { type: integer }
+        name: { type: string, examples: ['포항시 재난안전상황실'] }
+        phone: { type: string }
+        scope: { type: string, enum: [national, pohang, guryongpo] }
+        hazards: { type: array, items: { $ref: '#/components/schemas/Hazard' }, description: '비어 있으면 전 재난 공통' }
+        targets: { type: array, items: { type: string } }
+        priority: { type: integer, description: 낮을수록 먼저 }
+        note: { type: [string, 'null'] }
+        source_name: { type: string }
+
+    # ------------------------------------------------------------ 역할 · 접근성
+    Role:
+      type: string
+      enum: [resident, responder, caregiver, admin]
+      description: resident 주민 / responder 자율방재단 / caregiver 생활지원사 / admin 읍 담당자
+    RoleGrant:
+      type: object
+      required: [role]
+      properties:
+        role: { $ref: '#/components/schemas/Role' }
+        label: { type: [string, 'null'], description: '초대 코드 이름 (예 구룡포읍 자율방재단 2026)' }
+        granted_at: { type: string, format: date-time }
+    AlertPrefs:
+      type: object
+      description: |
+        C7 접근성 알림. 저장값이 없으면 서버가 기본값을 채워 준다 —
+        vision_impaired → tts, hearing_impaired → strong_vibration + screen_flash. large_text 는 기본 false.
+      properties:
+        tts: { type: boolean, description: '경고 수신 시 tts_text 를 자동으로 읽어 줌' }
+        strong_vibration: { type: boolean, description: '긴 진동 패턴 (청각장애)' }
+        screen_flash: { type: boolean, description: '화면·플래시 깜빡임 (청각장애)' }
+        large_text: { type: boolean }
+
+    # ------------------------------------------------------------ 대피 확인 (A5·A12)
+    EvacStatus:
+      type: string
+      enum: [no_response, evacuating, evacuated, need_help]
+      description: |
+        버튼 문구 (2026-10-03 확정): evacuated **대피 완료** / evacuating **대피 중** / need_help **도움 필요**.
+        no_response 는 아직 응답 없음 (초기값, 앱에서 보낼 수 없음)
+    ResponseVia:
+      type: string
+      enum: [button, voice, dashboard, responder, auto]
+      description: button 알림 버튼 / voice 음성 확인(B12) / dashboard 앱 대시보드 / responder 방재단이 대신 기록 / auto 시스템
+    EvacuationResponseInput:
+      type: object
+      required: [status, via]
+      properties:
+        status: { type: string, enum: [evacuated, evacuating, need_help] }
+        via: { type: string, enum: [button, voice, dashboard] }
         location: { $ref: '#/components/schemas/LatLng' }
-        want_audio: { type: boolean, default: false, description: true 면 TTS 음성 audio_url 포함 }
-    ChatResponse:
+        note: { type: string, maxLength: 200, description: '도움 필요 시 한 줄 (예 다리를 다쳐 못 움직여요)' }
+        transcript: { type: string, maxLength: 500, description: 'via=voice 일 때 STT 결과 (기록용)' }
+    EvacuationResponseResult:
       type: object
-      required: [session_id, message]
+      required: [alert_id, incident_id, status, recorded_at]
       properties:
-        session_id: { type: string, format: uuid }
-        message: { $ref: '#/components/schemas/ChatMessage' }
-    ChatSession:
+        alert_id: { type: string, format: uuid }
+        incident_id: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/EvacStatus' }
+        recorded_at: { type: string, format: date-time }
+        recheck_after_min: { type: [integer, 'null'], description: 'evacuating 이면 다시 확인할 때까지 분, 그 외 null' }
+        message: { type: string, description: '앱에 그대로 보여 줄 문장 (예 방재단에 도움 요청을 전달했어요)' }
+        call_suggested: { type: boolean, description: 'need_help 면 true — 앱은 119 버튼을 크게' }
+    MyEvacuation:
       type: object
-      required: [id, created_at]
+      description: 대시보드·경고에 붙는 '내 대피 확인' 상태
+      required: [incident_id, alert_id, status]
       properties:
-        id: { type: string, format: uuid }
-        title: { type: [string, 'null'] }
-        created_at: { type: string, format: date-time }
-        updated_at: { type: string, format: date-time }
-    ChatMessage:
-      type: object
-      required: [id, role, content, created_at]
-      properties:
-        id: { type: string, format: uuid }
-        role: { type: string, enum: [user, assistant] }
-        content: { type: string, description: 마크다운 텍스트 }
-        blocks:
-          type: array
-          description: 답변 다듬기 agent 가 만든 UI 블록
-          items: { $ref: '#/components/schemas/ChatBlock' }
-        audio_url: { type: [string, 'null'] }
-        grounding:
-          type: array
-          description: 답변 근거 (앱에서 '출처' 로 표시)
-          items:
-            type: object
-            required: [kind, label]
-            properties:
-              kind: { type: string, enum: [observation, forecast, warning, disaster_message, risk, risk_rule, action_guide, support_program, shelter, route] }
-              ref_id: { type: [string, 'null'] }
-              label: { type: string }
-        verification: { type: [string, 'null'], enum: [passed, retried, failed, skipped, null] }
-        profile_suggestions:
-          type: object
-          description: 대화 중 파악한 프로필 후보 — 앱이 "저장할까요?" 확인 후 PATCH /user
-        created_at: { type: string, format: date-time }
-    ChatBlock:
-      type: object
-      required: [type, data]
-      properties:
-        type: { type: string, enum: [table, action_steps, checklist, risk_card, shelter_card, route_card, call_button] }
+        incident_id: { type: string, format: uuid }
+        alert_id: { type: string, format: uuid }
+        hazard: { $ref: '#/components/schemas/Hazard' }
+        level: { $ref: '#/components/schemas/RiskLevel' }
         title: { type: string }
-        data:
-          type: object
-          description: |
-            - table: { columns: [..], rows: [[..]] }
-            - action_steps: { steps: [ { order, text } ] }
-            - checklist: { items: [ { id, content, checked } ] }
-            - risk_card: RiskItem
-            - shelter_card: Shelter
-            - route_card: { route_id, shelter_name, distance_m, duration_s }
-            - call_button: { label, phone }
+        status: { $ref: '#/components/schemas/EvacStatus' }
+        status_at: { type: [string, 'null'], format: date-time }
+        started_at: { type: string, format: date-time }
 
-    # ------------------------------------------------------------ route
+    # ------------------------------------------------------------ 취약 가구 (A13)
+    HouseholdNeed:
+      type: string
+      enum: [elderly, living_alone, mobility_limited, wheelchair, bedridden, hearing, vision, cognitive, medical_device, infant, pet]
+      description: |
+        elderly 65세 이상 / living_alone 독거 / mobility_limited 보행 불편 / wheelchair 휠체어 / bedridden 와상 /
+        hearing 청각장애 / vision 시각장애 / cognitive 인지 저하 / medical_device 산소·투석 등 의료기기 / infant 영유아 / pet 반려동물
+    Household:
+      type: object
+      required: [id, label, location, members, needs, source, consent]
+      properties:
+        id: { type: string, format: uuid }
+        label: { type: string, description: '화면 표시명 (예 삼정리 김OO 어르신 댁)' }
+        address: { type: [string, 'null'] }
+        location: { $ref: '#/components/schemas/LatLng' }
+        phone: { type: [string, 'null'] }
+        members: { type: integer, minimum: 1 }
+        needs: { type: array, items: { $ref: '#/components/schemas/HouseholdNeed' } }
+        has_app: { type: boolean, description: '본인이 앱으로 등록 (대피 확인 경고를 직접 받음)' }
+        caregiver: { oneOf: [ { type: 'null' }, { type: object, properties: { user_id: { type: string, format: uuid }, nickname: { type: [string, 'null'] } } } ] }
+        source: { type: string, enum: [self, responder, caregiver] }
+        consent:
+          type: object
+          required: [at, method, by]
+          properties:
+            at: { type: string, format: date-time }
+            method: { type: string, enum: [app, written, verbal] }
+            by: { type: string, description: '본인 / 보호자 김OO 등' }
+        landslide_zone: { type: [string, 'null'], description: '산사태 취약지역·위험지도 1·2등급 100m 안이면 그 이름 (우선순위 근거)' }
+        note: { type: [string, 'null'], description: '방문 참고 (출입 방법 등). 진단명 등 의료정보는 적지 않는다' }
+        updated_at: { type: string, format: date-time }
+    SelfHouseholdInput:
+      type: object
+      required: [location, members, needs, consent]
+      properties:
+        label: { type: string, description: '생략 시 닉네임 + 댁' }
+        address: { type: string }
+        location: { $ref: '#/components/schemas/LatLng' }
+        phone: { type: string }
+        members: { type: integer, minimum: 1, default: 1 }
+        needs: { type: array, items: { $ref: '#/components/schemas/HouseholdNeed' } }
+        note: { type: string, maxLength: 300 }
+        consent: { const: true, description: '민감정보(사정·위치·연락처) 수집·방재단 제공 동의. true 가 아니면 422' }
+    HouseholdInput:
+      type: object
+      required: [label, location, members, needs, consent_method, consent_by]
+      properties:
+        label: { type: string }
+        address: { type: string }
+        location: { $ref: '#/components/schemas/LatLng' }
+        phone: { type: string }
+        members: { type: integer, minimum: 1, default: 1 }
+        needs: { type: array, items: { $ref: '#/components/schemas/HouseholdNeed' } }
+        caregiver_user_id: { type: [string, 'null'], format: uuid, description: '생략 시 caregiver 가 등록하면 본인' }
+        consent_method: { type: string, enum: [written, verbal], description: '대리 등록은 서면 또는 구두 동의 확인' }
+        consent_by: { type: string, examples: ['본인', '보호자 김OO'] }
+        note: { type: string, maxLength: 300 }
+    HouseholdPatch:
+      type: object
+      description: 보낸 필드만 변경 (HouseholdInput 의 필드, 모두 선택)
+      properties:
+        label: { type: string }
+        address: { type: string }
+        location: { $ref: '#/components/schemas/LatLng' }
+        phone: { type: [string, 'null'] }
+        members: { type: integer, minimum: 1 }
+        needs: { type: array, items: { $ref: '#/components/schemas/HouseholdNeed' } }
+        caregiver_user_id: { type: [string, 'null'], format: uuid }
+        note: { type: [string, 'null'] }
+        active: { type: boolean }
+
+    # ------------------------------------------------------------ 대피 상황 · 현황 (A12, A14, B13)
+    StatusCounts:
+      type: object
+      required: [total, no_response, evacuating, evacuated, need_help]
+      properties:
+        total: { type: integer }
+        no_response: { type: integer }
+        evacuating: { type: integer }
+        evacuated: { type: integer }
+        need_help: { type: integer }
+    Incident:
+      type: object
+      required: [id, hazard, level, title, source, started_at, summary]
+      properties:
+        id: { type: string, format: uuid }
+        hazard: { $ref: '#/components/schemas/Hazard' }
+        level: { $ref: '#/components/schemas/RiskLevel' }
+        title: { type: string, examples: ['호우경보 · 구룡포환승센터 일대 침수'] }
+        source: { type: string, enum: [auto, manual, simulated] }
+        area_id: { type: [integer, 'null'], description: '자동 생성이면 원인 위험 영역 (risk_assessments.id)' }
+        started_at: { type: string, format: date-time }
+        closed_at: { type: [string, 'null'], format: date-time }
+        summary: { $ref: '#/components/schemas/StatusCounts' }
+    IncidentInput:
+      type: object
+      required: [hazard, level, title, area]
+      properties:
+        hazard: { $ref: '#/components/schemas/Hazard' }
+        level: { type: string, enum: [advisory, warning, critical] }
+        title: { type: string }
+        area:
+          description: '원(center + radius_m) 또는 GeoJSON Polygon/MultiPolygon'
+          oneOf:
+            - type: object
+              required: [center, radius_m]
+              properties:
+                center: { $ref: '#/components/schemas/LatLng' }
+                radius_m: { type: number, minimum: 50, maximum: 5000 }
+            - type: object
+              required: [type, coordinates]
+              properties:
+                type: { type: string, enum: [Polygon, MultiPolygon] }
+                coordinates: { type: array }
+        message: { type: string, description: '대피 확인 경고 본문 (생략 시 서버 기본 문장)' }
+    PriorityReason:
+      type: object
+      required: [factor, points, label]
+      properties:
+        factor: { type: string, examples: [need_help, no_response, living_alone, mobility_limited, landslide_zone, level] }
+        points: { type: number }
+        label: { type: string, examples: ['도움 요청', '독거', '산사태 위험지도 1등급 40m'] }
+    IncidentTarget:
+      type: object
+      required: [id, kind, label, location, status, priority_rank]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [household, app_user], description: 'household 등록 가구 / app_user 가구 등록 없이 경고를 받은 앱 사용자' }
+        household_id: { type: [string, 'null'], format: uuid }
+        label: { type: string, description: 'app_user 는 "앱 사용자 (가구 미등록)"' }
+        address: { type: [string, 'null'] }
+        location: { $ref: '#/components/schemas/LatLng' }
+        phone: { type: [string, 'null'] }
+        needs: { type: array, items: { $ref: '#/components/schemas/HouseholdNeed' } }
+        has_app: { type: boolean }
+        status: { $ref: '#/components/schemas/EvacStatus' }
+        status_via: { oneOf: [ { $ref: '#/components/schemas/ResponseVia' }, { type: 'null' } ] }
+        status_at: { type: [string, 'null'], format: date-time }
+        minutes_since_alert: { type: integer, description: '경고 후 경과 분 (미응답 판단용)' }
+        reminder_count: { type: integer }
+        escalated: { type: boolean, description: '미응답·도움 필요로 방재단에게 넘어옴' }
+        assigned_to: { oneOf: [ { type: 'null' }, { type: object, properties: { user_id: { type: string, format: uuid }, nickname: { type: [string, 'null'] }, is_me: { type: boolean } } } ] }
+        priority_rank: { type: integer, minimum: 1, description: '1 = 가장 먼저 방문' }
+        priority_score: { type: [number, 'null'], description: 'B13 점수 (없으면 기본 순서)' }
+        priority_reasons: { type: array, items: { $ref: '#/components/schemas/PriorityReason' } }
+        last_location: { oneOf: [ { $ref: '#/components/schemas/LatLng' }, { type: 'null' } ] }
+        note: { type: [string, 'null'] }
+        last_visit: { oneOf: [ { $ref: '#/components/schemas/VisitLog' }, { type: 'null' } ] }
+    IncidentDetail:
+      allOf:
+        - $ref: '#/components/schemas/Incident'
+        - type: object
+          required: [rules, targets, server_time, next_poll_sec]
+          properties:
+            area: { type: object, description: 'GeoJSON MultiPolygon' }
+            rules:
+              type: object
+              description: '대피 확인 시간 규칙 (분). 2026-10-03 팀 결정 — 근거 정리 중 (8-판단기준-근거현황 4절)'
+              properties:
+                reminder_interval_min: { type: integer, examples: [2], description: '미응답이면 이 간격으로 반복해서 다시 알림 (방재단에 넘길 때까지)' }
+                escalate_after_min: { type: integer, examples: [10], description: '미응답이면 경고 후 이 시간 뒤 방재단에게 넘김' }
+                evacuating_recheck_min: { type: integer, examples: [10], description: '대피 중이면 이 시간 뒤 다시 확인' }
+            targets:
+              type: array
+              description: '위험 영역 안 대상, priority_rank 순'
+              items: { $ref: '#/components/schemas/IncidentTarget' }
+            server_time: { type: string, format: date-time }
+            next_poll_sec: { type: integer, examples: [10] }
+    TargetPatch:
+      type: object
+      properties:
+        status: { type: string, enum: [evacuated, evacuating, need_help] }
+        assigned_to: { type: [string, 'null'], description: '"me" = 나에게 지정, null = 지정 해제' }
+        note: { type: [string, 'null'], maxLength: 300 }
+    VisitInput:
+      type: object
+      required: [result]
+      properties:
+        result: { type: string, enum: [evacuated_with_help, already_evacuated, refused, not_home, transported, other] }
+        status_after: { type: string, enum: [evacuated, evacuating, need_help], description: '생략 시 result 로 정함 (함께 대피·이송·이미 대피 → evacuated)' }
+        location: { $ref: '#/components/schemas/LatLng' }
+        note: { type: string, maxLength: 300 }
+    VisitLog:
+      type: object
+      required: [id, household_id, visited_at, result]
+      properties:
+        id: { type: integer }
+        household_id: { type: string, format: uuid }
+        target_id: { type: [string, 'null'], format: uuid }
+        responder: { type: object, properties: { user_id: { type: string, format: uuid }, nickname: { type: [string, 'null'] } } }
+        visited_at: { type: string, format: date-time }
+        result: { type: string, enum: [evacuated_with_help, already_evacuated, refused, not_home, transported, other] }
+        status_after: { oneOf: [ { $ref: '#/components/schemas/EvacStatus' }, { type: 'null' } ] }
+        note: { type: [string, 'null'] }
+    AdminOverview:
+      type: object
+      required: [households_total, needs_counts, active_incidents, server_time]
+      properties:
+        role: { $ref: '#/components/schemas/Role' }
+        households_total: { type: integer }
+        needs_counts: { type: object, additionalProperties: { type: integer }, description: 'HouseholdNeed → 가구 수' }
+        with_app: { type: integer, description: '본인 앱 등록 가구 수' }
+        active_incidents: { type: array, items: { $ref: '#/components/schemas/Incident' } }
+        server_time: { type: string, format: date-time }
+
+    # ------------------------------------------------------------ ai 서비스 (B) — 원본 ai/guardian_ai/service.py · state.py
+    AiLocation:
+      type: object
+      required: [lat, lon]
+      properties:
+        lat: { type: number }
+        lon: { type: number }
+        label: { type: [string, 'null'], description: '"집", "직장" 등' }
+    AiUserProfile:
+      type: object
+      required: [user_id]
+      properties:
+        user_id: { type: string }
+        user_type: { type: string, enum: [resident, tourist], default: resident }
+        home: { oneOf: [ { $ref: '#/components/schemas/AiLocation' }, { type: 'null' } ] }
+        age: { type: [integer, 'null'] }
+        mobility: { type: [string, 'null'], enum: [walk, car, wheelchair, public_transport, null], description: 'api 의 public_transit 과 철자가 다름' }
+        frequent_places: { type: array, items: { $ref: '#/components/schemas/AiLocation' } }
+        has_dependents: { type: [boolean, 'null'] }
+        walking_impaired: { type: [boolean, 'null'] }
+        visual_impaired: { type: [boolean, 'null'] }
+        hearing_impaired: { type: [boolean, 'null'] }
+        blood_type: { type: [string, 'null'] }
+        occupation: { type: [string, 'null'], examples: ['어업(선박 보유)'] }
+        emergency_contact: { type: [string, 'null'] }
+    AiChatRequest:
+      type: object
+      required: [user_id, question]
+      properties:
+        user_id: { type: string, description: '기기별 사용자 ID (Firebase uid 연결은 예정)' }
+        question: { type: string }
+        profile: { oneOf: [ { $ref: '#/components/schemas/AiUserProfile' }, { type: 'null' } ] }
+        current_location: { oneOf: [ { $ref: '#/components/schemas/AiLocation' }, { type: 'null' } ] }
+        conversation_id: { type: [string, 'null'], description: '없으면 새 대화. 마지막 문답 후 60분 지나면 새 대화' }
+        remember: { type: boolean, default: true, description: '사용자 기억(대화를 넘는 사실) 저장·사용' }
+    AiChatResponse:
+      type: object
+      required: [conversation_id, answer]
+      properties:
+        conversation_id: { type: string }
+        answer: { type: string }
+        selected_agents:
+          type: array
+          items: { type: string, enum: [landslide_agent, rain_flood_agent, wind_typhoon_agent, life_safety_agent, location_route_agent] }
+        phase: { type: string, enum: [before, during, after, none], default: none }
+        used_fallback: { type: boolean }
+        route:
+          oneOf:
+            - type: 'null'
+            - type: object
+              required: [destination, profile, distance_m, duration_s, geometry]
+              properties:
+                destination:
+                  type: object
+                  properties:
+                    name: { type: string }
+                    lat: { type: number }
+                    lon: { type: number }
+                    kind: { type: string, enum: [shelter, medical, home, work, place] }
+                profile: { type: string }
+                distance_m: { type: integer }
+                duration_s: { type: integer }
+                avoided: { type: array, items: { type: string } }
+                still_inside: { type: array, items: { type: string } }
+                hazards_ok: { type: boolean }
+                geometry: { type: string, description: 인코딩 polyline }
+        call_emergency: { type: boolean, description: '위험 지역에서 이동이 어려움 → 앱이 119 버튼을 크게' }
+
+    # ------------------------------------------------------------ route 서비스 (B) — 원본 route/guardian_route/service.py
+    LatLon:
+      type: object
+      required: [lat, lon]
+      properties:
+        lat: { type: number, minimum: -90, maximum: 90 }
+        lon: { type: number, minimum: -180, maximum: 180 }
+    RouteProfile:
+      type: string
+      enum: [adult, elderly]
+      description: 'adult 최단 시간(경사 무시) / elderly 급경사(1/18·1/12 초과) 회피·같은 경사면 계단 선호·느린 속도. 휠체어 이용자 → elderly'
     RouteRequest:
       type: object
+      required: [origin, destination]
+      properties:
+        origin: { $ref: '#/components/schemas/LatLon' }
+        destination: { $ref: '#/components/schemas/LatLon' }
+        profile: { $ref: '#/components/schemas/RouteProfile' }
+    RouteResponse:
+      type: object
+      required: [profile, distance_m, duration_s, geometry]
+      properties:
+        profile: { $ref: '#/components/schemas/RouteProfile' }
+        distance_m: { type: integer }
+        duration_s: { type: integer }
+        ascend_m: { type: integer }
+        descend_m: { type: integer }
+        max_slope_pct: { type: integer }
+        avoided: { type: array, items: { type: string }, description: '회피 없이 가면 지났을 위험 구역 중 이 경로가 피한 것' }
+        still_inside: { type: array, items: { type: string }, description: '다른 길이 없어 지나는 위험 구역 (경고용)' }
+        geometry: { type: string, description: '인코딩 polyline (Google, 정밀도 1e5, lat·lon 순)' }
+        source: { type: string, default: graphhopper }
+        hazards_ok: { type: boolean, description: 'false 면 위험 영역을 못 읽어 회피 없이 계산' }
+    RouteCheckRequest:
+      type: object
+      required: [current, destination, geometry]
+      properties:
+        current: { $ref: '#/components/schemas/LatLon' }
+        destination: { $ref: '#/components/schemas/LatLon' }
+        geometry: { type: string, description: '지금 안내 중인 경로 (직전 응답의 geometry)' }
+        profile: { $ref: '#/components/schemas/RouteProfile' }
+    RouteCheckResponse:
+      type: object
+      required: [reroute, off_route_m]
+      properties:
+        reroute: { type: boolean }
+        reasons: { type: array, items: { type: string, enum: [off_route, hazard_on_route] } }
+        off_route_m: { type: integer }
+        hazards_ahead: { type: array, items: { type: string } }
+        arrived: { type: boolean }
+        route: { oneOf: [ { $ref: '#/components/schemas/RouteResponse' }, { type: 'null' } ] }
+    SeaRouteRequest:
+      type: object
+      description: '[B11 제안]'
       required: [origin]
       properties:
-        origin: { $ref: '#/components/schemas/LatLng' }
-        destination: { $ref: '#/components/schemas/LatLng' }
-        shelter_id: { type: integer }
-        profile: { type: string, enum: [fastest, safe, elderly, wheelchair, car] }
-        avoid:
-          type: object
-          properties:
-            flood: { type: boolean }
-            landslide: { type: boolean }
-            manhole: { type: boolean }
-            coastal: { type: boolean }
-            max_slope_pct: { type: number, description: 'DEM 기반 오르막 한계 (elderly 기본 8)' }
-    Route:
+        origin: { $ref: '#/components/schemas/LatLon' }
+        destination: { oneOf: [ { $ref: '#/components/schemas/LatLon' }, { type: 'null' } ], description: '생략 시 항구에서 가장 안전한 대피소' }
+        profile: { $ref: '#/components/schemas/RouteProfile' }
+    SeaRouteResponse:
       type: object
-      required: [route_id, profile, destination, distance_m, duration_s, geometry, instructions, avoided, remaining_risks, computed_at]
+      description: '[B11 제안] 해상 구간과 육상 구간을 나눠서 준다'
+      required: [at_sea]
       properties:
-        route_id: { type: string, format: uuid }
-        profile: { type: string }
-        destination:
-          type: object
-          properties:
-            shelter: { oneOf: [ { $ref: '#/components/schemas/Shelter' }, { type: 'null' } ] }
-            location: { $ref: '#/components/schemas/LatLng' }
-        distance_m: { type: number }
-        duration_s: { type: number }
-        geometry:
-          type: object
-          description: GeoJSON LineString
-          required: [type, coordinates]
-          properties:
-            type: { const: LineString }
-            coordinates: { type: array, items: { type: array, items: { type: number } } }
-        instructions:
-          type: array
-          items:
-            type: object
-            required: [text, distance_m]
-            properties:
-              text: { type: string }
-              distance_m: { type: number }
-              interval: { type: array, items: { type: integer }, description: 'geometry 좌표 인덱스 [시작, 끝]' }
-        avoided:
-          type: object
-          description: 회피한 위험 요소 수
-          properties:
-            flood_areas: { type: integer }
-            landslide_zones: { type: integer }
-            manholes: { type: integer }
-            steep_segments: { type: integer }
-        remaining_risks:
-          type: array
-          description: 회피하지 못하고 경로에 남은 위험
-          items: { $ref: '#/components/schemas/RiskItem' }
-        computed_at: { type: string, format: date-time }
-    RouteCheck:
-      type: object
-      required: [status]
-      properties:
-        status:
-          type: string
-          enum: [ok, rerouted, arrived]
-          description: ok 그대로 진행 / rerouted 새 경로 사용 / arrived 도착
-        reason: { type: [string, 'null'] }
-        new_risks:
-          type: array
-          items: { $ref: '#/components/schemas/RiskItem' }
-        route:
-          description: status=rerouted 일 때만 새 경로
+        at_sea: { type: boolean, description: '출발 좌표가 해상인지 (해안선 기준, PostGIS)' }
+        port:
           oneOf:
-            - $ref: '#/components/schemas/Route'
             - type: 'null'
-        remaining_m: { type: number }
+            - type: object
+              properties:
+                id: { type: integer }
+                name: { type: string }
+                berth: { $ref: '#/components/schemas/LatLon' }
+                land_point: { $ref: '#/components/schemas/LatLon' }
+        sea_leg:
+          oneOf:
+            - type: 'null'
+            - type: object
+              required: [distance_m, bearing_deg]
+              properties:
+                distance_m: { type: integer, description: '직선 거리' }
+                bearing_deg: { type: number, description: '진북 기준 방위 (0~360)' }
+                bearing_label: { type: string, examples: ['북서쪽'] }
+                alternatives: { type: array, description: '다음으로 가까운 항구 2곳 (이름·거리·방위)', items: { type: object } }
+                high_seas_warning: { type: boolean, description: '풍랑 특보 발효 중' }
+        land_route: { oneOf: [ { $ref: '#/components/schemas/RouteResponse' }, { type: 'null' } ] }
