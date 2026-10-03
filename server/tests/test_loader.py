@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from loader import REQUIRED, apply, split_files
-from loader.core import schema_tables
+from loader.core import migration_files, schema_tables
 
 SEED_DIR = Path(__file__).resolve().parents[2] / "db" / "init"
 
@@ -24,6 +24,24 @@ def test_split_files():
     assert seeds and all(f.name[:2] >= "02" for f in seeds)
     assert {"shelters", "medical_facilities", "hazard_zones", "manholes", "action_guides"} <= set(schema_tables(schema))
     assert set(REQUIRED) <= set(schema_tables(schema))
+    assert not any(f.name.startswith("01m_") for f in seeds)        # 스키마 추가분은 시드가 아님
+
+
+def test_migrations_rerunnable_and_care_schema():
+    """01m_* 는 기존 DB 에 매번 적용 → 모든 CREATE 는 IF NOT EXISTS, ENUM 은 duplicate_object 무시.
+    민감정보 테이블은 care 스키마 (AI 읽기 전용 계정은 public 만 SELECT)"""
+    migs = migration_files(SEED_DIR)
+    assert [f.name for f in migs] == ["01m_v0_3.sql"]
+    sql = migs[0].read_text(encoding="utf-8")
+    for st in _statements(sql):
+        if re.match(r"CREATE (TABLE|INDEX|UNIQUE INDEX|SCHEMA)", st):
+            assert "IF NOT EXISTS" in st, st[:80]
+        if st.startswith("ALTER TABLE"):
+            assert "ADD COLUMN IF NOT EXISTS" in st, st[:80]
+    assert sql.count("CREATE TYPE") == sql.count("WHEN duplicate_object")
+    tables = schema_tables(migs)
+    assert {"care.households", "care.incidents", "care.incident_targets", "care.evacuation_responses",
+            "care.visit_logs", "care.invite_codes", "ports"} <= set(tables)
 
 
 def test_seeds_are_rerunnable():
@@ -66,8 +84,11 @@ class FakeConn:
         if self.fail_on and self.fail_on in sql:
             raise RuntimeError("boom")
         if sql.startswith("-- DB 컨테이너를 처음") or "CREATE TABLE" in sql:
-            self.tables |= set(re.findall(r"^CREATE TABLE\s+(\w+)", sql, re.M))
-        rows = [(t,) for t in self.tables] if "FROM pg_tables" in sql else [(999,)]
+            self.tables |= set(re.findall(r"^CREATE TABLE\s+(?:IF NOT EXISTS\s+)?((?:\w+\.)?\w+)", sql, re.M))
+        if "FROM pg_tables" in sql:     # (schemaname, tablename)
+            rows = [tuple(t.split(".", 1)) if "." in t else ("public", t) for t in self.tables]
+        else:
+            rows = [(999,)]
         return type("Cur", (), {"fetchall": lambda s: rows, "fetchone": lambda s: rows[0]})()
 
     def commit(self):
@@ -78,22 +99,29 @@ class FakeConn:
 
 
 def _all_tables():
-    return schema_tables(split_files(SEED_DIR)[0])
+    return schema_tables(split_files(SEED_DIR)[0] + migration_files(SEED_DIR))
 
 
 def test_apply_empty_db_creates_schema():
     c = FakeConn()
     rep = apply(c, SEED_DIR, log=lambda *_: None)
-    assert rep.created_schema and rep.applied[:2] == ["00_extensions.sql", "01_schema.sql"] and rep.ok
+    assert rep.created_schema and rep.applied[:3] == ["00_extensions.sql", "01_schema.sql", "01m_v0_3.sql"] and rep.ok
     assert c.committed and any("INSERT INTO ingest_runs" in s for s in c.sql)
 
 
 def test_apply_existing_db_skips_schema_and_dry_run_rolls_back():
     c = FakeConn(_all_tables())
     rep = apply(c, SEED_DIR, dry_run=True, log=lambda *_: None)
-    assert not rep.created_schema and rep.applied[0].startswith("02_")
+    assert not rep.created_schema and rep.applied[0] == "01m_v0_3.sql" and rep.applied[1].startswith("02_")
     assert c.rolled_back and not c.committed
     assert not any("INSERT INTO ingest_runs" in s for s in c.sql)
+
+
+def test_apply_existing_db_without_v03_gets_migration():
+    """v0.2 까지 만든 DB (care 스키마 없음) → loader 가 01m 을 먼저 적용해 스키마 확인을 통과"""
+    c = FakeConn([t for t in _all_tables() if not t.startswith("care.") and t != "ports"])
+    rep = apply(c, SEED_DIR, log=lambda *_: None)
+    assert rep.ok and "01m_v0_3.sql" in rep.applied and "care.households" in c.tables
 
 
 def test_apply_outdated_schema_stops():

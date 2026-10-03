@@ -1,0 +1,84 @@
+[
+  {
+    "id": "e7f8a9b0-c1d2-4e3f-9a4b-5c6d7e8f9a0b",
+    "label": "하린 댁",
+    "address": "경북 포항시 남구 구룡포읍 (예시 주소)",
+    "location": {
+      "lat": 35.9862,
+      "lng": 129.5489
+    },
+    "phone": "010-0000-0000",
+    "members": 1,
+    "needs": [
+      "elderly",
+      "mobility_limited"
+    ],
+    "has_app": true,
+    "caregiver": null,
+    "source": "self",
+    "consent": {
+      "at": "2026-10-01T09:20:00+09:00",
+      "method": "app",
+      "by": "본인"
+    },
+    "landslide_zone": "산사태위험지도 1등급 비탈 40m",
+    "note": null,
+    "updated_at": "2026-10-01T09:20:00+09:00"
+  },
+  {
+    "id": "f1a2b3c4-d5e6-4f70-8a91-b2c3d4e5f607",
+    "label": "구룡포리 박OO 어르신 댁 (예시)",
+    "address": "경북 포항시 남구 구룡포읍 (예시 주소)",
+    "location": {
+      "lat": 35.9898,
+      "lng": 129.5552
+    },
+    "phone": "054-000-0000",
+    "members": 1,
+    "needs": [
+      "elderly",
+      "living_alone",
+      "hearing"
+    ],
+    "has_app": false,
+    "caregiver": {
+      "user_id": "22222222-3333-4444-8555-666666666666",
+      "nickname": "생활지원사 이OO"
+    },
+    "source": "caregiver",
+    "consent": {
+      "at": "2026-10-02T10:00:00+09:00",
+      "method": "written",
+      "by": "본인"
+    },
+    "landslide_zone": null,
+    "note": "보청기 사용 — 문을 두드리고 기다릴 것",
+    "updated_at": "2026-10-02T10:00:00+09:00"
+  },
+  {
+    "id": "a9b8c7d6-e5f4-4a3b-9c2d-1e0f9a8b7c6d",
+    "label": "병포리 최OO 댁 (예시)",
+    "address": "경북 포항시 남구 구룡포읍 (예시 주소)",
+    "location": {
+      "lat": 35.9908,
+      "lng": 129.5566
+    },
+    "phone": "010-0000-0001",
+    "members": 2,
+    "needs": [
+      "elderly",
+      "wheelchair"
+    ],
+    "has_app": false,
+    "caregiver": null,
+    "source": "responder",
+    "consent": {
+      "at": "2026-10-02T15:30:00+09:00",
+      "method": "verbal",
+      "by": "보호자 최OO"
+    },
+    "landslide_zone": null,
+    "note": null,
+    "updated_at": "2026-10-02T15:30:00+09:00"
+  }
+]

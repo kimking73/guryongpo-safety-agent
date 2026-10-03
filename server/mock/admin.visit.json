@@ -1,0 +1,13 @@
+{
+  "id": 7,
+  "household_id": "f1a2b3c4-d5e6-4f70-8a91-b2c3d4e5f607",
+  "target_id": "7a000000-0000-4000-8000-000000000002",
+  "responder": {
+    "user_id": "11111111-2222-4333-8444-555555555555",
+    "nickname": "방재단 김OO"
+  },
+  "visited_at": "2026-10-05T14:39:00+09:00",
+  "result": "evacuated_with_help",
+  "status_after": "evacuated",
+  "note": "차량으로 대피소 A 이송"
+}

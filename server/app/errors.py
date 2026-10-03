@@ -16,14 +16,18 @@ log = logging.getLogger(__name__)
 
 DEFAULT_MESSAGES = {
     "UNAUTHORIZED": "로그인이 필요합니다. 앱을 다시 시작해 주세요.",
+    "FORBIDDEN": "이 기능을 사용할 권한이 없습니다. 초대 코드로 역할을 먼저 받아 주세요.",
     "NOT_FOUND": "요청한 정보를 찾을 수 없습니다.",
+    "CONFLICT": "이미 끝난 대피 상황입니다.",
+    "INVALID_INVITE": "초대 코드가 올바르지 않거나 만료되었습니다.",
     "VALIDATION_ERROR": "입력값을 확인해 주세요.",
     "STT_FAILED": "음성을 알아듣지 못했습니다. 다시 말씀해 주세요.",
     "AGENT_TIMEOUT": "답변이 늦어지고 있습니다. 잠시 후 다시 시도해 주세요.",
     "UPSTREAM_UNAVAILABLE": "외부 서비스에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.",
     "INTERNAL": "서버 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
 }
-STATUS_CODES = {"UNAUTHORIZED": 401, "NOT_FOUND": 404, "VALIDATION_ERROR": 422, "STT_FAILED": 422,
+STATUS_CODES = {"UNAUTHORIZED": 401, "FORBIDDEN": 403, "NOT_FOUND": 404, "CONFLICT": 409, "INVALID_INVITE": 400,
+                "VALIDATION_ERROR": 422, "STT_FAILED": 422,
                 "AGENT_TIMEOUT": 504, "UPSTREAM_UNAVAILABLE": 503, "INTERNAL": 500}
 
 
@@ -55,7 +59,8 @@ def install(app: FastAPI) -> None:
 
     @app.exception_handler(StarletteHTTPException)
     async def _http(_: Request, e: StarletteHTTPException):
-        code = {401: "UNAUTHORIZED", 404: "NOT_FOUND", 422: "VALIDATION_ERROR", 503: "UPSTREAM_UNAVAILABLE"}.get(
+        code = {401: "UNAUTHORIZED", 403: "FORBIDDEN", 404: "NOT_FOUND", 409: "CONFLICT", 422: "VALIDATION_ERROR",
+                503: "UPSTREAM_UNAVAILABLE"}.get(
             e.status_code, "INTERNAL" if e.status_code >= 500 else "VALIDATION_ERROR")
         return JSONResponse(body(code), status_code=e.status_code)
 

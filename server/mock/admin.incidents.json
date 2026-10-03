@@ -1,0 +1,19 @@
+[
+  {
+    "id": "c0ffee00-1d2e-4f30-9a41-5b6c7d8e9f01",
+    "hazard": "flood",
+    "level": "warning",
+    "title": "침수 경보 · 구룡포환승센터 일대",
+    "source": "auto",
+    "area_id": 1022,
+    "started_at": "2026-10-05T14:30:00+09:00",
+    "closed_at": null,
+    "summary": {
+      "total": 4,
+      "no_response": 1,
+      "evacuating": 1,
+      "evacuated": 1,
+      "need_help": 1
+    }
+  }
+]

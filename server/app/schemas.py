@@ -1,10 +1,10 @@
-"""요청 본문 모델 (api/openapi.yaml 의 components.schemas 와 같은 이름·제약)
+"""요청 본문 모델 (server/spec/openapi.yaml 의 components.schemas 와 같은 이름·제약)
 
 응답은 아직 목업이라 모델을 두지 않는다. 실구현 단계에서 응답 모델을 추가한다.
 """
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -35,6 +35,14 @@ class ProfileInput(_In):
     medical_note: Optional[str] = None
     prefers_voice: Optional[bool] = None
     language: Optional[str] = None
+    alert_prefs: Optional["AlertPrefs"] = None
+
+
+class AlertPrefs(_In):
+    tts: Optional[bool] = None
+    strong_vibration: Optional[bool] = None
+    screen_flash: Optional[bool] = None
+    large_text: Optional[bool] = None
 
 
 class PlaceInput(_In):
@@ -65,33 +73,100 @@ class DeviceTokenInput(_In):
     platform: Literal["ios", "android", "web"]
 
 
-class ChatRequest(_In):
-    session_id: Optional[UUID] = None
-    content: str = Field(min_length=1, max_length=2000)
-    location: Optional[LatLng] = None
-    want_audio: bool = False
-
-
-class RouteAvoid(_In):
-    flood: Optional[bool] = None
-    landslide: Optional[bool] = None
-    manhole: Optional[bool] = None
-    coastal: Optional[bool] = None
-    max_slope_pct: Optional[float] = None
-
-
-class RouteRequest(_In):
-    origin: LatLng
-    destination: Optional[LatLng] = None
-    shelter_id: Optional[int] = None
-    profile: Optional[Literal["fastest", "safe", "elderly", "wheelchair", "car"]] = None
-    avoid: Optional[RouteAvoid] = None
-
-
-class RouteCheckRequest(_In):
-    route_id: UUID
-    location: LatLng
-
-
 class SimulateRequest(_In):
-    scenario: Literal["typhoon_hinnamnor_2022", "heavy_rain_flood", "landslide", "fine_dust", "clear"]
+    scenario: Literal["heavy_rain_flood", "clear"]       # 구현된 시나리오만 (새로 만들면 명세와 함께 추가)
+
+
+# ------------------------------------------------------------------ v0.3 역할 · 가구 · 대피 확인 (A5·A12~A14)
+HouseholdNeed = Literal["elderly", "living_alone", "mobility_limited", "wheelchair", "bedridden", "hearing", "vision",
+                        "cognitive", "medical_device", "infant", "pet"]
+ButtonStatus = Literal["evacuated", "evacuating", "need_help"]      # 대피 완료 / 대피 중 / 도움 필요
+
+
+class RoleClaim(_In):
+    invite_code: str = Field(min_length=4, max_length=64)
+
+
+class SelfHouseholdInput(_In):
+    label: Optional[str] = None
+    address: Optional[str] = None
+    location: LatLng
+    phone: Optional[str] = None
+    members: int = Field(default=1, ge=1)
+    needs: list[HouseholdNeed] = Field(default_factory=list)
+    note: Optional[str] = Field(default=None, max_length=300)
+    consent: Literal[True]                    # 민감정보 수집·방재단 제공 동의 — true 가 아니면 422
+
+
+class HouseholdInput(_In):
+    label: str = Field(min_length=1)
+    address: Optional[str] = None
+    location: LatLng
+    phone: Optional[str] = None
+    members: int = Field(default=1, ge=1)
+    needs: list[HouseholdNeed] = Field(default_factory=list)
+    caregiver_user_id: Optional[UUID] = None
+    consent_method: Literal["written", "verbal"]
+    consent_by: str = Field(min_length=1)
+    note: Optional[str] = Field(default=None, max_length=300)
+
+
+class HouseholdPatch(_In):
+    label: Optional[str] = None
+    address: Optional[str] = None
+    location: Optional[LatLng] = None
+    phone: Optional[str] = None
+    members: Optional[int] = Field(default=None, ge=1)
+    needs: Optional[list[HouseholdNeed]] = None
+    caregiver_user_id: Optional[UUID] = None
+    note: Optional[str] = Field(default=None, max_length=300)
+    active: Optional[bool] = None
+
+
+class EvacuationResponseInput(_In):
+    status: ButtonStatus
+    via: Literal["button", "voice", "dashboard"]
+    location: Optional[LatLng] = None
+    note: Optional[str] = Field(default=None, max_length=200)
+    transcript: Optional[str] = Field(default=None, max_length=500)
+
+
+class IncidentCircle(_In):
+    center: LatLng
+    radius_m: float = Field(ge=50, le=5000)
+
+
+class IncidentPolygon(_In):
+    type: Literal["Polygon", "MultiPolygon"]
+    coordinates: list
+
+
+class IncidentInput(_In):
+    hazard: Literal["landslide", "heavy_rain", "flood", "strong_wind", "typhoon", "high_seas", "fine_dust", "ultrafine_dust", "uv"]
+    level: Literal["advisory", "warning", "critical"]
+    title: str = Field(min_length=1)
+    area: Union[IncidentCircle, IncidentPolygon]
+    message: Optional[str] = None
+
+
+class TargetPatch(_In):
+    status: Optional[ButtonStatus] = None
+    assigned_to: Optional[str] = None         # "me" = 나에게 지정, null = 해제
+    note: Optional[str] = Field(default=None, max_length=300)
+
+
+class VisitInput(_In):
+    result: Literal["evacuated_with_help", "already_evacuated", "refused", "not_home", "transported", "other"]
+    status_after: Optional[ButtonStatus] = None
+    location: Optional[LatLng] = None
+    note: Optional[str] = Field(default=None, max_length=300)
+
+
+class InviteInput(_In):
+    role: Literal["responder", "caregiver", "admin"]
+    label: Optional[str] = None
+    max_uses: Optional[int] = Field(default=None, ge=1)
+    expires_in_days: int = Field(default=60, ge=1, le=365)
+
+
+ProfileInput.model_rebuild()

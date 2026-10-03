@@ -1,10 +1,10 @@
-"""대시보드 · 지도 레이어"""
+"""대시보드 · 지도 레이어 · 긴급 전화"""
 from typing import Literal, Optional, get_args
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
-from .. import layers, mocks
+from .. import db, layers, mocks
 from ..auth import AuthUser, current_user
 from ..errors import ApiError
 
@@ -37,3 +37,19 @@ def get_layer(layer_id: str, bbox: Optional[str] = Query(None, description="minL
     if layer_id == "medical":
         return JSONResponse(layers.medical_layer(box if bbox else layers.POHANG_BBOX), media_type="application/geo+json")
     return JSONResponse(layers.manholes_layer(box), media_type="application/geo+json")     # manholes
+
+
+Hazard = Literal["landslide", "heavy_rain", "flood", "strong_wind", "typhoon", "high_seas", "fine_dust", "ultrafine_dust", "uv"]
+
+HOTLINES_SQL = """
+SELECT id, name, phone, scope, hazards::text[] AS hazards, targets, priority, note, source_name
+FROM public_hotlines
+WHERE %(h)s::text IS NULL OR cardinality(hazards) = 0 OR %(h)s::hazard_type = ANY (hazards)
+ORDER BY priority, id
+"""
+
+
+@router.get("/hotlines", summary="긴급 전화 목록 (실데이터)")
+def get_hotlines(hazard: Optional[Hazard] = None):
+    return [{**r, "hazards": list(r["hazards"] or []), "targets": list(r["targets"] or [])}
+            for r in db.fetch_all(HOTLINES_SQL, {"h": hazard})]

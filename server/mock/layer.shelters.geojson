@@ -21,7 +21,9 @@
         "address": "경북 포항시 남구 구룡포읍 (예시 주소)",
         "capacity": 300,
         "is_accessible": true,
-        "in_risk_area": false
+        "in_risk_area": false,
+        "unsuitable_for": [],
+        "unsuitable_reason": null
       }
     },
     {
@@ -43,7 +45,11 @@
         "address": "경북 포항시 남구 구룡포읍 (예시 주소)",
         "capacity": 150,
         "is_accessible": false,
-        "in_risk_area": false
+        "in_risk_area": false,
+        "unsuitable_for": [
+          "landslide"
+        ],
+        "unsuitable_reason": "산사태위험지도 1등급 비탈 44m"
       }
     }
   ]

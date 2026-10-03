@@ -359,7 +359,9 @@
         "lng": 129.5512
       },
       "distance_m": 540,
-      "in_risk_area": false
+      "in_risk_area": false,
+      "unsuitable_for": [],
+      "unsuitable_reason": null
     },
     {
       "id": 15,
@@ -375,8 +377,22 @@
         "lng": 129.547
       },
       "distance_m": 1010,
-      "in_risk_area": false
+      "in_risk_area": false,
+      "unsuitable_for": [
+        "landslide"
+      ],
+      "unsuitable_reason": "산사태위험지도 1등급 비탈 44m"
     }
   ],
+  "evacuation": {
+    "incident_id": "c0ffee00-1d2e-4f30-9a41-5b6c7d8e9f01",
+    "alert_id": "d1e2f3a4-b5c6-4d7e-8f90-a1b2c3d4e5f6",
+    "hazard": "flood",
+    "level": "warning",
+    "title": "침수 경보 · 구룡포환승센터 일대",
+    "status": "no_response",
+    "status_at": null,
+    "started_at": "2026-10-05T14:30:00+09:00"
+  },
   "updated_at": "2026-10-05T14:30:00+09:00"
 }

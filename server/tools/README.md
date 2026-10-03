@@ -10,7 +10,8 @@
 | `seed_knowledge.py` | 포항시 재난안전 페이지 → 행동요령·지원제도·긴급전화 | `db/init/04_seed_knowledge.sql` |
 | `geocode_shelters.py` | 대피소 주소 → 좌표 (카카오 로컬, `KAKAO_REST_KEY`) | `db/init/05_seed_shelters.sql` |
 | `nmc_medical.py` | 응급의료기관 (국립중앙의료원, `DATA_GO_KR_KEY`) | `db/init/06_seed_medical.sql` |
-| `make_mocks.py` · `validate.py` | 목업 JSON 재생성 · 명세(`server/spec/openapi.yaml`) ↔ 목업 검증 | `server/mock/*` |
+| `validate.py` | 명세(`server/spec/openapi.yaml`) ↔ 목업 검증 (대응표 `tests/spec_mocks.py`, pytest 판은 `tests/test_spec.py`) | – |
+| `make_mocks.py` | v0.2 목업 재생성 — **v0.3 목업(role·household·alert-response·admin.*)은 직접 편집**, 다시 돌리면 v0.3 필드가 지워지니 주의 | `server/mock/*` |
 | `pohang_dt_*.py` · `kma_*.py` | 원천 응답 변환기 원본 (수집기 사본은 `server/collector/converters/`) | – |
 
 `db/init/*.sql` 시드를 다시 만들면 `docker compose run --rm loader` 로 기존 DB 에 적용한다 (볼륨 초기화 불필요, 스키마 01 변경만 `down -v`).

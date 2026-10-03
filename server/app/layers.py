@@ -108,7 +108,8 @@ def stations_layer(bbox: tuple[float, float, float, float], now: datetime | None
 LANDSLIDE_SQL = """
 SELECT id, name, grade, meta, ST_AsGeoJSON(geom) AS geojson
 FROM hazard_zones
-WHERE hazard = 'landslide' AND ST_Intersects(geom, ST_MakeEnvelope(%(a)s, %(b)s, %(c)s, %(d)s, 4326))
+WHERE hazard = 'landslide' AND COALESCE(meta->>'role', '') <> 'trigger_area'   -- 판정용 100m 범위는 risk_areas 로만 보임
+  AND ST_Intersects(geom, ST_MakeEnvelope(%(a)s, %(b)s, %(c)s, %(d)s, 4326))
 ORDER BY id
 """
 
@@ -119,6 +120,7 @@ def landslide_layer(bbox: tuple[float, float, float, float]) -> dict:
         meta = r["meta"] if isinstance(r["meta"], dict) else json.loads(r["meta"] or "{}")
         feats.append({"type": "Feature", "id": r["id"], "geometry": json.loads(r["geojson"]),
                       "properties": {"name": r["name"], "hazard": "landslide", "grade": r["grade"],
+                                     "kind": "riskmap" if meta.get("role") == "display" else "designated",
                                      "reason": meta.get("reason"), "area_m2": meta.get("area_m2"),
                                      "shelter_distance_m": meta.get("shelter_distance_m")}})
     return {"type": "FeatureCollection", "features": feats}
@@ -128,22 +130,35 @@ def landslide_layer(bbox: tuple[float, float, float, float]) -> dict:
 POHANG_BBOX = (129.30, 35.90, 129.62, 36.10)          # 구룡포 안에 응급의료기관이 없어 의료시설은 bbox 생략 시 포항 전체
 
 # in_risk_area: 대피소 자체가 현재 유효한 위험 영역(risk_assessments, 주의 이상) 안이면 true → 앱·경로 안내에서 제외
+# landslide_g1_m: 산사태위험지도 1등급 비탈 100m 안이면 그 거리(m) → 산사태 때 비추천 (unsuitable_for)
+#   100m 범위(riskmap_g1_buf100, 09_seed)로 먼저 거른 뒤에만 1등급 폴리곤과 거리 계산 (큰 폴리곤이라 전부 계산하면 느림)
 SHELTERS_SQL = """
 SELECT s.id, s.name, s.shelter_types, s.address, s.capacity, s.phone, s.is_indoor, s.is_accessible,
        ST_X(s.geom) AS lng, ST_Y(s.geom) AS lat,
        EXISTS (SELECT 1 FROM risk_assessments ra
-               WHERE ra.valid_to IS NULL AND ra.level >= 'advisory' AND ST_Intersects(ra.area, s.geom)) AS in_risk_area
+               WHERE ra.valid_to IS NULL AND ra.level >= 'advisory' AND ST_Intersects(ra.area, s.geom)) AS in_risk_area,
+       (SELECT round(ST_Distance(s.geom::geography, g1.geom::geography))
+        FROM hazard_zones b JOIN hazard_zones g1 ON g1.hazard = 'landslide' AND g1.external_id = 'riskmap_g1'
+        WHERE b.hazard = 'landslide' AND b.external_id = 'riskmap_g1_buf100' AND ST_Intersects(b.geom, s.geom)) AS landslide_g1_m
 FROM shelters s
 WHERE s.is_open AND ST_Intersects(s.geom, ST_MakeEnvelope(%(a)s, %(b)s, %(c)s, %(d)s, 4326))
 ORDER BY s.id
 """
 
+# er: 응급실 실시간 가용병상 최신값 (국립중앙의료원, 10분 수집 nmc.er_beds) — 하루 지난 값은 없는 것으로
 MEDICAL_SQL = """
-SELECT id, name, kind, address, phone, meta, ST_X(geom) AS lng, ST_Y(geom) AS lat
-FROM medical_facilities
-WHERE ST_Intersects(geom, ST_MakeEnvelope(%(a)s, %(b)s, %(c)s, %(d)s, 4326))
-ORDER BY id
+SELECT m.id, m.name, m.kind, m.address, m.phone, m.meta, ST_X(m.geom) AS lng, ST_Y(m.geom) AS lat,
+       e.er_beds, e.ambulance, e.observed_at AS er_observed_at
+FROM medical_facilities m
+LEFT JOIN LATERAL (
+  SELECT er_beds, ambulance, observed_at FROM er_availability x
+  WHERE x.facility_id = m.id AND x.observed_at > now() - interval '1 day'
+  ORDER BY observed_at DESC LIMIT 1
+) e ON true
+WHERE ST_Intersects(m.geom, ST_MakeEnvelope(%(a)s, %(b)s, %(c)s, %(d)s, 4326))
+ORDER BY m.id
 """
+ER_VALID_MIN = 40          # 수집기 stale_after_min 과 같음 (10분 수집 × 4)
 
 MANHOLES_SQL = """
 SELECT m.id, m.source_code, m.external_id, m.kind, ST_X(m.geom) AS lng, ST_Y(m.geom) AS lat, st.name
@@ -163,18 +178,35 @@ def shelters_layer(bbox: tuple[float, float, float, float]) -> dict:
     feats = [_point(r, {"id": r["id"], "name": r["name"], "shelter_types": list(r["shelter_types"] or []),
                         "address": r["address"], "capacity": r["capacity"], "phone": r["phone"],
                         "is_indoor": r["is_indoor"], "is_accessible": r["is_accessible"],
-                        "in_risk_area": bool(r["in_risk_area"])})
+                        "in_risk_area": bool(r["in_risk_area"]), **_unsuitable(r.get("landslide_g1_m"))})
              for r in db.fetch_all(SHELTERS_SQL, dict(zip("abcd", bbox)))]
     return {"type": "FeatureCollection", "features": feats}
 
 
-def medical_layer(bbox: tuple[float, float, float, float]) -> dict:
+def _unsuitable(landslide_g1_m) -> dict:
+    if landslide_g1_m is None:
+        return {"unsuitable_for": [], "unsuitable_reason": None}
+    return {"unsuitable_for": ["landslide"], "unsuitable_reason": f"산사태위험지도 1등급 비탈 {int(landslide_g1_m)}m"}
+
+
+def _er(r: dict, now: datetime) -> dict | None:
+    t = r.get("er_observed_at")
+    if t is None:
+        return None
+    if isinstance(t, str):
+        t = datetime.fromisoformat(t)
+    age = (now - t).total_seconds() / 60
+    return {"beds": r.get("er_beds"), "ambulance": r.get("ambulance"), "observed_at": _iso(t), "stale": age > ER_VALID_MIN}
+
+
+def medical_layer(bbox: tuple[float, float, float, float], now: datetime | None = None) -> dict:
+    now = now or datetime.now(KST)
     feats = []
     for r in db.fetch_all(MEDICAL_SQL, dict(zip("abcd", bbox))):
         meta = r["meta"] if isinstance(r["meta"], dict) else json.loads(r["meta"] or "{}")
         feats.append(_point(r, {"id": r["id"], "name": r["name"], "kind": r["kind"], "address": r["address"],
                                 "phone": r["phone"], "er_phone": meta.get("er_phone"),
-                                "emergency_class": meta.get("emergency_class")}))
+                                "emergency_class": meta.get("emergency_class"), "er": _er(r, now)}))
     return {"type": "FeatureCollection", "features": feats}
 
 

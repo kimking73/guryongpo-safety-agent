@@ -1,4 +1,4 @@
-"""목업 응답 — 1주차_DB_API명세/mock/*.json 을 그대로 반환 (명세 스키마로 검증된 파일)
+"""목업 응답 — server/mock/*.json 을 그대로 반환 (tests/test_spec.py 가 명세 스키마로 검증)
 
 실구현으로 바뀌기 전까지 C(Flutter)·B(Agent)가 실제 서버 주소로 개발할 수 있게 한다.
 응답 헤더 X-Mock: true 로 목업임을 표시. 파일은 요청마다 읽음 → 목업을 고치면 재시작 없이 반영.
@@ -39,3 +39,11 @@ def mock(name: str, status: int = 200, **overrides: Any) -> JSONResponse:
 
 def now_iso() -> str:
     return datetime.now(KST).isoformat(timespec="seconds")
+
+
+def iso(t) -> str | None:
+    if t is None:
+        return None
+    if isinstance(t, str):
+        return t
+    return t.astimezone(KST).isoformat(timespec="seconds")
