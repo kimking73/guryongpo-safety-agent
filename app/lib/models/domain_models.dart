@@ -104,13 +104,14 @@ class ChatMessage {
 
 /// 사용자가 등록한 장소 (기기에 저장, AccountService). type: 집·직장·기타
 class SavedPlace {
-  const SavedPlace({required this.id, required this.name, required this.type, required this.position, this.alert = true});
+  const SavedPlace({required this.id, required this.name, required this.type, required this.position, this.address = '', this.alert = true});
   final String id, name, type;
+  final String address;
   final LatLng position;
   final bool alert;
-  Map<String, Object> toJson() => {'id': id, 'name': name, 'type': type, 'lat': position.latitude, 'lon': position.longitude, 'alert': alert};
+  Map<String, Object> toJson() => {'id': id, 'name': name, 'type': type, 'address': address, 'lat': position.latitude, 'lon': position.longitude, 'alert': alert};
   factory SavedPlace.fromJson(Map<String, dynamic> j) => SavedPlace(id: '${j['id']}', name: '${j['name']}', type: '${j['type']}',
-      position: LatLng((j['lat'] as num).toDouble(), (j['lon'] as num).toDouble()), alert: j['alert'] != false);
+      position: LatLng((j['lat'] as num).toDouble(), (j['lon'] as num).toDouble()), address: '${j['address'] ?? ''}', alert: j['alert'] != false);
 }
 
 class SafetyRoute {

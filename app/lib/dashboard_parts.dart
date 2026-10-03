@@ -132,6 +132,8 @@ class RouteMap extends ConsumerStatefulWidget {
 
 class _RouteMapState extends ConsumerState<RouteMap> {
   final mapController = MapController();
+  final mapOptions = const MapOptions();
+  String? fittedBounds;
 
   @override
   void dispose() {
@@ -142,7 +144,6 @@ class _RouteMapState extends ConsumerState<RouteMap> {
   @override
   Widget build(BuildContext context) {
     final facility = routeDestination(ref, widget.facilityId);
-    final userMode = ref.watch(mode);
     final routeType = ref.watch(routeKind);
     final routeAsync = ref.watch(routeProvider(widget.facilityId));
     final route = routeAsync.valueOrNull;
@@ -157,6 +158,17 @@ class _RouteMapState extends ConsumerState<RouteMap> {
           : const Column(mainAxisSize: MainAxisSize.min, children: [CircularProgressIndicator(), SizedBox(height: 10), Text('안전 경로를 준비하고 있습니다')]))));
     }
     final bounds = LatLngBounds.fromPoints([current, ...route.polylinePoints]);
+    final boundsKey = '${bounds.northWest}:${bounds.southEast}';
+    if (fittedBounds != boundsKey) {
+      fittedBounds = boundsKey;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          mapController.fitCamera(
+            CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(54)),
+          );
+        }
+      });
+    }
     final warn = shelterExclusion(facility, ref.watch(riskAreasProvider).valueOrNull ?? const []);
     return Card(
         clipBehavior: Clip.antiAlias,
@@ -165,11 +177,8 @@ class _RouteMapState extends ConsumerState<RouteMap> {
             child: Column(children: [
               Expanded(
                   child: FlutterMap(
-                key: ValueKey('${facility.id}-${routeType.name}-${userMode.name}'),
                 mapController: mapController,
-                options: MapOptions(
-                    initialCameraFit: CameraFit.bounds(
-                        bounds: bounds, padding: const EdgeInsets.all(54))),
+                options: mapOptions,
                 children: [
                   TileLayer(
                       urlTemplate:
@@ -430,9 +439,7 @@ class _AiPanelState extends ConsumerState<AiPanel> {
     ];
     setState(() => loading = true);
     final answer = await ref.read(repo).ask(question, ref.read(mode), ref.read(userLocation).position);
-    final personaGuide = widget.resident
-        ? '주민 예시 안내: 등록 장소와 현재 위치를 함께 확인하고 안전한 실내로 이동하세요.'
-        : '관광객 예시 안내: 현재 위치 주변의 위험 구간을 피하고 안전한 실내를 확인하세요.';
+    const personaGuide = '사용자 예시 안내: 등록한 장소와 현재 위치를 확인하고 안전한 실내로 이동하세요.';
     if (mounted)
       ref.read(chatMessages.notifier).state = [
         ...ref.read(chatMessages),
@@ -451,7 +458,7 @@ class _AiPanelState extends ConsumerState<AiPanel> {
             Padding(
                 padding: const EdgeInsets.all(12),
                 child:
-                    Text('${widget.resident ? '주민' : '관광객'} AI 대화 · ${AppConfig.dataLabel}')),
+                Text('사용자 AI 대화 · ${AppConfig.dataLabel}')),
             Wrap(
                 spacing: 4,
                 children: [

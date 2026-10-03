@@ -12,13 +12,14 @@ import 'services/app_config.dart';
 import 'services/auth_service.dart';
 import 'services/account_service.dart';
 import 'services/location_service.dart';
+import 'services/geocoding_service.dart';
 import 'dashboard_parts.dart';
+import 'disaster_center.dart';
 
 /// APP_MODE=remote면 실제 서버, 아니면 예시 데이터
 final repo = Provider<SafetyRepository>(
     (_) => AppConfig.isRemote ? RemoteSafetyRepository() : MockSafetyRepository());
-/// The prototype opens as the fishing-resident scenario. Visitors can switch
-/// modes in the profile, where the same flood layer is centred on their origin.
+/// Kept as an internal routing compatibility value; the interface presents one user profile.
 final mode = StateProvider<UserMode>((_) => UserMode.resident);
 final offline = StateProvider<bool>((_) => false);
 final routeFacilityId = StateProvider<String?>((_) => null);
@@ -156,6 +157,9 @@ final appRouter = GoRouter(initialLocation: '/boot', routes: [
     GoRoute(path: '/alerts', builder: (_, __) => const AlertsScreen()),
     GoRoute(path: '/ai', builder: (_, __) => const AiScreen()),
     GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
+    GoRoute(path: '/typhoon', builder: (_, s) => TyphoonScreen(initialLocal: s.extra == 'local')),
+    GoRoute(path: '/support', builder: (_, __) => const RecoveryScreen()),
+    GoRoute(path: '/alerts-hub', builder: (_, __) => const AlertHubScreen()),
   ]),
   GoRoute(
       path: '/facility/:id',
@@ -181,15 +185,13 @@ class _BootScreenState extends ConsumerState<BootScreen> {
 
   Future<void> start() async {
     final a = await AuthService().initialize();
-    final saved = await AccountService().savedMode();
-    final complete = await AccountService().hasCompletedSetup();
-    if (saved == UserMode.resident.name)
-      ref.read(mode.notifier).state = UserMode.resident;
+    await AccountService().clearLegacyMode();
     if (!mounted) return;
     setState(
         () => text = a.isMock ? 'Firebase 미설정: 목업 모드로 시작합니다.' : '익명 로그인 완료');
     await Future<void>.delayed(const Duration(milliseconds: 700));
-    if (mounted) context.go(complete ? '/' : '/location');
+    // Show live emergency information before asking the user to complete profile setup.
+    if (mounted) context.go('/');
   }
 
   @override
@@ -247,12 +249,14 @@ class Shell extends ConsumerWidget {
   Widget build(BuildContext c, WidgetRef ref) {
     const nav = [
       ('대시보드', Icons.dashboard_outlined, '/'),
-      ('알림', Icons.notifications_outlined, '/alerts'),
+      ('태풍 정보', Icons.cyclone, '/typhoon'),
+      ('선제 경고·알림', Icons.notifications_active_outlined, '/alerts-hub'),
+      ('지원 및 복구', Icons.health_and_safety_outlined, '/support'),
       ('프로필', Icons.person_outline, '/profile')
     ];
     final wide = MediaQuery.sizeOf(c).width >= 840;
     final here = GoRouterState.of(c).uri.path;
-    final selected = nav.indexWhere((x) => x.$3 == here).clamp(0, 2) as int;
+    final selected = nav.indexWhere((x) => x.$3 == here).clamp(0, 4) as int;
     ref.watch(gpsTracker);
     final body = Column(children: [const StatusLine(), Expanded(child: child)]);
     return Scaffold(
@@ -311,11 +315,12 @@ class StatusLine extends ConsumerWidget {
 class Dashboard extends ConsumerWidget {
   const Dashboard({super.key});
   @override
-  Widget build(BuildContext c, WidgetRef ref) => ref.watch(riskProvider).when(
+  Widget build(BuildContext c, WidgetRef ref) => const DisasterDashboard();
+  /*Widget build(BuildContext c, WidgetRef ref) => ref.watch(riskProvider).when(
       loading: () => const DashboardLoading(),
       error: (e, _) => LoadError(message: '$e', onRetry: () => ref.invalidate(riskProvider)),
       data: (risk) {
-        final resident = ref.watch(mode) == UserMode.resident;
+        final resident = true;
         final route = ref.watch(routeFacilityId);
         final selectedRouteType = ref.watch(routeKind);
         final main = route == null
@@ -336,7 +341,7 @@ class Dashboard extends ConsumerWidget {
                               const Icon(Icons.notifications_outlined),
                               const SizedBox(width: 6),
                               Text(
-                                  '알림 | ${resident ? '주민' : '관광객'} 맞춤 안내'),
+                                  '알림 | 사용자 맞춤 안내'),
                               const Spacer(),
                               FilledButton.icon(
                                   onPressed: () {
@@ -359,7 +364,7 @@ class Dashboard extends ConsumerWidget {
                                   const SizedBox(width: 6),
                                   Expanded(
                                       child: Text(
-                                          '알림 | ${resident ? '주민' : '관광객'} 맞춤 안내',
+                                          '알림 | 사용자 맞춤 안내',
                                           overflow: TextOverflow.ellipsis))
                                 ]),
                                 const SizedBox(height: 8),
@@ -398,7 +403,7 @@ class Dashboard extends ConsumerWidget {
                       const SizedBox(height: 12),
                       ModeCards(resident: resident, risk: risk)
                     ])));
-      });
+      });*/
 }
 
 class RiskCard extends StatelessWidget {
@@ -560,15 +565,9 @@ class DashboardInfo extends ConsumerWidget {
                 child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                          userMode == UserMode.visitor
-                              ? '관광객 맞춤 안내'
-                              : '주민 맞춤 안내',
-                          style: Theme.of(c).textTheme.titleLarge),
+                      Text('사용자 맞춤 안내', style: Theme.of(c).textTheme.titleLarge),
                       const SizedBox(height: 8),
-                      Text(userMode == UserMode.visitor
-                          ? '현재 위치와 가장 안전한 대피소를 우선 안내합니다.'
-                          : '등록 장소와 복구 지원 정보를 확인하세요.'),
+                      const Text('현재 위치와 등록 장소를 바탕으로 안전 정보와 대피소를 안내합니다.'),
                       const SizedBox(height: 12),
                       FilledButton.icon(
                           onPressed: () {
@@ -606,6 +605,32 @@ class MapCard extends ConsumerStatefulWidget {
 }
 class _MapCardState extends ConsumerState<MapCard> {
   String? locationNote; FloodGrid? selected;
+  late final MapOptions mapOptions;
+  @override
+  void initState() {
+    super.initState();
+    // Keep options stable while overlays and provider state rebuild. flutter_map
+    // revalidates the active camera whenever MapOptions is replaced; doing that
+    // on every parent rebuild can trip its cameraConstraint assertion.
+    mapOptions = MapOptions(
+      initialCenter: const LatLng(35.9922, 129.5531),
+      initialZoom: 14.5,
+      minZoom: 12,
+      cameraConstraint: CameraConstraint.containCenter(
+        bounds: LatLngBounds(
+          const LatLng(35.940, 129.525),
+          const LatLng(36.035, 129.585),
+        ),
+      ),
+      onTap: (_, point) {
+        if (locationNote != null) {
+          setPosition(ref, point, manual: true);
+          setState(() => locationNote = '지도에서 선택한 현재 위치입니다.');
+        }
+        if (ref.read(floodLayer)) setState(() => selected = gridAt(point));
+      },
+    );
+  }
   /// GPS 버튼: 지금 위치를 한 번 읽어 앱 전체 위치(userLocation)에 반영. 못 읽으면 지도를 눌러 고를 수 있게 한다
   Future<void> locate() async {
     try {
@@ -627,12 +652,7 @@ class _MapCardState extends ConsumerState<MapCard> {
   @override Widget build(BuildContext c) {
     final active = ref.watch(floodLayer), time = ref.watch(floodTime);
     return Card(clipBehavior: Clip.antiAlias, child: SizedBox(height: widget.height, child: Stack(children: [
-      FlutterMap(options: MapOptions(initialCenter: const LatLng(35.9922, 129.5531), initialZoom: 14.5,
-        // 지도 중심만 구룡포읍 안으로 (대피소가 읍 남북으로 흩어져 있다). 화면 가장자리까지 묶는 contain은 큰 창에서
-        // 보이는 영역이 범위보다 넓어져 만족할 수 없고, 다시 그릴 때 flutter_map 검사에 걸려 앱이 멈췄다 (2026-10-02 웹)
-        minZoom: 12,
-        cameraConstraint: CameraConstraint.containCenter(bounds: LatLngBounds(const LatLng(35.940,129.525), const LatLng(36.035,129.585))),
-        onTap: (_, point) { if (locationNote != null) { setPosition(ref, point, manual: true); setState(() => locationNote = '지도에서 선택한 현재 위치입니다.'); } if (active) setState(() => selected = gridAt(point)); }), children: [
+      FlutterMap(options: mapOptions, children: [
         TileLayer(urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', subdomains: const ['a','b','c'], userAgentPackageName: 'com.example.guryongpo_safety'),
         if (active) PolygonLayer(polygons: floodGridPolygons(time)),
         if (AppConfig.isRemote) PolygonLayer(polygons: riskAreaPolygons(ref.watch(riskAreasProvider).valueOrNull ?? const [])),
@@ -800,7 +820,7 @@ class AlertsScreen extends ConsumerWidget {
             if (s.isLoading) const LinearProgressIndicator(),
             if (s.hasError) LoadError(message: '${s.error}', onRetry: () => ref.invalidate(alertsProvider)),
             if (s.valueOrNull?.isEmpty ?? false) const Card(child: ListTile(leading: Icon(Icons.check_circle_outline), title: Text('현재 알림이 없습니다'))),
-            ...?(s.valueOrNull?.where((a) => a.id != 'work-flood' || ref.watch(mode) == UserMode.resident).map((a) => Card(
+            ...?(s.valueOrNull?.map((a) => Card(
                 child: ListTile(
                     leading: Icon(a.read
                         ? Icons.notifications_none
@@ -919,22 +939,10 @@ class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
   @override
   Widget build(BuildContext c, WidgetRef ref) {
-    final current = ref.watch(mode);
     return ListView(padding: const EdgeInsets.all(16), children: [
       Text('사용자 정보', style: Theme.of(c).textTheme.headlineSmall),
+      const ProfileDetailsCard(),
       const SizedBox(height: 12),
-      SegmentedButton<UserMode>(
-          segments: const [
-            ButtonSegment(value: UserMode.visitor, label: Text('관광객')),
-            ButtonSegment(value: UserMode.resident, label: Text('주민'))
-          ],
-          selected: {
-            current
-          },
-          onSelectionChanged: (v) {
-            ref.read(mode.notifier).state = v.first;
-            AccountService().saveMode(v.first.name);
-          }),
       Card(
           child: Column(children: const [
         ListTile(title: Text('익명 사용자'), subtitle: Text('mock-guryongpo-user')),
@@ -965,36 +973,49 @@ class ProfileScreen extends ConsumerWidget {
           for (final p in ref.watch(placesProvider).valueOrNull ?? const <SavedPlace>[])
             ListTile(leading: Icon(p.type == '집' ? Icons.home : p.type == '직장' ? Icons.business : Icons.place),
                 title: Text(p.type == '기타' ? p.name : '${p.type} · ${p.name}'),
-                subtitle: Text('${p.position.latitude.toStringAsFixed(5)}, ${p.position.longitude.toStringAsFixed(5)} · 알림 ${p.alert ? '켜짐' : '꺼짐'}'),
+                subtitle: Text('${p.address.isEmpty ? '주소 없음' : p.address} · 알림 ${p.alert ? '켜짐' : '꺼짐'}'),
                 trailing: IconButton(tooltip: '삭제', icon: const Icon(Icons.delete_outline), onPressed: () async {
                   await AccountService().removePlace(p.id);
                   ref.invalidate(placesProvider);
                 })),
-          ListTile(leading: const Icon(Icons.add_location_alt_outlined), title: const Text('장소 등록'), subtitle: const Text('장소명 · 유형 · 지도에서 위치 선택 · 알림 설정'), onTap: () => showModalBottomSheet<void>(context: c, showDragHandle: true, isScrollControlled: true, builder: (_) => const _PlaceForm())),
+          ListTile(leading: const Icon(Icons.add_location_alt_outlined), title: const Text('장소 등록'), subtitle: const Text('장소명 · 유형 · 도로명 주소 · 알림 설정'), onTap: () => showModalBottomSheet<void>(context: c, showDragHandle: true, isScrollControlled: true, builder: (_) => const _PlaceForm())),
       ])),
-      if (current == UserMode.resident)
-        Card(child: Column(children: [
-          ListTile(title: const Text('직업'), subtitle: Text(ref.watch(residentOccupation)), trailing: DropdownButton<String>(value: ref.watch(residentOccupation), items: const [DropdownMenuItem(value: '어업·수산업', child: Text('어업·수산업')), DropdownMenuItem(value: '기타 직업', child: Text('기타 직업'))], onChanged: (v) => ref.read(residentOccupation.notifier).state = v!)),
-        ])),
       const OptionalDetailsCard()
     ]);
   }
 }
 
-/// 장소 등록: 이름·유형을 적고 작은 지도에서 눌러 위치를 고른다 (주소 검색은 앱에 지도 API 키를 두지 않으려고 쓰지 않는다)
+/// 주소는 앱에서 좌표화하지 않는다. 카카오 키를 보관한 서버가 좌표를 반환한다.
 class _PlaceForm extends ConsumerStatefulWidget { const _PlaceForm(); @override ConsumerState<_PlaceForm> createState() => _PlaceFormState(); }
 class _PlaceFormState extends ConsumerState<_PlaceForm> {
   String type = '집';
   bool alert = true;
-  LatLng? point;
+  bool resolving = false;
   final name = TextEditingController();
+  final address = TextEditingController();
   @override
-  void dispose() { name.dispose(); super.dispose(); }
+  void dispose() { name.dispose(); address.dispose(); super.dispose(); }
   Future<void> save() async {
-    final label = name.text.trim().isEmpty ? type : name.text.trim();
-    await AccountService().addPlace(SavedPlace(id: DateTime.now().microsecondsSinceEpoch.toString(), name: label, type: type, position: point!, alert: alert));
-    ref.invalidate(placesProvider);
-    if (mounted) Navigator.pop(context);
+    if (resolving || address.text.trim().isEmpty) return;
+    setState(() => resolving = true);
+    try {
+      final resolved = await GeocodingService().resolve(address.text);
+      final label = name.text.trim().isEmpty ? type : name.text.trim();
+      await AccountService().addPlace(SavedPlace(
+        id: DateTime.now().microsecondsSinceEpoch.toString(),
+        name: label,
+        type: type,
+        address: resolved.address,
+        position: resolved.position,
+        alert: alert,
+      ));
+      ref.invalidate(placesProvider);
+      if (mounted) Navigator.pop(context);
+    } on GeocodingException catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => resolving = false);
+    }
   }
   @override
   Widget build(BuildContext c) => SafeArea(child: Padding(
@@ -1008,20 +1029,13 @@ class _PlaceFormState extends ConsumerState<_PlaceForm> {
             items: const [DropdownMenuItem(value: '집', child: Text('집')), DropdownMenuItem(value: '직장', child: Text('직장')), DropdownMenuItem(value: '기타', child: Text('기타'))],
             onChanged: (v) => setState(() => type = v!)),
         const SizedBox(height: 9),
-        Text(point == null ? '아래 지도에서 위치를 눌러 고르세요' : '선택한 위치: ${point!.latitude.toStringAsFixed(5)}, ${point!.longitude.toStringAsFixed(5)}', style: const TextStyle(fontSize: 12)),
+        TextField(controller: address, onChanged: (_) => setState(() {}), decoration: const InputDecoration(labelText: '도로명 주소', hintText: '예: 경북 포항시 남구 구룡포읍 호미로 152', border: OutlineInputBorder())),
         const SizedBox(height: 6),
-        SizedBox(height: 220, child: ClipRRect(borderRadius: BorderRadius.circular(10), child: FlutterMap(
-            options: MapOptions(initialCenter: const LatLng(35.9910, 129.5530), initialZoom: 15,
-                minZoom: 12,
-                cameraConstraint: CameraConstraint.containCenter(bounds: LatLngBounds(const LatLng(35.940, 129.525), const LatLng(36.035, 129.585))),
-                onTap: (_, p) => setState(() => point = p)),
-            children: [
-              TileLayer(urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', subdomains: const ['a', 'b', 'c'], userAgentPackageName: 'com.example.guryongpo_safety'),
-              if (point != null) MarkerLayer(markers: [Marker(point: point!, width: 40, height: 40, child: const Icon(Icons.location_on, color: Colors.red, size: 36))]),
-            ]))),
-        TextButton.icon(onPressed: () => setState(() => point = ref.read(userLocation).position), icon: const Icon(Icons.my_location), label: const Text('지금 출발 위치로')),
+        const Text('주소를 저장하면 서버가 카카오 주소 검색으로 좌표를 확인합니다.', style: TextStyle(fontSize: 12)),
         SwitchListTile(contentPadding: EdgeInsets.zero, value: alert, title: const Text('알림 수신'), onChanged: (v) => setState(() => alert = v)),
-        FilledButton(onPressed: point == null ? null : save, child: const Text('등록하기')),
+        FilledButton.icon(onPressed: resolving || address.text.trim().isEmpty ? null : save,
+          icon: resolving ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.add_location_alt_outlined),
+          label: Text(resolving ? '주소 확인 중…' : '주소 확인 후 등록')),
       ]))));
 }
 
@@ -1127,7 +1141,6 @@ class InitialSetupScreen extends ConsumerStatefulWidget {
 }
 
 class _InitialSetupScreenState extends ConsumerState<InitialSetupScreen> {
-  UserMode selected = UserMode.visitor;
   final age = TextEditingController();
   String transport = '도보';
   @override
@@ -1140,22 +1153,10 @@ class _InitialSetupScreenState extends ConsumerState<InitialSetupScreen> {
                 const Text('예시 데이터 · 구룡포 서비스 지역',
                     style: TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 16),
-                SegmentedButton<UserMode>(
-                    segments: const [
-                      ButtonSegment(
-                          value: UserMode.resident, label: Text('주민')),
-                      ButtonSegment(value: UserMode.visitor, label: Text('관광객'))
-                    ],
-                    selected: {
-                      selected
-                    },
-                    onSelectionChanged: (v) =>
-                        setState(() => selected = v.first)),
-                const SizedBox(height: 16),
                 const ListTile(
                     leading: Icon(Icons.location_on),
                     title: Text('주거·출발 위치'),
-                    subtitle: Text('구룡포 예시 위치 35.9907, 129.5526')),
+                    subtitle: Text('도로명 주소 입력으로 위치를 설정합니다.')),
                 CheckboxListTile(
                     value: true,
                     onChanged: (_) {},
@@ -1182,8 +1183,6 @@ class _InitialSetupScreenState extends ConsumerState<InitialSetupScreen> {
                     child: const Text('저장 후 대시보드 보기'))
               ]))));
   Future<void> complete() async {
-    ref.read(mode.notifier).state = selected;
-    await AccountService().saveMode(selected.name);
     await AccountService()
         .saveRequiredSetup(age: age.text, transport: transport);
     if (mounted) context.go('/');

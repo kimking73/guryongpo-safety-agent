@@ -78,6 +78,7 @@ class Settings:
     kma_key: Optional[str] = None
     data_go_kr_key: Optional[str] = None       # 공공데이터포털 (국립중앙의료원 응급실 가용병상)
     safetydata_key: Optional[str] = None       # 재난안전데이터공유플랫폼 (긴급재난문자) — 등록 IP 에서만 동작
+    kakao_rest_key: Optional[str] = None        # 주소 → 좌표 변환 (서버에서만 사용)
     # 다른 서비스 상태 확인 (설정된 것만 /health 에 표시)
     route_health_url: Optional[str] = None
     ai_health_url: Optional[str] = None
@@ -103,6 +104,7 @@ def load_settings() -> Settings:
         kma_key=_get(e, "KMA_API_KEY", "KMA_KEY"),
         data_go_kr_key=_get(e, "DATA_GO_KR_API_KEY", "DATA_GO_KR_KEY"),
         safetydata_key=_get(e, "SAFETY24_API_KEY", "SAFETYDATA_KEY"),
+        kakao_rest_key=_get(e, "KAKAO_REST_KEY"),
         route_health_url=_get(e, "ROUTE_HEALTH_URL"),
         ai_health_url=_get(e, "AI_HEALTH_URL"),
         cors_origins=[x.strip() for x in _get(e, "API_CORS_ORIGINS", "CORS_ORIGINS", default="*").split(",") if x.strip()],

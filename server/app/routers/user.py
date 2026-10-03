@@ -13,8 +13,9 @@ from .. import db, mocks, users
 from ..auth import AuthUser, current_user
 from ..config import settings
 from ..errors import ApiError
-from ..schemas import (DeviceTokenInput, EmergencyContactInput, PlaceInput, PlacePatch, ProfileInput, RoleClaim,
-                       SelfHouseholdInput)
+from ..geocoding import geocode_road_address
+from ..schemas import (AddressGeocodeInput, DeviceTokenInput, EmergencyContactInput, PlaceInput, PlacePatch,
+                       ProfileInput, RoleClaim, SelfHouseholdInput)
 
 router = APIRouter(tags=["user"])
 
@@ -51,14 +52,27 @@ def delete_user(u: AuthUser = Depends(current_user)):
 PLACE_COLS = "place_type, label, address, geom, notify"
 
 
+@router.post("/user/geocode", summary="도로명 주소를 좌표로 변환")
+def geocode_address(body: AddressGeocodeInput, u: AuthUser = Depends(current_user)):
+    return geocode_road_address(body.address)
+
+
 @router.post("/user/places", status_code=201, summary="장소 추가")
 def add_place(body: PlaceInput, u: AuthUser = Depends(current_user)):
+    values = body.model_dump()
+    if body.address:
+        resolved = geocode_road_address(body.address)
+        values["address"] = resolved["address"]
+        values["location"] = resolved["location"]
+    elif body.location is None:
+        raise ApiError("VALIDATION_ERROR", "도로명 주소를 입력해 주세요.")
+
     user_id = users.require_user_id(u)
     row = db.fetch_one("""
         INSERT INTO user_places (user_id, place_type, label, address, geom, notify)
         VALUES (%(uid)s, %(place_type)s::place_type, %(label)s, %(address)s,
                 ST_SetSRID(ST_MakePoint(%(lng)s, %(lat)s), 4326), %(notify)s)
-        RETURNING id""", {"uid": user_id, **body.model_dump(exclude={"location"}), **body.location.model_dump()})
+        RETURNING id""", {"uid": user_id, **values, **values["location"]})
     return JSONResponse(users.places(user_id, str(row["id"]))[0], status_code=201)
 
 

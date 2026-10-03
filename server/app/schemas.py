@@ -49,7 +49,7 @@ class PlaceInput(_In):
     place_type: Literal["home", "work", "frequent", "lodging"]
     label: str = Field(min_length=1)
     address: Optional[str] = None
-    location: LatLng
+    location: Optional[LatLng] = None  # 주소를 보내면 서버가 카카오로 변환
     notify: bool = True
 
 
@@ -59,6 +59,10 @@ class PlacePatch(_In):
     address: Optional[str] = None
     location: Optional[LatLng] = None
     notify: Optional[bool] = None
+
+
+class AddressGeocodeInput(_In):
+    address: str = Field(min_length=1, max_length=300)
 
 
 class EmergencyContactInput(_In):
