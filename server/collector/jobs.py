@@ -234,6 +234,11 @@ def run_hazards_risk(run_id: int) -> int:
     return hazards.run(run_id)
 
 
+def run_alerts(run_id: int) -> int:
+    from alerts import dispatch
+    return dispatch.run(run_id)
+
+
 # ------------------------------------------------------------------ 목록
 EVERY_10 = {"minute": "*/10"}
 JOBS: list[Job] = [
@@ -255,6 +260,8 @@ JOBS: list[Job] = [
     Job("risk", "flood", run_flood_risk, {"minute": "1-59/10"}),
     # A4: 호우·강풍(AWS 10분 수집)·산사태(호우 단계 + 취약지역) — AWS 수집(매 10분 정각) 2분 뒤
     Job("risk", "hazards", run_hazards_risk, {"minute": "2-59/10"}),
+    # A5 선제 경고: 판정 2개가 끝난 뒤(매 10분 3분) 판정 결과·재난문자 → 대상 사용자 경고 + FCM
+    Job("risk", "alerts", run_alerts, {"minute": "3-59/10"}),
 ]
 BY_KEY = {j.key: j for j in JOBS}
 

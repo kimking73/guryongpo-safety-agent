@@ -55,8 +55,10 @@ def apply(scenario: str) -> dict:
 
 
 def _rerun() -> dict:
-    """모의값 반영 즉시 판정 (다음 10분 주기를 기다리지 않음) — ingest_runs 에도 기록"""
+    """모의값 반영 즉시 판정 + 선제 경고 (다음 10분 주기를 기다리지 않음) — ingest_runs 에도 기록"""
     from collector import jobs
 
     res = jobs.execute(jobs.BY_KEY["risk.flood"])
-    return {"assessments": res.get("rows"), "risk_run": res.get("status")}
+    alerts = jobs.execute(jobs.BY_KEY["risk.alerts"])
+    return {"assessments": res.get("rows"), "risk_run": res.get("status"),
+            "new_alerts": alerts.get("rows"), "alerts_run": alerts.get("status")}

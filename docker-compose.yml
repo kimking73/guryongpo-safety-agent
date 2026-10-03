@@ -71,6 +71,9 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+    volumes:
+      # Firebase 서비스 계정 키 — 선제 경고 FCM 발송 (A5). 없으면 발송만 건너뛰고 경고는 폴링으로 전달
+      - ./secrets:/srv/secrets:ro
     depends_on:
       db:
         condition: service_healthy

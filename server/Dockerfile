@@ -11,6 +11,7 @@ RUN python -c "import tomllib, subprocess, sys; deps = tomllib.load(open('pyproj
 COPY app ./app
 COPY collector ./collector
 COPY risk ./risk
+COPY alerts ./alerts
 # loader: 정적 데이터 적재 (A7). 시드 SQL 은 이미지에 넣지 않고 실행 시 ./db/init 을 /srv/db/init 으로 연결
 COPY loader ./loader
 COPY mock ./mock
