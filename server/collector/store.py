@@ -73,3 +73,9 @@ def upsert_disaster_messages(rows: list[dict]) -> int:
     from .converters import safety_msg
     return db.execute_many(safety_msg.UPSERT_MESSAGE_SQL,
                            [{**r, "raw": json.dumps(r["raw"], ensure_ascii=False)} for r in rows])
+
+
+def insert_er_availability(rows: list[dict]) -> int:
+    from .converters import nmc_er
+    return db.execute_many(nmc_er.INSERT_AVAILABILITY_SQL,
+                           [{**r, "raw": json.dumps(r["raw"], ensure_ascii=False)} for r in rows])
