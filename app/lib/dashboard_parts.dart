@@ -1,10 +1,13 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 import 'main.dart';
 import 'models/domain_models.dart';
+import 'repositories/remote_repository.dart' show RemoteError;
 import 'services/app_config.dart';
+import 'services/voice_service.dart';
 
 class FloodGrid {
   const FloodGrid(this.name, this.level, this.south, this.west, this.north, this.east);
@@ -59,20 +62,47 @@ class FloodGridLegend extends StatelessWidget {
     ])))));
 }
 
+/// "음성으로 듣기": audio(음성 질문의 답 음성)가 있으면 그것을, 없으면 text를 ai /api/tts로 합성해 재생 (B5)
 class VoiceButton extends ConsumerStatefulWidget {
-  const VoiceButton({super.key, required this.text});
+  const VoiceButton({super.key, required this.text, this.audio});
   final String text;
+  final Uint8List? audio;
   @override ConsumerState<VoiceButton> createState() => _VoiceButtonState();
 }
 class _VoiceButtonState extends ConsumerState<VoiceButton> {
-  bool playing = false;
+  bool playing = false, preparing = false;
+
+  Future<void> toggle() async {
+    if (playing || preparing) {
+      await VoicePlayer.instance.stop();
+      if (mounted) setState(() => playing = preparing = false);
+      return;
+    }
+    setState(() => preparing = true);
+    final mp3 = widget.audio ?? await ref.read(repo).speak(widget.text);
+    if (!mounted || !preparing) return;
+    if (mp3 == null) {
+      setState(() => preparing = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
+          AppConfig.isRemote ? '음성 기능을 지금 쓸 수 없습니다. 잠시 후 다시 시도해 주세요.' : '예시 모드에서는 음성을 재생하지 않습니다.')));
+      return;
+    }
+    setState(() { preparing = false; playing = true; });
+    try {
+      await VoicePlayer.instance.play(mp3);
+    } catch (_) {}
+    if (mounted) setState(() => playing = false);
+  }
+
   @override Widget build(BuildContext context) => Tooltip(
-    message: '접근성용 ${ref.watch(voiceLanguage)} 음성 안내 · 이 환경에서는 목업 재생 상태를 표시합니다.',
+    message: '${ref.watch(voiceLanguage)} 음성 안내',
     child: TextButton.icon(
       style: TextButton.styleFrom(foregroundColor: playing ? Colors.red : null),
-      onPressed: () => setState(() => playing = !playing),
-      icon: Icon(playing ? Icons.stop_circle_outlined : Icons.volume_up_outlined),
-      label: Text(playing ? '재생 중지' : '음성으로 듣기', overflow: TextOverflow.ellipsis),
+      onPressed: toggle,
+      icon: preparing
+          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+          : Icon(playing ? Icons.stop_circle_outlined : Icons.volume_up_outlined),
+      label: Text(preparing ? '음성 준비 중' : playing ? '재생 중지' : '음성으로 듣기', overflow: TextOverflow.ellipsis),
     ),
   );
 }
@@ -339,7 +369,59 @@ class AiPanel extends ConsumerStatefulWidget {
 class _AiPanelState extends ConsumerState<AiPanel> {
   final input = TextEditingController();
   final scroll = ScrollController();
-  bool loading = false;
+  bool loading = false, recording = false;
+  VoiceRecorder? recorder;
+
+  void scrollToEnd() => WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (scroll.hasClients)
+          scroll.animateTo(scroll.position.maxScrollExtent,
+              duration: const Duration(milliseconds: 180), curve: Curves.easeOut);
+      });
+
+  void addMessages(List<ChatMessage> m) =>
+      ref.read(chatMessages.notifier).state = [...ref.read(chatMessages), ...m];
+
+  /// 마이크: 누르면 녹음 시작, 다시 누르면(또는 28초가 지나면) 서버로 보내 받아쓴 질문·답을 보여 주고 답 음성을 바로 재생
+  Future<void> toggleMic() async {
+    if (loading) return;
+    if (recording) return finishVoice();
+    await VoicePlayer.instance.stop();
+    recorder ??= VoiceRecorder();
+    final ok = await recorder!.start(onLimit: finishVoice);
+    if (!mounted) return;
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('마이크 권한이 필요합니다. 브라우저·기기 설정에서 허용해 주세요.')));
+      return;
+    }
+    setState(() => recording = true);
+  }
+
+  Future<void> finishVoice() async {
+    if (!recording) return;
+    setState(() { recording = false; loading = true; });
+    final wav = await recorder!.stop();
+    if (wav == null) {
+      if (mounted) setState(() => loading = false);
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('녹음이 너무 짧습니다. 버튼을 누르고 말씀한 뒤 다시 눌러 주세요.')));
+      return;
+    }
+    ChatAnswer? answer;
+    try {
+      final v = await ref.read(repo).askVoice(wav, ref.read(mode), ref.read(userLocation).position);
+      answer = v.answer;
+      if (mounted) addMessages([ChatMessage('🎤 ${v.transcript}', true), ChatMessage(v.answer.text, false, answer: v.answer)]);
+    } catch (e) {
+      if (mounted) addMessages([ChatMessage(e is RemoteError ? e.message : '음성 질문을 처리하지 못했습니다. 다시 시도해 주세요.', false)]);
+    }
+    if (mounted) setState(() => loading = false);
+    scrollToEnd();
+    if (answer?.audio != null) {
+      try {
+        await VoicePlayer.instance.play(answer!.audio!);
+      } catch (_) {}
+    }
+  }
+
   Future<void> ask(String question) async {
     if (question.trim().isEmpty) return;
     ref.read(chatMessages.notifier).state = [
@@ -357,11 +439,7 @@ class _AiPanelState extends ConsumerState<AiPanel> {
         ChatMessage(AppConfig.isRemote ? answer.text : '${answer.text}\n$personaGuide\n예시 AI 안내', false, answer: answer)
       ];
     if (mounted) setState(() => loading = false);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (scroll.hasClients)
-        scroll.animateTo(scroll.position.maxScrollExtent,
-            duration: const Duration(milliseconds: 180), curve: Curves.easeOut);
-    });
+    scrollToEnd();
   }
 
   @override
@@ -411,7 +489,7 @@ class _AiPanelState extends ConsumerState<AiPanel> {
                                       borderRadius: BorderRadius.circular(12)),
                                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(m.text),
                                     if (m.answer?.route != null) RouteButton(onPressed: () => showAiRoute(ref, m.answer!)),
-                                    if (!m.mine) VoiceButton(text: m.text)]))))
+                                    if (!m.mine) VoiceButton(text: m.answer?.voiceText ?? m.text, audio: m.answer?.audio)]))))
                           .toList(), if (loading) const Padding(padding: EdgeInsets.all(10), child: _FloodChatLoader())]);
             })),
             Padding(
@@ -425,17 +503,26 @@ class _AiPanelState extends ConsumerState<AiPanel> {
                               hintText: '질문 입력',
                               border: OutlineInputBorder()))),
                   IconButton(
+                      tooltip: recording ? '말하기 끝' : '음성으로 질문',
+                      onPressed: loading && !recording ? null : toggleMic,
+                      color: recording ? Colors.red : null,
+                      icon: Icon(recording ? Icons.stop_circle : Icons.mic)),
+                  IconButton(
                       onPressed: () {
                         ask(input.text);
                         input.clear();
                       },
                       icon: const Icon(Icons.send))
                 ])),
+            if (recording)
+              const Padding(padding: EdgeInsets.only(left: 12, bottom: 8),
+                  child: Text('듣고 있어요… 말씀이 끝나면 빨간 버튼을 눌러 주세요.', style: TextStyle(color: Colors.red, fontSize: 12))),
           ])));
   @override
   void dispose() {
     input.dispose();
     scroll.dispose();
+    recorder?.dispose();
     super.dispose();
   }
 }

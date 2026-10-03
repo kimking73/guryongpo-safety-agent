@@ -300,6 +300,8 @@ def test_chat_response_exposes_path_follow_up_and_emergency():
 def test_keyword_situation_fallback():
     assert G.keyword_situation("물이 들어와서 못 나가요") == ("no", "yes")
     assert G.keyword_situation("피해는 없어요") == ("unknown", "no")
+    assert G.keyword_situation("네, 지팡이 짚고 천천히 걸어갈 수 있어요.")[0] == "yes"
+    assert G.keyword_situation("혼자서는 움직일 수 없어요")[0] == "no"
 
 
 def test_no_guides_means_no_todo_list():
@@ -341,3 +343,21 @@ def test_calm_info_question_gets_no_action_list_or_question():
     out = A.make_action_advisor(fetch=FakeDB())(
         {**tree_state(Phase.NONE), "question": "내일 비 와?", "specialist_results": [result(Specialist.RAIN_FLOOD, RiskLevel.NORMAL, "내일 비 예보")]})
     assert out["draft"] == "내일 비 예보" and out["action_plan"].decision_path == ["평시", "정보 안내"]
+
+
+def test_reply_to_follow_up_reuses_previous_agents():
+    """'스스로 이동하실 수 있나요?' → '네, 걸어갈 수 있어요' — 답장도 같은 판단 로직으로 (직전 agent 재사용)."""
+    from guardian_ai.state import ActionPlan
+    prev = {**state("네, 걸어갈 수 있어요"), "selected_agents": [Specialist.RAIN_FLOOD],
+            "action_plan": ActionPlan(phase=Phase.DURING, risk_level=RiskLevel.WARNING, steps=[], question=A.QUESTIONS["can_move"])}
+    out = G.make_manager(lambda s: [])(prev)
+    assert out["selected_agents"] == [Specialist.RAIN_FLOOD]
+    fresh = {**prev, "action_plan": ActionPlan(phase=Phase.DURING, risk_level=RiskLevel.WARNING, steps=[])}
+    assert G.make_manager(lambda s: [])(fresh)["selected_agents"] == []
+
+
+def test_not_confirmed_items_are_listed_by_code():
+    out = A.make_action_advisor(fetch=FakeDB())(
+        {**tree_state(Phase.AFTER, damage="yes"), "specialist_results": [result(Specialist.RAIN_FLOOD, RiskLevel.NORMAL, "현황")]})
+    assert "확인되지 않음: 통제 도로, 보험·법률 정보" in out["draft"]
+

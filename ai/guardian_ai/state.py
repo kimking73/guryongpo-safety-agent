@@ -223,6 +223,8 @@ class GuardianState(TypedDict, total=False):
     polish_feedback: str
     polish_retry_count: int              # 최대 MAX_POLISH_RETRY
     polish_verdict: Literal["pass", "fail", "retry", "give_up"]
+    voice_text: str                      # 음성으로 읽을 2~3문장 (B5, polish.py)
+    card: dict[str, Any] | None          # 앱 카드: headline·chips·steps·sources·call_emergency (B5, polish.build_card)
 
     # 출력
     final_answer: str

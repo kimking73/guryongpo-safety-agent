@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:latlong2/latlong.dart';
 import '../models/domain_models.dart';
 
@@ -10,6 +11,12 @@ abstract class SafetyRepository {
   Future<List<AlertItem>> alerts(LatLng origin);
   Future<SafetyRoute> routeFor(Facility facility, UserMode userMode, RouteType routeType, LatLng origin);
   Future<ChatAnswer> ask(String question, UserMode userMode, LatLng origin);
+
+  /// 음성 질문 (WAV 녹음) → 받아쓴 질문 + 답 + 답 음성. 실패하면 RemoteError 메시지와 함께 예외
+  Future<VoiceAnswer> askVoice(Uint8List wav, UserMode userMode, LatLng origin);
+
+  /// 문장 → 음성(mp3). 음성 기능을 쓸 수 없으면 null
+  Future<Uint8List?> speak(String text);
 }
 
 class MockSafetyRepository implements SafetyRepository {
@@ -204,6 +211,14 @@ class MockSafetyRepository implements SafetyRepository {
       ]; }
   @override
   Future<ChatAnswer> ask(String question, UserMode userMode, LatLng origin) async => ChatAnswer(_mockAnswer(question));
+
+  // 목업은 받아쓰기·음성 합성이 없다. 녹음 여부와 상관없이 예시 질문으로 답한다
+  @override
+  Future<VoiceAnswer> askVoice(Uint8List wav, UserMode userMode, LatLng origin) async =>
+      VoiceAnswer('(예시) 대피소 어디야?', ChatAnswer(_mockAnswer('대피소')));
+
+  @override
+  Future<Uint8List?> speak(String text) async => null;
 
   String _mockAnswer(String question) {
     if (question.contains('대피소'))

@@ -9,7 +9,7 @@ info:
     | 서비스 | 담당 | 로컬 주소 | 배포 (Caddy, 같은 도메인) | 이 문서의 경로 |
     |---|---|---|---|---|
     | api — 데이터·위험 판정·사용자·대피 | A | `localhost:8000/api/v1` | `/api/v1/*` | `/health` … `/admin/*` (기본 서버) |
-    | ai — LangGraph 대화·음성 | B | `localhost:8001` | `/api/chat`, `/api/voice` | `/api/chat` (경로별 servers) |
+    | ai — LangGraph 대화·음성 | B | `localhost:8001` | `/api/chat`, `/api/voice`, `/api/tts` | `/api/chat`, `/api/voice`, `/api/tts` (경로별 servers) |
     | route — GraphHopper 경로 | B | `localhost:8002` | `/api/route*` | `/api/route`, `/api/route/check`, `/api/route/sea` |
 
     ai·route 의 요청·응답은 각 서비스 코드(Pydantic 모델)가 원본이다. 이 문서는 그 모양을 그대로 옮겨 적은 것이며,
@@ -27,7 +27,7 @@ info:
       방재단 `GET /admin/incidents/{id}` — `next_poll_sec` 10초. 같은 내용이 푸시와 폴링으로 모두 올 수 있으니 앱은 `id` 로 중복을 없앤다.
     - 대피 확인: 경고 중 `response_required=true` 인 것은 버튼 3개 — **대피 완료**(`evacuated`) / **대피 중**(`evacuating`) / **도움 필요**(`need_help`).
       알림 버튼·앱 대시보드·음성(B12) 모두 `POST /alerts/{alert_id}/response` 하나로 기록한다 (`via` 로 수단 구분).
-    - 음성: 앱은 녹음 파일만 ai 서비스로 보낸다. STT·TTS 호출은 서버가 한다 (앱에 Google 키 없음). 음성 API 형식은 B5 에서 확정 후 추가.
+    - 음성: 앱은 녹음 파일만 ai 서비스로 보낸다. STT·TTS 호출은 서버가 한다 (앱에 Google 키 없음). 형식은 `/api/voice`·`/api/tts` (B5, 2026-10-03).
     - 좌표: api 는 `{ "lat", "lng" }`, **ai·route 는 `{ "lat", "lon" }`** (서비스별로 다르니 주의). 지도 도형은 GeoJSON `[lng, lat]`.
       route 의 경로 선(`geometry`)은 GeoJSON 이 아니라 **인코딩된 polyline** (Google 형식, 정밀도 1e5).
     - 시각: ISO 8601, KST (`2026-10-05T14:30:00+09:00`)
@@ -848,7 +848,7 @@ paths:
       tags: [ai]
       summary: AI 대화 (LangGraph) — 원본 ai/guardian_ai/service.py ChatRequest·ChatResponse
       description: |
-        응답 시간 9~13초, 검증 재시도 시 30초 이상 (2026-10-03 실측) → 앱은 대기 표시.
+        응답 시간 7~19초, 검증 재시도 시 30초 이상 (2026-10-03 실측, 목표 15초) → 앱은 대기 표시.
         인증: 아직 없음 (Firebase 토큰 검증은 B 가 A 방식에 맞춰 추가 예정 — user_id 는 기기별 ID).
         답에 경로가 있으면 `route` 를 주고, 앱은 "지도에서 경로 보기"로 그린다 (`geometry` = 인코딩 polyline).
       operationId: aiChat
@@ -864,6 +864,75 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AiChatResponse' }
+
+  /api/voice:
+    servers:
+      - { url: 'http://localhost:8001', description: 'ai 로컬. 배포는 Caddy 가 /api/voice 를 ai 로' }
+    post:
+      tags: [ai]
+      summary: 음성 질문 → 받아쓰기(Google STT) → /api/chat 과 같은 대화 → 답 음성(Google TTS, mp3) — 원본 ai/guardian_ai/api.py
+      description: |
+        녹음 형식은 무엇이든 된다(서버가 ffmpeg 로 16kHz mono 로 바꿈). 앱은 16kHz mono WAV 를 보낸다. 30초·5MB 이내.
+        응답 = AiChatResponse + `transcript`(받아쓴 질문) + `audio_b64`(답의 voice_text 를 읽은 mp3, 합성 실패면 null).
+        대화는 conversation_id 로 /api/chat 과 이어진다.
+      operationId: aiVoice
+      security: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [audio, user_id]
+              properties:
+                audio: { type: string, format: binary, description: '녹음 파일 (wav·webm·m4a 등)' }
+                user_id: { type: string }
+                conversation_id: { type: string }
+                lat: { type: number }
+                lon: { type: number }
+                profile: { type: string, description: 'AiUserProfile JSON 문자열' }
+                remember: { type: boolean, default: true }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/AiChatResponse' }
+                  - type: object
+                    required: [transcript]
+                    properties:
+                      transcript: { type: string }
+                      audio_b64: { type: [string, 'null'], description: 'mp3 base64' }
+        '422': { description: '말을 알아듣지 못함·녹음이 너무 김·읽을 수 없는 파일 (detail 문구를 그대로 보여 줌)' }
+        '503': { description: '음성 기능 준비 안 됨 (서버에 Google 키 없음) 또는 Google 연결 실패' }
+
+  /api/tts:
+    servers:
+      - { url: 'http://localhost:8001', description: 'ai 로컬. 배포는 Caddy 가 /api/tts 를 ai 로' }
+    post:
+      tags: [ai]
+      summary: 문장 → 음성(mp3). 앱 "음성으로 듣기"·경고 읽기. 같은 문장은 10분 동안 캐시
+      operationId: aiTts
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string, description: '보통 AiChatResponse.voice_text' }
+      responses:
+        '200':
+          description: mp3
+          content:
+            audio/mpeg:
+              schema: { type: string, format: binary }
+        '422': { description: 빈 문장 }
+        '503': { description: 음성 기능 준비 안 됨 }
 
   # ================================================================ route 서비스 (B) — servers 가 다름
   /api/route:
@@ -1659,6 +1728,23 @@ components:
                 hazards_ok: { type: boolean }
                 geometry: { type: string, description: 인코딩 polyline }
         call_emergency: { type: boolean, description: '위험 지역에서 이동이 어려움 → 앱이 119 버튼을 크게' }
+        decision_path: { type: string, examples: ['재난 중 > 위험 지역 > 이동 가능'], description: '행동 권고 판단 로직에서 도달한 분기' }
+        follow_up: { type: [string, 'null'], description: '판단에 필요한 추가 질문 (답 끝에도 "확인할게요: …"로 붙음)' }
+        voice_text: { type: string, description: '음성으로 읽을 2~3문장 (/api/tts 에 그대로)' }
+        card:
+          oneOf:
+            - type: 'null'
+            - type: object
+              description: '카드형 표시용 (값은 모두 근거에서 코드가 고름). 앱 화면 적용은 C 와 협의'
+              properties:
+                headline: { type: string, examples: ['재난 중 · 위험 지역 · 이동 가능 · 호우·침수 경보'] }
+                chips:
+                  type: array
+                  items: { type: object, properties: { label: { type: string }, value: { type: string } } }
+                steps: { type: array, items: { type: string }, description: '지금 할 일' }
+                sources: { type: array, items: { type: string } }
+                call_emergency: { type: boolean }
+        timings: { type: object, additionalProperties: { type: number }, description: '단계별 초 (디버그용, 앱 표시 안 함)' }
 
     # ------------------------------------------------------------ route 서비스 (B) — 원본 route/guardian_route/service.py
     LatLon:

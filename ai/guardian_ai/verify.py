@@ -103,14 +103,26 @@ def make_hallucination_check(checker: FactChecker | None = None):
         plan = state.get("action_plan")
         if plan is not None:
             evidence += plan.evidence       # 행동 권고가 인용한 원문 (B4)
+        # 사용자가 직접 한 말도 근거 — "말씀하신 파손 상황"을 근거 없다고 거른 일이 있었다 (2026-10-03 live)
+        said = [Evidence(source="request", key="사용자 질문", value=state["question"])] if state.get("question") else []
+        said += [Evidence(source="request", key="사용자가 이번 대화에서 한 말", value=m["content"])
+                 for m in (state.get("history") or [])[-6:] if m.get("role") == "user"]
         result = check_numbers(draft, evidence)
+        intent = None
         how = "숫자"
         if result.ok and checker is not None and evidence:
             try:
-                result, how = checker(draft, evidence_lines(evidence)), "숫자+내용"
+                out = checker(draft, evidence_lines(evidence + said))
+                result, intent = out if isinstance(out, tuple) else (out, None)
+                how = "숫자+내용" + ("+의도" if intent is not None else "")
             except Exception as e:  # noqa: BLE001
                 logger.warning("내용 검사 실패 → 숫자 검사 결과만 사용 (%s: %s)", type(e).__name__, e)
+        if intent is not None and state.get("mode") != "alert":
+            logger.info("의도 검증 %s %s", "통과" if intent.ok else "실패", intent.feedback)
         logger.info("환각 검증 [%s] %s %s", how, "통과" if result.ok else "실패", result.feedback)
-        return {"checks": {"hallucination": result}}
+        checks = {"hallucination": result}
+        if intent is not None and state.get("mode") != "alert":
+            checks["intent"] = intent       # 의도 검증도 같은 호출로 (서비스는 intent_check 노드를 비워 둔다)
+        return {"checks": checks}
 
     return hallucination_check

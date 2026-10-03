@@ -4,7 +4,7 @@
 1. Read `.claude/docs/timeline.md` → status table, "다음 세션 시작점", "이월 항목", work log.
 2. From `코드/`: `git pull` (teammates push to `main`), then `docker compose up -d` and `docker compose ps`
    (db, api, ai all healthy). If `.env` changed since the ai container started: `docker compose up -d --force-recreate ai`.
-3. Baseline tests: `.venv/bin/python -m pytest -q` → **89 passed**. `-m db` → 4 passed (needs local db + `AI_DB_*`,
+3. Baseline tests: `.venv/bin/python -m pytest -q` → **160 passed**. `-m db` → 4 passed (needs local db + `AI_DB_*`,
    `AI_MEM_DB_*` in `.env`). `-m live` → 32 passed on gpt-6-luna (routing 13 + B3 injection 13 + memory extractor 6, ~7원).
 3a. **OpenAI spend check — warn the user** (user's budget 200,000원/month, user request 2026-10-01): read
    `curl -s localhost:8001/api/ai/usage` (local container), the VM's same URL over ssh, and
@@ -44,8 +44,15 @@
   `make_manager(phase_of=…)`. The advisor follows the user's decision tree (`action.decide`, agent-design.md 4절):
   phase → danger (`hazards_at`) → can_move / damage (classifier fields from the conversation, keyword fallback) → 119 /
   shelter route / one follow-up question; response `decision_path`, `follow_up`. Forecasts: `tools.get_forecast` (KMA
-  ultra-short + short, evidence named 오늘/내일/모레). Still stubs: intent_check, polish. Default graph (tests) uses no-DB advisor and phase 'during'.
+  ultra-short + short, evidence named 오늘/내일/모레). Default graph (tests) uses no-DB advisor and phase 'during'.
   `ChatService()` wires the real nodes; `DEFAULT_NODES`/`ChatService(classifier=…)` stay offline for tests.
+- B5 (2026-10-03, in progress — only the real Google voice round trip is left, waiting for `secrets/gcp-voice.json`):
+  intent check rides on the content checker's call (`OpenAIFactChecker(checks_intent=True)`, effort low by default —
+  `OPENAI_VERIFY_EFFORT`; the service's `intent_check` node is a no-op). `polish.py`: `build_card` (code picks chips from
+  Evidence) + `OpenAIPolisher` only for drafts > 600 chars + `voice_text`; `make_final_check` = rule number check →
+  `polish_feedback` (#3 fixed). `ChatResponse.card`·`voice_text`·`timings`. `voice.py` (ffmpeg → Google STT/TTS v1),
+  `api.py` `/api/voice` (multipart) and `/api/tts`; no key → 503. Latency targets: text 15 s, voice 20 s; measured text
+  7–19 s, one retry 30–35 s. Live tree test: `tests/test_tree_live.py -m "live and db"` (11 cases, ~6 min).
 - Data: tools read PostgreSQL directly with read-only role `AI_DB_*` (`../db/init/07_ai_readonly.sh`); every tool takes
   `fetch=` and returns `{"available": False, "reason"}` on failure; observations prefer A's simulated values for 6 h like
   the risk engine. `RiskLevel` = DB 5 levels (`.rank`), `ActionGuide` = `action_guides` row. `get_user_profile` is a mock.
@@ -55,7 +62,7 @@
   saved after answering in a thread (`OpenAIMemoryExtractor`); `remember` defaults True; `/api/ai/memory/{uid}` has no
   auth — keep it off the public proxy.
 - LLM: OpenAI `gpt-6-luna` (Responses API structured output; reasoning model → no `temperature`; classifier/writer
-  effort low, checker medium; SDK retries off). `OPENAI_VERIFY_MODEL` can raise only the checker. Key is borrowed — no
+  effort low, checker low since B5 (`OPENAI_VERIFY_EFFORT`); SDK retries off). `OPENAI_VERIFY_MODEL` can raise only the checker. Key is borrowed — no
   dashboard cap; `usage.py` estimates and warns at 50/80/100% of 200,000원 (step 3a).
 - Latency (2026-10-01, local): ~8 s/question (classify ~2.7 + write ~2.4 + check ~3.0 s, DB 0.02 s), 0 retries in 20;
   one forced retry → 12–15 s. B4/B5 will add LLM calls — set a target before B5.

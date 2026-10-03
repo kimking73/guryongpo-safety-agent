@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:latlong2/latlong.dart';
 import '../models/domain_models.dart';
@@ -9,7 +11,7 @@ import 'mock_repository.dart';
 
 /// 실제 서버 연결 (APP_MODE=remote).
 /// - api(8000): 위험도 /api/v1/risk, 위험 영역 /api/v1/risk/areas, 시설 /api/v1/dashboard/layers/{shelters,medical}
-/// - ai(8001): /api/chat
+/// - ai(8001): /api/chat, 음성 /api/voice·/api/tts
 /// - route(8002): /api/route
 /// 알림은 /api/v1/alerts가 아직 목업(A5)이라 위험도 판정 항목으로 만든다.
 class RemoteSafetyRepository implements SafetyRepository {
@@ -79,26 +81,32 @@ class RemoteSafetyRepository implements SafetyRepository {
     }
   }
 
-  @override
-  Future<ChatAnswer> ask(String question, UserMode userMode, LatLng o) async {
+  /// /api/chat·/api/voice 공통 사용자 정보 (서버 ChatRequest.profile)
+  Future<(String, Map<String, Object>)> _profile(UserMode userMode) async {
     final uid = await _account.deviceUserId();
     final (age, transport) = await _account.requiredSetup();
     final walking = await _account.walkingImpaired();
     final places = await _account.places();
+    return (uid, <String, Object>{
+      'user_id': uid,
+      'user_type': userMode == UserMode.resident ? 'resident' : 'tourist',
+      if (age != null) 'age': age,
+      'mobility': transport == '휠체어' ? 'wheelchair' : 'walk',
+      if (walking) 'walking_impaired': true,
+      ...placesForProfile(places),
+    });
+  }
+
+  @override
+  Future<ChatAnswer> ask(String question, UserMode userMode, LatLng o) async {
+    final (uid, profile) = await _profile(userMode);
     try {
       final r = await _guard(() => _client.ai.post<Map<String, dynamic>>('/api/chat', data: {
             'user_id': uid,
             'question': question,
             if (_conversationId != null) 'conversation_id': _conversationId,
             'current_location': {'lat': o.latitude, 'lon': o.longitude, 'label': '현재 위치'},
-            'profile': {
-              'user_id': uid,
-              'user_type': userMode == UserMode.resident ? 'resident' : 'tourist',
-              if (age != null) 'age': age,
-              'mobility': transport == '휠체어' ? 'wheelchair' : 'walk',
-              if (walking) 'walking_impaired': true,
-              ...placesForProfile(places),
-            },
+            'profile': profile,
           }));
       _conversationId = r.data!['conversation_id'] as String?;
       return chatAnswerFromJson(r.data!, names: await _routeHazardNames());
@@ -107,12 +115,44 @@ class RemoteSafetyRepository implements SafetyRepository {
     }
   }
 
-  Future<Response<T>> _guard<T>(Future<Response<T>> Function() call, {String? notFound}) async {
+  /// 녹음(WAV) → ai /api/voice (multipart). 같은 대화(conversation_id)로 이어진다.
+  /// 말을 못 알아들음(422)·음성 기능 없음(503)은 서버 문구를 그대로 RemoteError로
+  @override
+  Future<VoiceAnswer> askVoice(Uint8List wav, UserMode userMode, LatLng o) async {
+    final (uid, profile) = await _profile(userMode);
+    final form = FormData.fromMap({
+      'audio': MultipartFile.fromBytes(wav, filename: 'question.wav', contentType: DioMediaType('audio', 'wav')),
+      'user_id': uid,
+      if (_conversationId != null) 'conversation_id': _conversationId,
+      'lat': '${o.latitude}',
+      'lon': '${o.longitude}',
+      'profile': jsonEncode(profile),
+    });
+    final r = await _guard(() => _client.ai.post<Map<String, dynamic>>('/api/voice', data: form), passDetail: const {422, 503});
+    _conversationId = r.data!['conversation_id'] as String?;
+    return VoiceAnswer(r.data!['transcript'] as String, chatAnswerFromJson(r.data!, names: await _routeHazardNames()));
+  }
+
+  @override
+  Future<Uint8List?> speak(String text) async {
+    try {
+      final r = await _client.ai.post<List<int>>('/api/tts',
+          data: {'text': text}, options: Options(responseType: ResponseType.bytes));
+      return Uint8List.fromList(r.data!);
+    } on DioException {
+      return null; // 키 없음(503)·서버 꺼짐 → 버튼이 "쓸 수 없음"을 알린다
+    }
+  }
+
+  /// passDetail: 이 상태 코드면 서버가 보낸 문구(FastAPI detail)를 그대로 보여 준다
+  Future<Response<T>> _guard<T>(Future<Response<T>> Function() call, {String? notFound, Set<int> passDetail = const {}}) async {
     try {
       return await call();
     } on DioException catch (e) {
       final status = e.response?.statusCode;
       if (status == 404 && notFound != null) throw RemoteError(notFound);
+      final body = e.response?.data;
+      if (passDetail.contains(status) && body is Map && body['detail'] is String) throw RemoteError(body['detail'] as String);
       if (e.type == DioExceptionType.receiveTimeout) throw const RemoteError('서버 응답이 늦습니다. 잠시 후 다시 시도해 주세요.');
       if (status == null) throw const RemoteError('서버에 연결하지 못했습니다. 인터넷 연결을 확인해 주세요.');
       throw RemoteError('서버 오류가 발생했습니다 ($status). 잠시 후 다시 시도해 주세요.');
@@ -259,9 +299,14 @@ Map<String, Object> placesForProfile(List<SavedPlace> places) {
 /// /api/chat 응답 → 답변 + (있으면) 지도에 그릴 경로
 ChatAnswer chatAnswerFromJson(Map<String, dynamic> j, {Map<String, String> names = const {}}) {
   final r = j['route'] as Map<String, dynamic>?;
-  if (r == null) return ChatAnswer(j['answer'] as String);
+  final voiceText = j['voice_text'] as String?;
+  final b64 = j['audio_b64'] as String?;
+  final audio = b64 == null ? null : base64Decode(b64);
+  if (r == null) return ChatAnswer(j['answer'] as String, voiceText: voiceText, audio: audio);
   final dest = r['destination'] as Map<String, dynamic>;
   return ChatAnswer(j['answer'] as String,
+      voiceText: voiceText,
+      audio: audio,
       route: routeFromJson(r, 'ai', RouteType.safest, names: names),
       destinationName: dest['name'] as String,
       destinationKind: dest['kind'] as String?,

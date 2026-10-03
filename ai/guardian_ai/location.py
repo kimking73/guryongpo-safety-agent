@@ -118,6 +118,10 @@ def build_evidence(d: LocationData) -> tuple[list[Evidence], list[str]]:
     kinds = ", ".join(TYPE_KO.get(k, k) for k in s["shelter_types"]) or "대피소"
     ev += [Evidence(source="shelters", key="안내 대피소", value=s["name"]),
            Evidence(source="shelters", key=f"{s['name']} 종류", value=f"{kinds} · {'실내' if s['is_indoor'] else '실외'}")]
+    # 대피소 종류(지진해일 등)만 보고 검증기가 "호우 대피 장소라는 근거 없음"으로 막았다 (2026-10-03 live) → 고른 기준을 근거로
+    if s["safe"]:
+        ev.append(Evidence(source="shelters", key="대피소 선정 기준",
+                           value="지정 대피소 중 현재 침수·산사태 위험 영역 밖에서 가장 가까운 곳 (재난 종류와 관계없이 대피 장소로 안내)"))
     if not s["safe"]:
         ev.append(Evidence(source="shelters", key="주의",
                            value=f"근처에 위험 영역 밖 대피소가 없어 가장 가까운 곳을 안내함 ({s['excluded_reason']})"))

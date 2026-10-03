@@ -114,6 +114,8 @@ services:
     volumes:
       # OpenAI 사용량·예상 비용 기록(openai_usage.json). 재시작·재빌드해도 남는다
       - ai-data:/srv/data
+      # 음성(B5) Google 서비스 계정 키 (.env 의 GCP_VOICE_CREDENTIALS=secrets/gcp-voice.json). 없으면 음성만 503
+      - ./secrets:/srv/secrets:ro
     ports:
       - "${AI_PORT:-8001}:8001"
     healthcheck:

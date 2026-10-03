@@ -122,6 +122,8 @@ def keyword_mobility_limited(question: str) -> bool:
 
 
 _CANNOT_MOVE = ("못 움직", "못 나가", "갇혔", "갇혀", "고립", "다쳤", "다쳐서", "거동이 안", "못 걷", "움직일 수 없")
+# 분류기가 실패(시간 초과 등)했을 때 "갈 수 있어요" 답이 unknown이 되어 같은 질문을 되풀이했다 (2026-10-03 live)
+_CAN_MOVE = ("갈 수 있", "걸어갈 수", "걸을 수 있", "이동할 수 있", "움직일 수 있", "나갈 수 있", "대피할 수 있")
 _DAMAGE_YES = ("물이 찼", "물이 들어", "침수됐", "침수되었", "부서졌", "파손", "무너졌", "정전", "피해가 있", "피해를 입")
 _DAMAGE_NO = ("피해 없", "피해는 없", "괜찮아요", "멀쩡")
 
@@ -129,7 +131,8 @@ _DAMAGE_NO = ("피해 없", "피해는 없", "괜찮아요", "멀쩡")
 def keyword_situation(question: str) -> tuple[str, str]:
     """(이동 가능, 피해 유무) — 분류기 LLM이 실패했을 때만 쓰는 규칙. 근거 없으면 unknown."""
     q = question or ""
-    can_move = "no" if any(w in q for w in _CANNOT_MOVE) else "unknown"
+    can_move = ("no" if any(w in q for w in _CANNOT_MOVE)
+                else "yes" if any(w in q for w in _CAN_MOVE) else "unknown")
     damage = "yes" if any(w in q for w in _DAMAGE_YES) else ("no" if any(w in q for w in _DAMAGE_NO) else "unknown")
     return can_move, damage
 
@@ -171,6 +174,8 @@ _NEW_TURN_RESET = {
     "polish_verdict": None,
     "verified_draft": "",
     "polished": "",
+    "voice_text": "",
+    "card": None,
 }
 
 
@@ -223,6 +228,14 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
                 logger.exception("질문 분류 실패, 키워드 분류로 대체")
                 selected, how = fallback_classify(view), "키워드 대체"
 
+        # 직전 답이 질문으로 끝났으면("확인할게요: 스스로 이동하실 수 있나요?") 이번 말은 그 답이다 → 직전 agent를 다시 쓴다.
+        # 답장("네, 걸어갈 수 있어요")만으로는 재난 질문으로 분류되지 않아 판단 로직이 끊겼다 (2026-10-03 live)
+        prev_plan = state.get("action_plan")
+        continued = (not is_retry and state.get("mode") != "alert" and prev_plan is not None and bool(prev_plan.question)
+                     and bool(state.get("selected_agents")))
+        if continued:
+            selected = list(dict.fromkeys([*state["selected_agents"], *selected]))
+
         # ── 3) 라우팅 로그 (질문마다 한 줄) ─────────────────────────────────
         # `docker compose logs -f ai | grep 라우팅`으로 볼 수 있다.
         # 예) 라우팅 [분류기] '비 많이 와요?' → ['rain_flood_agent'] (강수 관련 질문)
@@ -230,7 +243,7 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
         #   getattr를 두 번 쓰는 이유: keyword_classify 같은 일반 함수에는 .last가 없고,
         #   .last가 None일 수도 있다. 어느 경우든 오류 없이 ""가 되게 한다.
         reason = getattr(getattr(classify, "last", None), "reason", "") if how == "분류기" else ""
-        logger.info("라우팅 [%s%s] %r → %s %s", how, " 재시도" if is_retry else "",
+        logger.info("라우팅 [%s%s] %r → %s %s", how, " 재시도" if is_retry else (" +직전 질문" if continued else ""),
                     # chat이면 질문 문장, alert면 재난 종류를 찍는다
                     state.get("question") or getattr(state.get("risk_event"), "disaster", ""),
                     [s.value for s in selected], f"({reason})" if reason else "")
@@ -374,8 +387,10 @@ def finalize(state: GuardianState) -> dict:
     if state.get("polish_verdict") == "pass":
         return {"final_answer": state.get("polished", ""), "used_fallback": False}
     # 다듬은 답변이 끝내 검증을 못 넘었다 → 모양은 덜 예뻐도
-    # 루프 1에서 이미 검증을 통과한 초안을 그대로 내보낸다.
-    return {"final_answer": state.get("verified_draft", ""), "used_fallback": False}
+    # 루프 1에서 이미 검증을 통과한 초안을 그대로 내보낸다. 음성 문장도 그 초안에서 코드로 다시 만든다.
+    from .polish import fallback_voice
+    draft = state.get("verified_draft", "")
+    return {"final_answer": draft, "used_fallback": False, "voice_text": fallback_voice(state, draft)}
 
 
 def fallback(state: GuardianState) -> dict:

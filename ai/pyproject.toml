@@ -13,6 +13,10 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "psycopg-pool>=3.2",
     "langgraph-checkpoint-postgres>=3.1",
+    # 음성 (B5): Google Speech-to-Text·Text-to-Speech REST를 서비스 계정 토큰으로 부른다 (무거운 gRPC 클라이언트 대신)
+    "google-auth>=2.30",
+    "requests>=2.31",
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]

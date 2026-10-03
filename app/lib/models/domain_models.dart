@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -75,12 +76,22 @@ String? shelterExclusion(Facility f, List<RiskArea> areas) {
 enum RouteType { safest, nearest }
 
 /// AI 답변 한 개. 경로 안내가 있으면 route·목적지가 함께 온다 ("지도에서 경로 보기").
+/// voiceText = 음성으로 읽을 짧은 문장(서버 voice_text), audio = 음성 질문의 답 음성(mp3)
 class ChatAnswer {
-  const ChatAnswer(this.text, {this.route, this.destinationName, this.destinationPos, this.destinationKind});
+  const ChatAnswer(this.text, {this.route, this.destinationName, this.destinationPos, this.destinationKind, this.voiceText, this.audio});
   final String text;
+  final String? voiceText;
+  final Uint8List? audio;
   final SafetyRoute? route;
   final String? destinationName, destinationKind;
   final LatLng? destinationPos;
+}
+
+/// 음성 질문 결과: 받아쓴 질문 + 답 (답 음성은 answer.audio)
+class VoiceAnswer {
+  const VoiceAnswer(this.transcript, this.answer);
+  final String transcript;
+  final ChatAnswer answer;
 }
 
 /// 채팅 화면의 말풍선 하나

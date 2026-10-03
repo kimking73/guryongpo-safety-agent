@@ -201,6 +201,9 @@ def decide(state: GuardianState, fetch: Fetch | None = None, use_data: bool = Tr
         d.path.append("이동 불가능")
         d.emergency = True
         d.notes.append(Evidence(source="rule", key="119 구조 요청 권고", value=EMERGENCY_STEP))
+        # "무리하게 이동하지 마세요"를 검증기가 원문에 없는 새 지시로 막았다 (2026-10-03 live) → 판단 결과를 근거로
+        d.notes.append(Evidence(source="rule", key="판단 결과",
+                                value="스스로 이동할 수 없음 → 무리하게 이동하지 말고 안전한 곳에서 구조를 기다림"))
     elif can_move == "yes":
         d.path.append("이동 가능")
         d.need_route = True
@@ -320,10 +323,20 @@ def make_action_advisor(writer: ActionWriter | None = None, fetch: Fetch | None 
                     main.agent.value if main else None, [g["id"] for g in guides], bool(route), bool(decision.question))
 
         draft = "\n\n".join(parts)
+        # 위험 지역 판단은 코드가 맨 앞에 밝힌다. 전문 agent는 이 판단을 모른 채 "위험 단계 정상"만 쓸 수 있어
+        # 검증기가 "위험을 낮춰 말함"으로 막았다 (2026-10-03 live)
+        if "위험 지역" in decision.path:
+            where = next((n.value for n in decision.notes if n.key == "사용자 위치"), "")
+            reason = (f"현재 위치가 {where}에 있어" if where.startswith("위험 영역 안")
+                      else "현재 위치의 위험 여부를 확인할 수 없어" if where else "현재 위치를 알 수 없어")
+            draft = f"{reason} 위험 지역 기준으로 안내합니다.\n\n" + draft
         if decision.emergency:
             draft = EMERGENCY_STEP + "\n\n" + draft                      # 답변 맨 앞에도 (판단 로직 규칙)
         if steps:
             draft += "\n\n지금 할 일:\n" + "\n".join(f"{n}. {s}" for n, s in enumerate(steps, 1))
+        missing = [n.key for n in decision.notes if n.value == NOT_CONFIRMED]
+        if missing:                                                     # 값이 없으면 '확인되지 않음' (판단 로직 규칙, AI에 맡기지 않음)
+            draft += "\n\n확인되지 않음: " + ", ".join(missing)
         if decision.question:
             draft += f"\n\n확인할게요: {decision.question}"
         plan = ActionPlan(phase=phase, risk_level=level, steps=steps, guide_ids=[g["id"] for g in guides],

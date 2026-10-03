@@ -7,7 +7,7 @@ B1 코드(`guardian_ai/`)를 점검하며 찾은 결함. 2026-09-24 재현 확�
 | --- | --- | --- | --- | --- | --- |
 | 1 | alert 모드에서 재난 7종 중 3종이 엉뚱한 agent로 감 | 높음 | 예 (스텁 단계부터) | B2 (manager 교체) | ✅ 2026-09-24 `test_alert_routes_each_disaster_to_its_agent` |
 | 2 | 대화마다 초기화돼야 할 값이 다음 질문으로 넘어감 | 높음 | 아니요 (checkpointer를 붙이면 드러남) | B2 (`/chat`) | ✅ 2026-09-24 `test_conversation_turns_do_not_share_retry_state` |
-| 3 | 다듬기를 다시 할 때 실패 사유(`polish_feedback`)가 전달되지 않음 | 중간 | 아니요 (스텁은 항상 통과) | B5 (polish 구현) | - |
+| 3 | 다듬기를 다시 할 때 실패 사유(`polish_feedback`)가 전달되지 않음 | 중간 | 아니요 (스텁은 항상 통과) | B5 (polish 구현) | ✅ 2026-10-03 `test_polisher_changing_a_number_gets_feedback_then_falls_back_to_draft` |
 | 4 | 대화 저장 시 Pydantic 타입 역직렬화 경고 | 낮음 (지금은 경고만) | checkpointer를 붙이면 드러남 | B2 | ✅ 2026-09-24 `test_checkpointer_restores_state_types_without_warnings` |
 | 5 | 대피소·경로 질문 답이 "location_route_agent stub"뿐 (구현 전 agent 문구가 답에 섞임) | 높음 | 예 (2026-10-02 QA) | B4 | ✅ 2026-10-02 위치·경로 agent(`location.py`), 구현 전 agent는 빈 조각 → `test_stub_agents_never_leak_stub_text` |
 | 6 | 침수 agent가 침수 중 지하주차장 대피소를 "가까운 대피소"로 안내 | 높음 | 예 (heavy_rain_flood 시연) | B4 | ✅ 2026-10-02 `get_safe_shelters` 규칙 적용, `test_flood_verify` 가짜 DB에 지하 대피소 |
@@ -108,8 +108,11 @@ for q in ["비 와요?", "태풍 와요?", "미세먼지 어때요?"]:
 
 ## 3. 다듬기를 다시 할 때 실패 사유가 없음
 
-- [ ] 수정
-- [ ] 테스트 추가
+- [x] 수정
+- [x] 테스트 추가
+
+**해결 (2026-10-03, B5)**: `polish.make_final_check()`가 다듬은 글·음성 문장의 숫자를 규칙(`verify.check_numbers`)으로 다시 보고,
+실패 사유를 `polish_feedback`에 쓴다. `make_polish`가 다음 다듬기 호출에 그 사유를 넘긴다. 두 번째도 실패하면 다듬기 전 초안.
 
 **위치**: `graph.py:254-276` (`final_hallucination_check`, `final_check_gate`)
 

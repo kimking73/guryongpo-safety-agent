@@ -191,6 +191,8 @@ WRITER_PROMPT = """너는 포항 구룡포 재난 대응 서비스 '구룡가디
 - '확인할 수 없는 정보'가 있으면 그 정보는 지금 확인할 수 없다고 밝힌다. 그 상태에서 "안전하다"고 단정하지 않는다.
 - 위치가 '구룡포읍 중심(위치 정보 없음)'이면 그 기준이라고 밝힌다.
 - 행동요령(대피 방법 등)은 쓰지 않는다. 다른 agent가 공식 행동요령으로 따로 안내한다. 가까운 대피소 이름·거리는 근거에 있으면 써도 된다.
+- 사용자가 무엇을 해야 하는지·대비 방법을 물어도 그 부분은 쓰지 않는다. 답변 아래 '지금 할 일'에서 공식 원문으로 따로 안내된다.
+  행동요령이 '확인할 수 없다'거나 '근거에 없다'고도 쓰지 않는다.
 - 재검증 실패 사유가 주어지면 그 문제를 고쳐서 다시 쓴다.
 - '사용자 기억' 항목은 이 사용자가 지난 대화에서 직접 말한 자기 정보다(예: 보행 불편). 답을 그 사람에 맞추는 데만 쓰고,
   재난 상황 판단에는 쓰지 않는다."""
@@ -239,6 +241,8 @@ LOCATION_WRITER_PROMPT = """너는 포항 구룡포 재난 대응 서비스 '구
 - 경로 거리·소요 시간은 반드시 '경로 도착지'까지의 값이다. 다른 장소까지의 거리·시간처럼 쓰지 않는다.
 - '요청한 목적지'에 찾지 못했다는 내용이 있으면 그 사실을 밝히고 안내하는 대피소로 이어 간다.
 - 침수 단계·특보·행동요령은 쓰지 않는다. 다른 agent가 따로 안내한다.
+- 사용자가 무엇을 해야 하는지·대비 방법을 물어도 그 부분은 쓰지 않는다. 답변 아래 '지금 할 일'에서 공식 원문으로 따로 안내된다.
+  행동요령이 '확인할 수 없다'거나 '근거에 없다'고도 쓰지 않는다.
 - 재검증 실패 사유가 주어지면 그 문제를 고쳐서 다시 쓴다.
 - '사용자 기억' 항목은 이 사용자가 지난 대화에서 직접 말한 자기 정보다. 답을 그 사람에 맞추는 데만 쓴다."""
 
@@ -281,6 +285,8 @@ _COMMON_RULES = """규칙:
 - '확인할 수 없는 정보'가 있으면 그 정보는 지금 확인할 수 없다고 밝힌다. 그 상태에서 "안전하다"고 단정하지 않는다.
 - 위치가 '구룡포읍 중심(위치 정보 없음)'이면 그 기준이라고 밝힌다.
 - 행동요령(대피 방법·준비물 등)은 쓰지 않는다. 행동 권고 agent가 공식 원문으로 따로 안내한다.
+- 사용자가 무엇을 해야 하는지·대비 방법을 물어도 그 부분은 쓰지 않는다. 답변 아래 '지금 할 일'에서 공식 원문으로 따로 안내된다.
+  행동요령이 '확인할 수 없다'거나 '근거에 없다'고도 쓰지 않는다.
 - 재검증 실패 사유가 주어지면 그 문제를 고쳐서 다시 쓴다.
 - '사용자 기억' 항목은 이 사용자가 직접 말한 자기 정보다. 답을 그 사람에 맞추는 데만 쓴다."""
 
@@ -346,6 +352,8 @@ ACTION_WRITER_PROMPT = """너는 포항 구룡포 재난 대응 서비스 '구�
 규칙:
 - 원문에 없는 행동을 만들지 않는다. 원문 문장을 이 사용자 상황(주민·관광객, 나이, 보행 불편, 직업, 위치·경로 안내)에 맞게
   고르고 쉬운 말로 풀어 쓰기만 한다. 사용자에게 해당하지 않는 원문(예: 농업인이 아닌데 비닐하우스)은 고르지 않는다.
+- 사용자 상황(고령·보행 불편 등)만 보고 '주변 사람에게 도움 요청', '가족과 함께 이동' 같은 행동을 덧붙이지 않는다.
+  원문이나 '판단 결과'에 있을 때만 쓴다. '판단 결과'가 주어지면 그와 반대되는 행동(예: 이동 불가인데 이동 지시)은 쓰지 않는다.
 - 숫자는 원문·상황에 있는 값만 쓴다.
 - '119 구조 요청 권고'가 주어지면 그 내용을 첫 번째 할 일로 쓴다.
 - 대피소 경로가 주어지면 그 이름·거리·시간을 그대로 쓴다. 수치는 주어진 값만, 없으면 "확인되지 않음".
@@ -378,12 +386,61 @@ class OpenAIActionWriter:
 
 
 # ---------------------------------------------------------------------------
+# 답변 다듬기 (B5) — 쉬운 문장 + 음성용 문장. 카드형 필드는 코드가 만든다(polish.build_card)
+# ---------------------------------------------------------------------------
+
+class PolishAnswer(BaseModel):
+    text: str = Field(description="다듬은 답변 전체")
+    voice_text: str = Field(description="소리 내어 읽을 2~3문장")
+
+
+POLISH_PROMPT = """너는 포항 구룡포 재난 대응 서비스 '구룡가디언'의 답변 다듬기 agent다. 이미 사실 검증을 통과한 답변 초안을
+노인과 관광객도 바로 이해하도록 다듬는다.
+
+규칙:
+- 숫자·단위·시각·지명·대피소 이름·위험 단계 이름은 한 글자도 바꾸지 않는다. 새 숫자·사실을 더하지 않는다.
+- '지금 할 일:' 번호 목록, '확인되지 않음:' 줄, '확인할게요:' 질문, 맨 앞의 119 안내는 내용 그대로 둔다(문장만 살짝 다듬기 가능).
+- 긴 문장은 나누고, 어려운 말(예: 지표면 수위계)은 쉬운 말로 풀되 숫자는 그대로.
+- '요약 필요'가 true면 '지금 할 일' 앞의 상황 설명을 핵심 3문장 이내로 줄인다. 위험 단계·특보·가장 중요한 수치는 남긴다.
+- voice_text: 소리 내어 읽을 2~3문장. 가장 중요한 상황 한 문장 + 가장 먼저 할 일(119 안내가 있으면 그것) + 질문이 있으면 질문.
+  숫자는 초안 그대로, 목록 기호·괄호는 쓰지 않는다.
+- 재다듬기 사유가 주어지면 그 문제(바뀐 숫자 등)를 고친다."""
+
+
+class OpenAIPolisher:
+    """polish.make_polish(polisher=OpenAIPolisher())로 쓴다. 실패하면 예외 → 초안 그대로."""
+
+    def __init__(self, client: OpenAI | None = None, model: str | None = None,
+                 tracker: UsageTracker | None = None):
+        self.client = client or make_client()
+        self.model = model or os.environ.get("OPENAI_MODEL") or DEFAULT_MODEL
+        self.tracker = tracker or get_tracker()
+
+    def __call__(self, draft: str, summarize: bool, feedback: str = "") -> tuple[str, str]:
+        body = [f"요약 필요: {'true' if summarize else 'false'}", "답변 초안:", draft]
+        if feedback:
+            body.append(f"재다듬기 사유:\n{feedback}")
+        response = self.client.responses.parse(
+            model=self.model, instructions=POLISH_PROMPT, input="\n".join(body),
+            text_format=PolishAnswer, reasoning={"effort": "low"})
+        self.tracker.record(self.model, getattr(response, "usage", None))
+        result = response.output_parsed
+        if not isinstance(result, PolishAnswer) or not result.text.strip():
+            raise ValueError(f"다듬기 결과를 해석하지 못함: {response.output_text!r}")
+        return result.text.strip(), result.voice_text.strip()
+
+
+# ---------------------------------------------------------------------------
 # 환각 검증 — 내용 검사 (B3). 숫자는 verify.check_numbers가 규칙으로 이미 확인했다
 # ---------------------------------------------------------------------------
 
 class FactCheck(BaseModel):
     ok: bool = Field(description="근거와 어긋나는 주장이 하나도 없으면 true")
     issues: list[str] = Field(description="근거와 어긋나거나 근거에 없는 주장. 한 줄에 하나, 없으면 빈 목록")
+    # 의도 검증 (B5) — 같은 호출에서 함께 판단해 AI 호출 수를 늘리지 않는다
+    answers_question: bool = Field(default=True, description=(
+        "답변이 사용자 질문이 실제로 물은 것에 답하는가. 질문이 없으면(경고 알림) true"))
+    intent_issue: str = Field(default="", description="answers_question이 false일 때, 질문이 물은 것과 답이 어긋난 점 한 줄")
 
 
 CHECKER_PROMPT = """너는 재난 안내 답변의 사실 검증자다. 답변 초안의 각 주장이 근거 목록으로 뒷받침되는지 확인한다.
@@ -398,8 +455,12 @@ CHECKER_PROMPT = """너는 재난 안내 답변의 사실 검증자다. 답변 �
 - '지금 할 일'에 근거의 행동요령 원문·대피소 경로·'119 구조 요청 권고'와 무관한 새 행동 지시를 지어냄
   (원문을 쉬운 말로 풀거나, 일부만 고르거나, 원문 행동의 준비 단계(예: '대피할 장소를 미리 확인')로 쓴 것은 괜찮다)
 
-'사용자 기억' 항목은 사용자가 직접 말한 자기 정보로, 그 사용자에 대한 근거로 인정한다.
-실패가 아닌 것: 표현을 쉽게 바꾸기, 근거 일부만 고르기, "확인할 수 없다"고 밝히기, 일반적인 주의 당부.
+'사용자 기억'·'사용자 질문'·'사용자가 이번 대화에서 한 말' 항목은 사용자가 직접 한 말로, 그 사용자 상황에 대한 근거로 인정한다.
+answers_question: '사용자 질문'이 물은 것(예: 내일 날씨, 특정 목적지까지 길, 특정 재난)에 답이 실제로 답하는지 본다.
+물은 것을 빼먹었거나 다른 것(오늘만, 다른 장소, 다른 재난 위주)을 답하면 false. 근거가 부족해 '확인할 수 없다'고 밝힌 것은 답한 것으로 본다.
+실패가 아닌 것: 표현을 쉽게 바꾸기, 근거 일부만 고르기(근거에 있는 내용을 빠뜨린 것은 사실 오류가 아니다),
+"확인할 수 없다"고 밝히기, 일반적인 주의 당부, '판단 결과' 항목을 따른 행동,
+행동요령 원문의 적용 대상(상습침수지역·보행자 등) — 원문은 서비스 규칙이 사용자 상황에 맞춰 이미 골랐다.
 issues에는 무엇이 근거와 어떻게 다른지 짧게 쓴다."""
 
 
@@ -410,13 +471,16 @@ class OpenAIFactChecker:
     """
 
     def __init__(self, client: OpenAI | None = None, model: str | None = None,
-                 tracker: UsageTracker | None = None, reasoning_effort: str = "medium"):
+                 tracker: UsageTracker | None = None, reasoning_effort: str | None = None, checks_intent: bool = False):
         self.client = client or make_client()
         self.model = (model or os.environ.get("OPENAI_VERIFY_MODEL") or os.environ.get("OPENAI_MODEL")
                       or DEFAULT_MODEL)
         self.tracker = tracker or get_tracker()
-        # 검증은 놓치면 안 되므로 분류(low)보다 깊게 생각하게 둔다
-        self.reasoning_effort = reasoning_effort
+        # medium은 8~12초로 응답 제한(10초)을 자주 넘겨 내용 검사가 통째로 빠졌다. low(약 4초)도 같은 문제를 잡았다 (2026-10-03 live)
+        # → 기본 low. 더 깊게 보려면 OPENAI_VERIFY_EFFORT=medium (지연 늘어남)
+        self.reasoning_effort = reasoning_effort or os.environ.get("OPENAI_VERIFY_EFFORT") or "low"
+        # True면 의도 검증도 같은 호출로 — (내용, 의도) 두 결과를 돌려준다 (verify.make_hallucination_check가 나눠 쓴다)
+        self.checks_intent = checks_intent
 
     def __call__(self, draft: str, evidence: str):
         from .state import CheckResult
@@ -428,9 +492,14 @@ class OpenAIFactChecker:
         result = response.output_parsed
         if not isinstance(result, FactCheck):
             raise ValueError(f"검증 결과를 해석하지 못함: {response.output_text!r}")
-        if result.ok:   # ok=true인데 issues가 있으면 사소한 메모로 보고 통과 (오탐으로 안전 안내까지 가지 않게)
-            return CheckResult(ok=True)
-        return CheckResult(ok=False, feedback="근거와 다른 내용: " + " / ".join(result.issues or ["(사유 없음)"]))
+        # ok=true인데 issues가 있으면 사소한 메모로 보고 통과 (오탐으로 안전 안내까지 가지 않게)
+        fact = CheckResult(ok=True) if result.ok else CheckResult(
+            ok=False, feedback="근거와 다른 내용: " + " / ".join(result.issues or ["(사유 없음)"]))
+        if not self.checks_intent:
+            return fact
+        intent = CheckResult(ok=True) if result.answers_question else CheckResult(
+            ok=False, feedback="질문에 맞지 않는 답: " + (result.intent_issue or "(사유 없음)"))
+        return fact, intent
 
 
 # ---------------------------------------------------------------------------

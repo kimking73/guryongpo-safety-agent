@@ -51,11 +51,11 @@ flowchart TD
 | `life_safety_agent` | 미세먼지·자외선 등급 (행동요령은 행동 권고가 원문으로) | current_location | specialist_results | get_life_safety | O |
 | `location_route_agent` | 위치 기반 경고, 대피소까지 안전 경로 | user, current_location | specialist_results (route 포함) | get_risk_at, get_facilities, request_route | O |
 | `action_advisor` | 판단 트리로 행동 우선순위 결정 → 전문 agent 결과와 합쳐 초안 작성 | phase, specialist_results, user | action_plan, draft | get_action_guides, get_facilities | 문장화만 |
-| `intent_check` | 초안이 질문 의도에 답하는지 (chat만) | question, history, draft | checks.intent | - | O |
+| `intent_check` | 초안이 질문 의도에 답하는지 (chat만). 실제 서비스는 아래 `hallucination_check`와 한 번의 LLM 호출로 함께 (B5) | question, history, draft | checks.intent | - | O |
 | `hallucination_check` | 초안의 수치·사실이 evidence와 일치하는지 | draft, specialist_results[].evidence, action_plan | checks.hallucination | - | 숫자는 규칙 대조 + LLM |
 | `verify_gate` | 검증 합류, 통과/재시도/fallback 결정 | checks, retry_count | verdict, retry_count, manager_feedback, verified_draft | - | X |
-| `polish` | 수치는 표, 긴 글은 요약, 쉬운 문장 | verified_draft, polish_feedback | polished | - | O |
-| `final_hallucination_check` | 다듬으며 내용이 바뀌지 않았는지 | polished, verified_draft, evidence | polish_verdict | - | 숫자는 규칙 대조 + LLM |
+| `polish` | 카드형 필드(코드) + 600자 넘는 답만 쉬운 말 요약 + 음성용 문장 | verified_draft, polish_feedback | polished, voice_text, card | - | 긴 답만 O |
+| `final_hallucination_check` | 다듬은 글·음성 문장의 숫자가 근거와 맞는지 | polished, voice_text, evidence | polish_verdict, polish_feedback | - | X (규칙만) |
 | `final_check_gate` | 루프 2 재시도 여부 | polish_verdict, polish_retry_count | polish_verdict, polish_retry_count | - | X |
 | `finalize` | 최종 답변 확정 | polished 또는 verified_draft | final_answer | - | X |
 | `fallback` | 검증 실패 시 최소 안내 (119, 대피소) | - | final_answer, used_fallback | - | X |
@@ -216,12 +216,25 @@ A7이 `action_guides` 표에 적재한 형식을 그대로 쓴다 (2026-10-01, �
 - 동의: `ChatRequest.remember`(기본 켜짐, 사용자 결정) — 끄면 불러오기·저장 모두 안 함. 보기·지우기 `GET/DELETE /api/ai/memory/{user_id}`
   (인증 전이라 외부 비공개, B10 Caddy에서 막는다). 서버 종료 때 백그라운드 저장이 끝날 때까지 기다린다.
 
+B5 구현 (2026-10-03):
+- 의도 검증: `OpenAIFactChecker(checks_intent=True)`가 내용 검사와 같은 호출에서 `answers_question`·`intent_issue`도 낸다 →
+  `checks["intent"]`. 실패하면 기존 재시도(`verify_gate` → `manager_feedback`). alert 모드는 의도 검사 없음. 서비스에서 `intent_check` 노드는 빈 노드.
+  검증 근거에 '사용자 질문'·'사용자가 이번 대화에서 한 말'을 넣어 사용자가 말한 피해·상황을 지어낸 것으로 보지 않게 했다.
+  내용 검사 추론 깊이는 기본 low (`OPENAI_VERIFY_EFFORT`) — medium은 8~12초로 10초 제한을 자주 넘겨 검사가 통째로 빠졌다.
+- 다듬기 (`polish.py`): 카드(`build_card`) — 제목(분기 + 가장 높은 위험), 수치 칩(근거에서 코드가 고름, 최대 5개), 할 일, 출처, 119.
+  글은 600자 넘을 때만 `OpenAIPolisher`가 쉬운 말로 요약하고 음성 문장(2~3문장)도 쓴다. 그보다 짧으면 초안 그대로, 음성 문장은 코드
+  (`fallback_voice`: 첫 두 문장 + 첫 할 일 + 질문). 다듬은 뒤 숫자 재검증은 규칙만(#3 해결).
+- 행동 권고가 '위험 지역' 분기면 코드가 답 맨 앞에 "현재 위치가 위험 영역 안(…)에 있어 위험 지역 기준으로 안내합니다"를 붙인다
+  (전문 agent는 이 판단을 모르고 "위험 단계 정상"만 쓸 수 있어 검증기가 막았다). 이동 불가능 분기는 '판단 결과' 근거를 남긴다.
+- 지연 (2026-10-03 로컬, gpt-6-luna): 텍스트 7~19초(대부분), 검증 재시도 1회면 30~35초. 목표 텍스트 15초·음성 20초.
+  남은 단축: 재시도 때 데이터 재수집 없이 문장만 다시(전문 agent 결과 재사용).
+
 ## 7. 열린 질문
 
 1. ~~재난 '후' 판정 기간 N시간~~ → 24시간 (2026-10-03). 생활안전(자외선·미세먼지) 판정은 재난 단계에 쓰지 않는다
 2. 맨홀 위치 데이터를 포항 디지털 트윈이 제공하는가? (A7과 동일 질문)
 3. ~~AI의 DB 직접 조회(읽기 전용) vs FastAPI 경유~~ → 직접 조회로 결정 (2026-10-01, 5절)
-4. 한 질문당 LLM 호출이 최소 5회. 음성 대화에서 지연이 크면 alert 모드처럼 의도 검증 생략, 또는 단순 질문은 다듬기 생략 검토 (B5에서 측정 후 결정)
+4. ~~한 질문당 LLM 호출 수와 음성 지연~~ → 의도 검증은 내용 검사와 한 호출로, 다듬기는 600자 넘는 답만, 다듬은 뒤 재검증은 규칙만 (2026-10-03, 2절 B5)
 5. ~~대화 중 알게 된 사용자 정보 저장 주체~~ → AI가 자기 기억 저장소(`ai_memory`)에 저장 (2026-10-02, 6-1절). A의 `users`·`user_profiles`와 동기화할지는 남은 질문
 
 ## 8. 채팅 API (B2, 초안)
@@ -268,5 +281,15 @@ AI는 별도 컨테이너(`ai`, 포트 8001)로 운영한다. 배포 시 Caddy�
 - `conversation_id`가 없으면 새 대화를 시작하고 응답에 id를 돌려준다. 같은 id를 보내면 이전 대화를 기억한다("거기는요?" 해석).
 - `profile`·`current_location`은 선택. 사용자 정보 저장 주체는 열린 질문 5번.
 - 대화 기억은 지금 메모리에 있어 ai 컨테이너를 재시작하면 사라진다. 필요하면 PostgreSQL 저장으로 바꾼다.
-- 목업의 카드형 답변(판정 제목·수치 칩·할 일·출처·버튼)은 B5 다듬기에서 응답에 필드를 추가한다. C와 형식 합의 필요.
+- 응답에 `card`(headline·chips[{label,value}]·steps·sources·call_emergency), `voice_text`(음성으로 읽을 2~3문장),
+  `timings`(단계별 초, 디버그용)가 함께 온다 (B5). 카드를 앱 화면에 쓰는 것은 C와 협의.
 - `GET /api/ai/health` → `{"status":"ok"}`
+
+### 음성 (B5, Google Cloud Speech-to-Text v1 · Text-to-Speech v1)
+
+`POST /api/voice` (multipart): `audio`(녹음 파일, 아무 형식 — 서버가 ffmpeg로 16kHz mono 변환, 30초·5MB 이내), `user_id`,
+`conversation_id`, `lat`, `lon`, `profile`(JSON 문자열), `remember` → 채팅 응답 + `transcript`(받아쓴 질문) + `audio_b64`(답의
+`voice_text`를 읽은 mp3). 대화는 `/api/chat`과 이어진다. 못 알아들음·너무 긺 → 422(문구를 그대로 보여 줌), 키 없음 → 503.
+`POST /api/tts` `{text}` → mp3 (같은 문장 10분 캐시). 앱: AI 대화창 마이크(16kHz mono WAV 녹음) → 받아쓴 질문·답 표시 + 답 음성 자동 재생,
+"음성으로 듣기"는 `voice_text`를 `/api/tts`로. 키: 서비스 계정 JSON `secrets/gcp-voice.json` (`GCP_VOICE_CREDENTIALS`로 바꿀 수 있음),
+목소리 `ko-KR-Neural2-A`(`GCP_VOICE_NAME`), 0.95배속. B12(음성 대피 확인)가 같은 `voice.GoogleVoice`를 쓴다.

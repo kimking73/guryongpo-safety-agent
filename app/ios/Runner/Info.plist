@@ -4,6 +4,8 @@
 <dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>현재 위치 주변의 재난 위험과 가까운 대피소까지의 안전한 경로를 안내하려고 위치를 사용합니다.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>음성으로 재난 정보를 묻고 답을 들을 수 있도록 마이크를 사용합니다.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 import uuid
 from concurrent.futures import Executor, ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -64,6 +65,20 @@ class RouteInfo(BaseModel):
     geometry: str
 
 
+class CardChip(BaseModel):
+    label: str
+    value: str
+
+
+class Card(BaseModel):
+    """앱 카드형 답변 (B5). 값은 모두 근거·판단 결과에서 코드가 그대로 가져온다."""
+    headline: str = ""
+    chips: list[CardChip] = Field(default_factory=list)
+    steps: list[str] = Field(default_factory=list)
+    sources: list[str] = Field(default_factory=list)
+    call_emergency: bool = False
+
+
 class ChatResponse(BaseModel):
     """AI → 앱. 카드형 답변(수치 칩·할 일·출처)은 B5 다듬기에서 확장한다."""
     conversation_id: str
@@ -75,6 +90,9 @@ class ChatResponse(BaseModel):
     call_emergency: bool = False     # 판단 로직 '재난 중 > 위험 지역 > 이동 불가능' → 앱이 119 연결 버튼을 크게
     decision_path: str = ""          # 행동 권고 판단 로직에서 도달한 분기 (예: "재난 중 > 위험 지역 > 이동 가능")
     follow_up: str | None = None     # 근거가 없어 사용자에게 물은 질문 (답변 끝에도 있음). 다음 질문에서 대화로 이어진다
+    card: Card | None = None         # 카드형 답변 (안전 안내로 끝난 답에는 없음)
+    voice_text: str = ""             # 음성으로 읽을 2~3문장 (/api/voice·/api/tts가 읽는다)
+    timings: dict[str, float] = Field(default_factory=dict)   # 단계별 걸린 시간(초) — 지연 측정용, 앱 표시 안 함
 
 
 def make_serde() -> JsonPlusSerializer:
@@ -115,7 +133,8 @@ class ChatService:
             from .flood import make_rain_flood_agent
             from .location import make_location_route_agent
             from .llm import (OpenAIActionWriter, OpenAIClassifier, OpenAIFactChecker, OpenAILocationWriter,
-                              OpenAISpecialistWriter, OpenAIWriter)
+                              OpenAIPolisher, OpenAISpecialistWriter, OpenAIWriter)
+            from .polish import make_final_check, make_polish
             from .specialists import make_landslide_agent, make_life_safety_agent, make_wind_typhoon_agent
             from .verify import make_hallucination_check
             from .llm import OpenAIMemoryExtractor
@@ -131,7 +150,11 @@ class ChatService:
                 S.Specialist.WIND_TYPHOON.value: make_wind_typhoon_agent(writer=OpenAISpecialistWriter(S.Specialist.WIND_TYPHOON)),
                 S.Specialist.LIFE_SAFETY.value: make_life_safety_agent(writer=OpenAISpecialistWriter(S.Specialist.LIFE_SAFETY)),
                 G.ACTION_ADVISOR: make_action_advisor(writer=OpenAIActionWriter()),
-                G.HALLUCINATION_CHECK: make_hallucination_check(checker=OpenAIFactChecker()),
+                # 내용 검사 + 의도 검증을 한 호출로 (B5). intent_check 노드는 비워 둔다 — 같은 키를 두 노드가 쓰지 않게
+                G.HALLUCINATION_CHECK: make_hallucination_check(checker=OpenAIFactChecker(checks_intent=True)),
+                G.INTENT_CHECK: lambda state: {},
+                G.POLISH: make_polish(polisher=OpenAIPolisher()),
+                G.FINAL_HALLUCINATION_CHECK: make_final_check(),
             }
         self.app = G.build_graph(
             {G.MANAGER: G.make_manager(classifier, phase_of=phase_of), **nodes, **(overrides or {})},
@@ -181,7 +204,10 @@ class ChatService:
             except Exception:  # noqa: BLE001 — 기억을 못 읽어도 답은 한다
                 logger.exception("사용자 기억 불러오기 실패")
 
-        result = self.app.invoke(
+        # 단계별 시간을 재며 실행한다 (지연 측정, B5). 병렬 agent는 끝난 순서대로 앞 단계와의 간격이 기록된다
+        timings: dict[str, float] = {}
+        started = last = time.perf_counter()
+        for chunk in self.app.stream(
             {
                 "mode": "chat",
                 "user": profile,
@@ -191,7 +217,15 @@ class ChatService:
                 "user_memory": memory,
             },
             config,
-        )
+            stream_mode="updates",
+        ):
+            now = time.perf_counter()
+            for node in chunk:
+                timings[node] = round(timings.get(node, 0.0) + now - last, 2)
+            last = now
+        timings["total"] = round(time.perf_counter() - started, 2)
+        result = self.app.get_state(config).values
+        logger.info("응답 시간 %.1fs %s", timings["total"], {k: v for k, v in timings.items() if k != "total"})
         answer = result.get("final_answer", "")
         if req.remember and self.extractor is not None:
             self.executor.submit(self._remember, req.user_id, conversation_id, req.question, answer, memory)
@@ -217,6 +251,9 @@ class ChatService:
             call_emergency=bool(getattr(plan, "call_emergency", False)),
             decision_path=" > ".join(getattr(plan, "decision_path", None) or []),
             follow_up=getattr(plan, "question", None),
+            card=Card.model_validate(result["card"]) if result.get("card") and not used_fallback else None,
+            voice_text=(result.get("voice_text") or answer) if not used_fallback else answer,
+            timings=timings,
         )
 
     def close(self) -> None:
