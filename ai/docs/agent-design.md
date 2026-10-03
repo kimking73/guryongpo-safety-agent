@@ -48,7 +48,7 @@ flowchart TD
 | `landslide_agent` | 산사태 위험지역과 사용자 위치로 답변 조각 | user, current_location, phase | specialist_results | get_risk_at, get_hazard_zones, get_observations, get_weather_warnings | O |
 | `rain_flood_agent` | 강수와 수위를 함께 고려한 호우·침수 답변 | 〃 | specialist_results | get_risk_at, get_observations, get_hazard_zones, get_weather_warnings, get_disaster_messages, get_facilities | O |
 | `wind_typhoon_agent` | 강풍·태풍 답변 (선박 보유자는 계류 등 포함) | 〃 | specialist_results | get_risk_at, get_observations, get_weather_warnings, get_disaster_messages | O |
-| `life_safety_agent` | 미세먼지·자외선 등급과 행동요령 | current_location | specialist_results | get_life_safety | O |
+| `life_safety_agent` | 미세먼지·자외선 등급 (행동요령은 행동 권고가 원문으로) | current_location | specialist_results | get_life_safety | O |
 | `location_route_agent` | 위치 기반 경고, 대피소까지 안전 경로 | user, current_location | specialist_results (route 포함) | get_risk_at, get_facilities, request_route | O |
 | `action_advisor` | 판단 트리로 행동 우선순위 결정 → 전문 agent 결과와 합쳐 초안 작성 | phase, specialist_results, user | action_plan, draft | get_action_guides, get_facilities | 문장화만 |
 | `intent_check` | 초안이 질문 의도에 답하는지 (chat만) | question, history, draft | checks.intent | - | O |
@@ -119,11 +119,22 @@ flowchart TD
 | --- | --- |
 | 전 | 예비특보(`status=planned`) 있음, 또는 예보상 기준 도달 예상 |
 | 중 | 특보 발효(`active`) 또는 Risk engine이 사용자 위치 반경 내 `advisory` 이상 판정 |
-| 후 | 특보 해제(`lifted`) 후 **N시간 이내** (N은 열린 질문) |
+| 후 | 특보 해제(`lifted`) 후 **24시간 이내** (2026-10-03 결정, `action.LIFTED_HOURS`) |
 | 평시 | 위 조건 없음 |
 
 "이동 가능"은 `UserProfile`(보행 장애, 휠체어, 동반자)과 경로 존재 여부로 판단. 정보가 없으면 질문한다.
 행동 권고 agent는 `get_action_guides`로 가져온 원문만 인용하고, 인용한 id를 `ActionPlan.guide_ids`에 남긴다.
+
+구현 (B4, 2026-10-03, `action.py`):
+- 단계 판정 `decide_phase`: 위 표 그대로. DB 장애면 '중'. 관리자가 `phase_of`로 부른다(기본 그래프·테스트는 '중' 고정).
+- 원문 고르기(규칙): 단계가 가장 높은 전문 agent(같으면 침수·호우 > 강풍·태풍 > 산사태 > 생활안전, 위치·경로 제외)의 재난들
+  (침수 agent → flood·heavy_rain, 강풍·태풍 → typhoon·strong_wind·high_seas)에서 단계·대상(주민/관광객 + 직업: 어업 →
+  fisher·vessel_owner·coastal, 차량 → driver)에 맞는 원문 최대 3건. 직업 대상 원문을 앞에(관광객·주민 대상 원문은 장소별이라 앞에 두지 않음).
+  평시 질문("태풍 오면 어떻게 해?")은 '재난 전' 원문 → 없으면 '관심' 단계 '재난 중' 원문.
+- 119(D3): 위험 단계 경보 이상 + 보행 불편·휠체어 + (경로 없음 또는 위험 영역을 지나야 함) → `call_emergency`, 첫 할 일로 구조 요청.
+- 작성: `OpenAIActionWriter`가 원문만 바탕으로 사용자 상황에 맞춘 '지금 할 일' 2~4개. 실패하면 원문 그대로 번호 목록.
+  인용 원문은 `ActionPlan.evidence`로 환각 검증에 들어가고, 내용 검사는 원문에 없는 행동 지시를 실패로 본다.
+- 생활안전 행동요령 원문은 아직 DB에 없다(A 요청) → 자외선·미세먼지 질문은 수치·등급만 답하고 '지금 할 일'은 붙지 않는다.
 
 ## 5. DB 조회 tool 명세 — 직접 조회 (B3, 2026-10-01 결정)
 
@@ -193,7 +204,7 @@ A7이 `action_guides` 표에 적재한 형식을 그대로 쓴다 (2026-10-01, �
 
 ## 7. 열린 질문
 
-1. 재난 '후' 판정 기간 N시간 (예: 특보 해제 후 24시간)?
+1. ~~재난 '후' 판정 기간 N시간~~ → 24시간 (2026-10-03). 생활안전(자외선·미세먼지) 판정은 재난 단계에 쓰지 않는다
 2. 맨홀 위치 데이터를 포항 디지털 트윈이 제공하는가? (A7과 동일 질문)
 3. ~~AI의 DB 직접 조회(읽기 전용) vs FastAPI 경유~~ → 직접 조회로 결정 (2026-10-01, 5절)
 4. 한 질문당 LLM 호출이 최소 5회. 음성 대화에서 지연이 크면 alert 모드처럼 의도 검증 생략, 또는 단순 질문은 다듬기 생략 검토 (B5에서 측정 후 결정)

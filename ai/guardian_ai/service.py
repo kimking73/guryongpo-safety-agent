@@ -72,6 +72,7 @@ class ChatResponse(BaseModel):
     phase: S.Phase = S.Phase.NONE
     used_fallback: bool = False
     route: RouteInfo | None = None   # 답에 경로 안내가 있을 때만 (안전 안내로 끝난 답에는 없음)
+    call_emergency: bool = False     # 위험 지역에서 이동이 어려움 → 앱이 119 연결 버튼을 크게 (행동 권고 규칙)
 
 
 def make_serde() -> JsonPlusSerializer:
@@ -100,29 +101,38 @@ class ChatService:
                  overrides: dict[str, G.Node] | None = None, store=None, extractor=None,
                  executor: Executor | None = None, now: Callable[[], datetime] | None = None):
         """classifier를 안 주면 실제 서비스 구성: OpenAI 분류기 + 실제 DB를 읽는 침수 agent(B3)
-        + 위치·경로 agent(대피소·경로) + 숫자·내용 환각 검증 + PostgreSQL 기억(단기·장기) + 기억 추출기 (OPENAI_API_KEY, AI_DB_*, AI_MEM_DB_* 필요).
+        + 위치·경로·산사태·강풍태풍·생활안전 agent + 원문 기반 행동 권고·재난 단계 판정 + 숫자·내용 환각 검증 + PostgreSQL 기억(단기·장기) + 기억 추출기 (OPENAI_API_KEY, AI_DB_*, AI_MEM_DB_* 필요).
         classifier를 주면(테스트) 나머지 노드는 stub 그대로, 기억은 메모리 저장, 추출기 없음(넘기면 바로 실행).
         """
         nodes: dict[str, G.Node] = {}
+        phase_of = None             # 재난 단계 판정 (실제 서비스만 — DB를 읽는다)
         self.memory_backend = "memory"
         if classifier is None:
             # 키가 없는 테스트 환경에서 import 오류를 피하려고 여기서 import 한다
+            from .action import decide_phase, make_action_advisor
             from .flood import make_rain_flood_agent
             from .location import make_location_route_agent
-            from .llm import OpenAIClassifier, OpenAIFactChecker, OpenAILocationWriter, OpenAIWriter
+            from .llm import (OpenAIActionWriter, OpenAIClassifier, OpenAIFactChecker, OpenAILocationWriter,
+                              OpenAISpecialistWriter, OpenAIWriter)
+            from .specialists import make_landslide_agent, make_life_safety_agent, make_wind_typhoon_agent
             from .verify import make_hallucination_check
             from .llm import OpenAIMemoryExtractor
             classifier = OpenAIClassifier()
+            phase_of = decide_phase
             checkpointer, store, self.memory_backend = M.make_backends(make_serde())
             extractor = OpenAIMemoryExtractor()
             executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="memory")
             nodes = {
                 S.Specialist.RAIN_FLOOD.value: make_rain_flood_agent(writer=OpenAIWriter()),
                 S.Specialist.LOCATION_ROUTE.value: make_location_route_agent(writer=OpenAILocationWriter()),
+                S.Specialist.LANDSLIDE.value: make_landslide_agent(writer=OpenAISpecialistWriter(S.Specialist.LANDSLIDE)),
+                S.Specialist.WIND_TYPHOON.value: make_wind_typhoon_agent(writer=OpenAISpecialistWriter(S.Specialist.WIND_TYPHOON)),
+                S.Specialist.LIFE_SAFETY.value: make_life_safety_agent(writer=OpenAISpecialistWriter(S.Specialist.LIFE_SAFETY)),
+                G.ACTION_ADVISOR: make_action_advisor(writer=OpenAIActionWriter()),
                 G.HALLUCINATION_CHECK: make_hallucination_check(checker=OpenAIFactChecker()),
             }
         self.app = G.build_graph(
-            {G.MANAGER: G.make_manager(classifier), **nodes, **(overrides or {})},
+            {G.MANAGER: G.make_manager(classifier, phase_of=phase_of), **nodes, **(overrides or {})},
             checkpointer=checkpointer or make_checkpointer(),
         )
         self.store = store if store is not None else M.InMemoryStore()
@@ -200,6 +210,7 @@ class ChatService:
             phase=result.get("phase") or S.Phase.NONE,
             used_fallback=used_fallback,
             route=RouteInfo.model_validate(route) if route else None,
+            call_emergency=bool(getattr(result.get("action_plan"), "call_emergency", False)),
         )
 
     def close(self) -> None:

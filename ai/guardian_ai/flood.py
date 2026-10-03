@@ -124,8 +124,9 @@ def build_evidence(d: FloodData) -> tuple[list[Evidence], list[str]]:
                 ev.append(Evidence(source="risk_assessments", key=f"{HAZARD_KO[i['hazard']]} 판정 근거",
                                    value=i["reason"], observed_at=_ts(i["observed_at"])))
             if i["distance_m"] == 0:
+                # 어느 재난 영역인지 값에도 쓴다 — "호우 영역 안"을 "침수 영역 안"으로 바꿔 말하는 일이 있었다 (2026-10-03)
                 ev.append(Evidence(source="risk_assessments", key=f"{HAZARD_KO[i['hazard']]} 위험 영역",
-                                   value="기준 위치가 영역 안"))
+                                   value=f"기준 위치가 {HAZARD_KO[i['hazard']]} 위험 영역 안"))
             else:
                 ev.append(Evidence(source="risk_assessments", key=f"{HAZARD_KO[i['hazard']]} 위험 영역까지 거리",
                                    value=i["distance_m"], unit="m"))

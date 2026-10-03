@@ -37,8 +37,11 @@
   destination from the classifier's `destination` (keyword fallback) → `find_place` user places > DB names > Kakao
   (`KAKAO_REST_KEY`); hazardous destination → route to the safe shelter instead; route returned as `ChatResponse.route`).
   Classifier's `mobility_limited` sets `user.walking_impaired` for the same question (memory still saves it for later).
-  Still stubs: landslide/wind/life-safety specialists (return an empty piece; if only stubs are picked the answer is
-  `graph.NOT_READY`), action_advisor, intent_check, polish.
+  `landslide_agent`·`wind_typhoon_agent`·`life_safety_agent` (`specialists.py`: same shape, `make_specialist` + `OpenAISpecialistWriter`;
+  unavailable data also goes into evidence so the checker accepts "확인할 수 없음"). `action_advisor` (`action.py`): rule picks
+  official guides (disaster·phase·targets) → `OpenAIActionWriter` personalizes "지금 할 일" from them only → guides go into
+  `ActionPlan.evidence` for the checker; `call_emergency` rule (D3); `decide_phase` (before/during/after 24 h/none) via
+  `make_manager(phase_of=…)`. Still stubs: intent_check, polish. Default graph (tests) uses no-DB advisor and phase 'during'.
   `ChatService()` wires the real nodes; `DEFAULT_NODES`/`ChatService(classifier=…)` stay offline for tests.
 - Data: tools read PostgreSQL directly with read-only role `AI_DB_*` (`../db/init/07_ai_readonly.sh`); every tool takes
   `fetch=` and returns `{"available": False, "reason"}` on failure; observations prefer A's simulated values for 6 h like

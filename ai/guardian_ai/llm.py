@@ -264,6 +264,103 @@ class OpenAILocationWriter:
 
 
 # ---------------------------------------------------------------------------
+# 산사태·강풍태풍·생활안전 agent 문장 (B4) — 프롬프트만 다르고 형식은 침수 agent와 같다
+# ---------------------------------------------------------------------------
+
+_COMMON_RULES = """규칙:
+- 숫자는 근거 목록에 있는 값과 단위를 그대로 쓴다. 계산·추정·반올림한 새 숫자를 만들지 않는다.
+- 위험 단계·특보 이름·등급은 근거에 적힌 그대로 쓴다. 근거에 없는 특보·경보를 말하지 않는다.
+- 근거에 없는 사실(다른 지역 상황, 앞으로의 예보, 피해 규모)을 지어내지 않는다.
+- '확인할 수 없는 정보'가 있으면 그 정보는 지금 확인할 수 없다고 밝힌다. 그 상태에서 "안전하다"고 단정하지 않는다.
+- 위치가 '구룡포읍 중심(위치 정보 없음)'이면 그 기준이라고 밝힌다.
+- 행동요령(대피 방법·준비물 등)은 쓰지 않는다. 행동 권고 agent가 공식 원문으로 따로 안내한다.
+- 재검증 실패 사유가 주어지면 그 문제를 고쳐서 다시 쓴다.
+- '사용자 기억' 항목은 이 사용자가 직접 말한 자기 정보다. 답을 그 사람에 맞추는 데만 쓴다."""
+
+SPECIALIST_PROMPTS = {
+    Specialist.LANDSLIDE: "너는 포항 구룡포 재난 대응 서비스 '구룡가디언'의 산사태 agent다.\n"
+        "주어진 근거 목록만 보고 산사태 위험(판정 단계, 산사태 취약지역과의 관계, 강수량)을 한국어 2~4문장으로 쓴다.\n" + _COMMON_RULES,
+    Specialist.WIND_TYPHOON: "너는 포항 구룡포 재난 대응 서비스 '구룡가디언'의 강풍·태풍 agent다.\n"
+        "주어진 근거 목록만 보고 강풍·태풍·풍랑 상황(판정 단계, 특보, 풍속)을 한국어 2~4문장으로 쓴다. "
+        "사용자가 어업인이면 풍랑을 먼저 말한다.\n" + _COMMON_RULES,
+    Specialist.LIFE_SAFETY: "너는 포항 구룡포 재난 대응 서비스 '구룡가디언'의 생활안전 agent다.\n"
+        "주어진 근거 목록만 보고 자외선·미세먼지 상태(지수와 등급)를 한국어 1~3문장으로 쓴다.\n" + _COMMON_RULES,
+}
+
+
+class OpenAISpecialistWriter:
+    """specialists.make_*_agent(writer=OpenAISpecialistWriter(Specialist.X))로 쓴다. 실패하면 예외 → 템플릿 문장."""
+
+    def __init__(self, agent: Specialist, client: OpenAI | None = None, model: str | None = None,
+                 tracker: UsageTracker | None = None):
+        self.prompt = SPECIALIST_PROMPTS[agent]
+        self.client = client or make_client()
+        self.model = model or os.environ.get("OPENAI_MODEL") or DEFAULT_MODEL
+        self.tracker = tracker or get_tracker()
+
+    def __call__(self, question: str, evidence: str, data, feedback: str = "") -> str:
+        from .flood import location_text
+        body = [f"질문: {question or '(경고 알림 — 질문 없음)'}", f"기준 위치: {location_text(data)}",
+                f"위험 단계(판정 엔진): {data.level.value}", "근거 목록:", evidence or "(없음)"]
+        if data.unavailable:
+            body.append("확인할 수 없는 정보: " + ", ".join(data.unavailable))
+        if feedback:
+            body.append(f"재검증 실패 사유:\n{feedback}")
+        response = self.client.responses.parse(
+            model=self.model, instructions=self.prompt, input="\n".join(body),
+            text_format=FloodAnswer, reasoning={"effort": "low"})
+        self.tracker.record(self.model, getattr(response, "usage", None))
+        result = response.output_parsed
+        if not isinstance(result, FloodAnswer) or not result.summary.strip():
+            raise ValueError(f"답변을 해석하지 못함: {response.output_text!r}")
+        return result.summary.strip()
+
+
+# ---------------------------------------------------------------------------
+# 행동 권고 (B4) — 규칙이 고른 공식 원문만 바탕으로 사용자 상황에 맞춘 '지금 할 일'
+# ---------------------------------------------------------------------------
+
+class ActionAnswer(BaseModel):
+    steps: list[str] = Field(description="지금 할 일. 중요한 순서로 2~4개, 각 한 문장")
+
+
+ACTION_WRITER_PROMPT = """너는 포항 구룡포 재난 대응 서비스 '구룡가디언'의 행동 권고 agent다.
+주어진 '공식 행동요령 원문'만 바탕으로, 이 사용자가 지금 할 일을 중요한 순서로 2~4개 쓴다.
+
+규칙:
+- 원문에 없는 행동을 만들지 않는다. 원문 문장을 이 사용자 상황(주민·관광객, 나이, 보행 불편, 직업, 위치·경로 안내)에 맞게
+  고르고 쉬운 말로 풀어 쓰기만 한다. 사용자에게 해당하지 않는 원문(예: 농업인이 아닌데 비닐하우스)은 고르지 않는다.
+- 숫자는 원문·상황에 있는 값만 쓴다.
+- '119 구조 요청 권고'가 주어지면 그 내용을 첫 번째 할 일로 쓴다.
+- 위치·경로 안내에 대피소가 있으면 그 대피소 이름을 써도 된다.
+- 각 할 일은 한 문장, 명령형 존댓말(예: "~하세요").
+- 재검증 실패 사유가 주어지면 그 문제를 고쳐서 다시 쓴다."""
+
+
+class OpenAIActionWriter:
+    """action.make_action_advisor(writer=OpenAIActionWriter())로 쓴다. 실패하면 예외 → 원문 그대로 목록."""
+
+    def __init__(self, client: OpenAI | None = None, model: str | None = None,
+                 tracker: UsageTracker | None = None):
+        self.client = client or make_client()
+        self.model = model or os.environ.get("OPENAI_MODEL") or DEFAULT_MODEL
+        self.tracker = tracker or get_tracker()
+
+    def __call__(self, question: str, situation: str, guides: str, feedback: str = "") -> list[str]:
+        body = [f"질문: {question or '(경고 알림 — 질문 없음)'}", "사용자 상황:", situation, "공식 행동요령 원문:", guides]
+        if feedback:
+            body.append(f"재검증 실패 사유:\n{feedback}")
+        response = self.client.responses.parse(
+            model=self.model, instructions=ACTION_WRITER_PROMPT, input="\n".join(body),
+            text_format=ActionAnswer, reasoning={"effort": "low"})
+        self.tracker.record(self.model, getattr(response, "usage", None))
+        result = response.output_parsed
+        if not isinstance(result, ActionAnswer) or not [x for x in result.steps if x.strip()]:
+            raise ValueError(f"행동 권고를 해석하지 못함: {response.output_text!r}")
+        return [x.strip() for x in result.steps if x.strip()][:4]
+
+
+# ---------------------------------------------------------------------------
 # 환각 검증 — 내용 검사 (B3). 숫자는 verify.check_numbers가 규칙으로 이미 확인했다
 # ---------------------------------------------------------------------------
 
@@ -281,6 +378,7 @@ CHECKER_PROMPT = """너는 재난 안내 답변의 사실 검증자다. 답변 �
 - 근거에 없는 장소·시설·피해·예보를 사실처럼 말함
 - 근거에서 확인할 수 없다고 한 정보를 두고 "안전하다"고 단정함
 - 관측소·지명을 다른 것과 바꿔 말함
+- '지금 할 일'에 근거의 행동요령 원문이나 '119 구조 요청 권고'에 없는 행동 지시를 지어냄 (원문을 쉬운 말로 바꾼 것은 괜찮다)
 
 '사용자 기억' 항목은 사용자가 직접 말한 자기 정보로, 그 사용자에 대한 근거로 인정한다.
 실패가 아닌 것: 표현을 쉽게 바꾸기, 근거 일부만 고르기, "확인할 수 없다"고 밝히기, 일반적인 주의 당부.

@@ -132,6 +132,7 @@ class ActionPlan(BaseModel):
     steps: list[str]                     # 우선순위 순서
     guide_ids: list[int] = Field(default_factory=list)  # 인용한 ActionGuide.id
     call_emergency: bool = False         # 이동 불가 → 119 연결 버튼 표시
+    evidence: list[Evidence] = Field(default_factory=list)  # 인용한 원문(·119 권고) — 환각 검증이 '지금 할 일'을 대조한다
 
 
 class CheckResult(BaseModel):

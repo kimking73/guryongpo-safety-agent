@@ -100,6 +100,9 @@ def make_hallucination_check(checker: FactChecker | None = None):
     def hallucination_check(state: GuardianState) -> dict:
         draft = state.get("draft") or ""
         evidence = [e for r in state.get("specialist_results", []) for e in r.evidence]
+        plan = state.get("action_plan")
+        if plan is not None:
+            evidence += plan.evidence       # 행동 권고가 인용한 원문 (B4)
         result = check_numbers(draft, evidence)
         how = "숫자"
         if result.ok and checker is not None and evidence:

@@ -38,12 +38,12 @@ from typing import Callable
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
+from .action import NOT_READY, make_action_advisor  # noqa: F401 — NOT_READY는 테스트·밖에서 G.NOT_READY로 쓴다
 from .verify import make_hallucination_check
 from .state import (
     MAX_POLISH_RETRY,   # 다듬기 재시도 한도 (1회)
     MAX_RETRY,          # 검증 실패 시 관리자부터 다시 하는 한도 (2회)
     RESET,              # reducer에 보내면 누적된 값을 비우는 신호
-    ActionPlan,
     CheckResult,
     DisasterType,
     GuardianState,
@@ -161,14 +161,16 @@ _NEW_TURN_RESET = {
 }
 
 
-def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_classify) -> Node:
+def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_classify,
+                 phase_of: Callable[[GuardianState], Phase] | None = None) -> Node:
     """관리자 agent를 만든다. classify가 예외를 내면 fallback_classify로 대체한다.
 
     왜 함수를 반환하는가 (공장 함수):
         LangGraph 노드는 state 하나만 받는 함수여야 한다. 그런데 manager는 "어떤 분류기를 쓸지"도
         알아야 한다. 그래서 바깥 함수가 분류기를 받아 두고, 안쪽 manager가 그것을 기억해서 쓴다(클로저).
         - 테스트·기본값: make_manager(keyword_classify)          → 이 함수 바로 아래 `manager = ...`
-        - 서비스:       make_manager(OpenAIClassifier())         → service.py
+        - 서비스:       make_manager(OpenAIClassifier(), phase_of=action.decide_phase)  → service.py
+    phase_of: 재난 단계(전·중·후·평시) 판정. 없으면 '재난 중'(DB 없이 도는 테스트·기본 그래프).
     """
 
     def manager(state: GuardianState) -> dict:
@@ -236,12 +238,21 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
         if limited and user is not None and user.walking_impaired is None:
             user_update = {"user": user.model_copy(update={"walking_impaired": True})}
 
+        def _phase(v: GuardianState) -> Phase:
+            if phase_of is None or v.get("mode") == "alert":
+                return Phase.DURING
+            try:
+                return phase_of(v)
+            except Exception:  # noqa: BLE001 — 단계 판정 실패로 답이 끊기면 안 된다 (안전 쪽)
+                logger.exception("재난 단계 판정 실패 → 재난 중")
+                return Phase.DURING
+
         # ── 5) state에서 바꿀 필드만 반환 ───────────────────────────────────
         return {
             **turn,                         # 새 질문이면 초기화 값들, 재시도면 아무것도 없음
             **user_update,
             "destination_query": destination or None,
-            "phase": Phase.DURING,          # stub: 항상 "재난 중". B4에서 특보·위험 판정으로 계산
+            "phase": _phase(view),          # 특보·위험 판정으로 (action.decide_phase), 없으면 '재난 중'
             "selected_agents": selected,    # 다음 route_specialists가 이 목록을 보고 병렬 실행한다
             # 재시도로 다시 들어온 경우를 대비해 이전 시도의 결과를 비운다.
             # (이걸 안 하면 1차 시도 결과와 2차 시도 결과가 섞여 쌓인다)
@@ -273,29 +284,9 @@ def _specialist_stub(agent: Specialist) -> Node:
     return node
 
 
-# 아직 구현 전인 agent(산사태·강풍태풍·생활안전, B4)만 고른 질문의 답
-NOT_READY = "이 질문은 아직 답변을 준비 중입니다. 지금은 침수·호우 상황과 대피소·경로를 안내할 수 있습니다."
-
-
-def action_advisor(state: GuardianState) -> dict:
-    """행동 권고 agent: 전문 agent 결과를 모아 행동 우선순위와 답변 초안을 만든다.
-
-    실제 구현(B4): 판단 트리(재난 전/중/후 → 위험도 → 이동 가능 여부)를 규칙 코드로 돌려
-    행동 목록(ActionPlan.steps)을 먼저 확정하고, LLM은 이를 문장으로 풀어 쓰기만 한다.
-    → AI가 잘못된 행동요령을 지어내는 것을 막는다.
-    """
-    results = state.get("specialist_results", [])
-    plan = ActionPlan(phase=state.get("phase", Phase.NONE), risk_level=RiskLevel.NORMAL, steps=[])
-    # stub: 전문 agent 요약을 이어 붙여 초안으로 쓴다. 아직 구현 전인 agent(빈 조각)는 빼고,
-    # 그런 agent만 골랐으면 준비 중이라고 밝힌다. 선택된 agent가 없으면 기본 문구.
-    parts = [r.summary for r in results if r.summary.strip()]
-    if parts:
-        draft = " / ".join(parts)
-    elif results:
-        draft = NOT_READY
-    else:
-        draft = "현재 확인된 위험 없음"
-    return {"action_plan": plan, "draft": draft}
+# 행동 권고 (B4): 규칙이 고른 행동요령 원문 → (서비스는) LLM이 사용자 상황에 맞춘 '지금 할 일' → action.py.
+# 기본 그래프는 원문을 찾지 않는다(DB 없이 도는 테스트용). 서비스가 원문·작성기를 붙인 것으로 바꿔 끼운다 (service.py).
+action_advisor = make_action_advisor(use_guides=False)
 
 
 def intent_check(state: GuardianState) -> dict:
