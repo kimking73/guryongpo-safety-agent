@@ -45,6 +45,9 @@ ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS alert_prefs jsonb NOT NULL DE
 ALTER TABLE user_alerts ADD COLUMN IF NOT EXISTS response_required boolean NOT NULL DEFAULT false;
 ALTER TABLE user_alerts ADD COLUMN IF NOT EXISTS incident_id       uuid;      -- care.incidents.id (스키마 분리를 위해 FK 없음)
 ALTER TABLE user_alerts ADD COLUMN IF NOT EXISTS tts_text          text;
+-- A5: 경고 카드 버튼 (명세 Alert.actions) — [{"type":"respond","label":"대피 확인","params":{…}}, …]
+ALTER TABLE user_alerts ADD COLUMN IF NOT EXISTS actions           jsonb NOT NULL DEFAULT '[]';
+CREATE INDEX IF NOT EXISTS idx_user_alerts_user_created ON user_alerts(user_id, created_at DESC);
 
 -- B11 해상 → 최근접 항: 항구·접안 지점 (데이터는 B11 이 출처 확인 후 적재)
 CREATE TABLE IF NOT EXISTS ports (
@@ -123,6 +126,9 @@ CREATE TABLE IF NOT EXISTS care.incidents (
 );
 CREATE INDEX IF NOT EXISTS idx_incidents_active ON care.incidents(started_at DESC) WHERE closed_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_incidents_area   ON care.incidents USING gist(area);
+-- A5: 판정 1건당 진행 중인 대피 상황은 1개 (수집기 주기 실행과 API 폴링 즉시 판정이 동시에 만들어도 중복 없음)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_incidents_assessment ON care.incidents(assessment_id)
+  WHERE closed_at IS NULL AND assessment_id IS NOT NULL;
 
 -- 대피 대상 = 상황 영역 안의 등록 가구 + (가구 등록은 안 했지만) 대피 확인 경고를 받은 앱 사용자
 CREATE TABLE IF NOT EXISTS care.incident_targets (

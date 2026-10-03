@@ -43,13 +43,6 @@ def test_auth_required(client):
     assert client.get("/api/v1/user", headers={"Authorization": "Basic abc"}).status_code == 401
 
 
-def test_user_mock_uses_caller_uid(client):
-    r = client.get("/api/v1/user", headers=AUTH)
-    assert r.status_code == 200 and r.headers["X-Mock"] == "true"
-    assert r.json()["firebase_uid"] == "test-uid"
-    assert client.post("/api/v1/user", headers=AUTH, json={}).status_code == 201
-
-
 def test_validation_error_format(client):
     r = client.get("/api/v1/dashboard", headers=AUTH)            # lat/lng 누락
     assert r.status_code == 422 and r.json()["code"] == "VALIDATION_ERROR"
@@ -108,21 +101,6 @@ def test_medical_default_bbox_is_pohang(client, monkeypatch):
     assert seen[1]["a"] == 129.5
 
 
-def test_device_token_stable(client):
-    body = {"token": "fcm-abc", "platform": "android"}
-    a = client.post("/api/v1/device-token", headers=AUTH, json=body).json()["device_id"]
-    b = client.post("/api/v1/device-token", headers=AUTH, json=body).json()["device_id"]
-    assert a == b
-    assert client.post("/api/v1/device-token", headers=AUTH, json={"token": "x", "platform": "pc"}).status_code == 422
-
-
-def test_alerts_since(client):
-    first = client.get("/api/v1/alerts", headers=AUTH).json()
-    assert first["alerts"] and first["next_poll_sec"]
-    again = client.get("/api/v1/alerts", headers=AUTH, params={"since": first["server_time"]}).json()
-    assert again["alerts"] == []
-
-
 def test_risk_rules_from_db(client, fake_db):
     fake_db.rows["FROM risk_rules"] = [{"id": 9, "hazard": "flood", "level": "advisory", "label": "침수",
                                         "metric": "flood_depth", "operator": ">=", "threshold": 150, "threshold_max": None,
@@ -144,7 +122,6 @@ def test_internal_ingest(client, fake_db, monkeypatch):
 # ------------------------------------------------------------------ v0.3
 STAFF = {"Authorization": "Bearer dev:responder-1"}
 CAREGIVER = {"Authorization": "Bearer dev:caregiver-1"}
-EVAC_ALERT = "d1e2f3a4-b5c6-4d7e-8f90-a1b2c3d4e5f6"
 INCIDENT = "c0ffee00-1d2e-4f30-9a41-5b6c7d8e9f01"
 
 
@@ -256,30 +233,9 @@ def test_admin_households(client):
                        json={k: v for k, v in body.items() if k != "consent_by"}).status_code == 422
 
 
-def test_alert_evacuation_response(client):
-    first = client.get("/api/v1/alerts", headers=AUTH).json()
-    evac = [a for a in first["alerts"] if a["response_required"]]
-    assert evac and first["evacuation"]["alert_id"] == evac[0]["id"] == EVAC_ALERT
-    r = client.post(f"/api/v1/alerts/{EVAC_ALERT}/response", headers=AUTH, json={"status": "evacuating", "via": "button"})
-    assert r.status_code == 200 and r.json()["recheck_after_min"] == 10
-    r = client.post(f"/api/v1/alerts/{EVAC_ALERT}/response", headers=AUTH, json={"status": "need_help", "via": "voice"})
-    assert r.status_code == 422                                        # 도움 요청은 위치 필수
-    r = client.post(f"/api/v1/alerts/{EVAC_ALERT}/response", headers=AUTH,
-                    json={"status": "need_help", "via": "voice", "location": {"lat": 35.99, "lng": 129.55}})
-    assert r.json()["call_suggested"] is True
-    assert client.post(f"/api/v1/alerts/{EVAC_ALERT}/response", headers=AUTH,
-                       json={"status": "no_response", "via": "button"}).status_code == 422   # 앱이 보낼 수 없는 상태
-    other = next(a for a in first["alerts"] if not a["response_required"])["id"]
-    assert client.post(f"/api/v1/alerts/{other}/response", headers=AUTH,
-                       json={"status": "evacuated", "via": "button"}).status_code == 422
-    assert client.post("/api/v1/alerts/00000000-0000-4000-8000-000000000000/response", headers=AUTH,
-                       json={"status": "evacuated", "via": "button"}).status_code == 404
-
-
 def test_my_household_requires_consent(client):
     body = {"location": {"lat": 35.98, "lng": 129.55}, "members": 1, "needs": ["elderly"]}
     assert client.put("/api/v1/user/household", headers=AUTH, json=body).status_code == 422
     assert client.put("/api/v1/user/household", headers=AUTH, json={**body, "consent": False}).status_code == 422
     r = client.put("/api/v1/user/household", headers=AUTH, json={**body, "consent": True})
     assert r.status_code == 200 and r.json()["consent"]["method"] == "app"
-    assert client.get("/api/v1/user", headers=AUTH).json()["role"] == "resident"

@@ -13,6 +13,7 @@ services:
       - ./server/app:/srv/app
       - ./server/collector:/srv/collector
       - ./server/risk:/srv/risk
+      - ./server/alerts:/srv/alerts
       - ./server/mock:/srv/mock
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
@@ -22,6 +23,7 @@ services:
       - ./server/app:/srv/app
       - ./server/collector:/srv/collector
       - ./server/risk:/srv/risk
+      - ./server/alerts:/srv/alerts
       - ./server/mock:/srv/mock
 
   loader:
