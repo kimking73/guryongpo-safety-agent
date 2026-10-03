@@ -14,7 +14,7 @@
 4. If the user mentions timeline changes, re-read the live timeline artifact
    (https://claude.ai/artifact/H3ofVAbENCmCvRtAvaGLAi — 28-day version since 2026-10-03, Artifact tool `action: "read"`) and sync `timeline.md`.
    Its downloaded file may come wrapped in an extra host `<html>` shell — strip it before republishing.
-5. Check `docs/agent-design.md` §7 (open questions) and `docs/code_check_list.md` (open: #3, target B5).
+5. Check `docs/agent-design.md` §7 (open questions) and `docs/code_check_list.md` (#1–6 fixed, #7 mitigated — recheck in a demo scenario).
 6. Route work (B6·B7): `cd ../route && .venv/bin/python -m pytest -q` → **34 passed, 6 deselected** (live 6). Needs
    `../graphhopper/data/guryongpo.osm.pbf` (`../graphhopper/fetch_osm.sh`).
 
@@ -24,11 +24,14 @@
 - If code moved, fix file:line references here, in `architectural_patterns.md`, and in `../CLAUDE.md`.
 - Commit; if `git push` is blocked for Claude, ask the user to run `! git push`.
 
-## Current status (2026-10-02, Day 10)
-- Timeline is now 28 days (Day 1 = 2026-09-23; Day 21 = extra features integration). **Done: B1, B8, B2, B3, B6, B7.**
-  In progress: **B4** (location/route agent done; landslide·wind/typhoon·life-safety agents + rule-based action advisor +
-  alert message left — overdue), **B10** (VM up; static IP·Caddy·domain left). Next: B5 (11–13), then new B11 sea→port→land
-  route (15–17), B12 voice evacuation check (17–18), B13 patrol priority (19–20), B9 (22–23). See `.claude/docs/timeline.md`.
+## Current status (2026-10-03, Day 11)
+- Timeline is 28 days (Day 1 = 2026-09-23; Day 21 = extra features integration). **Done: B1, B8, B2, B3, B6, B7.**
+  **B4**: all agents + decision-tree action advisor done; only the proactive alert message function for A5 is left (user: later).
+  **B5**: text part done (intent check, card/polish, number recheck, latency). **Voice conversation deferred by the user
+  (2026-10-03)** — code is in (`voice.py`, `/api/voice`, `/api/tts`, app mic) but no GCP key → 503; decide again before B12.
+  Neither B4 nor B5 is marked done in the live artifact — ask the user. **B10** in progress (VM up; static IP·Caddy·domain left).
+  Next: B10 finish, then B11 sea→port→land route (15–17), B12 voice evacuation check (17–18), B13 patrol priority (19–20),
+  B9 (22–23). See `.claude/docs/timeline.md` "다음 세션 시작점".
 - AI path: `POST /api/chat` → `ChatService.chat` (service.py) → graph. Real nodes: manager (`OpenAIClassifier`, keyword
   fallback), `rain_flood_agent` (`flood.py`: code collects DB data + builds Evidence incl. "기준 위치" and user memory,
   `OpenAIWriter` only phrases, template fallback), `hallucination_check` (`verify.py`: rule number check → `OpenAIFactChecker`).
@@ -91,18 +94,23 @@ Flutter app/web (teammate C). This lane (B) also owns GraphHopper routing and GC
 ## Key directories
 | Path | Purpose |
 | --- | --- |
-| `guardian_ai/state.py` | Enums, Pydantic domain models, reducers, `GuardianState` (state.py:175), retry limits (state.py:211) |
-| `guardian_ai/graph.py` | Node functions (stubs), routing functions, `build_graph()` (graph.py:400) |
+| `guardian_ai/state.py` | Enums, Pydantic domain models, reducers, `GuardianState` (state.py:192), retry limits (state.py:234) |
+| `guardian_ai/graph.py` | Default (stub) nodes, manager (keyword fallbacks, follow-up continuation), routing functions, `build_graph()` (graph.py:470) |
 | `guardian_ai/tools.py` | Read-only DB tools (risk, observations, warnings, messages, zones, facilities, life safety, action guides), `request_route`; allowlist `AGENT_TOOLS` |
 | `guardian_ai/flood.py` | Rain/flood agent: `collect` → `build_evidence` → writer or `template_summary`; `make_rain_flood_agent(writer, fetch)` |
-| `guardian_ai/verify.py` | Hallucination check: `check_numbers` (rule), `make_hallucination_check(checker)` |
+| `guardian_ai/verify.py` | Hallucination + intent check: `check_numbers` (rule), `make_hallucination_check(checker)` (checker may return (fact, intent)) |
+| `guardian_ai/specialists.py` | Landslide·wind/typhoon·life-safety agents (`make_specialist`) |
+| `guardian_ai/location.py` | Location/route agent: safe shelter, `find_place` destination, route |
+| `guardian_ai/action.py` | Action advisor: `decide_phase`, decision tree `decide`, `pick_guides`, `make_action_advisor` |
+| `guardian_ai/polish.py` | B5: `build_card`, `fallback_voice`, `make_polish(polisher)` (LLM only > 600 chars), `make_final_check()` (rule → `polish_feedback`) |
+| `guardian_ai/voice.py` | B5 voice (deferred): `to_pcm16k` (ffmpeg), `GoogleVoice.stt/.tts` (key `secrets/gcp-voice.json`) |
 | `guardian_ai/memory.py` | Memory: `make_backends()` → InMemorySaver + PostgresStore in `ai_memory` (fallback InMemoryStore), `CONVERSATION_TTL_MIN`, user facts/episodes load·apply·save·export·forget |
 | `guardian_ai/db.py` | Read-only PostgreSQL access (`Database`, `default_fetch`, `conninfo()` from `AI_DB_*`) |
 | `guardian_ai/usage.py` | OpenAI token/cost ledger per month (`data/openai_usage.json`, volume `ai-data` in compose), warns at 50/80/100% of `OPENAI_BUDGET_KRW`; `GET /api/ai/usage` |
-| `guardian_ai/llm.py` | `make_client()`, `OpenAIClassifier`, `OpenAIWriter` (flood sentences), `OpenAIFactChecker` (`OPENAI_VERIFY_MODEL`), prompts |
-| `guardian_ai/service.py` | `ChatRequest`/`ChatResponse`, `ChatService` (service.py:49), checkpointer + `STATE_TYPES` allowlist |
-| `guardian_ai/api.py` | FastAPI app for the `ai` container: `/api/chat`, `/api/ai/health` |
-| `tests/` | Topology (stub overrides), manager/API (fakes, offline), `test_tools_db.py` (fake fetch), `test_tools_db_live.py` (local DB, `db` marker), `test_routing_live.py` (real OpenAI, `live` marker) |
+| `guardian_ai/llm.py` | `make_client()`, `OpenAIClassifier`, `OpenAIWriter` (flood sentences), `OpenAIFactChecker` (`OPENAI_VERIFY_MODEL`, `OPENAI_VERIFY_EFFORT`, `checks_intent`), specialist/action/polish writers, prompts |
+| `guardian_ai/service.py` | `ChatRequest`/`ChatResponse`, `ChatService` (service.py:119; real nodes wired in `__init__`, `chat()` streams for `timings`), `Card`·`RouteInfo`, checkpointer + `STATE_TYPES` allowlist |
+| `guardian_ai/api.py` | FastAPI app for the `ai` container: `/api/chat`, `/api/voice`, `/api/tts`, `/api/ai/health`, `/api/ai/usage`, `/api/ai/memory/{uid}` |
+| `tests/` | Topology (stub overrides), manager/API (fakes, offline), `test_tools_db.py` (fake fetch), `test_tools_db_live.py` (local DB, `db` marker), `test_routing_live.py` (real OpenAI, `live` marker), `test_b4.py`·`test_b5.py`·`test_voice.py` (offline), `test_tree_live.py` (decision tree, `live and db`, ~6 min) |
 | `Dockerfile` | `ai` container, port 8001 (service defined in `../docker-compose.yml`) |
 | `docs/agent-design.md` | Team-facing design doc (Korean): graph, node I/O, decision tree, tool contract, open questions |
 | `.claude/docs/` | Claude-facing notes: timeline/progress, architectural patterns |

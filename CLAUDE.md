@@ -18,7 +18,7 @@ Lanes: **A** server/DB/data collection/risk engine (`server/`, `db/`) · **B** A
 ## Tech stack
 - Python 3.12 containers (local venvs ≥3.11), FastAPI + uvicorn for every HTTP service
 - PostgreSQL 17 + PostGIS 3.5 (`imresamu/postgis`, multi-arch — official image lacks arm64)
-- AI: LangGraph ≥1.0, Pydantic v2, openai SDK (`gpt-6-luna`, Responses API; switched from Gemini 2026-10-01); voice planned: Google Cloud STT/TTS
+- AI: LangGraph ≥1.0, Pydantic v2, openai SDK (`gpt-6-luna`, Responses API; switched from Gemini 2026-10-01); voice: Google Cloud STT/TTS code in place (B5), deferred by the user — no key yet
 - Routing (B6 done, B7 in progress): GraphHopper 11 (Java 21, foot profile, flexible mode) + OSM + elevation (SRTM 90m, or 국토지리정보원 DEM via `graphhopper/build_dem.sh`)
 - Client (planned, C2): Flutter; Firebase anonymous auth + FCM
 - Infra: Docker Compose (OrbStack on Mac, Docker Desktop + WSL2 on Windows); GCP project
@@ -30,7 +30,7 @@ Lanes: **A** server/DB/data collection/risk engine (`server/`, `db/`) · **B** A
 | `docker-compose.yml` | Services shared by local and server: `db`, `api`, `collector`, `ai`, `graphhopper`, `route`; one-shot `loader` (profile `tools`, `docker compose run --rm loader`); project name fixed |
 | `docker-compose.override.yml` | Local-only: DB host port 5433, graphhopper 8989, code mounts + `--reload` |
 | `server/` | Lane A: FastAPI API (`/api/v1`, mostly mock responses with `X-Mock: true`; real: `/api/health`, `/api/v1/risk*`, map layers), `collector/` (Pohang DT + KMA ingestion, APScheduler, runs as the `collector` service), `risk/` (flood risk engine → `risk_assessments`), `spec/openapi.yaml`, `mock/`, `tools/`. See `server/README.md` |
-| `ai/` | LangGraph multi-agent + `POST /api/chat`; reads the DB directly with a read-only role (B3). See `ai/CLAUDE.md` |
+| `ai/` | LangGraph multi-agent + `POST /api/chat` (also `/api/voice`·`/api/tts`, 503 without `secrets/gcp-voice.json`); reads the DB directly with a read-only role (B3). See `ai/CLAUDE.md` |
 | `route/` | Route server (lane B): `POST /api/route` (avoids the risk engine's current flood/landslide areas ≥ advisory via api `/api/v1/risk/areas` (hazards.py `RiskAreaHazardSource`, 60 s cache; no manholes), re-requests with the zone widened when GraphHopper misses a crossing (service.py `_widen_until_clear`), per-profile slope/steps rules (profiles.py), route/guardian_route/service.py:88), `POST /api/route/check` (reroute while moving, service.py:141); fixed demo zones `route/data/hazards.sample.geojson` only via `ROUTE_HAZARDS_FILE`; elderly slope thresholds 1/18·1/12 (profiles.py); avoidance demo `route/scripts/avoid_demo.py` (outputs `route/out/`, gitignored); tests in `route/tests/` |
 | `graphhopper/` | GraphHopper 11 image + `config.yml` (foot, no CH); `fetch_osm.sh` builds `data/guryongpo.osm.pbf`; `build_dem.sh` turns 국토지리정보원 DEM in `dem/ngii/` into `data/dem-hgt/`; `entrypoint.sh` picks DEM (NGII if present, else SRTM) and rebuilds the graph when it changes (data/ and dem/ngii/ gitignored) |
 | `app/` | Lane C: Flutter app/web. Mock by default; `--dart-define=APP_MODE=remote` connects to api/ai/route (J1, `lib/repositories/remote_repository.dart`; base URLs `API_BASE_URL`/`AI_BASE_URL`/`ROUTE_BASE_URL`). See `app/README.md` |
