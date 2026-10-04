@@ -208,7 +208,7 @@ class RemoteSafetyRepository implements SafetyRepository {
       'user_id': uid,
       // 사용자 유형 구분(주민·관광객)이 앱에서 빠져 서버 기본값(resident)을 쓴다
       if (age != null) 'age': age,
-      'mobility': transport == '휠체어' ? 'wheelchair' : 'walk',
+      'mobility': switch (transport) { '휠체어' => 'wheelchair', '자동차' => 'car', _ => 'walk' },
       if (walking) 'walking_impaired': true,
       ...placesForProfile(places),
     });

@@ -22,10 +22,13 @@ class AccountService {
     await prefs.setBool('profile_setup_complete', true);
     await AccountSync.instance.changed();
   }
-  /// (연령, 이동수단). 입력 전이면 null
+  /// (연령, 이동수단). 입력 전이면 null. 프로필 화면에서 고친 값(optional_profile)이 첫 설정 값보다 우선
   Future<(int?, String?)> requiredSetup() async {
     final prefs = await SharedPreferences.getInstance();
-    return (int.tryParse(prefs.getString('profile_age') ?? ''), prefs.getString('profile_transport'));
+    final o = await optionalProfile();
+    final age = int.tryParse(o['age'] ?? '') ?? int.tryParse(prefs.getString('profile_age') ?? '');
+    final transport = (o['transport'] ?? '').isNotEmpty ? o['transport'] : prefs.getString('profile_transport');
+    return (age, transport);
   }
   /// Firebase 없이도 기기마다 다른 사용자 ID (AI 대화·기억을 사용자별로 나눈다). 처음 부를 때 만들어 저장한다.
   Future<String> deviceUserId() async {

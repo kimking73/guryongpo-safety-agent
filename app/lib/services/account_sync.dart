@@ -160,13 +160,14 @@ class AccountSync {
   static Map<String, Object> profilePatch(SharedPreferences prefs, {DateTime? now}) {
     final o = _optional(prefs);
     String v(String k) => (o[k] ?? '').trim();
-    final age = int.tryParse(prefs.getString('profile_age') ?? '') ?? int.tryParse(v('age'));
-    final transport = prefs.getString('profile_transport') ?? (v('transport').isEmpty ? null : v('transport'));
+    // 프로필 화면(optional_profile)이 첫 설정(profile_*)보다 나중에 고친 값이라 먼저 본다
+    final age = int.tryParse(v('age')) ?? int.tryParse(prefs.getString('profile_age') ?? '');
+    final transport = v('transport').isNotEmpty ? v('transport') : prefs.getString('profile_transport');
     final jobs = v('jobs').split('|').where((e) => e.isNotEmpty).toList();
     final occupation = [v('직업'), ...jobs].where((e) => e.isNotEmpty).join(', ');
     return {
       if (age != null && age > 0 && age < 120) 'birth_year': (now ?? DateTime.now()).year - age,
-      if (transport != null) 'mobility': transport == '휠체어' ? 'wheelchair' : 'walk',
+      if (transport != null) 'mobility': _mobility[transport] ?? 'walk',
       if (occupation.isNotEmpty) 'occupation': occupation,
       if (jobs.any((j) => j.contains('어업') || j.contains('뱃사람'))) 'owns_vessel': true,
       if (v('보행 능력').isNotEmpty) 'walking_ability': 'limited',
@@ -176,6 +177,8 @@ class AccountSync {
   }
 
   static const _placeType = {'집': 'home', '직장': 'work', '숙소': 'lodging'};
+  /// 앱 이동수단 → 서버 mobility (명세 ProfileInput)
+  static const _mobility = {'도보': 'walk', '휠체어': 'wheelchair', '자동차': 'car', '자전거': 'bicycle', '대중교통': 'public_transit'};
 
   /// 서버에 있어야 할 장소 (키 → POST /user/places 본문): 집·직장(프로필 주소) + 저장 장소 목록
   static Map<String, Map<String, Object>> desiredPlaces(SharedPreferences prefs) {

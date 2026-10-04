@@ -25,6 +25,17 @@ void main() {
     });
   });
 
+  test('프로필 화면에서 고친 이동수단·연령이 첫 설정 값보다 우선, 자동차 → car', () async {
+    final prefs = await prefsWith({
+      'profile_age': '30',
+      'profile_transport': '도보',
+      'optional_profile': jsonEncode({'age': '45', 'transport': '자동차'}),
+    });
+    final p = AccountSync.profilePatch(prefs, now: DateTime(2026, 10, 5));
+    expect(p['mobility'], 'car');
+    expect(p['birth_year'], 1981);
+  });
+
   test('아무것도 입력 안 했으면 보낼 칸 없음', () async {
     final prefs = await prefsWith({});
     expect(AccountSync.profilePatch(prefs), isEmpty);
