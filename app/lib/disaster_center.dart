@@ -1594,7 +1594,7 @@ class _ProfileDetailsCardState extends State<ProfileDetailsCard> {
     await AccountService().saveOptionalProfile(p);
     if (mounted && notify) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('프로필을 기기에 저장했습니다.')));
+          .showSnackBar(const SnackBar(content: Text('프로필을 저장했습니다. 로그인 계정에도 함께 저장됩니다.')));
       setState(() {});
     }
   }

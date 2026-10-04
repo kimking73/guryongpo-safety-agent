@@ -17,7 +17,9 @@ import 'services/geocoding_service.dart';
 import 'services/demo_speech.dart';
 import 'dashboard_parts.dart';
 import 'disaster_center.dart';
+import 'live_screens.dart';
 import 'login_screen.dart';
+import 'services/demo_mode.dart';
 import 'prototype_safety_screens.dart';
 import 'services/demo_notifications.dart';
 import 'services/prototype_safety_store.dart';
@@ -566,27 +568,27 @@ final appRouter = GoRouter(initialLocation: '/boot', routes: [
     GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
     GoRoute(
         path: '/typhoon',
-        builder: (_, s) => TyphoonScreen(initialLocal: s.extra == 'local')),
-    GoRoute(path: '/support', builder: (_, __) => const RecoveryScreen()),
-    GoRoute(path: '/alerts-hub', builder: (_, __) => const AlertHubScreen()),
+        builder: (_, s) => DemoSwitch(demo: TyphoonScreen(initialLocal: s.extra == 'local'), live: const LiveTyphoonScreen())),
+    GoRoute(path: '/support', builder: (_, __) => const DemoSwitch(demo: RecoveryScreen(), live: LiveRecoveryScreen())),
+    GoRoute(path: '/alerts-hub', builder: (_, __) => const DemoSwitch(demo: AlertHubScreen(), live: AlertsScreen())),
     GoRoute(
-        path: '/evacuation', builder: (_, __) => const EvacuationDemoRoute()),
+        path: '/evacuation', builder: (_, __) => const DemoOnlyNotice(title: '대피 확인 시연', demo: EvacuationDemoRoute())),
     GoRoute(
         path: '/evacuation-voice',
-        builder: (_, __) => const EvacuationVoiceDemoScreen()),
+        builder: (_, __) => const DemoOnlyNotice(title: '음성 대피 확인 시연', demo: EvacuationVoiceDemoScreen())),
     GoRoute(
         path: '/accessibility',
         builder: (_, __) => const AccessibilitySettingsScreen()),
     GoRoute(
         path: '/household',
-        builder: (_, __) => const HouseholdRegistrationScreen()),
+        builder: (_, __) => const DemoSwitch(demo: HouseholdRegistrationScreen(), live: LiveHouseholdScreen())),
     GoRoute(
         path: '/household/delegate',
-        builder: (_, __) => const HouseholdRegistrationScreen(delegated: true)),
+        builder: (_, __) => const DemoSwitch(demo: HouseholdRegistrationScreen(delegated: true), live: LiveResponderScreen())),
     GoRoute(
         path: '/responder',
-        builder: (_, __) => const ResponderDashboardScreen()),
-    GoRoute(path: '/sea-route', builder: (_, __) => const SeaRouteDemoScreen()),
+        builder: (_, __) => const DemoSwitch(demo: ResponderDashboardScreen(), live: LiveResponderScreen())),
+    GoRoute(path: '/sea-route', builder: (_, __) => const DemoOnlyNotice(title: '해상 경로 데모', demo: SeaRouteDemoScreen())),
   ]),
   GoRoute(
       path: '/facility/:id',
@@ -937,7 +939,8 @@ class Dashboard extends ConsumerWidget {
   @override
   Widget build(BuildContext c, WidgetRef ref) {
     final route = ref.watch(routeFacilityId);
-    if (route == null) return const DisasterDashboard();
+    // 시연 모드(또는 서버 없이 실행)면 가상 시나리오 상황판, 아니면 실측 상황판 (2026-10-05)
+    if (route == null) return const DemoSwitch(demo: DisasterDashboard(), live: LiveDashboard());
     final routeType = ref.watch(routeKind);
     return ListView(padding: const EdgeInsets.all(16), children: [
       Row(children: [
@@ -1923,7 +1926,7 @@ class AlertsScreen extends ConsumerWidget {
           '${alertMode == 'emergency' ? '비상 모드' : '일반 모드'} · $pollInterval초마다 확인${serverTime == null ? '' : ' · 서버 ${TimeOfDay.fromDateTime(serverTime.toLocal()).format(c)} 기준'}',
           style: Theme.of(c).textTheme.bodySmall,
         ),
-      if (kIsWeb)
+      if (kIsWeb && ref.watch(showDemoProvider))
         OutlinedButton.icon(
           onPressed: () {
             final alert = AlertItem(
@@ -1964,6 +1967,8 @@ class AlertsScreen extends ConsumerWidget {
                 }
               },
             )),
+      // 가상 대피 확인 카드·시연 버튼은 시연 모드에서만 (실제 대피 확인은 위 서버 경고 카드)
+      if (ref.watch(showDemoProvider)) ...[
       EvacuationResponseCard(
         alertId: prototypeEvacuationAlertId,
         title: '구룡포 저지대 침수 대피 확인',
@@ -1979,6 +1984,7 @@ class AlertsScreen extends ConsumerWidget {
         icon: const Icon(Icons.notifications_active_outlined),
         label: const Text('3버튼 기기 알림 시연'),
       ),
+      ],
       if ((!AppConfig.isRemote && s.isLoading) ||
           (AppConfig.isRemote && !feedLoaded && pollError == null))
         const LinearProgressIndicator(),
@@ -2228,14 +2234,20 @@ class ProfileScreen extends ConsumerWidget {
       const ProfileDetailsCard(),
       const SizedBox(height: 12),
       const AccountCard(),
-      const PrototypeFeatureLinks(),
-      const DemoRoleClaimCard(),
+      if (AppConfig.isRemote) const DemoModeSwitch(),
+      // 시연 모드면 가상 시나리오 기능 모음, 아니면 실제 서버 기능만 (2026-10-05)
+      if (ref.watch(showDemoProvider)) ...[
+        const PrototypeFeatureLinks(),
+        const DemoRoleClaimCard(),
+      ] else
+        const LiveFeatureLinks(),
       const FcmPushSettingsCard(),
-      Card(
-          child: Column(children: const [
-        ListTile(title: Text('이동수단'), subtitle: Text('도보')),
-        ListTile(title: Text('접근성'), subtitle: Text('휠체어 접근 우선 (예시)'))
-      ])),
+      if (ref.watch(showDemoProvider))
+        Card(
+            child: Column(children: const [
+          ListTile(title: Text('이동수단'), subtitle: Text('도보')),
+          ListTile(title: Text('접근성'), subtitle: Text('휠체어 접근 우선 (예시)'))
+        ])),
       Card(
           child: Column(children: [
         ListTile(
@@ -2512,7 +2524,7 @@ class _OptionalDetailsCardState extends State<OptionalDetailsCard> {
           child:
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Text('선택 정보', style: TextStyle(fontWeight: FontWeight.bold)),
-            const Text('개인정보는 선택 입력이며 기기에 저장됩니다.'),
+            const Text('개인정보는 선택 입력이며 기기와 로그인 계정(서버)에 저장됩니다.'),
             DropdownButton<String>(
                 value: field,
                 isExpanded: true,
@@ -2563,8 +2575,9 @@ class _OptionalDetailsCardState extends State<OptionalDetailsCard> {
 }
 
 Future<void> call119(BuildContext c) async {
+  // 위치를 119에 자동 전송하지는 않는다 — 통화 중 직접 말해야 한다 (예전 '예시 위치' 문구 제거, 2026-10-05)
   ScaffoldMessenger.of(c).showSnackBar(const SnackBar(
-      content: Text('예시 현재 위치: 35.9907, 129.5526 · 실제 위치 전송은 구현하지 않았습니다.')));
+      content: Text('119에 연결합니다. 위치는 자동 전송되지 않으니 통화 중 현재 위치를 말해 주세요.')));
   await launchUrl(Uri.parse('tel:119'));
 }
 
@@ -2586,7 +2599,7 @@ class _InitialSetupScreenState extends ConsumerState<InitialSetupScreen> {
           child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 520),
               child: ListView(padding: const EdgeInsets.all(24), children: [
-                const Text('예시 데이터 · 구룡포 서비스 지역',
+                Text(AppConfig.isRemote ? '구룡포 서비스 지역' : '예시 데이터 · 구룡포 서비스 지역',
                     style: TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 16),
                 TextField(
