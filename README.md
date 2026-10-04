@@ -45,13 +45,12 @@ cp .env.example .env
 - 로컬 DB는 기본값 그대로 동작한다.
 - API 키와 `secrets/firebase-admin.json`은 **팀 비공개 채널**로 받아서 넣는다.
 
-### 4. 도로망 받기 (처음 한 번)
+### 4. 도로망 (저장소에 포함)
 
-```bash
-./graphhopper/fetch_osm.sh
-```
-- 한국 전체 OSM(약 290MB)을 받아 구룡포 일대만 잘라 `graphhopper/data/guryongpo.osm.pbf`(약 300KB)를 만든다. 몇 분 걸린다.
-- curl과 docker만 있으면 된다(Windows는 WSL 터미널에서). 이 파일이 없으면 graphhopper 컨테이너가 시작되지 않는다.
+- 구룡포 일대 도로망 `graphhopper/data/guryongpo.osm.pbf`(약 300KB, 2026-09-26 기준)가 저장소에 들어 있어 **따로 받을 필요 없다**.
+  범위는 경도 129.48~129.60, 위도 35.92~36.04. 데이터 © OpenStreetMap contributors, ODbL 라이선스 — 화면·발표에 쓸 때 출처를 표기한다.
+- 도로망을 최신으로 바꿀 때만 `./graphhopper/fetch_osm.sh` — 한국 전체 OSM(약 290MB)을 받아 같은 범위로 잘라 이 파일을 덮어쓴다(몇 분, curl·docker 필요,
+  Windows는 WSL 터미널). 바뀐 파일을 커밋하면 팀원 모두 같은 도로망을 쓴다. 이 파일이 없으면 graphhopper 컨테이너가 시작되지 않는다.
 - 고도(오르막 계산)는 처음 실행 때 SRTM(90m)을 자동으로 받는다. 더 정확한 **국토지리정보원 DEM**을 쓰려면 (선택):
   1. 국토정보플랫폼(https://map.ngii.go.kr)에서 구룡포 일대 수치표고모델 파일(.img 등)을 받아 `graphhopper/dem/ngii/`에 넣는다.
   2. `./graphhopper/build_dem.sh` → `docker compose restart graphhopper` (그래프를 새 고도로 다시 만든다).

@@ -26,8 +26,10 @@ __pycache__/
 .pytest_cache/
 
 # GraphHopper 캐시·지도 원본 (B6에서 생성, 용량 큼)
-graphhopper/data/
+graphhopper/data/*
 *.osm.pbf
+# 구룡포 일대만 자른 도로망(약 300KB)은 커밋한다 — 팀원이 290MB 전체 파일을 받지 않아도 되게. © OpenStreetMap contributors (ODbL)
+!graphhopper/data/guryongpo.osm.pbf
 
 # 국토지리정보원 DEM 원본 (B7, 용량 큼). graphhopper/dem/README.md 참고
 graphhopper/dem/ngii/
