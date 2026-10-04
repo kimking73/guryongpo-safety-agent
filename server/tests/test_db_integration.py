@@ -10,6 +10,16 @@ import pytest
 pytestmark = pytest.mark.skipif(not os.environ.get("TEST_DATABASE_URL"), reason="TEST_DATABASE_URL 없음")
 
 
+# 장소 등록은 도로명 주소 → 카카오 좌표 변환 (C 변경). 통합 테스트는 외부 호출 없이 주소별 좌표를 정해 둔다
+PLACES = {"환승센터": (35.99069, 129.556057), "구룡포 밖": (35.93, 129.50)}
+
+
+@pytest.fixture(autouse=True)
+def fake_geocoder(monkeypatch):
+    from app.routers import user
+    monkeypatch.setattr(user, "geocode_road_address", lambda a: {"address": a, "location": dict(zip(("lat", "lng"), PLACES[a]))})
+
+
 @pytest.fixture(scope="module")
 def real_db():
     from app import db
@@ -63,14 +73,14 @@ def test_alert_pipeline_end_to_end(real_db):
     me = {"Authorization": "Bearer dev:a5-near"}
     far = {"Authorization": "Bearer dev:a5-far"}
     try:
-        assert c.post("/api/v1/user", headers=me, json={"user_type": "resident", "birth_year": 1950,
+        assert c.post("/api/v1/user", headers=me, json={"birth_year": 1950,
                                                          "walking_ability": "limited"}).status_code == 201
         assert c.post("/api/v1/user", headers=far, json={}).status_code == 201
         place = c.post("/api/v1/user/places", headers=me, json={"place_type": "home", "label": "우리집",
-                                                                "location": {"lat": 35.99069, "lng": 129.556057}})
+                                                                "address": "환승센터"})
         assert place.status_code == 201
         c.post("/api/v1/user/places", headers=far, json={"place_type": "home", "label": "먼 집",
-                                                         "location": {"lat": 35.93, "lng": 129.50}})
+                                                         "address": "구룡포 밖"})
         res = simulate.apply("heavy_rain_flood")
         assert res["alerts_run"] == "success" and res["new_alerts"] >= 1
 
@@ -110,7 +120,7 @@ def test_evacuation_response_end_to_end(real_db):
     try:
         c.post("/api/v1/user", headers=me, json={})
         c.post("/api/v1/user/places", headers=me, json={"place_type": "home", "label": "우리집",
-                                                        "location": {"lat": 35.99069, "lng": 129.556057}})
+                                                        "address": "환승센터"})
         simulate.apply("heavy_rain_flood")
         alert = next(a for a in c.get("/api/v1/alerts", headers=me).json()["alerts"] if a["response_required"])
         iid = alert["incident_id"]
@@ -173,3 +183,63 @@ def test_evacuation_response_end_to_end(real_db):
         simulate.apply("clear")
         real_db.execute("DELETE FROM care.incidents WHERE created_by IN (SELECT id FROM users WHERE firebase_uid = 'responder-a12')")
         real_db.execute("DELETE FROM users WHERE firebase_uid IN ('a12-me', 'responder-a12')")
+
+
+def test_households_end_to_end(real_db):
+    """A13 완료 기준: 동의 없이는 민감정보가 저장되지 않고, 일반 계정은 타 가구 정보를 조회할 수 없음"""
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from risk import simulate
+    c = TestClient(app)
+    me = {"Authorization": "Bearer dev:a13-me"}
+    staff = {"Authorization": "Bearer dev:responder-a13"}
+    cg = {"Authorization": "Bearer dev:caregiver-a13"}
+    try:
+        # 건강 정보는 care.user_health 로 (public.user_profiles 에는 컬럼이 없음)
+        c.post("/api/v1/user", headers=me, json={"nickname": "하린"})
+        c.patch("/api/v1/user", headers=me, json={"blood_type": "A+", "medical_note": "고혈압 약"})
+        assert c.get("/api/v1/user", headers=me).json()["profile"]["blood_type"] == "A+"
+        assert real_db.fetch_one("""SELECT count(*) AS n FROM information_schema.columns WHERE table_schema = 'public'
+                                    AND table_name = 'user_profiles' AND column_name IN ('blood_type', 'medical_note')""")["n"] == 0
+        assert real_db.fetch_one("""SELECT h.medical_note FROM care.user_health h JOIN users u ON u.id = h.user_id
+                                    WHERE u.firebase_uid = 'a13-me'""")["medical_note"] == "고혈압 약"
+
+        # 본인 등록 — 동의 없으면 422 + 저장 안 됨, 동의하면 버전과 함께 저장
+        body = {"location": {"lat": 35.99069, "lng": 129.556057}, "needs": ["elderly", "living_alone"]}
+        assert c.put("/api/v1/user/household", headers=me, json=body).status_code == 422
+        assert c.get("/api/v1/user/household", headers=me).status_code == 404
+        h = c.put("/api/v1/user/household", headers=me, json={**body, "consent": True}).json()
+        assert h["label"] == "하린 댁" and h["consent"]["method"] == "app" and h["consent"]["version"] == "v1" and h["has_app"]
+        assert c.get("/api/v1/user", headers=me).json()["household"]["id"] == h["id"]
+
+        # 일반 계정은 방재단 API 403, 생활지원사는 담당 가구만
+        assert c.get("/api/v1/admin/households", headers=me).status_code == 403
+        assert c.get(f"/api/v1/admin/households/{h['id']}", headers=me).status_code == 403
+        mine = c.post("/api/v1/admin/households", headers=cg, json={
+            "label": "삼정리 이OO 댁", "location": {"lat": 35.979, "lng": 129.56}, "needs": ["vision"],
+            "consent_method": "verbal", "consent_by": "보호자 이OO"}).json()
+        assert mine["source"] == "caregiver" and mine["caregiver"] and mine["consent"]["method"] == "verbal"
+        assert {x["id"] for x in c.get("/api/v1/admin/households", headers=cg).json()} == {mine["id"]}
+        assert c.get(f"/api/v1/admin/households/{h['id']}", headers=cg).status_code == 404
+        assert {h["id"], mine["id"]} <= {x["id"] for x in c.get("/api/v1/admin/households", headers=staff).json()}
+
+        # 시연 가구 → 모의 침수 → 대피 상황 대상에 가구가 들어감
+        res = simulate.apply("demo_households")
+        assert res["households"] == 5
+        demo = [x for x in c.get("/api/v1/admin/households", headers=staff, params={"q": "[시연]"}).json()]
+        assert len(demo) == 5 and any((x["landslide_zone"] or "").startswith("산사태위험지도 1등급") for x in demo)
+        simulate.apply("heavy_rain_flood")
+        flood = next(i for i in c.get("/api/v1/admin/incidents", headers=staff).json() if i["hazard"] == "flood")
+        labels = {t["label"] for t in c.get(f"/api/v1/admin/incidents/{flood['id']}", headers=staff).json()["targets"]}
+        assert "[시연] 환승센터 옆 휠체어 어르신 댁" in labels and "하린 댁" in labels
+
+        # 동의 철회 → 삭제 (대피 대상에서도 빠짐)
+        assert c.delete("/api/v1/user/household", headers=me).status_code == 204
+        assert c.get("/api/v1/user/household", headers=me).status_code == 404
+        assert simulate.apply("demo_households_clear")["removed_households"] == 5
+    finally:
+        simulate.apply("clear")
+        simulate.apply("demo_households_clear")
+        real_db.execute("DELETE FROM care.households WHERE label = '삼정리 이OO 댁'")
+        real_db.execute("DELETE FROM care.incidents WHERE source = 'simulated'")
+        real_db.execute("DELETE FROM users WHERE firebase_uid IN ('a13-me', 'responder-a13', 'caregiver-a13')")

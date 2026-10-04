@@ -62,10 +62,10 @@ CREATE TABLE user_profiles (
   walking_ability    walking_ability NOT NULL DEFAULT 'normal',
   vision_impaired    boolean NOT NULL DEFAULT false,
   hearing_impaired   boolean NOT NULL DEFAULT false,
-  blood_type         text CHECK (blood_type IN ('A+','A-','B+','B-','O+','O-','AB+','AB-')),
+  blood_type         text CHECK (blood_type IN ('A+','A-','B+','B-','O+','O-','AB+','AB-')),  -- → care.user_health (01m_v0_4 가 옮기고 삭제)
   has_dependents     boolean NOT NULL DEFAULT false, -- 보호가 필요한 동반자(영유아/노약자/반려동물)
   dependents_note    text,
-  medical_note       text,                           -- 119 전달용 (지병/복용약 등, 사용자 자유기재)
+  medical_note       text,                           -- 119 전달용 → care.user_health (01m_v0_4 가 옮기고 삭제)
   prefers_voice      boolean NOT NULL DEFAULT false,
   language           text NOT NULL DEFAULT 'ko',
   updated_at         timestamptz NOT NULL DEFAULT now()

@@ -47,7 +47,12 @@ t AS (
 )
 SELECT DISTINCT ON (t.user_id) t.user_id, t.trigger, t.place_id, t.place_label, ST_Y(t.geom) AS lat, ST_X(t.geom) AS lng,
        pr.birth_year, pr.walking_ability::text AS walking_ability, pr.mobility::text AS mobility, pr.occupation,
-       pr.owns_vessel, pr.vision_impaired, pr.hearing_impaired, pr.user_type::text AS user_type,
+       pr.owns_vessel, pr.vision_impaired, pr.hearing_impaired,
+       -- 관광객: 사용자 유형이 tourist 이거나, 숙소만 있고 집은 없는 사람 (2026-10-04 — 유형 입력 대신 숙소로 판단)
+       CASE WHEN pr.user_type = 'tourist'
+              OR (EXISTS (SELECT 1 FROM user_places x WHERE x.user_id = t.user_id AND x.place_type = 'lodging')
+                  AND NOT EXISTS (SELECT 1 FROM user_places x WHERE x.user_id = t.user_id AND x.place_type = 'home'))
+            THEN 'tourist' ELSE pr.user_type::text END AS user_type,
        (SELECT jsonb_build_object('name', c.name, 'relation', c.relation, 'phone', c.phone) FROM emergency_contacts c
         WHERE c.user_id = t.user_id ORDER BY c.priority, c.name LIMIT 1) AS contact
 FROM t LEFT JOIN user_profiles pr ON pr.user_id = t.user_id

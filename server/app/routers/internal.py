@@ -32,7 +32,7 @@ def run_ingest(source: str, job: str, background: BackgroundTasks):
     return {"ingest_run_id": run_id}
 
 
-@router.post("/simulate", status_code=202, summary="시연 시나리오 주입 (heavy_rain_flood · clear)")
+@router.post("/simulate", status_code=202, summary="시연 시나리오 주입 (heavy_rain_flood · clear · demo_households · demo_households_clear)")
 def simulate(body: SimulateRequest):
     """모의 관측값을 넣고 즉시 판정. 모의값은 6시간 동안 실측보다 우선, clear 로 해제"""
     from risk import simulate as sim

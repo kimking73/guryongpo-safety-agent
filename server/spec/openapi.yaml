@@ -786,10 +786,12 @@ paths:
               type: object
               required: [scenario]
               properties:
-                scenario: { type: string, enum: [heavy_rain_flood, clear] }
+                scenario: { type: string, enum: [heavy_rain_flood, clear, demo_households, demo_households_clear] }
       description: |
         모의 관측값(observations.quality='simulated')을 넣고 즉시 판정. 모의값은 6시간 동안 실측보다 우선하고 clear 로 지운다.
         구현된 시나리오: heavy_rain_flood, clear. 새 시나리오를 만들면 이 목록에 추가한다.
+        demo_households (A13): 시연용 가상 취약 가구 5곳 등록(표시명 "[시연] …", 실제 개인정보 아님, 다시 실행하면 교체) —
+        침수 경보 영역 2곳·산사태위험지도 1등급 비탈 1곳 포함. demo_households_clear 로 삭제 (clear 는 가구를 지우지 않음).
         A12 이후: 위험 영역이 생기면 대피 상황(source=simulated)과 대피 확인 경고도 함께 만들어진다.
       responses:
         '202': { description: '적용됨 — 응답 필드 scenario, accepted, observations, assessments, risk_run' }
@@ -1213,21 +1215,32 @@ components:
             missing:
               type: array
               items: { type: string, enum: [birth_year, mobility, home_place] }
+              description: 'home_place = 집 또는 숙소(lodging) 장소가 없음 — 숙소를 등록한 관광객은 집을 요구하지 않는다'
         created_at: { type: string, format: date-time }
     PlaceInput:
       type: object
-      required: [place_type, label, address]
+      description: |
+        도로명 주소(address)·좌표(location) 중 하나 이상 (2026-10-04). location 이 있으면 그 좌표를 그대로 쓰고 address 는 받은 글자 그대로 저장,
+        address 만 있으면 서버가 카카오로 도로명 주소·좌표 변환 (서버에 KAKAO_REST_KEY 필요, 도로명 결과가 없으면 404).
+        지번만 있는 집·항구, 지도에서 찍기·현재 위치(GPS)로 등록할 때는 location 을 보낸다.
+      required: [place_type, label]
+      anyOf:
+        - required: [address]
+        - required: [location]
       properties:
-        place_type: { type: string, enum: [home, work, frequent, lodging] }
+        place_type: { type: string, enum: [home, work, frequent, lodging], description: 'lodging(숙소)만 있고 home 이 없으면 관광객으로 본다 (집 등록 요구 안 함)' }
         label: { type: string }
-        address: { type: string, minLength: 1, maxLength: 300 }
+        address: { type: [string, 'null'], minLength: 1, maxLength: 300 }
+        location: { $ref: '#/components/schemas/LatLng' }
         notify: { type: boolean, default: true }
     PlacePatch:
       type: object
+      description: 보낸 필드만 변경. location 을 보내면 그 좌표로, address 만 보내면 카카오 변환 좌표로 위치도 바뀐다
       properties:
         place_type: { type: string, enum: [home, work, frequent, lodging] }
         label: { type: string }
         address: { type: string, minLength: 1, maxLength: 300 }
+        location: { $ref: '#/components/schemas/LatLng' }
         notify: { type: boolean }
     Place:
       allOf:
@@ -1539,8 +1552,10 @@ components:
             at: { type: string, format: date-time }
             method: { type: string, enum: [app, written, verbal] }
             by: { type: string, description: '본인 / 보호자 김OO 등' }
+            version: { type: string, examples: [v1], description: '동의서 버전 (A13). 동의 문구가 바뀌면 올라가고, 이전 버전 가구는 재동의 대상' }
         landslide_zone: { type: [string, 'null'], description: '산사태 취약지역·위험지도 1·2등급 100m 안이면 그 이름 (우선순위 근거)' }
         note: { type: [string, 'null'], description: '방문 참고 (출입 방법 등). 진단명 등 의료정보는 적지 않는다' }
+        active: { type: boolean, description: 'false 면 목록·대피 대상에서 빠짐 (PATCH active)' }
         updated_at: { type: string, format: date-time }
     SelfHouseholdInput:
       type: object
