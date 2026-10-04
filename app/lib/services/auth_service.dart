@@ -51,20 +51,20 @@ String authErrorMessage(String code) => switch (code) {
 /// 연결하면 uid가 그대로라 익명일 때 저장한 정보(서버 사용자·장소·AI 기억)가 이어진다.
 class AuthService {
   /// Firebase 설정: --dart-define 값이 있으면 그것(예전 방식), 없으면 firebase_options.dart
-  static FirebaseOptions? get _options => AppConfig.hasFirebaseConfig
+  static FirebaseOptions? get firebaseOptions => AppConfig.hasFirebaseConfig
       ? FirebaseOptions(apiKey: AppConfig.firebaseApiKey, appId: AppConfig.firebaseAppId,
           messagingSenderId: AppConfig.firebaseSenderId, projectId: AppConfig.firebaseProjectId,
           authDomain: DefaultFirebaseOptions.web.authDomain)
       : DefaultFirebaseOptions.currentPlatform;
 
   /// 목업 모드(APP_MODE=mock)이거나 이 플랫폼 설정이 없으면 Firebase를 쓰지 않는다
-  static bool get enabled => AppConfig.isRemote && _options != null;
+  static bool get enabled => AppConfig.isRemote && firebaseOptions != null;
   static bool get ready => Firebase.apps.isNotEmpty;
 
   Future<AuthStateInfo> initialize() async {
     if (!enabled) return const AuthStateInfo(isMock: true, userId: 'mock-guryongpo-user');
     try {
-      if (!ready) await Firebase.initializeApp(options: _options);
+      if (!ready) await Firebase.initializeApp(options: firebaseOptions);
       final auth = FirebaseAuth.instance;
       final user = auth.currentUser ?? (await auth.signInAnonymously()).user;
       await syncServerUser();

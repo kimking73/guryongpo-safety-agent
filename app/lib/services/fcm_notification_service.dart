@@ -8,18 +8,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/domain_models.dart';
 import '../repositories/mock_repository.dart';
 import 'app_config.dart';
+import 'auth_service.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  if (Firebase.apps.isEmpty && AppConfig.hasFirebaseConfig) {
-    await Firebase.initializeApp(
-      options: FirebaseOptions(
-        apiKey: AppConfig.firebaseApiKey,
-        appId: AppConfig.firebaseAppId,
-        messagingSenderId: AppConfig.firebaseSenderId,
-        projectId: AppConfig.firebaseProjectId,
-      ),
-    );
+  // 앱이 꺼진 상태에서 받은 푸시 — 로그인과 같은 Firebase 설정(firebase_options.dart 또는 --dart-define)으로 초기화
+  final options = AuthService.firebaseOptions;
+  if (Firebase.apps.isEmpty && options != null) {
+    await Firebase.initializeApp(options: options);
   }
 }
 
