@@ -8,8 +8,15 @@ enum SignInMethod { anonymous, google, naver, email }
 class AccountService {
   static const _modeKey = 'user_mode';
   static const _methodKey = 'sign_in_method';
-  Future<void> clearLegacyMode() async =>
-      (await SharedPreferences.getInstance()).remove(_modeKey);
+  Future<void> clearLegacyMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_modeKey);
+    final raw = prefs.getString('optional_profile');
+    if (raw == null) return;
+    final values = (jsonDecode(raw) as Map).map((k, v) => MapEntry('$k', '$v'));
+    values.remove('user_type');
+    await prefs.setString('optional_profile', jsonEncode(values));
+  }
   Future<void> saveRequiredSetup({required String age, required String transport}) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('profile_age', age);

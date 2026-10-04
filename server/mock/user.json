@@ -5,7 +5,6 @@
   "role": "resident",
   "profile": {
     "nickname": "하린",
-    "user_type": "resident",
     "birth_year": 1958,
     "mobility": "walk",
     "occupation": "fisher",
@@ -37,7 +36,7 @@
       "id": "7b1f6a3e-2c4d-4e8f-9a01-3b5c7d9e1f20",
       "place_type": "home",
       "label": "우리집",
-      "address": null,
+      "address": "경북 포항시 남구 구룡포읍 호미로 152 (목업)",
       "location": {
         "lat": 35.9862,
         "lng": 129.5489
@@ -51,7 +50,7 @@
       "id": "8c2e7b4f-3d5e-4f90-8b12-4c6d8e0f2a31",
       "place_type": "work",
       "label": "구룡포항 3부두",
-      "address": null,
+      "address": "경북 포항시 남구 구룡포읍 예시로 31 (목업)",
       "location": {
         "lat": 35.9893,
         "lng": 129.5571

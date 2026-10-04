@@ -99,6 +99,7 @@ def stations_layer(bbox: tuple[float, float, float, float], now: datetime | None
             **_fresh(obs_at, r, now),
             "metrics": {k: v["value"] for k, v in ms.items() if k not in ("battery",)},
             "simulated": bool(p and p.get("simulated")),
+            "value_origin": "unavailable" if not p else ("simulated" if p.get("simulated") else "observed"),
         }
         features.append({"type": "Feature", "id": sid,
                          "geometry": {"type": "Point", "coordinates": [r["lng"], r["lat"]]}, "properties": props})
@@ -106,7 +107,7 @@ def stations_layer(bbox: tuple[float, float, float, float], now: datetime | None
 
 
 LANDSLIDE_SQL = """
-SELECT id, name, grade, meta, ST_AsGeoJSON(geom) AS geojson
+SELECT id, source_code, name, grade, meta, ST_AsGeoJSON(geom) AS geojson
 FROM hazard_zones
 WHERE hazard = 'landslide' AND COALESCE(meta->>'role', '') <> 'trigger_area'   -- 판정용 100m 범위는 risk_areas 로만 보임
   AND ST_Intersects(geom, ST_MakeEnvelope(%(a)s, %(b)s, %(c)s, %(d)s, 4326))
@@ -121,9 +122,65 @@ def landslide_layer(bbox: tuple[float, float, float, float]) -> dict:
         feats.append({"type": "Feature", "id": r["id"], "geometry": json.loads(r["geojson"]),
                       "properties": {"name": r["name"], "hazard": "landslide", "grade": r["grade"],
                                      "kind": "riskmap" if meta.get("role") == "display" else "designated",
+                                     "data_kind": "official_risk_map" if meta.get("role") == "display" else "designated_vulnerable_area",
+                                     "data_label": "산림청 산사태 위험지도 등급 · 현재 발생/예보 아님" if meta.get("role") == "display" else "산사태 취약지역 지정 자료 · 현재 발생/예보 아님",
+                                     "source": meta.get("source") or ("산림청 산사태 위험지도" if meta.get("role") == "display" else "공공데이터포털 · 경상북도 포항시 산사태 취약지역 현황"),
+                                     "source_code": r.get("source_code") or ("safemap" if meta.get("role") == "display" else "datagokr"),
+                                     "source_url": "https://sansatai.forest.go.kr/" if meta.get("role") == "display" else "https://www.data.go.kr/",
+                                     "is_example": False,
                                      "reason": meta.get("reason"), "area_m2": meta.get("area_m2"),
                                      "shelter_distance_m": meta.get("shelter_distance_m")}})
     return {"type": "FeatureCollection", "features": feats}
+
+
+# Risk assessments are produced by the server from an observed station or
+# another explicit assessment. Tiling only discretizes those assessed areas;
+# it does not spread point observations into unassessed cells.
+FLOOD_GRID_SQL = """
+WITH p AS (
+  SELECT %(a)s::float8 AS a, %(b)s::float8 AS b, %(c)s::float8 AS c, %(d)s::float8 AS d,
+         0.004::float8 AS step
+), grid AS (
+  SELECT x.i AS col, y.i AS row,
+         ST_MakeEnvelope(p.a + x.i*p.step, p.b + y.i*p.step,
+                         LEAST(p.c, p.a + (x.i+1)*p.step), LEAST(p.d, p.b + (y.i+1)*p.step), 4326) AS geom
+  FROM p,
+       generate_series(0, GREATEST(0, CEIL((p.c-p.a)/p.step)::int-1)) AS x(i),
+       generate_series(0, GREATEST(0, CEIL((p.d-p.b)/p.step)::int-1)) AS y(i)
+), assessed AS (
+  SELECT g.col, g.row, g.geom, ra.id, ra.level::text AS level, ra.label, ra.basis,
+         ROW_NUMBER() OVER (PARTITION BY g.col, g.row ORDER BY ra.level DESC, ra.computed_at DESC, ra.id DESC) AS rank
+  FROM grid g
+  JOIN risk_assessments ra ON ra.valid_to IS NULL AND ra.hazard = 'flood'
+       AND ra.level >= 'watch'::risk_level AND ST_Intersects(g.geom, ra.area)
+)
+SELECT id, level, label, basis, ST_AsGeoJSON(geom) AS geojson FROM assessed WHERE rank = 1
+ORDER BY row, col
+"""
+
+
+def flood_grid_layer(bbox: tuple[float, float, float, float]) -> dict:
+    features = []
+    for r in db.fetch_all(FLOOD_GRID_SQL, dict(zip("abcd", bbox))):
+        basis = r["basis"] if isinstance(r["basis"], dict) else json.loads(r["basis"] or "{}")
+        value = basis.get("value")
+        depth_cm = None
+        if basis.get("metric") == "flood_depth" and value is not None:
+            try:
+                depth_cm = float(value) / 10 if basis.get("unit") == "mm" else float(value)
+            except (TypeError, ValueError):
+                depth_cm = None
+        features.append({
+            "type": "Feature", "id": r["id"], "geometry": json.loads(r["geojson"]),
+            "properties": {
+                "hazard": "flood", "level": r["level"], "label": r["label"],
+                "observed_depth_cm": depth_cm, "observed_at": basis.get("observed_at"),
+                "source": basis.get("station_name") or basis.get("source") or "위험 판정 자료",
+                "simulated": bool(basis.get("simulated")),
+                "data_status": "simulated" if basis.get("simulated") else "assessed",
+            },
+        })
+    return {"type": "FeatureCollection", "features": features}
 
 
 # ---------------------------------------------------------------- 정적 시설 (A7 loader 가 적재)

@@ -21,7 +21,6 @@ class LatLng(_In):
 
 class ProfileInput(_In):
     nickname: Optional[str] = None
-    user_type: Optional[Literal["resident", "tourist", "worker"]] = None
     birth_year: Optional[int] = Field(default=None, ge=1900, le=2100)
     mobility: Optional[Literal["walk", "car", "bicycle", "public_transit", "wheelchair"]] = None
     occupation: Optional[str] = None
@@ -48,8 +47,7 @@ class AlertPrefs(_In):
 class PlaceInput(_In):
     place_type: Literal["home", "work", "frequent", "lodging"]
     label: str = Field(min_length=1)
-    address: Optional[str] = None
-    location: Optional[LatLng] = None  # 주소를 보내면 서버가 카카오로 변환
+    address: str = Field(min_length=1, max_length=300)
     notify: bool = True
 
 
@@ -57,7 +55,6 @@ class PlacePatch(_In):
     place_type: Optional[Literal["home", "work", "frequent", "lodging"]] = None
     label: Optional[str] = None
     address: Optional[str] = None
-    location: Optional[LatLng] = None
     notify: Optional[bool] = None
 
 

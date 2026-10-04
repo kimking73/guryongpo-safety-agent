@@ -7,6 +7,7 @@ import '../models/domain_models.dart';
 abstract class SafetyRepository {
   Future<RiskStatus> risk(LatLng origin);
   Future<List<RiskArea>> riskAreas();
+  Future<List<FloodGrid>> floodGrid({int timeIndex = 0});
   Future<List<Facility>> getFacilities(LatLng origin);
   Future<List<AlertItem>> alerts(LatLng origin);
   Future<SafetyRoute> routeFor(Facility facility, UserMode userMode, RouteType routeType, LatLng origin);
@@ -20,6 +21,9 @@ abstract class SafetyRepository {
 }
 
 class MockSafetyRepository implements SafetyRepository {
+  @override
+  Future<List<FloodGrid>> floodGrid({int timeIndex = 0}) async => demoFloodGrid(timeIndex);
+
   static final facilities = <Facility>[
     Facility(
         id: 'gym',
@@ -67,82 +71,41 @@ class MockSafetyRepository implements SafetyRepository {
   /// polyline for each user origin and route preference. There is deliberately
   /// no text-only fallback route.
   static final _routes = <String, SafetyRoute>{
-    // Visitor origin: 35.9907, 129.5526
-    'visitor/safest/gym': _route('gym', RouteType.safest, 800, 12,
-        '침수 예시 구간과 맨홀 주변을 우회합니다.', [
-      (35.9907, 129.5526), (35.9912, 129.5505), (35.9910, 129.5514),
-      (35.9920, 129.5515), (35.9928, 129.5518)
-    ]),
-    'visitor/nearest/gym': _route('gym', RouteType.nearest, 680, 10,
-        '가까운 보행로를 따라 이동하며 위험 표지를 확인합니다.', [
-      (35.9907, 129.5526), (35.9911, 129.5525), (35.9920, 129.5521),
-      (35.9928, 129.5518)
-    ]),
-    'visitor/safest/school': _route('school', RouteType.safest, 1200, 18,
-        '저지대 대신 북쪽 보행로로 우회합니다.', [
-      (35.9907, 129.5526), (35.9913, 129.5517), (35.9908, 129.5509),
-      (35.9902, 129.5506), (35.9898, 129.5501)
-    ]),
-    'visitor/nearest/school': _route('school', RouteType.nearest, 1010, 15,
-        '가까운 도보 구간을 이용합니다.', [
-      (35.9907, 129.5526), (35.9909, 129.5518), (35.9901, 129.5509),
-      (35.9898, 129.5501)
-    ]),
-    'visitor/safest/hall': _route('hall', RouteType.safest, 1500, 21,
-        '해안가 대신 내륙 보행로로 위험 구간을 회피합니다.', [
-      (35.9907, 129.5526), (35.9915, 129.5514), (35.9927, 129.5520),
-      (35.9940, 129.5544), (35.9955, 129.5562)
-    ]),
-    'visitor/nearest/hall': _route('hall', RouteType.nearest, 1280, 18,
-        '가까운 교차로를 경유하는 도보 경로입니다.', [
-      (35.9907, 129.5526), (35.9920, 129.5530), (35.9935, 129.5546),
-      (35.9955, 129.5562)
-    ]),
-    'visitor/safest/clinic': _route('clinic', RouteType.safest, 900, 13,
-        '침수 예시 구간을 피해 의료지원소로 이동합니다.', [
-      (35.9907, 129.5526), (35.9909, 129.5514), (35.9918, 129.5510),
-      (35.9922, 129.5531), (35.9915, 129.5554)
-    ]),
-    'visitor/nearest/clinic': _route('clinic', RouteType.nearest, 760, 11,
-        '가까운 보행로로 의료지원소에 접근합니다.', [
-      (35.9907, 129.5526), (35.9912, 129.5530), (35.9915, 129.5542),
-      (35.9915, 129.5554)
-    ]),
-    // Resident origin: 35.9918, 129.5507
-    'resident/safest/gym': _route('gym', RouteType.safest, 640, 10,
+    // User origin: 35.9918, 129.5507
+    'user/safest/gym': _route('gym', RouteType.safest, 640, 10,
         '침수 예시 구간을 피해 실내체육관으로 이동합니다.', [
       (35.9918, 129.5507), (35.9911, 129.5512), (35.9920, 129.5515),
       (35.9928, 129.5518)
     ]),
-    'resident/nearest/gym': _route('gym', RouteType.nearest, 520, 8,
+    'user/nearest/gym': _route('gym', RouteType.nearest, 520, 8,
         '가까운 보행로를 따라 이동합니다.', [
       (35.9918, 129.5507), (35.9922, 129.5511), (35.9928, 129.5518)
     ]),
-    'resident/safest/school': _route('school', RouteType.safest, 980, 15,
+    'user/safest/school': _route('school', RouteType.safest, 980, 15,
         '저지대 보행로를 피해 학교 대피소로 이동합니다.', [
       (35.9918, 129.5507), (35.9913, 129.5512), (35.9908, 129.5508),
       (35.9898, 129.5501)
     ]),
-    'resident/nearest/school': _route('school', RouteType.nearest, 820, 12,
+    'user/nearest/school': _route('school', RouteType.nearest, 820, 12,
         '가까운 골목 보행로를 경유합니다.', [
       (35.9918, 129.5507), (35.9909, 129.5507), (35.9898, 129.5501)
     ]),
-    'resident/safest/hall': _route('hall', RouteType.safest, 1300, 19,
+    'user/safest/hall': _route('hall', RouteType.safest, 1300, 19,
         '위험 표지 구간을 피해 문화회관으로 이동합니다.', [
       (35.9918, 129.5507), (35.9921, 129.5520), (35.9934, 129.5532),
       (35.9944, 129.5550), (35.9955, 129.5562)
     ]),
-    'resident/nearest/hall': _route('hall', RouteType.nearest, 1120, 16,
+    'user/nearest/hall': _route('hall', RouteType.nearest, 1120, 16,
         '가까운 교차로를 이용하는 보행 경로입니다.', [
       (35.9918, 129.5507), (35.9929, 129.5527), (35.9940, 129.5546),
       (35.9955, 129.5562)
     ]),
-    'resident/safest/clinic': _route('clinic', RouteType.safest, 780, 12,
+    'user/safest/clinic': _route('clinic', RouteType.safest, 780, 12,
         '침수 위험 표지 주변을 우회해 의료지원소로 이동합니다.', [
       (35.9918, 129.5507), (35.9922, 129.5518), (35.9920, 129.5530),
       (35.9915, 129.5554)
     ]),
-    'resident/nearest/clinic': _route('clinic', RouteType.nearest, 650, 10,
+    'user/nearest/clinic': _route('clinic', RouteType.nearest, 650, 10,
         '가까운 보행로로 의료지원소에 접근합니다.', [
       (35.9918, 129.5507), (35.9919, 129.5524), (35.9915, 129.5540),
       (35.9915, 129.5554)
@@ -210,7 +173,22 @@ class MockSafetyRepository implements SafetyRepository {
             guide: '외출 시 모자와 자외선 차단을 사용하세요.')
       ]; }
   @override
-  Future<ChatAnswer> ask(String question, UserMode userMode, LatLng origin) async => ChatAnswer(_mockAnswer(question));
+  Future<ChatAnswer> ask(String question, UserMode userMode, LatLng origin) async {
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    final wantsRoute = ['대피소', '의료시설', '병원', '경로', '도보로'].any(question.contains);
+    if (!wantsRoute) return ChatAnswer(_mockAnswer(question));
+    final medical = question.contains('의료') || question.contains('병원');
+    final facility = facilities.firstWhere((f) => f.type == (medical ? FacilityType.medical : FacilityType.shelter));
+    final routeType = question.contains('가까운') || question.contains('최단') ? RouteType.nearest : RouteType.safest;
+    final route = exampleRoute(facility.id, userMode, routeType);
+    return ChatAnswer(
+      '${_mockAnswer(question)}\n목업 경로 · ${route.distanceMeters}m · 도보 약 ${route.estimatedMinutes}분',
+      route: route,
+      destinationName: facility.name,
+      destinationKind: medical ? 'medical' : 'shelter',
+      destinationPos: facility.position,
+    );
+  }
 
   // 목업은 받아쓰기·음성 합성이 없다. 녹음 여부와 상관없이 예시 질문으로 답한다
   @override
@@ -223,6 +201,8 @@ class MockSafetyRepository implements SafetyRepository {
   String _mockAnswer(String question) {
     if (question.contains('대피소'))
       return '예시 데이터: 가장 안전한 대피소는 구룡포 실내체육관입니다. 0.8km, 도보 12분이며 침수 예시 구간을 피합니다.';
+    if (question.contains('의료') || question.contains('병원'))
+      return '예시 데이터: 구룡포 의료지원소까지의 경로를 준비했습니다. 실제 운영 여부와 응급 진료 가능 여부를 먼저 확인하세요.';
     if (question.contains('침수') || question.contains('위험'))
       return '예시 데이터: 현재는 경계 단계입니다. 저지대 보행과 맨홀 주변을 피하고 안전한 실내로 이동하세요.';
     if (question.contains('미세먼지'))

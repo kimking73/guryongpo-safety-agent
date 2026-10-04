@@ -67,7 +67,7 @@ void main() {
        'properties': {'id': 8, 'name': '구룡포 초등학교 앞', 'shelter_types': ['tsunami'], 'address': '경북 포항시 남구 구룡포읍',
          'capacity': null, 'phone': null, 'is_indoor': false, 'is_accessible': null, 'in_risk_area': false}},
     ]};
-    final f = facilitiesFromGeoJson(fc, FacilityType.shelter, originFor(UserMode.visitor)).single;
+    final f = facilitiesFromGeoJson(fc, FacilityType.shelter, originFor(UserMode.user)).single;
     expect(f.id, 'shelter-8');
     expect(f.description, '지진해일 대피장소 · 실외');
     expect(f.distanceKm, 0.1);

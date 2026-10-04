@@ -34,7 +34,9 @@ def geocode_road_address(address: str) -> dict:
 
     result = documents[0]
     road = result.get("road_address")
-    normalized = (road or {}).get("address_name") or result.get("address_name")
+    # This flow promises a road-name address. Do not silently store a parcel
+    # address as if it were the road-name value the user entered.
+    normalized = (road or {}).get("address_name")
     if not normalized:
         raise ApiError("NOT_FOUND", "도로명 주소 결과가 없습니다. 도로명 주소를 확인해 주세요.")
     try:

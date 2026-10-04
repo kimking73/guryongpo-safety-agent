@@ -50,7 +50,7 @@ def test_route_converts_graphhopper_response():
     c, seen = client(ok)
     res = c.post("/api/route", json=BODY)
     assert res.status_code == 200
-    assert res.json() == {"profile": "adult", "distance_m": 986, "duration_s": 710,
+    assert res.json() == {"strategy": None, "profile": "adult", "distance_m": 986, "duration_s": 710,
                           "ascend_m": 10, "descend_m": 2, "max_slope_pct": 8,   # 내리막 7.6%도 급경사로 본다
                           "avoided": [], "still_inside": [], "geometry": PATH["points"], "source": "graphhopper",
                           "hazards_ok": True}
@@ -65,6 +65,24 @@ def test_route_converts_graphhopper_response():
 def test_profile_defaults_to_adult():
     c, _ = client(ok)
     assert c.post("/api/route", json=BODY).json()["profile"] == "adult"
+
+
+def test_fastest_strategy_uses_fast_walking_profile():
+    c, seen = client(ok)
+    response = c.post("/api/route", json={**BODY, "strategy": "fastest", "profile": "elderly"})
+    assert response.status_code == 200
+    assert response.json()["strategy"] == "fastest"
+    assert response.json()["profile"] == "adult"
+    assert "custom_model" not in json.loads(seen[0].content)
+
+
+def test_safest_strategy_keeps_accessibility_profile():
+    c, seen = client(ok)
+    response = c.post("/api/route", json={**BODY, "strategy": "safest", "profile": "elderly"})
+    assert response.status_code == 200
+    assert response.json()["strategy"] == "safest"
+    assert response.json()["profile"] == "elderly"
+    assert "custom_model" in json.loads(seen[0].content)
 
 
 def test_graphhopper_down_gives_503():

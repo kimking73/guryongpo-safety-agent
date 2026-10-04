@@ -27,27 +27,43 @@ class RemoteSafetyRepository implements SafetyRepository {
   static const riskRadiusM = 300;
 
   Future<Map<String, dynamic>> _risk(LatLng o) async {
-    final r = await _guard(() => _client.api.get<Map<String, dynamic>>('/api/v1/risk',
-        queryParameters: {'lat': o.latitude, 'lng': o.longitude, 'radius_m': riskRadiusM}));
+    final r = await _guard(() => _client.api
+            .get<Map<String, dynamic>>('/api/v1/risk', queryParameters: {
+          'lat': o.latitude,
+          'lng': o.longitude,
+          'radius_m': riskRadiusM
+        }));
     return r.data!;
   }
 
   @override
-  Future<RiskStatus> risk(LatLng origin) async => riskFromJson(await _risk(origin));
+  Future<RiskStatus> risk(LatLng origin) async =>
+      riskFromJson(await _risk(origin));
 
   @override
-  Future<List<AlertItem>> alerts(LatLng origin) async => alertsFromRiskJson(await _risk(origin));
+  Future<List<AlertItem>> alerts(LatLng origin) async =>
+      alertsFromRiskJson(await _risk(origin));
 
   @override
   Future<List<RiskArea>> riskAreas() async {
-    final r = await _guard(() => _client.api.get<Map<String, dynamic>>('/api/v1/risk/areas'));
+    final r = await _guard(
+        () => _client.api.get<Map<String, dynamic>>('/api/v1/risk/areas'));
     return riskAreasFromGeoJson(r.data!);
   }
 
   @override
+  Future<List<FloodGrid>> floodGrid({int timeIndex = 0}) async {
+    final r = await _guard(() => _client.api
+        .get<Map<String, dynamic>>('/api/v1/dashboard/layers/flood_grid'));
+    return floodGridFromGeoJson(r.data!);
+  }
+
+  @override
   Future<List<Facility>> getFacilities(LatLng o) async {
-    final shelters = await _guard(() => _client.api.get<Map<String, dynamic>>('/api/v1/dashboard/layers/shelters'));
-    final medical = await _guard(() => _client.api.get<Map<String, dynamic>>('/api/v1/dashboard/layers/medical'));
+    final shelters = await _guard(() => _client.api
+        .get<Map<String, dynamic>>('/api/v1/dashboard/layers/shelters'));
+    final medical = await _guard(() => _client.api
+        .get<Map<String, dynamic>>('/api/v1/dashboard/layers/medical'));
     return [
       ...facilitiesFromGeoJson(shelters.data!, FacilityType.shelter, o),
       ...facilitiesFromGeoJson(medical.data!, FacilityType.medical, o),
@@ -55,25 +71,38 @@ class RemoteSafetyRepository implements SafetyRepository {
   }
 
   @override
-  Future<SafetyRoute> routeFor(Facility facility, UserMode userMode, RouteType routeType, LatLng o) async {
+  Future<SafetyRoute> routeFor(Facility facility, UserMode userMode,
+      RouteType routeType, LatLng o) async {
     final (age, transport) = await _account.requiredSetup();
     final walking = await _account.walkingImpaired();
-    final r = await _guard(() => _client.route.post<Map<String, dynamic>>('/api/route', data: {
-          'origin': {'lat': o.latitude, 'lon': o.longitude},
-          'destination': {'lat': facility.position.latitude, 'lon': facility.position.longitude},
-          // 위험 영역 회피는 항상 켜짐. 안전 경로 = 사용자 유형(노약자면 급경사 회피), 가까운 경로 = 경사 무시 최단
-          'profile': routeType == RouteType.safest ? routeProfileFor(age, transport, walkingImpaired: walking) : 'adult',
-        }), notFound: '이 시설까지 걸어서 갈 수 있는 길을 찾지 못했습니다.');
-    return routeFromJson(r.data!, facility.id, routeType, names: await _routeHazardNames());
+    final r = await _guard(
+        () => _client.route.post<Map<String, dynamic>>('/api/route', data: {
+              'origin': {'lat': o.latitude, 'lon': o.longitude},
+              'destination': {
+                'lat': facility.position.latitude,
+                'lon': facility.position.longitude
+              },
+              // 두 전략 모두 활성 위험 영역은 회피한다. 가까운 경로는 시간 우선,
+              // 안전 경로는 사용자 이동 조건(고령·휠체어·보행 불편)을 반영한다.
+              'strategy': routeType == RouteType.nearest ? 'fastest' : 'safest',
+              'profile': routeType == RouteType.safest
+                  ? routeProfileFor(age, transport, walkingImpaired: walking)
+                  : 'adult',
+            }),
+        notFound: '이 시설까지 걸어서 갈 수 있는 길을 찾지 못했습니다.');
+    return routeFromJson(r.data!, facility.id, routeType,
+        names: await _routeHazardNames());
   }
 
   /// 경로 서버의 위험 구역 id → 이름 (응답의 avoided·still_inside는 id). 한 번만 받아 둔다
   Future<Map<String, String>> _routeHazardNames() async {
     if (_hazardNames != null) return _hazardNames!;
     try {
-      final r = await _client.route.get<Map<String, dynamic>>('/api/route/hazards');
+      final r =
+          await _client.route.get<Map<String, dynamic>>('/api/route/hazards');
       return _hazardNames = {
-        for (final f in (r.data!['features'] as List).cast<Map<String, dynamic>>())
+        for (final f
+            in (r.data!['features'] as List).cast<Map<String, dynamic>>())
           '${f['properties']['id']}': '${f['properties']['name']}'
       };
     } on DioException {
@@ -111,7 +140,7 @@ class RemoteSafetyRepository implements SafetyRepository {
       _conversationId = r.data!['conversation_id'] as String?;
       return chatAnswerFromJson(r.data!, names: await _routeHazardNames());
     } on RemoteError catch (e) {
-      return ChatAnswer(e.message);
+      return ChatAnswer(e.message, isError: true);
     }
   }
 
@@ -145,7 +174,8 @@ class RemoteSafetyRepository implements SafetyRepository {
   }
 
   /// passDetail: 이 상태 코드면 서버가 보낸 문구(FastAPI detail)를 그대로 보여 준다
-  Future<Response<T>> _guard<T>(Future<Response<T>> Function() call, {String? notFound, Set<int> passDetail = const {}}) async {
+  Future<Response<T>> _guard<T>(Future<Response<T>> Function() call,
+      {String? notFound, Set<int> passDetail = const {}}) async {
     try {
       return await call();
     } on DioException catch (e) {
@@ -171,7 +201,13 @@ class RemoteError implements Exception {
 // ---------------------------------------------------------------------------
 // 서버 응답 → 화면 모델 (테스트에서 실제 응답 모양으로 검사)
 
-const _levelKo = {'normal': '정상', 'watch': '관심', 'advisory': '주의', 'warning': '경계', 'critical': '심각'};
+const _levelKo = {
+  'normal': '정상',
+  'watch': '관심',
+  'advisory': '주의',
+  'warning': '경계',
+  'critical': '심각'
+};
 String levelKo(String? level) => _levelKo[level] ?? '정상';
 
 String guideFor(String levelKorean) => switch (levelKorean) {
@@ -198,7 +234,8 @@ RiskStatus riskFromJson(Map<String, dynamic> j) {
         : '주변 ${RemoteSafetyRepository.riskRadiusM}m 안에 발효 중인 위험이 없습니다.';
   } else {
     title = items.take(2).map((i) => i['label']).join(' · ');
-    summary = (items.first['reason'] as String?) ?? items.first['label'] as String;
+    summary =
+        (items.first['reason'] as String?) ?? items.first['label'] as String;
   }
   return RiskStatus(
     level: level,
@@ -206,9 +243,47 @@ RiskStatus riskFromJson(Map<String, dynamic> j) {
     summary: summary,
     updatedAt: _hhmm(j['computed_at']),
     guide: guideFor(level),
-    details: [for (final i in items) i['reason'] == null ? '${i['label']}' : '${i['label']} — ${i['reason']}'],
+    details: [
+      for (final i in items)
+        i['reason'] == null ? '${i['label']}' : '${i['label']} — ${i['reason']}'
+    ],
     stale: stale,
   );
+}
+
+List<FloodGrid> floodGridFromGeoJson(Map<String, dynamic> fc) {
+  final result = <FloodGrid>[];
+  for (final f
+      in (fc['features'] as List? ?? const []).cast<Map<String, dynamic>>()) {
+    final geometry = f['geometry'] as Map<String, dynamic>?;
+    final properties = f['properties'] as Map<String, dynamic>? ?? const {};
+    if (geometry?['type'] != 'Polygon') continue;
+    final ring = (geometry!['coordinates'] as List).first as List;
+    final points = ring
+        .cast<List>()
+        .map((p) => [(p[0] as num).toDouble(), (p[1] as num).toDouble()])
+        .toList();
+    final lngs = points.map((p) => p[0]).toList(),
+        lats = points.map((p) => p[1]).toList();
+    result.add(FloodGrid(
+      id: '${f['id'] ?? 'flood-cell'}',
+      level: switch ('${properties['level']}') {
+        'critical' || '심각' => '심각',
+        'warning' || '경계' => '경계',
+        'advisory' || 'watch' || '주의' => '주의',
+        _ => '미확인',
+      },
+      south: lats.reduce((a, b) => a < b ? a : b),
+      north: lats.reduce((a, b) => a > b ? a : b),
+      west: lngs.reduce((a, b) => a < b ? a : b),
+      east: lngs.reduce((a, b) => a > b ? a : b),
+      depthCm: (properties['observed_depth_cm'] as num?)?.toDouble(),
+      observedAt: properties['observed_at'] as String?,
+      source: properties['source'] as String? ?? '위험 판정 자료',
+      isExample: properties['simulated'] == true,
+    ));
+  }
+  return result;
 }
 
 List<AlertItem> alertsFromRiskJson(Map<String, dynamic> j) {
@@ -227,26 +302,38 @@ List<AlertItem> alertsFromRiskJson(Map<String, dynamic> j) {
 }
 
 List<RiskArea> riskAreasFromGeoJson(Map<String, dynamic> fc) {
-  List<LatLng> ring(List coords) => [for (final c in coords) LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble())];
+  List<LatLng> ring(List coords) => [
+        for (final c in coords)
+          LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble())
+      ];
   return [
     for (final f in (fc['features'] as List).cast<Map<String, dynamic>>())
-      if (f['geometry'] case {'type': final String type, 'coordinates': final List coords})
+      if (f['geometry']
+          case {'type': final String type, 'coordinates': final List coords})
         RiskArea(
           level: levelKo(f['properties']?['level'] as String?),
           label: f['properties']?['label'] as String? ?? '',
           hazard: f['properties']?['hazard'] as String? ?? '',
           polygons: switch (type) {
             'Polygon' => [ring(coords.first as List)],
-            'MultiPolygon' => [for (final p in coords) ring((p as List).first as List)],
+            'MultiPolygon' => [
+                for (final p in coords) ring((p as List).first as List)
+              ],
             _ => const [],
           },
         ),
   ];
 }
 
-const _shelterKind = {'tsunami': '지진해일 대피장소', 'civil_defense': '민방위 대피시설', 'earthquake': '지진 옥외대피장소', 'shelter': '임시주거시설'};
+const _shelterKind = {
+  'tsunami': '지진해일 대피장소',
+  'civil_defense': '민방위 대피시설',
+  'earthquake': '지진 옥외대피장소',
+  'shelter': '임시주거시설'
+};
 
-List<Facility> facilitiesFromGeoJson(Map<String, dynamic> fc, FacilityType type, LatLng origin) {
+List<Facility> facilitiesFromGeoJson(
+    Map<String, dynamic> fc, FacilityType type, LatLng origin) {
   const distance = Distance();
   return [
     for (final f in (fc['features'] as List).cast<Map<String, dynamic>>())
@@ -257,7 +344,9 @@ List<Facility> facilitiesFromGeoJson(Map<String, dynamic> fc, FacilityType type,
         final km = distance.as(LengthUnit.Meter, origin, pos) / 1000;
         final String description;
         if (type == FacilityType.shelter) {
-          final kinds = (p['shelter_types'] as List? ?? const []).map((k) => _shelterKind[k] ?? '$k').join('·');
+          final kinds = (p['shelter_types'] as List? ?? const [])
+              .map((k) => _shelterKind[k] ?? '$k')
+              .join('·');
           description = [
             if (kinds.isNotEmpty) kinds,
             p['is_indoor'] == true ? '실내' : '실외',
@@ -285,19 +374,30 @@ List<Facility> facilitiesFromGeoJson(Map<String, dynamic> fc, FacilityType type,
 }
 
 /// 65세 이상·휠체어·보행 불편이면 급경사를 피하는 노약자 경로 (AI tools.route_profile과 같은 기준)
-String routeProfileFor(int? age, String? transport, {bool walkingImpaired = false}) =>
-    (age != null && age >= 65) || transport == '휠체어' || walkingImpaired ? 'elderly' : 'adult';
+String routeProfileFor(int? age, String? transport,
+        {bool walkingImpaired = false}) =>
+    (age != null && age >= 65) || transport == '휠체어' || walkingImpaired
+        ? 'elderly'
+        : 'adult';
 
 /// 등록 장소 → AI 요청 profile (집 → home, 나머지 → frequent_places). AI가 "집까지", "직장까지"를 찾는다
 Map<String, Object> placesForProfile(List<SavedPlace> places) {
-  Map<String, Object> loc(SavedPlace p, String label) => {'lat': p.position.latitude, 'lon': p.position.longitude, 'label': label};
+  Map<String, Object> loc(SavedPlace p, String label) =>
+      {'lat': p.position.latitude, 'lon': p.position.longitude, 'label': label};
   final home = places.where((p) => p.type == '집').firstOrNull;
-  final others = places.where((p) => p != home).map((p) => loc(p, p.type == '직장' ? '직장' : p.name)).toList();
-  return {if (home != null) 'home': loc(home, '집'), if (others.isNotEmpty) 'frequent_places': others};
+  final others = places
+      .where((p) => p != home)
+      .map((p) => loc(p, p.type == '직장' ? '직장' : p.name))
+      .toList();
+  return {
+    if (home != null) 'home': loc(home, '집'),
+    if (others.isNotEmpty) 'frequent_places': others
+  };
 }
 
 /// /api/chat 응답 → 답변 + (있으면) 지도에 그릴 경로
-ChatAnswer chatAnswerFromJson(Map<String, dynamic> j, {Map<String, String> names = const {}}) {
+ChatAnswer chatAnswerFromJson(Map<String, dynamic> j,
+    {Map<String, String> names = const {}}) {
   final r = j['route'] as Map<String, dynamic>?;
   final voiceText = j['voice_text'] as String?;
   final b64 = j['audio_b64'] as String?;
@@ -310,18 +410,28 @@ ChatAnswer chatAnswerFromJson(Map<String, dynamic> j, {Map<String, String> names
       route: routeFromJson(r, 'ai', RouteType.safest, names: names),
       destinationName: dest['name'] as String,
       destinationKind: dest['kind'] as String?,
-      destinationPos: LatLng((dest['lat'] as num).toDouble(), (dest['lon'] as num).toDouble()));
+      destinationPos: LatLng(
+          (dest['lat'] as num).toDouble(), (dest['lon'] as num).toDouble()));
 }
 
-SafetyRoute routeFromJson(Map<String, dynamic> j, String facilityId, RouteType routeType, {Map<String, String> names = const {}}) {
-  final avoided = [for (final id in (j['avoided'] as List? ?? const []).cast<String>()) names[id] ?? id];
-  final inside = [for (final id in (j['still_inside'] as List? ?? const []).cast<String>()) names[id] ?? id];
+SafetyRoute routeFromJson(
+    Map<String, dynamic> j, String facilityId, RouteType routeType,
+    {Map<String, String> names = const {}}) {
+  final avoided = [
+    for (final id in (j['avoided'] as List? ?? const []).cast<String>())
+      names[id] ?? id
+  ];
+  final inside = [
+    for (final id in (j['still_inside'] as List? ?? const []).cast<String>())
+      names[id] ?? id
+  ];
   final slope = (j['max_slope_pct'] as num?)?.toInt() ?? 0;
   final summary = [
-    if (avoided.isNotEmpty) '위험 구역 ${avoided.length}곳을 피했습니다: ${avoided.join(', ')}',
+    if (avoided.isNotEmpty)
+      '위험 구역 ${avoided.length}곳을 피했습니다: ${avoided.join(', ')}',
     if (inside.isNotEmpty) '주의: 다른 길이 없어 지나는 위험 구역 — ${inside.join(', ')}',
     if (avoided.isEmpty && inside.isEmpty) '경로 위에 알려진 위험 구역이 없습니다.',
-    if (j['profile'] == 'elderly') '급경사를 피한 노약자 경로 (최대 경사 $slope%)',
+    if (j['profile'] == 'elderly') '급경사·계단 부담을 줄이는 경로 (최대 경사 $slope%)',
     if (j['hazards_ok'] == false) '주의: 위험 정보를 확인하지 못해 위험 영역 회피 없이 계산한 경로입니다',
   ].join('\n');
   return SafetyRoute(

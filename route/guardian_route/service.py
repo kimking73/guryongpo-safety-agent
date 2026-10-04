@@ -46,10 +46,12 @@ class LatLon(BaseModel):
 class RouteRequest(BaseModel):
     origin: LatLon
     destination: LatLon
+    strategy: Literal["fastest", "safest"] | None = None  # omitted keeps the pre-strategy profile behavior
     profile: Profile = "adult"      # adult(최단 시간, 경사 무시), elderly(급경사 회피·같은 경사면 계단 선호, 느린 속도)
 
 
 class RouteResponse(BaseModel):
+    strategy: Literal["fastest", "safest"] | None = None
     profile: Profile
     distance_m: int
     duration_s: int
@@ -93,7 +95,16 @@ class RouteService:
         """
         points = [(req.origin.lat, req.origin.lon), (req.destination.lat, req.destination.lon)]
         zones = self._zones()
-        rules = PROFILE_RULES[req.profile]
+        # Active hazard polygons remain avoided for both strategies. Fastest
+        # prioritizes travel time; safest applies the established slope and
+        # accessibility weighting. Requests without a strategy preserve their
+        # existing profile-based behavior.
+        profile = (
+            "adult" if req.strategy == "fastest"
+            else "elderly" if req.strategy == "safest"
+            else req.profile
+        )
+        rules = PROFILE_RULES[profile]
 
         safe = self.gh.route(points, custom_model=build_model(rules, zones))
         avoided: list[str] = []
@@ -106,7 +117,8 @@ class RouteService:
             avoided = [z.id for z in zones if base_line.intersects(z.geometry) and z.id not in still_inside]
 
         return RouteResponse(
-            profile=req.profile,
+            strategy=req.strategy,
+            profile=profile,
             distance_m=round(safe["distance"]),
             duration_s=round(safe["time"] / 1000),     # GraphHopper time은 밀리초
             ascend_m=round(safe.get("ascend") or 0),

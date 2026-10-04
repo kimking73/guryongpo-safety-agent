@@ -8,58 +8,104 @@ import 'models/domain_models.dart';
 import 'repositories/remote_repository.dart' show RemoteError;
 import 'services/app_config.dart';
 import 'services/voice_service.dart';
-
-class FloodGrid {
-  const FloodGrid(this.name, this.level, this.south, this.west, this.north, this.east);
-  final String name, level;
-  final double south, west, north, east;
-  Color get color => riskColor(level);
-  String get depth => switch (level) {'안전' => '0~5cm', '주의' => '5~15cm', '경계' => '15~30cm', _ => '30cm 이상'};
-  String get guide => switch (level) {'안전' => '기상 변화를 계속 확인하세요.', '주의' => '배수 상태와 물 고임을 확인하세요.', '경계' => '차량 이동을 자제하고 고지대로 이동하세요.', _ => '즉시 대피하고 해당 구간에 진입하지 마세요.'};
-}
+import 'services/account_service.dart';
 
 Color riskColor(String level) => switch (level) {
-  '안전' => const Color(0xff16803c), '주의' => const Color(0xffe7ac16),
-  '경계' => const Color(0xffe56717), _ => const Color(0xffd93232)
-};
+      '주의' || 'advisory' || 'watch' => const Color(0xffe7ac16),
+      '경계' || 'warning' => const Color(0xffe56717),
+      '심각' || 'critical' => const Color(0xffd93232),
+      _ => const Color(0xff718096)
+    };
 
-List<FloodGrid> floodGridsFor(int timeIndex) {
-  const south = 35.984, west = 129.543, latStep = .00142, lngStep = .00158;
-  const levels = ['안전', '주의', '경계', '심각'];
-  return List.generate(108, (i) {
-    final row = i ~/ 12, col = i % 12;
-    // East coast / harbour (high columns) and the southern lowland cluster are riskier.
-    final coastal = col >= 8 ? 2 : col >= 6 ? 1 : 0;
-    final harbour = (row >= 3 && row <= 8 && col >= 7) ? 1 : 0;
-    final texture = (row * 7 + col * 3 + row * col + timeIndex * 2) % 4;
-    final inlandRelief = col <= 2 && row <= 5 ? -1 : 0;
-    final severity = (texture ~/ 2 + coastal + harbour + inlandRelief + (timeIndex >= 3 && col >= 7 ? 1 : 0)).clamp(0, 3);
-    return FloodGrid('구룡포 ${row + 1}구역-${col + 1}', levels[severity],
-        south + row * latStep, west + col * lngStep,
-        south + (row + 1) * latStep, west + (col + 1) * lngStep);
-  });
-}
-
-List<Polygon> floodGridPolygons(int timeIndex) => floodGridsFor(timeIndex).map((g) => Polygon(
-  points: [LatLng(g.south, g.west), LatLng(g.south, g.east), LatLng(g.north, g.east), LatLng(g.north, g.west)],
-  color: g.color.withValues(alpha: .48), borderColor: Colors.white.withValues(alpha: .75), borderStrokeWidth: .6)).toList();
+List<Polygon> floodGridPolygons(List<FloodGrid> grids,
+        {bool severeOnly = false}) =>
+    [
+      for (final g in grids)
+        if (g.hasRisk && (!severeOnly || g.level == '심각') || !severeOnly)
+          Polygon(
+              points: [
+                LatLng(g.south, g.west),
+                LatLng(g.south, g.east),
+                LatLng(g.north, g.east),
+                LatLng(g.north, g.west)
+              ],
+              color: g.hasRisk && (!severeOnly || g.level == '심각')
+                  ? riskColor(g.level).withValues(alpha: .24)
+                  : Colors.transparent,
+              borderColor: Colors.blueGrey.withValues(alpha: .24),
+              borderStrokeWidth: .35),
+    ];
 
 /// 서버 위험 영역(/risk/areas) → 지도 폴리곤. 단계 색은 침수 그리드와 같은 기준
 List<Polygon> riskAreaPolygons(List<RiskArea> areas) => [
-  for (final a in areas)
-    for (final ring in a.polygons)
-      Polygon(points: ring, color: riskColor(a.level == '관심' ? '주의' : a.level).withValues(alpha: .35),
-          borderColor: riskColor(a.level == '관심' ? '주의' : a.level), borderStrokeWidth: 1.5, label: a.label)
-];
+      for (final a in areas)
+        for (final ring in a.polygons)
+          Polygon(
+              points: ring,
+              color: riskColor(a.level == '관심' ? '주의' : a.level)
+                  .withValues(alpha: .35),
+              borderColor: riskColor(a.level == '관심' ? '주의' : a.level),
+              borderStrokeWidth: 1.5,
+              label: a.label)
+    ];
 
 class FloodGridLegend extends StatelessWidget {
   const FloodGridLegend({super.key});
-  @override Widget build(BuildContext context) => Positioned(right: 12, bottom: 58, child: Material(
-    color: Colors.white.withValues(alpha: .90), elevation: 8, borderRadius: BorderRadius.circular(14),
-    child: SizedBox(width: 178, child: Padding(padding: const EdgeInsets.all(12), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Text('침수 위험도', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)), const SizedBox(height: 8),
-      ...const [('안전', '침수 위험 낮음', '0~5cm'), ('주의', '침수 가능성 있음', '5~15cm'), ('경계', '저지대 침수 우려', '15~30cm'), ('심각', '침수 진행 · 긴급 대피', '30cm 이상')].map((x) => Padding(padding: const EdgeInsets.only(bottom: 7), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Container(width: 13, height: 32, decoration: BoxDecoration(color: riskColor(x.$1), borderRadius: BorderRadius.circular(3))), const SizedBox(width: 7), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(x.$1, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)), Text('${x.$2} · ${x.$3}', style: const TextStyle(fontSize: 10))]))]))),
-    ])))));
+  @override
+  Widget build(BuildContext context) => Positioned(
+      right: 12,
+      bottom: 58,
+      child: Material(
+          color: Colors.white.withValues(alpha: .90),
+          elevation: 8,
+          borderRadius: BorderRadius.circular(14),
+          child: SizedBox(
+              width: 178,
+              child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('침수 위험도',
+                            style: TextStyle(
+                                fontWeight: FontWeight.w800, fontSize: 15)),
+                        const SizedBox(height: 8),
+                        ...const [
+                          ('주의', '서버 판정 주의 단계'),
+                          ('경계', '서버 판정 경계 단계'),
+                          ('심각', '서버 판정 심각 단계')
+                        ].map((x) => Padding(
+                            padding: const EdgeInsets.only(bottom: 7),
+                            child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Container(
+                                      width: 13,
+                                      height: 20,
+                                      decoration: BoxDecoration(
+                                          color: riskColor(x.$1)
+                                              .withValues(alpha: .7),
+                                          borderRadius:
+                                              BorderRadius.circular(3))),
+                                  const SizedBox(width: 7),
+                                  Expanded(
+                                      child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                        Text(x.$1,
+                                            style: const TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 12)),
+                                        Text(x.$2,
+                                            style:
+                                                const TextStyle(fontSize: 10))
+                                      ]))
+                                ]))),
+                        const Text('색은 앱 표시용 위험 단계이며 수심 구간 기준이 아닙니다.',
+                            style: TextStyle(fontSize: 9)),
+                      ])))));
 }
 
 /// "음성으로 듣기": audio(음성 질문의 답 음성)가 있으면 그것을, 없으면 text를 ai /api/tts로 합성해 재생 (B5)
@@ -67,8 +113,10 @@ class VoiceButton extends ConsumerStatefulWidget {
   const VoiceButton({super.key, required this.text, this.audio});
   final String text;
   final Uint8List? audio;
-  @override ConsumerState<VoiceButton> createState() => _VoiceButtonState();
+  @override
+  ConsumerState<VoiceButton> createState() => _VoiceButtonState();
 }
+
 class _VoiceButtonState extends ConsumerState<VoiceButton> {
   bool playing = false, preparing = false;
 
@@ -112,8 +160,12 @@ class RouteButton extends StatelessWidget {
   const RouteButton({super.key, required this.onPressed});
   final VoidCallback onPressed;
   @override
-  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.only(top: 6),
-      child: FilledButton.tonalIcon(onPressed: onPressed, icon: const Icon(Icons.map_outlined), label: const Text('지도에서 경로 보기')));
+  Widget build(BuildContext context) => Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: FilledButton.tonalIcon(
+          onPressed: onPressed,
+          icon: const Icon(Icons.map_outlined),
+          label: const Text('지도에서 경로 보기')));
 }
 
 class ServiceMap extends StatelessWidget {
@@ -150,12 +202,31 @@ class _RouteMapState extends ConsumerState<RouteMap> {
     final loading = routeAsync.isLoading;
     final current = ref.watch(userLocation).position;
     if (facility == null || route == null) {
-      return Card(child: SizedBox(height: 470, child: Center(child: routeAsync.hasError
-          ? Column(mainAxisSize: MainAxisSize.min, children: [
-              Padding(padding: const EdgeInsets.all(16), child: Text('${routeAsync.error}', textAlign: TextAlign.center)),
-              FilledButton(onPressed: () => ref.invalidate(routeProvider(widget.facilityId)), child: const Text('다시 시도')),
-              TextButton(onPressed: () => ref.read(routeFacilityId.notifier).state = null, child: const Text('경로 안내 종료'))])
-          : const Column(mainAxisSize: MainAxisSize.min, children: [CircularProgressIndicator(), SizedBox(height: 10), Text('안전 경로를 준비하고 있습니다')]))));
+      return Card(
+          child: SizedBox(
+              height: 470,
+              child: Center(
+                  child: routeAsync.hasError
+                      ? Column(mainAxisSize: MainAxisSize.min, children: [
+                          Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Text('${routeAsync.error}',
+                                  textAlign: TextAlign.center)),
+                          FilledButton(
+                              onPressed: () => ref
+                                  .invalidate(routeProvider(widget.facilityId)),
+                              child: const Text('다시 시도')),
+                          TextButton(
+                              onPressed: () => ref
+                                  .read(routeFacilityId.notifier)
+                                  .state = null,
+                              child: const Text('경로 안내 종료'))
+                        ])
+                      : const Column(mainAxisSize: MainAxisSize.min, children: [
+                          CircularProgressIndicator(),
+                          SizedBox(height: 10),
+                          Text('안전 경로를 준비하고 있습니다')
+                        ]))));
     }
     final bounds = LatLngBounds.fromPoints([current, ...route.polylinePoints]);
     final boundsKey = '${bounds.northWest}:${bounds.southEast}';
@@ -169,7 +240,8 @@ class _RouteMapState extends ConsumerState<RouteMap> {
         }
       });
     }
-    final warn = shelterExclusion(facility, ref.watch(riskAreasProvider).valueOrNull ?? const []);
+    final warn = shelterExclusion(
+        facility, ref.watch(riskAreasProvider).valueOrNull ?? const []);
     return Card(
         clipBehavior: Clip.antiAlias,
         child: SizedBox(
@@ -186,9 +258,12 @@ class _RouteMapState extends ConsumerState<RouteMap> {
                       subdomains: const ['a', 'b', 'c'],
                       userAgentPackageName: 'com.example.guryongpo_safety'),
                   if (AppConfig.isRemote)
-                    PolygonLayer(polygons: riskAreaPolygons(ref.watch(riskAreasProvider).valueOrNull ?? const []))
+                    PolygonLayer(
+                        polygons: riskAreaPolygons(
+                            ref.watch(riskAreasProvider).valueOrNull ??
+                                const []))
                   else
-                    PolygonLayer(polygons: floodGridPolygons(0)),
+                    PolygonLayer(polygons: floodGridPolygons(demoFloodGrid(0))),
                   PolylineLayer(polylines: [
                     Polyline(
                         points: route.polylinePoints,
@@ -230,7 +305,20 @@ class _RouteMapState extends ConsumerState<RouteMap> {
                         ]))
                   ]),
                   if (!AppConfig.isRemote) const FloodGridLegend(),
-                  if (loading) const Positioned.fill(child: ColoredBox(color: Color(0x88000000), child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [CircularProgressIndicator(color: Colors.white), SizedBox(height: 10), Text('안전 경로를 준비하고 있습니다', style: TextStyle(color: Colors.white))])))),
+                  if (loading)
+                    const Positioned.fill(
+                        child: ColoredBox(
+                            color: Color(0x88000000),
+                            child: Center(
+                                child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                  CircularProgressIndicator(
+                                      color: Colors.white),
+                                  SizedBox(height: 10),
+                                  Text('안전 경로를 준비하고 있습니다',
+                                      style: TextStyle(color: Colors.white))
+                                ])))),
                 ],
               )),
               Container(
@@ -240,7 +328,7 @@ class _RouteMapState extends ConsumerState<RouteMap> {
                     Row(children: [
                       Expanded(
                           child: Text(
-                              '${warn != null ? '⚠ $warn — 갈 만한 대피소가 없을 때만 이용하세요\n' : ''}${AppConfig.isRemote ? '위험 구역 회피 경로' : '침수 위험 구간 회피 경로'} · ${AppConfig.dataLabel}\n${facility.name} · ${(route.distanceMeters / 1000).toStringAsFixed(1)}km · 도보 ${route.estimatedMinutes}분\n${route.riskAvoidanceSummary}',
+                              '${warn != null ? '⚠ $warn — 다른 대피소를 먼저 확인하세요\n' : ''}${routeType == RouteType.nearest ? '최단 시간 우선 · 확인된 위험 구역 회피' : '안전·접근성 우선 · 확인된 위험 구역 회피'} · ${AppConfig.dataLabel}\n${facility.name} · ${(route.distanceMeters / 1000).toStringAsFixed(1)}km · 도보 ${route.estimatedMinutes}분\n${route.riskAvoidanceSummary}',
                               style: const TextStyle(fontSize: 12))),
                       IconButton(
                           tooltip: '경로 안내 종료',
@@ -255,14 +343,28 @@ class _RouteMapState extends ConsumerState<RouteMap> {
                               showDragHandle: true,
                               builder: (_) => const ShelterPickerSheet()),
                           icon: const Icon(Icons.place_outlined),
-                          label: const Text('다른 대피소 선택')),
+                          label: const Text('다른 시설 선택')),
                       FilledButton.tonal(
-                          style: FilledButton.styleFrom(backgroundColor: routeType == RouteType.nearest ? const Color(0xff16803c) : Colors.grey.shade100, foregroundColor: routeType == RouteType.nearest ? Colors.white : Colors.black87),
-                          onPressed: () => startRouteToShelter(ref, facility.id, routeType: RouteType.nearest),
+                          style: FilledButton.styleFrom(
+                              backgroundColor: routeType == RouteType.nearest
+                                  ? const Color(0xff16803c)
+                                  : Colors.grey.shade100,
+                              foregroundColor: routeType == RouteType.nearest
+                                  ? Colors.white
+                                  : Colors.black87),
+                          onPressed: () => startRouteToShelter(ref, facility.id,
+                              routeType: RouteType.nearest),
                           child: const Text('가까운 경로')),
                       FilledButton.tonal(
-                          style: FilledButton.styleFrom(backgroundColor: routeType == RouteType.safest ? const Color(0xff16803c) : Colors.grey.shade100, foregroundColor: routeType == RouteType.safest ? Colors.white : Colors.black87),
-                          onPressed: () => startRouteToShelter(ref, facility.id, routeType: RouteType.safest),
+                          style: FilledButton.styleFrom(
+                              backgroundColor: routeType == RouteType.safest
+                                  ? const Color(0xff16803c)
+                                  : Colors.grey.shade100,
+                              foregroundColor: routeType == RouteType.safest
+                                  ? Colors.white
+                                  : Colors.black87),
+                          onPressed: () => startRouteToShelter(ref, facility.id,
+                              routeType: RouteType.safest),
                           child: const Text('안전 경로')),
                     ])
                   ])),
@@ -276,27 +378,34 @@ class ShelterPickerSheet extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final routeType = ref.watch(routeKind);
-    final areas = ref.watch(riskAreasProvider).valueOrNull ?? const <RiskArea>[];
+    final areas =
+        ref.watch(riskAreasProvider).valueOrNull ?? const <RiskArea>[];
     return SafeArea(
         child: ListView(shrinkWrap: true, children: [
       const ListTile(
-          title: Text('다른 대피소 선택'),
+          title: Text('대피소·의료시설 선택'),
           subtitle: Text('선택하면 현재 대시보드 지도에서 새 경로를 바로 표시합니다.')),
       // 걸어서 갈 만한 곳만 (의료시설은 5km 안), 갈 만한 대피소 먼저. 거리는 경로 계산 전 대략값
       ...([...?ref.watch(facilitiesProvider).valueOrNull]
-          .where((f) => f.type == FacilityType.shelter || f.distanceKm <= 5)
-          .toList()
+              .where((f) => f.type == FacilityType.shelter || f.distanceKm <= 5)
+              .toList()
             ..sort((a, b) {
-              final ua = shelterExclusion(a, areas) == null ? 0 : 1, ub = shelterExclusion(b, areas) == null ? 0 : 1;
+              final ua = shelterExclusion(a, areas) == null ? 0 : 1,
+                  ub = shelterExclusion(b, areas) == null ? 0 : 1;
               return ua != ub ? ua - ub : a.distanceKm.compareTo(b.distanceKm);
             }))
           .map((facility) {
         final warn = shelterExclusion(facility, areas);
-        final label = warn ?? (routeType == RouteType.safest ? '가장 안전한 경로' : '가까운 대피소 경로');
+        final label = warn ??
+            (routeType == RouteType.safest ? '가장 안전한 경로' : '가까운 대피소 경로');
         return ListTile(
-            leading: Icon(warn != null ? Icons.warning_amber_rounded : facility.type == FacilityType.shelter
-                ? Icons.home_work_outlined
-                : Icons.local_hospital, color: warn != null ? Colors.orange.shade800 : null),
+            leading: Icon(
+                warn != null
+                    ? Icons.warning_amber_rounded
+                    : facility.type == FacilityType.shelter
+                        ? Icons.home_work_outlined
+                        : Icons.local_hospital,
+                color: warn != null ? Colors.orange.shade800 : null),
             title: Text(facility.name),
             subtitle: Text(
                 '약 ${facility.distanceKm}km · 도보 ${facility.walkMinutes}분 · $label'),
@@ -314,63 +423,346 @@ class ShelterPickerSheet extends ConsumerWidget {
 }
 
 class ModeCards extends ConsumerWidget {
-  const ModeCards({super.key, required this.resident, required this.risk});
-  final bool resident;
+  const ModeCards({super.key, required this.risk});
   final RiskStatus risk;
   @override
   Widget build(BuildContext context, WidgetRef ref) => Column(children: [
-    // 등록 장소 위험은 장소 등록(/user/places, A5) 연결 전이라 목업에서만 보인다
-    if (!AppConfig.isRemote) ...const [PlaceRiskSummary(), SizedBox(height: 12)],
-    const AlertCards(), const SizedBox(height: 12),
-    SupportCard(fishing: ref.watch(residentOccupation) == '어업·수산업'),
-    Card(child: ListTile(leading: const Icon(Icons.directions_walk), title: const Text('안전한 대피 안내'), subtitle: Text(risk.guide), trailing: VoiceButton(text: risk.guide), onTap: () => startRouteToShelter(ref, nearestShelterId(ref))))
-  ]);
+        // 등록 장소 위험은 장소 등록(/user/places, A5) 연결 전이라 목업에서만 보인다
+        if (!AppConfig.isRemote) ...const [
+          PlaceRiskSummary(),
+          SizedBox(height: 12)
+        ],
+        const AlertCards(), const SizedBox(height: 12),
+        const SupportCard(),
+        Card(
+            child: ListTile(
+                leading: const Icon(Icons.directions_walk),
+                title: const Text('안전한 대피 안내'),
+                subtitle: Text(risk.guide),
+                trailing: VoiceButton(text: risk.guide),
+                onTap: () => startRouteToShelter(ref, nearestShelterId(ref))))
+      ]);
 }
 
-class PlaceRiskSummary extends StatelessWidget { const PlaceRiskSummary({super.key});
-  @override Widget build(BuildContext context) => Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    const Row(children: [Icon(Icons.place_outlined), SizedBox(width: 7), Text('등록 장소 위험 요약', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)), Spacer(), Text('10:42 갱신', style: TextStyle(fontSize: 11))]), const SizedBox(height: 10),
-    const Wrap(spacing: 10, runSpacing: 10, children: [_PlaceTile(icon: Icons.my_location, name: '현재 위치', level: '경계', depth: '18cm', guide: '고지대 방향 이동 권고'), _PlaceTile(icon: Icons.home, name: '집', level: '주의', depth: '8cm', guide: '배수 상태 확인'), _PlaceTile(icon: Icons.business, name: '직장', level: '안전', depth: '2cm', guide: '특이사항 없음')])
-  ])));
+class PlaceRiskSummary extends StatelessWidget {
+  const PlaceRiskSummary({super.key});
+  @override
+  Widget build(BuildContext context) => Card(
+      child: Padding(
+          padding: const EdgeInsets.all(14),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Row(children: [
+              Icon(Icons.place_outlined),
+              SizedBox(width: 7),
+              Text('등록 장소 위험 요약',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
+              Spacer(),
+              Text('10:42 갱신', style: TextStyle(fontSize: 11))
+            ]),
+            const SizedBox(height: 10),
+            const Wrap(spacing: 10, runSpacing: 10, children: [
+              _PlaceTile(
+                  icon: Icons.my_location,
+                  name: '현재 위치',
+                  level: '경계',
+                  depth: '18cm',
+                  guide: '고지대 방향 이동 권고'),
+              _PlaceTile(
+                  icon: Icons.home,
+                  name: '집',
+                  level: '주의',
+                  depth: '8cm',
+                  guide: '배수 상태 확인'),
+              _PlaceTile(
+                  icon: Icons.business,
+                  name: '직장',
+                  level: '안전',
+                  depth: '2cm',
+                  guide: '특이사항 없음')
+            ])
+          ])));
 }
-class _PlaceTile extends StatelessWidget { const _PlaceTile({required this.icon, required this.name, required this.level, required this.depth, required this.guide}); final IconData icon; final String name, level, depth, guide;
-  @override Widget build(BuildContext c) { final color = riskColor(level); return SizedBox(width: 210, child: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: color.withValues(alpha:.08), borderRadius: BorderRadius.circular(10), border: Border.all(color: color.withValues(alpha:.3))), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Row(children:[Icon(icon, color: color), const SizedBox(width:6), Text(name, style: const TextStyle(fontWeight: FontWeight.bold)), const Spacer(), Container(width:8,height:8,decoration:BoxDecoration(color:color,shape:BoxShape.circle))]), const SizedBox(height:7), Row(children:[Container(padding:const EdgeInsets.symmetric(horizontal:7,vertical:3),decoration:BoxDecoration(color:color,borderRadius:BorderRadius.circular(20)),child:Text(level,style:const TextStyle(color:Colors.white,fontSize:11,fontWeight:FontWeight.bold))), const SizedBox(width:7), Text('예상 $depth')]), const SizedBox(height:6), LinearProgressIndicator(value: level=='경계'? .62:level=='주의'? .35:.12, color:color, backgroundColor:color.withValues(alpha:.15)), const SizedBox(height:5), Text(guide,style:const TextStyle(fontSize:11))]))); }
+
+class _PlaceTile extends StatelessWidget {
+  const _PlaceTile(
+      {required this.icon,
+      required this.name,
+      required this.level,
+      required this.depth,
+      required this.guide});
+  final IconData icon;
+  final String name, level, depth, guide;
+  @override
+  Widget build(BuildContext c) {
+    final color = riskColor(level);
+    return SizedBox(
+        width: 210,
+        child: Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+                color: color.withValues(alpha: .08),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: color.withValues(alpha: .3))),
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Icon(icon, color: color),
+                const SizedBox(width: 6),
+                Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                const Spacer(),
+                Container(
+                    width: 8,
+                    height: 8,
+                    decoration:
+                        BoxDecoration(color: color, shape: BoxShape.circle))
+              ]),
+              const SizedBox(height: 7),
+              Row(children: [
+                Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                        color: color, borderRadius: BorderRadius.circular(20)),
+                    child: Text(level,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold))),
+                const SizedBox(width: 7),
+                Text('예상 $depth')
+              ]),
+              const SizedBox(height: 6),
+              LinearProgressIndicator(
+                  value: level == '경계'
+                      ? .62
+                      : level == '주의'
+                          ? .35
+                          : .12,
+                  color: color,
+                  backgroundColor: color.withValues(alpha: .15)),
+              const SizedBox(height: 5),
+              Text(guide, style: const TextStyle(fontSize: 11))
+            ])));
+  }
 }
-class AlertCards extends ConsumerWidget { const AlertCards({super.key});
-  @override Widget build(BuildContext c, WidgetRef ref) => AppConfig.isRemote ? _live(ref) : Column(crossAxisAlignment: CrossAxisAlignment.start, children:[const Text('선제 경고 알림', style: TextStyle(fontSize:17,fontWeight:FontWeight.bold)), const SizedBox(height:8), ...const [('09:20','구룡포항 북측','경계','해안 저지대 침수 확대 가능성','차량 이동 자제 및 고지대 이동 권고','09:15'),('10:05','구룡포 시장 인근','주의','배수로 수위 상승','상가 지하층 및 배수 시설 점검 권고','10:00'),('10:30','병포리 해안도로','심각','도로 일부 침수 진행','해당 구간 진입 금지 및 우회 경로 이용','10:25')].map((a) {final color=riskColor(a.$3); return Card(child: Padding(padding:const EdgeInsets.all(12),child:Row(crossAxisAlignment:CrossAxisAlignment.start,children:[Container(width:4,height:72,color:color),const SizedBox(width:10),Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Row(children:[Text(a.$1,style:const TextStyle(fontWeight:FontWeight.bold)),const SizedBox(width:8),Expanded(child:Text(a.$2,style:const TextStyle(fontWeight:FontWeight.bold))),Chip(label:Text(a.$3),backgroundColor:color.withValues(alpha:.14),labelStyle:TextStyle(color:color,fontSize:11))]),Text(a.$4),const SizedBox(height:3),Text(a.$5,style:const TextStyle(fontWeight:FontWeight.w600,fontSize:12)),Text('${a.$6} 업데이트',style:const TextStyle(fontSize:10,color:Colors.black54))]))]))); })]);
+
+class AlertCards extends ConsumerWidget {
+  const AlertCards({super.key});
+  @override
+  Widget build(BuildContext c, WidgetRef ref) => AppConfig.isRemote
+      ? _live(ref)
+      : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('선제 경고 알림',
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          ...const [
+            (
+              '09:20',
+              '구룡포항 북측',
+              '경계',
+              '해안 저지대 침수 확대 가능성',
+              '차량 이동 자제 및 고지대 이동 권고',
+              '09:15'
+            ),
+            (
+              '10:05',
+              '구룡포 시장 인근',
+              '주의',
+              '배수로 수위 상승',
+              '상가 지하층 및 배수 시설 점검 권고',
+              '10:00'
+            ),
+            (
+              '10:30',
+              '병포리 해안도로',
+              '심각',
+              '도로 일부 침수 진행',
+              '해당 구간 진입 금지 및 우회 경로 이용',
+              '10:25'
+            )
+          ].map((a) {
+            final color = riskColor(a.$3);
+            return Card(
+                child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(width: 4, height: 72, color: color),
+                          const SizedBox(width: 10),
+                          Expanded(
+                              child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                Row(children: [
+                                  Text(a.$1,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold)),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                      child: Text(a.$2,
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold))),
+                                  Chip(
+                                      label: Text(a.$3),
+                                      backgroundColor:
+                                          color.withValues(alpha: .14),
+                                      labelStyle:
+                                          TextStyle(color: color, fontSize: 11))
+                                ]),
+                                Text(a.$4),
+                                const SizedBox(height: 3),
+                                Text(a.$5,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 12)),
+                                Text('${a.$6} 업데이트',
+                                    style: const TextStyle(
+                                        fontSize: 10, color: Colors.black54))
+                              ]))
+                        ])));
+          })
+        ]);
 
   /// 실시간 위험 판정 항목 (/risk items)
   Widget _live(WidgetRef ref) {
     final alerts = ref.watch(alertsProvider).valueOrNull ?? const <AlertItem>[];
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Text('선제 경고 알림', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)), const SizedBox(height: 8),
-      if (alerts.isEmpty) const Card(child: ListTile(leading: Icon(Icons.check_circle_outline), title: Text('현재 위치 주변에 발효 중인 경고가 없습니다'))),
-      ...alerts.map((a) { final color = riskColor(a.level == '관심' ? '주의' : a.level); return Card(child: ListTile(
-        leading: Container(width: 4, height: 40, color: color),
-        title: Text(a.title, style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text('${a.summary}\n${a.guide}'), isThreeLine: true,
-        trailing: Text(a.time, style: const TextStyle(fontSize: 11)))); }),
+      const Text('선제 경고 알림',
+          style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+      const SizedBox(height: 8),
+      if (alerts.isEmpty)
+        const Card(
+            child: ListTile(
+                leading: Icon(Icons.check_circle_outline),
+                title: Text('현재 위치 주변에 발효 중인 경고가 없습니다'))),
+      ...alerts.map((a) {
+        final color = riskColor(a.level == '관심' ? '주의' : a.level);
+        return Card(
+            child: ListTile(
+                leading: Container(width: 4, height: 40, color: color),
+                title: Text(a.title,
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: Text('${a.summary}\n${a.guide}'),
+                isThreeLine: true,
+                trailing: Text(a.time, style: const TextStyle(fontSize: 11))));
+      }),
     ]);
   }
 }
 
-class SupportCard extends StatefulWidget { const SupportCard({super.key, required this.fishing}); final bool fishing; @override State<SupportCard> createState()=>_SupportCardState(); }
-class _SupportCardState extends State<SupportCard> {
-  bool open = false;
-  @override Widget build(BuildContext context) => Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    Row(children: [const Icon(Icons.sailing, color: Color(0xff16803c)), const SizedBox(width: 8), const Expanded(child: Text('선박 피해 지원 및 보상 안내', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17))), TextButton.icon(onPressed: () => setState(() => open = !open), icon: Icon(open ? Icons.expand_less : Icons.expand_more), label: Text(open ? '접기' : '복구 지원'))]),
-    const Text('긴급 신고부터 수리·어구·생계 안정까지 핵심 지원을 확인하세요.'), const SizedBox(height: 10),
-    const Wrap(spacing: 8, runSpacing: 8, children: [_SupportMini(Icons.report, '긴급 피해 신고', '즉시'), _SupportMini(Icons.build, '선박 수리비', '최대 300만원'), _SupportMini(Icons.inventory_2, '장비·어구', '피해 확인 후')]),
-    if (open) ...const [Divider(height: 24), Text('복구 지원 상세', style: TextStyle(fontWeight: FontWeight.bold)), SizedBox(height: 8), _Detail('긴급 복구 지원', '배수·안전 조치 및 현장 확인을 우선 지원합니다.'), _Detail('선박 수리 지원', '피해 사진과 선박 등록 정보를 바탕으로 수리비를 신청합니다.'), _Detail('장비·어구 지원', '파손 장비 목록과 구매 증빙을 준비하세요.'), _Detail('생계 안정 지원', '피해 확인 후 생계 안정 상담을 제공합니다.'), _Detail('신청 방법', '1. 피해 신고  2. 현장 확인  3. 서류 제출  4. 결과 안내'), _Detail('필요 서류', '신분증, 피해 사진, 선박 등록증, 통장 사본'), _Detail('문의처', '구룡포 재난복구 상담창구 054-000-1190 (목업)')]
-  ])));
+class SupportCard extends StatefulWidget {
+  const SupportCard({super.key});
+  @override
+  State<SupportCard> createState() => _SupportCardState();
 }
-class _SupportMini extends StatelessWidget { const _SupportMini(this.icon,this.title,this.sub); final IconData icon; final String title,sub; @override Widget build(BuildContext c)=>Container(width:135,padding:const EdgeInsets.all(9),decoration:BoxDecoration(color:const Color(0xff16803c).withValues(alpha:.07),borderRadius:BorderRadius.circular(9)),child:Row(children:[Icon(icon,size:19,color:const Color(0xff16803c)),const SizedBox(width:6),Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(title,style:const TextStyle(fontWeight:FontWeight.bold,fontSize:11)),Text(sub,style:const TextStyle(fontSize:10))]))])); }
-class _Detail extends StatelessWidget { const _Detail(this.title,this.text); final String title,text; @override Widget build(BuildContext c)=>Padding(padding:const EdgeInsets.only(bottom:8),child:Row(crossAxisAlignment:CrossAxisAlignment.start,children:[const Icon(Icons.check_circle,color:Color(0xff16803c),size:17),const SizedBox(width:7),Expanded(child:Text('$title\n$text',style:const TextStyle(fontSize:12)))])); }
+
+class _SupportCardState extends State<SupportCard> {
+  Set<String> jobs = {};
+  @override
+  void initState() {
+    super.initState();
+    AccountService().optionalProfile().then((profile) {
+      if (mounted)
+        setState(() => jobs = (profile['jobs'] ?? '')
+            .split('|')
+            .where((x) => x.isNotEmpty)
+            .toSet());
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const support = <String, (IconData, String, List<(String, String)>)>{
+      '농업 종사자': (
+        Icons.agriculture,
+        '농업 지원·복구',
+        [
+          ('농작물 피해', '피해 구역과 작물 상태를 촬영하고 발생 시각을 기록하세요.'),
+          ('농업시설', '비닐하우스·관개·배수시설 손상을 기록하고 안전 확인 후 복구를 시작하세요.'),
+          ('신청 확인', '관할 지자체와 농업 관련 기관에 실제 지원 요건을 확인하세요.')
+        ]
+      ),
+      '축산업 종사자': (
+        Icons.pets,
+        '축산업 지원·복구',
+        [
+          ('축사·가축 피해', '가축 수와 시설 피해를 기록하고 안전한 장소로 이동시키세요.'),
+          ('시설 점검', '배수·전력·환기·비상전원을 확인하세요.'),
+          ('신청 확인', '관할 지자체와 축산 관련 기관에 실제 지원 요건을 확인하세요.')
+        ]
+      ),
+      '어업 종사자·뱃사람': (
+        Icons.sailing,
+        '어업 지원·복구',
+        [
+          ('어선·어구 피해', '피해 사진과 선박·어구 정보를 기록하세요.'),
+          ('안전 확인', '항만 통제와 출항 제한을 확인하고 안전 통보 전에는 출항하지 마세요.'),
+          ('신청 확인', '관할 지자체와 수산 관련 기관에 실제 지원 요건을 확인하세요.')
+        ]
+      ),
+      '양식업 종사자·수산물 양식': (
+        Icons.waves,
+        '양식업 지원·복구',
+        [
+          ('양식시설 피해', '시설과 수산생물 피해를 기록하세요.'),
+          ('긴급 점검', '전력·산소공급·취수시설을 확인하고 안전 지침을 따르세요.'),
+          ('신청 확인', '관할 지자체와 수산 관련 기관에 실제 지원 요건을 확인하세요.')
+        ]
+      ),
+      '자영업자': (
+        Icons.store,
+        '사업장 지원·복구',
+        [
+          ('사업장 피해', '침수·시설 피해를 촬영하고 영업 중단 시각을 기록하세요.'),
+          ('안전 조치', '전기·가스는 안전이 확인된 후 점검하세요.'),
+          ('신청 확인', '관할 지자체와 소상공인 지원 기관에 실제 지원 요건을 확인하세요.')
+        ]
+      ),
+    };
+    final selected = jobs
+        .map((j) => support[j])
+        .whereType<(IconData, String, List<(String, String)>)>();
+    if (selected.isEmpty)
+      return const Card(
+          child: ListTile(
+              leading: Icon(Icons.handyman_outlined),
+              title: Text('지원 및 복구 안내'),
+              subtitle: Text('프로필에서 직업 분야를 선택하면 해당 분야의 안내를 표시합니다.')));
+    return Column(children: [
+      for (final entry in selected)
+        Card(
+            child: ExpansionTile(
+          leading: Icon(entry.$1, color: const Color(0xff16803c)),
+          title: Text(entry.$2),
+          subtitle: const Text('목업 안내 · 실제 자격과 지원 범위는 기관 확인 필요'),
+          children: [
+            for (final item in entry.$3) _Detail(item.$1, item.$2),
+            const _Detail('공통 절차', '피해 사진·발생 시각을 기록하고 관할 기관에 신청 절차를 확인하세요.')
+          ],
+        ))
+    ]);
+  }
+}
+
+class _Detail extends StatelessWidget {
+  const _Detail(this.title, this.text);
+  final String title, text;
+  @override
+  Widget build(BuildContext c) => Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Icon(Icons.check_circle, color: Color(0xff16803c), size: 17),
+        const SizedBox(width: 7),
+        Expanded(
+            child: Text('$title\n$text', style: const TextStyle(fontSize: 12)))
+      ]));
+}
 
 class AiPanel extends ConsumerStatefulWidget {
-  const AiPanel({super.key, required this.risk, required this.resident});
+  const AiPanel({super.key, required this.risk});
   final RiskStatus risk;
-  final bool resident;
   @override
   ConsumerState<AiPanel> createState() => _AiPanelState();
 }
@@ -438,12 +830,19 @@ class _AiPanelState extends ConsumerState<AiPanel> {
       ChatMessage(question, true)
     ];
     setState(() => loading = true);
-    final answer = await ref.read(repo).ask(question, ref.read(mode), ref.read(userLocation).position);
+    final answer = await ref
+        .read(repo)
+        .ask(question, UserMode.user, ref.read(userLocation).position);
     const personaGuide = '사용자 예시 안내: 등록한 장소와 현재 위치를 확인하고 안전한 실내로 이동하세요.';
     if (mounted)
       ref.read(chatMessages.notifier).state = [
         ...ref.read(chatMessages),
-        ChatMessage(AppConfig.isRemote ? answer.text : '${answer.text}\n$personaGuide\n예시 AI 안내', false, answer: answer)
+        ChatMessage(
+            AppConfig.isRemote
+                ? answer.text
+                : '${answer.text}\n$personaGuide\n예시 AI 안내',
+            false,
+            answer: answer)
       ];
     if (mounted) setState(() => loading = false);
     scrollToEnd();
@@ -457,8 +856,7 @@ class _AiPanelState extends ConsumerState<AiPanel> {
               Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Padding(
                 padding: const EdgeInsets.all(12),
-                child:
-                Text('사용자 AI 대화 · ${AppConfig.dataLabel}')),
+                child: Text('사용자 AI 대화 · ${AppConfig.dataLabel}')),
             Wrap(
                 spacing: 4,
                 children: [
@@ -534,6 +932,19 @@ class _AiPanelState extends ConsumerState<AiPanel> {
   }
 }
 
-class _FloodChatLoader extends StatelessWidget { const _FloodChatLoader();
-  @override Widget build(BuildContext c) => Row(mainAxisSize: MainAxisSize.min, children:[const Icon(Icons.waves, color:Color(0xff16803c)),const SizedBox(width:7),const Text('침수 정보를 분석하고 있습니다.',style:TextStyle(fontSize:12)),const SizedBox(width:7),SizedBox(width:18,height:18,child:CircularProgressIndicator(strokeWidth:2,color:Color(0xff16803c)))]);
+class _FloodChatLoader extends StatelessWidget {
+  const _FloodChatLoader();
+  @override
+  Widget build(BuildContext c) =>
+      Row(mainAxisSize: MainAxisSize.min, children: [
+        const Icon(Icons.waves, color: Color(0xff16803c)),
+        const SizedBox(width: 7),
+        const Text('침수 정보를 분석하고 있습니다.', style: TextStyle(fontSize: 12)),
+        const SizedBox(width: 7),
+        SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(
+                strokeWidth: 2, color: Color(0xff16803c)))
+      ]);
 }

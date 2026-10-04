@@ -10,7 +10,7 @@ from ..errors import ApiError
 
 router = APIRouter(tags=["dashboard"])
 # 위험지역 고정 영역은 산사태 취약지역만 사용 (침수·해안 영역 레이어는 두지 않음 — 침수는 실시간 판정 영역 risk_areas)
-LayerId = Literal["shelters", "medical", "landslide_zones", "manholes", "stations", "risk_areas"]
+LayerId = Literal["shelters", "medical", "landslide_zones", "manholes", "stations", "risk_areas", "flood_grid"]
 
 
 @router.get("/dashboard", summary="맞춤 대시보드 (목업)")
@@ -32,6 +32,8 @@ def get_layer(layer_id: str, bbox: Optional[str] = Query(None, description="minL
     if layer_id == "risk_areas":
         from risk import queries
         return JSONResponse(queries.areas(None, None, box), media_type="application/geo+json")
+    if layer_id == "flood_grid":
+        return JSONResponse(layers.flood_grid_layer(box), media_type="application/geo+json")
     if layer_id == "shelters":
         return JSONResponse(layers.shelters_layer(box), media_type="application/geo+json")
     if layer_id == "medical":

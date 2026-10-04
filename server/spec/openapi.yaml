@@ -124,6 +124,34 @@ paths:
       operationId: deleteUser
       responses:
         '204': { description: 삭제됨 }
+  /user/geocode:
+    post:
+      tags: [user]
+      summary: 도로명 주소를 서버 측 카카오 API로 좌표 변환
+      operationId: geocodeAddress
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [address]
+              properties:
+                address: { type: string, minLength: 1, maxLength: 300 }
+      responses:
+        '200':
+          description: 정규화된 도로명 주소와 좌표
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [address, location]
+                properties:
+                  address: { type: string }
+                  location: { $ref: '#/components/schemas/LatLng' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
   /user/places:
     post:
       tags: [user]
@@ -151,7 +179,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/PlaceInput' }
+            schema: { $ref: '#/components/schemas/PlacePatch' }
       responses:
         '200':
           description: OK
@@ -319,7 +347,7 @@ paths:
       description: |
         `mode` 는 서버가 결정한다. 현재 위치 또는 등록 장소에 advisory(주의보) 이상 위험이 있으면 `emergency`.
         emergency 이면 `widgets` 가 현재 재난 중심으로 재정렬되고 `highlight_layers` 가 지정된다.
-        관광객(user_type=tourist)은 평상시에도 대피소·해안 위험지역 위젯이 위로 온다.
+        사용자 프로필의 이동수단과 등록 장소를 반영해 정보를 구성한다.
       operationId: getDashboard
       parameters:
         - $ref: '#/components/parameters/Lat'
@@ -351,6 +379,7 @@ paths:
           — 판정용 100m 범위(riskmap_g1_buf100 등)는 이 레이어에 나오지 않고, 판정되면 risk_areas 로 보임
         - risk_areas: /risk/areas 와 같음
         위험지역 고정 영역은 산사태만 (침수·해안 고정 영역 없음 — 침수는 실시간 판정 영역 risk_areas)
+        flood_grid: 현재 침수 위험 판정 영역을 격자로 나눈 GeoJSON. 판정 영역 밖은 응답하지 않으며 관측을 미확인 셀까지 확장하지 않음.
       operationId: getLayer
       security: []
       parameters:
@@ -458,11 +487,15 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [alerts, server_time, next_poll_sec]
+                required: [alerts, weather_bulletins, server_time, next_poll_sec]
                 properties:
                   alerts:
                     type: array
                     items: { $ref: '#/components/schemas/Alert' }
+                  weather_bulletins:
+                    type: array
+                    description: 화면 검토용 예시 특보·예보. 실제 발표 자료가 아니며 각 항목의 is_example을 확인한다.
+                    items: { $ref: '#/components/schemas/WeatherBulletin' }
                   mode: { type: string, enum: [normal, emergency] }
                   evacuation: { oneOf: [ { $ref: '#/components/schemas/MyEvacuation' }, { type: 'null' } ] }
                   server_time: { type: string, format: date-time, description: '다음 폴링의 since 로 사용' }
@@ -1132,10 +1165,9 @@ components:
     # ------------------------------------------------------------ user
     ProfileInput:
       type: object
-      description: 모두 선택 항목. 필수 온보딩 항목은 user_type, birth_year, mobility, 그리고 home 장소
+      description: 선택 프로필 항목. 사용자는 출생연도·이동수단과 등록 장소를 제공할 수 있습니다.
       properties:
         nickname: { type: string }
-        user_type: { type: string, enum: [resident, tourist, worker] }
         birth_year: { type: integer, minimum: 1900, maximum: 2100 }
         mobility: { type: string, enum: [walk, car, bicycle, public_transit, wheelchair] }
         occupation: { type: [string, 'null'], examples: [fisher, merchant, farmer, office, student] }
@@ -1180,24 +1212,31 @@ components:
             completed: { type: boolean }
             missing:
               type: array
-              items: { type: string, enum: [user_type, birth_year, mobility, home_place] }
+              items: { type: string, enum: [birth_year, mobility, home_place] }
         created_at: { type: string, format: date-time }
     PlaceInput:
       type: object
-      required: [place_type, label, location]
+      required: [place_type, label, address]
       properties:
         place_type: { type: string, enum: [home, work, frequent, lodging] }
         label: { type: string }
-        address: { type: [string, 'null'] }
-        location: { $ref: '#/components/schemas/LatLng' }
+        address: { type: string, minLength: 1, maxLength: 300 }
         notify: { type: boolean, default: true }
+    PlacePatch:
+      type: object
+      properties:
+        place_type: { type: string, enum: [home, work, frequent, lodging] }
+        label: { type: string }
+        address: { type: string, minLength: 1, maxLength: 300 }
+        notify: { type: boolean }
     Place:
       allOf:
         - $ref: '#/components/schemas/PlaceInput'
         - type: object
-          required: [id]
+          required: [id, location]
           properties:
             id: { type: string, format: uuid }
+            location: { $ref: '#/components/schemas/LatLng' }
             in_hazard_zones:
               type: array
               description: 이 장소가 포함된 정적 위험지역 (지금은 산사태만 — 위험지도 1·2등급 100m·지정 취약지역)
@@ -1215,7 +1254,7 @@ components:
     # ------------------------------------------------------------ dashboard
     LayerId:
       type: string
-      enum: [shelters, medical, landslide_zones, manholes, stations, risk_areas]
+      enum: [shelters, medical, landslide_zones, manholes, stations, risk_areas, flood_grid]
     Dashboard:
       type: object
       required: [mode, point_risk, widgets, highlight_layers, updated_at]
@@ -1349,6 +1388,22 @@ components:
         tts_text: { type: [string, 'null'], description: '음성으로 읽어 줄 짧은 문장 (접근성 tts·음성 대피 확인)' }
         created_at: { type: string, format: date-time }
         read_at: { type: [string, 'null'], format: date-time }
+    WeatherBulletin:
+      type: object
+      required: [id, kind, region_name, published_at, valid_from, valid_to, content, source, is_example, data_label]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [warning, forecast] }
+        region_name: { type: string, description: 대상 행정구역 }
+        published_at: { type: string, format: date-time }
+        valid_from: { type: string, format: date-time }
+        valid_to: { type: string, format: date-time }
+        level: { type: [string, 'null'], description: 특보 단계. 예보 항목은 null일 수 있음 }
+        content: { type: string, description: 특보 내용 또는 예보 요약 }
+        source: { type: string }
+        source_url: { type: string, format: uri }
+        is_example: { type: boolean, description: true이면 실제 발표/관측 자료가 아님 }
+        data_label: { type: string }
     FcmPayload:
       type: object
       description: |

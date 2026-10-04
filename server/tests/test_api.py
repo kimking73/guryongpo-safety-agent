@@ -70,6 +70,26 @@ def test_layers(client, fake_db):
     assert client.get("/api/v1/dashboard/layers/stations?bbox=1,2").status_code == 422
 
 
+def test_flood_grid_exposes_only_assessed_cells_with_source_and_depth(client, fake_db):
+    fake_db.rows["WITH p AS"] = [{
+        "id": 21, "level": "warning", "label": "침수 위험",
+        "basis": {"metric": "flood_depth", "value": 230, "unit": "mm", "observed_at": "2026-10-05T14:27:00+09:00", "station_name": "구룡포 수위계"},
+        "geojson": '{"type":"Polygon","coordinates":[[[129.55,35.98],[129.554,35.98],[129.554,35.984],[129.55,35.984],[129.55,35.98]]]}',
+    }]
+    response = client.get("/api/v1/dashboard/layers/flood_grid")
+    assert response.status_code == 200
+    feature = response.json()["features"][0]
+    assert feature["properties"]["level"] == "warning"
+    assert feature["properties"]["observed_depth_cm"] == 23
+    assert feature["properties"]["source"] == "구룡포 수위계"
+    assert feature["properties"]["data_status"] == "assessed"
+
+
+def test_flood_grid_is_empty_when_no_assessments(client):
+    response = client.get("/api/v1/dashboard/layers/flood_grid")
+    assert response.status_code == 200 and response.json()["features"] == []
+
+
 def test_static_layers(client, fake_db):
     """A7: 대피소·의료시설·맨홀은 loader 가 적재한 DB 값"""
     fake_db.rows["FROM shelters s"] = [{

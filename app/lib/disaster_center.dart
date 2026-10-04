@@ -74,46 +74,52 @@ const demoHazards = <DemoHazard>[
   ),
 ];
 
-class DemoGrid {
-  const DemoGrid(this.id, this.point, this.depth, this.time);
-  final String id, time;
-  final LatLng point;
-  final double depth;
-}
+Color _floodColor(String level) => switch (level) {
+      '주의' => const Color(0xffe7ac16),
+      '경계' => const Color(0xffe56717),
+      '심각' => const Color(0xffd93232),
+      _ => Colors.transparent,
+    };
 
-const demoGrids = <DemoGrid>[
-  DemoGrid('C-01', LatLng(35.9817, 129.5495), 0, '13:40'),
-  DemoGrid('C-02', LatLng(35.9817, 129.5510), .1, '13:40'),
-  DemoGrid('C-03', LatLng(35.9817, 129.5525), .2, '13:40'),
-  DemoGrid('C-04', LatLng(35.9831, 129.5495), .3, '13:40'),
-  DemoGrid('C-05', LatLng(35.9831, 129.5510), .4, '13:40'),
-  DemoGrid('C-06', LatLng(35.9831, 129.5525), .6, '13:40'),
-];
-
-Color _floodColor(double d) => Color.lerp(
-  Colors.lightBlue.shade300,
-  Colors.red.shade800,
-  (d / .6).clamp(0.0, 1.0),
-)!;
+List<Polygon> _disasterFloodPolygons(List<FloodGrid> grids,
+        {required bool severeOnly}) =>
+    [
+      for (final g in grids)
+        if (g.hasRisk && (!severeOnly || g.level == '심각') || !severeOnly)
+          Polygon(
+            points: [
+              LatLng(g.south, g.west),
+              LatLng(g.south, g.east),
+              LatLng(g.north, g.east),
+              LatLng(g.north, g.west)
+            ],
+            color: g.hasRisk && (!severeOnly || g.level == '심각')
+                ? _floodColor(g.level).withValues(alpha: .24)
+                : Colors.transparent,
+            borderColor: Colors.blueGrey.withValues(alpha: .24),
+            borderStrokeWidth: .35,
+          ),
+    ];
 Color _hazardColor(HazardKind k) => switch (k) {
-  HazardKind.flood => Colors.blue.shade800,
-  HazardKind.wind => Colors.deepOrange.shade700,
-  HazardKind.slide => Colors.brown.shade700,
-  HazardKind.overlap => Colors.purple.shade800,
-  HazardKind.storm => Colors.indigo.shade800,
-};
+      HazardKind.flood => Colors.blue.shade800,
+      HazardKind.wind => Colors.deepOrange.shade700,
+      HazardKind.slide => Colors.brown.shade700,
+      HazardKind.overlap => Colors.purple.shade800,
+      HazardKind.storm => Colors.indigo.shade800,
+    };
 Color _windColor(double averageSpeed, double gustSpeed) {
   if (averageSpeed >= 21 || gustSpeed >= 26) return Colors.red.shade800;
   if (averageSpeed >= 14 || gustSpeed >= 20) return Colors.deepOrange;
   return Colors.blueGrey.shade700;
 }
+
 IconData _hazardIcon(HazardKind k) => switch (k) {
-  HazardKind.flood => Icons.flood,
-  HazardKind.wind => Icons.air,
-  HazardKind.slide => Icons.terrain,
-  HazardKind.overlap => Icons.warning_amber_rounded,
-  HazardKind.storm => Icons.cyclone,
-};
+      HazardKind.flood => Icons.flood,
+      HazardKind.wind => Icons.air,
+      HazardKind.slide => Icons.terrain,
+      HazardKind.overlap => Icons.warning_amber_rounded,
+      HazardKind.storm => Icons.cyclone,
+    };
 
 class DisasterDashboard extends StatefulWidget {
   const DisasterDashboard({super.key});
@@ -132,10 +138,48 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
   DemoHazard? selected;
   LatLng focus = guryongpo;
   final MapController mapController = MapController();
+  Map<String, String> savedProfile = {};
+  List<SavedPlace> savedPlaces = [];
   late final MapOptions mapOptions = MapOptions(
     initialCenter: guryongpo,
-    initialZoom: 13.3,
+    initialZoom: 11.5,
+    onTap: (_, point) {
+      if (!activeLayers.contains(HazardKind.flood)) return;
+      final grids = demoFloodGrid(0);
+      final cell = grids
+          .where((g) =>
+              point.latitude >= g.south &&
+              point.latitude <= g.north &&
+              point.longitude >= g.west &&
+              point.longitude <= g.east)
+          .firstOrNull;
+      if (cell != null &&
+          cell.hasRisk &&
+          (!compositeView || cell.level == '심각')) _showGrid(context, cell);
+    },
   );
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRegisteredPlaces();
+  }
+
+  Future<void> _loadRegisteredPlaces() async {
+    final profile = await AccountService().optionalProfile();
+    final places = await AccountService().places();
+    if (mounted)
+      setState(() {
+        savedProfile = profile;
+        savedPlaces = places;
+      });
+  }
+
+  @override
+  void dispose() {
+    mapController.dispose();
+    super.dispose();
+  }
 
   void choose(String value) {
     if (value == '태풍') {
@@ -155,17 +199,17 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
         });
       focus = guryongpo;
     });
-    mapController.move(guryongpo, 13.3);
+    mapController.move(guryongpo, 11.5);
   }
 
   void toggleLayer(HazardKind layer, bool on) => setState(() {
-    compositeView = false;
-    if (on) {
-      activeLayers.add(layer);
-    } else {
-      activeLayers.remove(layer);
-    }
-  });
+        compositeView = false;
+        if (on) {
+          activeLayers.add(layer);
+        } else {
+          activeLayers.remove(layer);
+        }
+      });
 
   void focusOn(LatLng point) {
     setState(() => focus = point);
@@ -175,6 +219,32 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
   @override
   Widget build(BuildContext context) {
     final visible = activeLayers;
+    final floodGrids = demoFloodGrid(0);
+    final registered = <(LatLng, String)>[
+      if (_position(savedProfile, 'home') case final p?)
+        (
+          p,
+          savedProfile['homeName']?.isNotEmpty == true
+              ? savedProfile['homeName']!
+              : '집'
+        ),
+      if (_position(savedProfile, 'work') case final p?)
+        (
+          p,
+          savedProfile['workName']?.isNotEmpty == true
+              ? savedProfile['workName']!
+              : '직장'
+        ),
+      for (final p in savedPlaces) (p.position, p.name),
+    ];
+    final legendParts = [
+      if (visible.contains(HazardKind.flood)) '침수',
+      if (visible.contains(HazardKind.wind)) '강풍',
+      if (visible.contains(HazardKind.slide)) '산사태',
+    ];
+    final legendTitle = compositeView || legendParts.isEmpty
+        ? '지도 범례'
+        : '${legendParts.join('·')} 범례';
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -194,6 +264,19 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
           ],
         ),
         const _DemoBanner(),
+        const SizedBox(height: 10),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          FilledButton.icon(
+            onPressed: () => context.go('/map'),
+            icon: const Icon(Icons.directions_walk),
+            label: const Text('대피소·의료시설 경로'),
+          ),
+          OutlinedButton.icon(
+            onPressed: () => context.go('/ai'),
+            icon: const Icon(Icons.chat_bubble_outline),
+            label: const Text('AI 채팅'),
+          ),
+        ]),
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
@@ -231,7 +314,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
               onSelected: (on) => toggleLayer(HazardKind.wind, on),
             ),
             FilterChip(
-              label: const Text('산사태 위험'),
+              label: const Text('산사태 위험 안내'),
               selected: visible.contains(HazardKind.slide),
               onSelected: (on) => toggleLayer(HazardKind.slide, on),
             ),
@@ -252,34 +335,8 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                 ),
                 if (visible.contains(HazardKind.flood))
                   PolygonLayer(
-                    polygons: [
-                      for (final g in demoGrids.where((g) => g.depth > 0))
-                        Polygon(
-                          points: [
-                            LatLng(
-                              g.point.latitude - .00055,
-                              g.point.longitude - .0006,
-                            ),
-                            LatLng(
-                              g.point.latitude - .00055,
-                              g.point.longitude + .0006,
-                            ),
-                            LatLng(
-                              g.point.latitude + .00055,
-                              g.point.longitude + .0006,
-                            ),
-                            LatLng(
-                              g.point.latitude + .00055,
-                              g.point.longitude - .0006,
-                            ),
-                          ],
-                          color: _floodColor(g.depth).withValues(alpha: .6),
-                          borderColor: Colors.white,
-                          borderStrokeWidth: 1,
-                          label: '${g.id} · ${(g.depth * 100).round()}cm',
-                        ),
-                    ],
-                  ),
+                      polygons: _disasterFloodPolygons(floodGrids,
+                          severeOnly: compositeView)),
                 if (visible.contains(HazardKind.wind))
                   PolylineLayer(
                     polylines: [
@@ -297,18 +354,20 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                 MarkerLayer(
                   markers: [
                     if (visible.contains(HazardKind.flood))
-                      for (final g in demoGrids.where((g) => g.depth > 0))
+                      for (final g in floodGrids.where((g) =>
+                          g.hasRisk && (!compositeView || g.level == '심각')))
                         Marker(
-                          point: g.point,
-                          width: 45,
-                          height: 45,
+                          point: g.center,
+                          width: 22,
+                          height: 22,
                           child: GestureDetector(
                             onTap: () => _showGrid(context, g),
-                            child: Icon(
-                              Icons.water_drop,
-                              color: _floodColor(g.depth),
-                              size: 22,
-                            ),
+                            child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                    color: _floodColor(g.level),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                        color: Colors.white, width: 2))),
                           ),
                         ),
                     if (visible.contains(HazardKind.wind))
@@ -327,8 +386,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                             child: Column(
                               children: [
                                 Transform.rotate(
-                                  angle:
-                                      (w.$3 == '북동풍' ? 225 : 270) *
+                                  angle: (w.$3 == '북동풍' ? 225 : 270) *
                                       math.pi /
                                       180,
                                   child: Icon(
@@ -380,6 +438,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                         .where(
                           (h) =>
                               h.kind != HazardKind.overlap &&
+                              h.kind != HazardKind.flood &&
                               visible.contains(h.kind),
                         )
                         .map(
@@ -407,6 +466,31 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                         size: 24,
                       ),
                     ),
+                    for (final place in registered)
+                      Marker(
+                        point: place.$1,
+                        width: 78,
+                        height: 54,
+                        child: Column(children: [
+                          Icon(
+                              place.$2.contains('집')
+                                  ? Icons.home
+                                  : Icons.business,
+                              color: place.$2.contains('집')
+                                  ? Colors.indigo
+                                  : Colors.deepOrange,
+                              size: 28),
+                          Container(
+                              color: Colors.white.withValues(alpha: .92),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 3),
+                              child: Text(
+                                  '${place.$2} · ${_riskForPosition(place.$1)}',
+                                  style: const TextStyle(
+                                      fontSize: 8,
+                                      fontWeight: FontWeight.bold))),
+                        ]),
+                      ),
                   ],
                 ),
                 Positioned(
@@ -419,23 +503,70 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(compositeView ? '지도 범례' : '침수·산사태', style: const TextStyle(fontWeight: FontWeight.bold)),
+                          Text(legendTitle,
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.bold)),
                           if (compositeView) ...const [
-                            Text('재난 표식은 영향 위치', style: TextStyle(fontSize: 11)),
-                            Text('바람 화살표는 불어가는 방향·풍속', style: TextStyle(fontSize: 11)),
+                            Text('재난 표식은 영향 위치',
+                                style: TextStyle(fontSize: 11)),
+                            Text('바람 화살표는 방향·세기',
+                                style: TextStyle(fontSize: 11)),
+                            Text('침수는 심각 단계만 표시',
+                                style: TextStyle(fontSize: 11)),
                           ],
-                          if (!compositeView && visible.contains(HazardKind.flood)) ...const [
-                            Text('침수 격자 색은 관측 수심 비교용', style: TextStyle(fontSize: 11)),
-                            Text('단계 경계가 아닌 수심(cm) 표시', style: TextStyle(fontSize: 10)),
+                          if (!compositeView &&
+                              visible.contains(HazardKind.flood)) ...const [
+                            Text('격자색은 서버 위험 단계',
+                                style: TextStyle(fontSize: 11)),
+                            Text('실측 수심 구간 기준이 아님',
+                                style: TextStyle(fontSize: 10)),
+                            Text('목업 격자는 예시 데이터',
+                                style: TextStyle(fontSize: 10)),
                           ],
-                          if (!compositeView && visible.contains(HazardKind.slide))
-                            const Text('산사태 표식은 목업 알림 위치입니다.', style: TextStyle(fontSize: 11)),
-                          const Text('가상 시연 데이터', style: TextStyle(fontSize: 10)),
+                          if (!compositeView &&
+                              visible.contains(HazardKind.slide))
+                            const Text('산사태 표식은 목업 알림 위치입니다.',
+                                style: TextStyle(fontSize: 11)),
+                          const Text('가상 시연 데이터',
+                              style: TextStyle(fontSize: 10)),
                         ],
                       ),
                     ),
                   ),
                 ),
+                if (!compositeView && visible.contains(HazardKind.flood))
+                  Positioned(
+                      right: 8,
+                      bottom: 8,
+                      child: Card(
+                          child: Padding(
+                              padding: const EdgeInsets.all(8),
+                              child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Text('침수 위험 단계',
+                                        style: TextStyle(
+                                            fontWeight: FontWeight.bold)),
+                                    for (final item in const [
+                                      ('주의', '주의'),
+                                      ('경계', '경계'),
+                                      ('심각', '심각')
+                                    ])
+                                      Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Container(
+                                                width: 12,
+                                                height: 12,
+                                                color: _floodColor(item.$1)
+                                                    .withValues(alpha: .7)),
+                                            const SizedBox(width: 5),
+                                            Text(item.$2,
+                                                style: const TextStyle(
+                                                    fontSize: 10))
+                                          ]),
+                                  ])))),
                 if (!compositeView && visible.contains(HazardKind.wind))
                   Positioned(
                     right: 8,
@@ -446,13 +577,31 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
-                          children: const [
-                            Text('강풍 범례', style: TextStyle(fontWeight: FontWeight.bold)),
-                            Text('화살표: 불어가는 방향', style: TextStyle(fontSize: 11)),
-                            Text('색·크기: 풍속', style: TextStyle(fontSize: 11)),
-                            Text('주의보: 평균 14m/s 또는 순간 20m/s', style: TextStyle(fontSize: 10)),
-                            Text('경보: 평균 21m/s 또는 순간 26m/s', style: TextStyle(fontSize: 10)),
-                            Text('기준: 기상청 · 예시 관측값', style: TextStyle(fontSize: 10)),
+                          children: [
+                            const Text('강풍 범례',
+                                style: TextStyle(fontWeight: FontWeight.bold)),
+                            const Text('화살표: 불어가는 방향',
+                                style: TextStyle(fontSize: 11)),
+                            const Text('색·크기: 풍속',
+                                style: TextStyle(fontSize: 11)),
+                            const Text('주의보: 평균 14m/s 또는 순간 20m/s',
+                                style: TextStyle(fontSize: 10)),
+                            const Text('경보: 평균 21m/s 또는 순간 26m/s',
+                                style: TextStyle(fontSize: 10)),
+                            const Text('예시 관측값 · 기상청 기준',
+                                style: TextStyle(fontSize: 10)),
+                            TextButton(
+                              style: TextButton.styleFrom(
+                                padding: EdgeInsets.zero,
+                                visualDensity: VisualDensity.compact,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              onPressed: () => launchUrl(Uri.parse(
+                                'https://www.weather.go.kr/w/forecast/guide/standard.do',
+                              )),
+                              child: const Text('기상청 공식 기준 보기',
+                                  style: TextStyle(fontSize: 10)),
+                            ),
                           ],
                         ),
                       ),
@@ -467,7 +616,8 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
             child: ListTile(
               leading: const Icon(Icons.terrain, color: Colors.brown),
               title: const Text('산림청 산사태 위험지도(2025)'),
-              subtitle: const Text('위험등급 1~5 · 1등급이 가장 높음 · 현재 목업 지도에는 등급 격자 미포함'),
+              subtitle: const Text(
+                  '공식 산사태 위험지도 열기 · 위험등급 1~5(1등급이 가장 높음). 앱 지도는 등급 격자 미연동이며 표식은 목업입니다.'),
               trailing: const Icon(Icons.open_in_new),
               onTap: () => launchUrl(Uri.parse(
                 'https://sansatai.forest.go.kr/mhms_pub/mhms/lndsInfo/lndsMapViewPage.do',
@@ -492,86 +642,87 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
   }
 
   Widget _riskCard(BuildContext context, DemoHazard h) => SizedBox(
-    width: MediaQuery.sizeOf(context).width > 850 ? 300 : null,
-    child: Card(
-      color: _hazardColor(h.kind).withValues(alpha: .06),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () {
-          setState(() {
-            selected = h;
-            focus = h.point;
-            compositeView = false;
-            activeLayers.add(h.kind);
-          });
-          mapController.move(h.point, 15);
-          _showHazard(context, h);
-        },
-        child: Padding(
-          padding: const EdgeInsets.all(10),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(_hazardIcon(h.kind), color: _hazardColor(h.kind)),
-              const SizedBox(width: 9),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '${h.id} · ${h.name}',
-                      style: const TextStyle(fontWeight: FontWeight.bold),
+        width: MediaQuery.sizeOf(context).width > 850 ? 300 : null,
+        child: Card(
+          color: _hazardColor(h.kind).withValues(alpha: .06),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () {
+              setState(() {
+                selected = h;
+                focus = h.point;
+                compositeView = false;
+                activeLayers.add(h.kind);
+              });
+              mapController.move(h.point, 15);
+              _showHazard(context, h);
+            },
+            child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(_hazardIcon(h.kind), color: _hazardColor(h.kind)),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${h.id} · ${h.name}',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        Text(
+                          '${h.summary}\n기준 ${h.time} · ${h.guide}',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ],
                     ),
-                    Text(
-                      '${h.summary}\n기준 ${h.time} · ${h.guide}',
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
-      ),
-    ),
-  );
+      );
 }
 
 void _showHazard(BuildContext c, DemoHazard h) => showModalBottomSheet<void>(
-  context: c,
-  showDragHandle: true,
-  builder: (_) =>
-      _detailSheet(c, h.name, h.summary, h.time, h.guide, '위험 안내 목업 데이터 · 실제 발생 정보 아님'),
-);
-void _showGrid(BuildContext c, DemoGrid g) => showModalBottomSheet<void>(
-  context: c,
-  showDragHandle: true,
-  builder: (context) => _detailSheet(
-    context,
-    '침수 관측 그리드 ${g.id}',
-    '침수 관측 수심 ${(g.depth * 100).round()}cm',
-    g.time,
-    '침수된 도로와 지하 공간에 진입하지 마세요.',
-    '침수 관측(가상 목업 데이터) · 수심 구간 기준 없음',
-  ),
-);
+      context: c,
+      showDragHandle: true,
+      builder: (_) => _detailSheet(
+          c, h.name, h.summary, h.time, h.guide, '위험 안내 목업 데이터 · 실제 발생 정보 아님'),
+    );
+void _showGrid(BuildContext c, FloodGrid g) => showModalBottomSheet<void>(
+      context: c,
+      showDragHandle: true,
+      builder: (context) => _detailSheet(
+        context,
+        '침수 격자 ${g.id}',
+        '침수 위험 · ${g.level}${g.depthCm == null ? '\n수심 미확인' : '\n예시 수심 ${g.depthCm!.toStringAsFixed(0)}cm'}',
+        g.observedAt ?? '확인 시각 없음',
+        '위험 단계 셀에는 진입하지 말고 안전한 경로를 이용하세요.',
+        '${g.source.isEmpty ? '자료 미확인' : g.source}${g.isExample ? ' · 예시 데이터, 실제 관측이 아닙니다' : ''}',
+      ),
+    );
 void _showWind(
   BuildContext c,
   LatLng p,
   double speed,
   String from,
-) => showModalBottomSheet<void>(
-  context: c,
-  showDragHandle: true,
-  builder: (context) => _detailSheet(
-    context,
-    '구룡포 강풍 관측 시연지점',
-    '평균풍속 ${speed.toInt()}m/s · 순간최대풍속 ${speed.toInt() + 9}m/s · 풍향 $from(불어오는 방향)\n지도 화살표는 불어가는 방향',
-    demoTime,
-    '해안가·옥외 시설물 주변을 피하세요. 태풍 DEMO 영향(가상 시나리오).',
-    '관측(가상 시연 자료)',
-  ),
-);
+) =>
+    showModalBottomSheet<void>(
+      context: c,
+      showDragHandle: true,
+      builder: (context) => _detailSheet(
+        context,
+        '구룡포 강풍 관측 시연지점',
+        '평균풍속 ${speed.toInt()}m/s · 순간최대풍속 ${speed.toInt() + 9}m/s · 풍향 $from(불어오는 방향)\n지도 화살표는 불어가는 방향',
+        demoTime,
+        '해안가·옥외 시설물 주변을 피하세요. 태풍 DEMO 영향(가상 시나리오).',
+        '관측(가상 시연 자료)',
+      ),
+    );
 Widget _detailSheet(
   BuildContext context,
   String title,
@@ -579,50 +730,51 @@ Widget _detailSheet(
   String time,
   String guide,
   String source,
-) => SafeArea(
-  child: Padding(
-    padding: const EdgeInsets.all(18),
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+) =>
+    SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(summary),
+            Text('기준 시각: $time'),
+            Text('자료 구분: $source'),
+            const SizedBox(height: 8),
+            Text('행동 안내: $guide'),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('닫기'),
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: 8),
-        Text(summary),
-        Text('기준 시각: $time'),
-        Text('자료 구분: $source'),
-        const SizedBox(height: 8),
-        Text('행동 안내: $guide'),
-        Align(
-          alignment: Alignment.centerRight,
-          child: TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('닫기'),
-          ),
-        ),
-      ],
-    ),
-  ),
-);
+      ),
+    );
 
 class _DemoBanner extends StatelessWidget {
   const _DemoBanner();
   @override
   Widget build(BuildContext c) => Container(
-    margin: const EdgeInsets.only(bottom: 8),
-    padding: const EdgeInsets.all(10),
-    decoration: BoxDecoration(
-      color: Colors.amber.shade100,
-      borderRadius: BorderRadius.circular(9),
-    ),
-    child: const Text(
-      '모든 위험·좌표·측정값·시설 정보는 실제 발생 정보가 아닌 시연용 가상 데이터입니다. 기상청 실시간 자료 미연동.',
-      style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
-    ),
-  );
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: Colors.amber.shade100,
+          borderRadius: BorderRadius.circular(9),
+        ),
+        child: const Text(
+          '모든 위험·좌표·측정값·시설 정보는 실제 발생 정보가 아닌 시연용 가상 데이터입니다. 기상청 실시간 자료 미연동.',
+          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+        ),
+      );
 }
 
 class _SavedPlaceSummary extends StatefulWidget {
@@ -661,7 +813,8 @@ class _SavedPlaceSummaryState extends State<_SavedPlaceSummary> {
               c,
               '현위치',
               guryongpo,
-              '강풍 영향 시연 구역 인근',
+              '구룡포 시연 중심',
+              '${_riskForPosition(guryongpo)} 위험 · 예시 판정',
               Icons.my_location,
             ),
             if (home != null)
@@ -669,7 +822,8 @@ class _SavedPlaceSummaryState extends State<_SavedPlaceSummary> {
                 c,
                 profile['homeName'] ?? '집',
                 home,
-                '저지대 침수 경고(가상)',
+                profile['homeAddress'] ?? '주소 미등록',
+                '${_riskForPosition(home)} 위험 · 예시 판정',
                 Icons.home,
               ),
             if (work != null)
@@ -677,7 +831,8 @@ class _SavedPlaceSummaryState extends State<_SavedPlaceSummary> {
                 c,
                 profile['workName'] ?? '직장',
                 work,
-                '강풍 경고(가상)',
+                profile['workAddress'] ?? '주소 미등록',
+                '${_riskForPosition(work)} 위험 · 예시 판정',
                 Icons.business,
               ),
             ...places.map(
@@ -685,7 +840,8 @@ class _SavedPlaceSummaryState extends State<_SavedPlaceSummary> {
                 c,
                 p.name,
                 p.position,
-                '등록 장소 · 가상 위험 요약',
+                p.address.isEmpty ? '주소 미등록' : p.address,
+                '${_riskForPosition(p.position)} 위험 · 예시 판정',
                 Icons.place,
               ),
             ),
@@ -699,27 +855,29 @@ class _SavedPlaceSummaryState extends State<_SavedPlaceSummary> {
     BuildContext c,
     String title,
     LatLng p,
+    String address,
     String summary,
     IconData icon,
-  ) => SizedBox(
-    width: 235,
-    child: Card(
-      child: ListTile(
-        onTap: () {
-          widget.onFocus(p);
-          _placeDetail(c, title, p, summary);
-        },
-        leading: Icon(icon),
-        title: Text(title),
-        subtitle: Text(
-          '$summary\n눌러 지도 이동·상세 보기',
-          style: const TextStyle(fontSize: 11),
+  ) =>
+      SizedBox(
+        width: 235,
+        child: Card(
+          child: ListTile(
+            onTap: () {
+              widget.onFocus(p);
+              _placeDetail(c, title, address, summary);
+            },
+            leading: Icon(icon),
+            title: Text(title),
+            subtitle: Text(
+              '$summary\n눌러 지도 이동·상세 보기',
+              style: const TextStyle(fontSize: 11),
+            ),
+            isThreeLine: true,
+            trailing: const Icon(Icons.open_in_full, size: 16),
+          ),
         ),
-        isThreeLine: true,
-        trailing: const Icon(Icons.open_in_full, size: 16),
-      ),
-    ),
-  );
+      );
 }
 
 LatLng? _position(Map<String, String> p, String key) {
@@ -728,139 +886,101 @@ LatLng? _position(Map<String, String> p, String key) {
   return a == null || b == null ? null : LatLng(a, b);
 }
 
+String _riskForPosition(LatLng p) {
+  final cell = demoFloodGrid(0)
+      .where((g) =>
+          p.latitude >= g.south &&
+          p.latitude <= g.north &&
+          p.longitude >= g.west &&
+          p.longitude <= g.east)
+      .firstOrNull;
+  return cell?.hasRisk == true ? cell!.level : '미확인';
+}
+
 void _placeDetail(
   BuildContext c,
   String name,
-  LatLng p,
+  String address,
   String risk,
-) => showDialog<void>(
-  context: c,
-  builder: (ctx) => AlertDialog(
-    title: Text(name),
-    content: Text(
-      '주소: ${name == '현위치' ? '구룡포 시연 중심' : '저장한 주소'}\n위치: ${p.latitude.toStringAsFixed(5)}, ${p.longitude.toStringAsFixed(5)}\n위험 요약: $risk\n특이사항: 가상 시연 정보',
-    ),
-    actions: [
-      TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('닫기')),
-    ],
-  ),
-);
+) =>
+    showDialog<void>(
+      context: c,
+      builder: (ctx) => AlertDialog(
+        title: Text(name),
+        content: Text(
+          '도로명 주소: $address\n위험 요약: $risk\n특이사항: 가상 시연 정보',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('닫기')),
+        ],
+      ),
+    );
 
 class _RealtimeCards extends StatelessWidget {
   const _RealtimeCards();
   @override
   Widget build(BuildContext c) => Column(
-    children: [
-      _metric('🌧️', '강수', '시간당 32mm · 누적 118mm', '구룡포 강수 시연지점 · mm', '14:00', [
-        5,
-        7,
-        12,
-        18,
-        25,
-        32,
-      ]),
-      _metric(
-        '💨',
-        '바람',
-        '평균 21m/s · 순간최대 30m/s · 북동풍',
-        '해안 시연지점 A · m/s · 풍향은 불어오는 방향',
-        '14:00',
-        [7, 8, 10, 14, 17, 21],
-      ),
-      _metric('🌊', '파고', '유의파고 3.2m · 최대파고 4.8m', '해상 시연지점 · m', '14:00', [
-        1,
-        1.3,
-        1.8,
-        2.2,
-        2.7,
-        3.2,
-      ]),
-      _metric(
-        '〰️',
-        '수위',
-        '현재 2.4m · 최근 1시간 +0.3m',
-        '수위 시연지점 · m · 침수 깊이와 별도 지표',
-        '14:00',
-        [1.7, 1.8, 1.9, 2.0, 2.2, 2.4],
-      ),
-    ],
-  );
+        children: [
+          _metric(Icons.water_drop_outlined, '강수', '32 mm/h',
+              '누적 118mm · 강한 비 예시', '구룡포 강수 시연지점 · 14:00', Colors.indigo),
+          _metric(Icons.navigation, '바람', '평균 21 · 순간 30m/s',
+              '북동풍 · 화살표는 바람이 불어가는 방향', '해안 시연지점 · 14:00', Colors.deepOrange,
+              rotation: math.pi * 1.25),
+          _metric(Icons.waves, '파고', '유의 3.2m', '최대파고 4.8m · 높은 파도 예시',
+              '해상 시연지점 · 14:00', Colors.blue),
+          _metric(Icons.height, '수위', '현재 2.4m', '최근 1시간 +0.3m · 침수 깊이와 별도 지표',
+              '수위 시연지점 · 14:00', Colors.teal),
+        ],
+      );
 }
 
 Widget _metric(
-  String icon,
+  IconData icon,
   String title,
   String value,
-  String location,
-  String time,
-  List<double> data,
-) => Card(
-  child: Padding(
-    padding: const EdgeInsets.all(12),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Text(icon, style: const TextStyle(fontSize: 22)),
-            const SizedBox(width: 8),
-            Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-            const Spacer(),
-            Text(time),
-          ],
-        ),
-        Text(value),
-        Text('$location · $demoTime', style: const TextStyle(fontSize: 10)),
-        SizedBox(
-          height: 48,
-          width: double.infinity,
-          child: CustomPaint(painter: _SparkPainter(data)),
-        ),
-      ],
-    ),
-  ),
-);
-
-class _SparkPainter extends CustomPainter {
-  _SparkPainter(this.values);
-  final List<double> values;
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (values.length < 2) return;
-    final minV = values.reduce(math.min),
-        maxV = values.reduce(math.max),
-        range = (maxV - minV) == 0 ? 1 : maxV - minV;
-    final path = Path();
-    for (var i = 0; i < values.length; i++) {
-      final p = Offset(
-        i * size.width / (values.length - 1),
-        size.height - (values[i] - minV) / range * size.height,
-      );
-      if (i == 0)
-        path.moveTo(p.dx, p.dy);
-      else
-        path.lineTo(p.dx, p.dy);
-    }
-    canvas.drawPath(
-      path,
-      Paint()
-        ..color = Colors.teal
-        ..strokeWidth = 2.5
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round,
+  String description,
+  String locationTime,
+  Color color, {
+  double rotation = 0,
+}) =>
+    Card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(children: [
+          Container(
+              width: 54,
+              height: 54,
+              decoration: BoxDecoration(
+                  color: color.withValues(alpha: .12),
+                  borderRadius: BorderRadius.circular(15)),
+              child: Center(
+                  child: Transform.rotate(
+                      angle: rotation,
+                      child: Icon(icon, color: color, size: 31)))),
+          const SizedBox(width: 13),
+          Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Row(children: [
+                  Text(title,
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                  const Spacer(),
+                  const Text('예시',
+                      style: TextStyle(fontSize: 10, color: Colors.black54))
+                ]),
+                Text(value,
+                    style: const TextStyle(
+                        fontSize: 19, fontWeight: FontWeight.w800)),
+                Text(description, style: const TextStyle(fontSize: 11)),
+                Text('$locationTime · 가상 시연 자료',
+                    style:
+                        const TextStyle(fontSize: 10, color: Colors.black54)),
+              ])),
+        ]),
+      ),
     );
-    for (var i = 0; i < values.length; i++) {
-      final p = Offset(
-        i * size.width / (values.length - 1),
-        size.height - (values[i] - minV) / range * size.height,
-      );
-      canvas.drawCircle(p, 3, Paint()..color = Colors.teal);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _SparkPainter old) => old.values != values;
-}
 
 class TyphoonScreen extends StatefulWidget {
   const TyphoonScreen({super.key, this.initialLocal = false});
@@ -903,6 +1023,12 @@ class _TyphoonScreenState extends State<TyphoonScreen> {
     '20:00 예측',
     '22:00 예측',
   ];
+  @override
+  void dispose() {
+    mapController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext c) {
     return ListView(
@@ -967,15 +1093,16 @@ class _TyphoonScreenState extends State<TyphoonScreen> {
                     Marker(
                       point: track[i],
                       width: 65,
-                      height: 42,
+                      height: 50,
                       child: Column(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
                             i < 3
                                 ? Icons.place
                                 : i == 3
-                                ? Icons.cyclone
-                                : Icons.trip_origin,
+                                    ? Icons.cyclone
+                                    : Icons.trip_origin,
                             color: i == 3 ? Colors.red : Colors.indigo,
                             size: 22,
                           ),
@@ -986,8 +1113,9 @@ class _TyphoonScreenState extends State<TyphoonScreen> {
                   Marker(
                     point: guryongpo,
                     width: 60,
-                    height: 40,
+                    height: 48,
                     child: const Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(Icons.home, color: Colors.teal),
                         Text('구룡포', style: TextStyle(fontSize: 9)),
@@ -1028,9 +1156,9 @@ List<Polyline> _dashed(List<LatLng> pts) {
     for (var j = 0; j < 8; j++) {
       if (j.isOdd) continue;
       LatLng at(double t) => LatLng(
-        a.latitude + (b.latitude - a.latitude) * t,
-        a.longitude + (b.longitude - a.longitude) * t,
-      );
+            a.latitude + (b.latitude - a.latitude) * t,
+            a.longitude + (b.longitude - a.longitude) * t,
+          );
       out.add(
         Polyline(
           points: [at(j / 8), at((j + 1) / 8)],
@@ -1048,37 +1176,41 @@ class _WeatherBulletins extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      const SizedBox(height: 10),
-      const Text('기상 특보', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
-      Card(
-        child: ListTile(
-          leading: const Icon(Icons.warning_amber_rounded, color: Colors.deepOrange),
-          title: const Text('호우주의보 · 예시 데이터'),
-          subtitle: const Text(
-            '대상: 포항시 남구 구룡포읍\n발표: 오늘 13:00 (가상) · 유효: 오늘 18:00까지 (가상)\n기준 안내: 3시간 60mm 또는 12시간 110mm 이상 예상',
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 10),
+          const Text('기상 특보',
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.warning_amber_rounded,
+                  color: Colors.deepOrange),
+              title: const Text('호우주의보 · 예시 데이터'),
+              subtitle: const Text(
+                '대상: 포항시 남구 구룡포읍\n발표: 오늘 13:00 (가상) · 유효: 오늘 18:00까지 (가상)\n기준 안내: 3시간 60mm 또는 12시간 110mm 이상 예상',
+              ),
+              isThreeLine: true,
+            ),
           ),
-          isThreeLine: true,
-        ),
-      ),
-      const Text('기상 예보', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
-      Card(
-        child: ListTile(
-          leading: const Icon(Icons.cloudy_snowing, color: Colors.indigo),
-          title: const Text('강한 비 가능성 · 예시 데이터'),
-          subtitle: const Text(
-            '대상: 포항시 남구 구룡포읍\n예보 작성: 오늘 12:00 (가상) · 유효: 오늘 14:00~18:00 (가상)\n예보 내용: 시간당 20~30mm 비가 내리는 상황을 가정',
+          const Text('기상 예보',
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.cloudy_snowing, color: Colors.indigo),
+              title: const Text('강한 비 가능성 · 예시 데이터'),
+              subtitle: const Text(
+                '대상: 포항시 남구 구룡포읍\n예보 작성: 오늘 12:00 (가상) · 유효: 오늘 14:00~18:00 (가상)\n예보 내용: 시간당 20~30mm 비가 내리는 상황을 가정',
+              ),
+              isThreeLine: true,
+            ),
           ),
-          isThreeLine: true,
-        ),
-      ),
-      const Padding(
-        padding: EdgeInsets.only(left: 8, bottom: 8),
-        child: Text('출처: 기상청 기준을 참고한 화면 검토용 목업. 실제 발표 정보가 아닙니다.', style: TextStyle(fontSize: 11)),
-      ),
-    ],
-  );
+          const Padding(
+            padding: EdgeInsets.only(left: 8, bottom: 8),
+            child: Text('출처: 기상청 기준을 참고한 화면 검토용 목업. 실제 발표 정보가 아닙니다.',
+                style: TextStyle(fontSize: 11)),
+          ),
+        ],
+      );
 }
 
 class AlertHubScreen extends StatefulWidget {
@@ -1099,10 +1231,8 @@ class _AlertHubScreenState extends State<AlertHubScreen> {
 
   @override
   Widget build(BuildContext c) {
-    final jobs = (profile['jobs'] ?? '')
-        .split('|')
-        .where((e) => e.isNotEmpty)
-        .toList();
+    final jobs =
+        (profile['jobs'] ?? '').split('|').where((e) => e.isNotEmpty).toList();
     final personal = <(String, String, String, String, String)>[];
     if ((profile['homeAddress'] ?? '').isNotEmpty)
       personal.add((
@@ -1125,7 +1255,8 @@ class _AlertHubScreenState extends State<AlertHubScreen> {
         personal.add((
           '직업 맞춤 기상 대비',
           switch (j) {
-            '어업 종사자·뱃사람' => '강한 바람과 높은 파도 가능성을 가정했습니다. 조업을 자제하고 출항 전 통제를 확인하세요.',
+            '어업 종사자·뱃사람' =>
+              '강한 바람과 높은 파도 가능성을 가정했습니다. 조업을 자제하고 출항 전 통제를 확인하세요.',
             '자영업자' => '매장 인근 집중호우 가능성을 가정했습니다. 배수구와 전기기기를 점검하세요.',
             '농업 종사자' => '농경지 주변 비와 강풍 가능성을 가정했습니다. 배수로와 시설물을 점검하세요.',
             '축산업 종사자' => '축사 주변 집중호우 가능성을 가정했습니다. 배수시설과 비상전원을 확인하세요.',
@@ -1155,30 +1286,34 @@ class _AlertHubScreenState extends State<AlertHubScreen> {
             child: ListTile(title: Text('맞춤 경고를 보려면 프로필에 집·직장·직업을 등록하세요.')),
           ),
         ...personal.map((warning) => Card(
-          child: ExpansionTile(
-            leading: const Icon(Icons.personal_injury, color: Colors.deepOrange),
-            title: Text(warning.$1),
-            subtitle: const Text('목업 경고 · 눌러 상세 정보 보기'),
-            children: [
-              ListTile(title: const Text('경고 이유'), subtitle: Text(warning.$2)),
-              ListTile(title: const Text('영향 위치'), subtitle: Text(warning.$3)),
-              ListTile(title: const Text('영향 시각'), subtitle: Text(warning.$4)),
-              ListTile(title: const Text('출처'), subtitle: Text(warning.$5)),
-              const ListTile(
-                title: Text('권고 행동'),
-                subtitle: Text('기상 특보와 주변 상황을 확인하고 위험 구역 접근을 피하세요.'),
+              child: ExpansionTile(
+                leading:
+                    const Icon(Icons.personal_injury, color: Colors.deepOrange),
+                title: Text(warning.$1),
+                subtitle: const Text('목업 경고 · 눌러 상세 정보 보기'),
+                children: [
+                  ListTile(
+                      title: const Text('경고 이유'), subtitle: Text(warning.$2)),
+                  ListTile(
+                      title: const Text('영향 위치'), subtitle: Text(warning.$3)),
+                  ListTile(
+                      title: const Text('영향 시각'), subtitle: Text(warning.$4)),
+                  ListTile(title: const Text('출처'), subtitle: Text(warning.$5)),
+                  const ListTile(
+                    title: Text('권고 행동'),
+                    subtitle: Text('기상 특보와 주변 상황을 확인하고 위험 구역 접근을 피하세요.'),
+                  ),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      onPressed: () => context.go('/'),
+                      icon: const Icon(Icons.map_outlined),
+                      label: const Text('종합 지도 열기'),
+                    ),
+                  ),
+                ],
               ),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton.icon(
-                  onPressed: () => context.go('/'),
-                  icon: const Icon(Icons.map_outlined),
-                  label: const Text('종합 지도 열기'),
-                ),
-              ),
-            ],
-          ),
-        )),
+            )),
         const SizedBox(height: 10),
         const Text(
           '일반 알림 · 재난문자',
@@ -1222,66 +1357,174 @@ class _VirtualMessageState extends State<_VirtualMessage> {
   bool open = false;
   @override
   Widget build(BuildContext c) => Card(
-    child: Column(
-      children: [
-        ListTile(
-          leading: const Icon(Icons.sms),
-          title: const Text('가상 재난문자 · 구룡포 해안 강풍주의 시연'),
-          subtitle: const Text('발송 14:00 · 시연 시스템(가상) · 방파제 접근 자제'),
-          trailing: TextButton(
-            onPressed: () => setState(() => open = !open),
-            child: Text(open ? '접기' : '원문 보기'),
-          ),
-        ),
-        if (open)
-          const Padding(
-            padding: EdgeInsets.all(14),
-            child: Text(
-              '[가상 재난문자 원문] 구룡포 해안 시연구역에 강풍과 높은 파도가 예상되는 상황을 가정했습니다. 해안과 방파제 접근을 자제하고 실제 재난 상황에서는 공식 안내를 확인하세요.',
+        child: Column(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.sms),
+              title: const Text('가상 재난문자 · 구룡포 해안 강풍주의 시연'),
+              subtitle: const Text('발송 14:00 · 시연 시스템(가상) · 방파제 접근 자제'),
+              trailing: TextButton(
+                onPressed: () => setState(() => open = !open),
+                child: Text(open ? '접기' : '원문 보기'),
+              ),
             ),
-          ),
-      ],
-    ),
-  );
+            if (open)
+              const Padding(
+                padding: EdgeInsets.all(14),
+                child: Text(
+                  '[가상 재난문자 원문] 구룡포 해안 시연구역에 강풍과 높은 파도가 예상되는 상황을 가정했습니다. 해안과 방파제 접근을 자제하고 실제 재난 상황에서는 공식 안내를 확인하세요.',
+                ),
+              ),
+          ],
+        ),
+      );
 }
 
-class RecoveryScreen extends StatelessWidget {
+class RecoveryScreen extends StatefulWidget {
   const RecoveryScreen({super.key});
   @override
-  Widget build(BuildContext c) => ListView(
-    padding: const EdgeInsets.all(16),
-    children: [
-      const Text(
-        '지원 및 복구',
-        style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+  State<RecoveryScreen> createState() => _RecoveryScreenState();
+}
+
+class _RecoveryScreenState extends State<RecoveryScreen> {
+  Set<String> jobs = {};
+  @override
+  void initState() {
+    super.initState();
+    AccountService().optionalProfile().then((profile) {
+      if (!mounted) return;
+      final saved =
+          (profile['jobs'] ?? '').split('|').where((x) => x.isNotEmpty).toSet();
+      if (saved.isEmpty && (profile['직업'] ?? '').isNotEmpty)
+        saved.add(profile['직업']!);
+      setState(() => jobs = saved);
+    });
+  }
+
+  @override
+  Widget build(BuildContext c) {
+    const jobGuides = <String, (IconData, String, String)>{
+      '농업 종사자': (
+        Icons.agriculture,
+        '농업 지원·복구',
+        '농작물·농업시설 피해를 기록하고 배수로와 시설 안전을 먼저 확인하세요. 실제 지원 대상과 보험 약관은 관할 기관에 문의하세요.'
       ),
-      const _DemoBanner(),
-      const Text(
-        '아래 내용은 메뉴 동작을 위한 가상 안내입니다. 실재 제도·대상·금액·지급 가능성으로 해석하지 말고 관할 기관에 확인하세요.',
+      '축산업 종사자': (
+        Icons.pets,
+        '축산업 지원·복구',
+        '축사·가축 피해와 복구 비용을 기록하고 배수시설과 비상전원을 점검하세요. 실제 지원 대상은 관할 기관에 확인하세요.'
       ),
-      for (final x in const [
-        ('피해 신고·복구', '피해 사진과 발생 시각을 기록하고 지방자치단체 재난 담당 창구에 신청 절차를 확인하세요.'),
-        ('농업', '농작물·농업시설 피해 지원을 가정한 가상 안내. 실제 대상과 재해보험 약관 확인 필요.'),
-        ('축산업', '축사·가축 피해 지원을 가정한 가상 안내. 피해 조사와 가입 계약 확인 필요.'),
-        ('어업', '어선·어구 피해 지원을 가정한 가상 안내. 등록 상태와 피해 조사 확인 필요.'),
-        ('양식업', '양식시설·수산생물 피해 지원을 가정한 가상 안내. 양식장 등록·보험 약관 확인 필요.'),
-        ('보험 안내', '보험 가입 여부·보장 범위·보험금 지급 가능성은 앱에서 확정하지 않습니다. 계약서와 보험사에 확인하세요.'),
-      ])
-        Card(
-          child: ExpansionTile(
-            leading: const Icon(Icons.handyman_outlined),
-            title: Text(x.$1),
-            subtitle: const Text('가상 안내 · 실제 지원 제도와 다를 수 있음'),
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text('${x.$2}\n신청·문의: 관할 지자체 또는 가입 보험사에 자격과 서류를 확인하세요.'),
-              ),
-            ],
-          ),
+      '어업 종사자·뱃사람': (
+        Icons.sailing,
+        '어업 지원·복구',
+        '어선·어구 피해와 발생 시각을 기록하고 항만 통제와 출항 제한을 확인하세요. 실제 지원 대상은 관할 기관에 문의하세요.'
+      ),
+      '양식업 종사자·수산물 양식': (
+        Icons.waves,
+        '양식업 지원·복구',
+        '양식시설과 수산생물 피해를 기록하고 전력·산소공급·취수시설 상태를 확인하세요. 실제 지원 대상은 관할 기관에 확인하세요.'
+      ),
+      '자영업자': (
+        Icons.store,
+        '사업장 지원·복구',
+        '매장 침수와 시설 피해를 촬영·기록하고 전기와 가스를 안전하게 차단하세요. 실제 지원 대상은 관할 기관에 확인하세요.'
+      ),
+      '기타': (
+        Icons.handyman_outlined,
+        '일반 피해 신고·복구',
+        '피해 사진과 발생 시각을 기록하고 관할 지자체 재난 담당 창구에 복구 절차를 문의하세요.'
+      ),
+      'farmer': (
+        Icons.agriculture,
+        '농업 지원·복구',
+        '농작물·농업시설 피해를 기록하고 관할 기관에 실제 지원 요건을 확인하세요.'
+      ),
+      'livestock': (
+        Icons.pets,
+        '축산업 지원·복구',
+        '축사·가축 피해를 기록하고 관할 기관에 실제 지원 요건을 확인하세요.'
+      ),
+      'fisher': (
+        Icons.sailing,
+        '어업 지원·복구',
+        '어선·어구 피해를 기록하고 관할 기관에 실제 지원 요건을 확인하세요.'
+      ),
+      'aquaculture': (
+        Icons.waves,
+        '양식업 지원·복구',
+        '양식시설 피해를 기록하고 관할 기관에 실제 지원 요건을 확인하세요.'
+      ),
+    };
+    final selected = jobs
+        .map((j) => jobGuides[j])
+        .whereType<(IconData, String, String)>()
+        .toSet()
+        .toList();
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        const Text(
+          '지원 및 복구',
+          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
         ),
-    ],
-  );
+        const _DemoBanner(),
+        const Text(
+          '목업 안내입니다. 실제 제도·자격·지원 금액은 관할 기관에 확인하세요.',
+        ),
+        if (jobs.isEmpty)
+          Card(
+              child: ListTile(
+                  leading: const Icon(Icons.person_outline),
+                  title: const Text('직업 분야가 설정되지 않았습니다.'),
+                  subtitle:
+                      const Text('프로필에서 직업을 선택하면 해당 분야의 지원·복구 안내만 표시합니다.'),
+                  trailing: TextButton(
+                      onPressed: () => GoRouter.of(c).push('/profile'),
+                      child: const Text('프로필')))),
+        if (selected.isNotEmpty) ...[
+          const Text('내 직업 분야 안내',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          for (final x in selected)
+            Card(
+              child: ExpansionTile(
+                leading: Icon(x.$1),
+                title: Text(x.$2),
+                subtitle: const Text('목업 안내 · 실제 지원 요건 확인 필요'),
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(
+                        '${x.$3}\n신청·문의: 관할 지자체 또는 가입 보험사에 자격과 서류를 확인하세요.'),
+                  ),
+                ],
+              ),
+            ),
+        ],
+        Card(
+            child: ExpansionTile(
+                leading: const Icon(Icons.report_outlined),
+                title: const Text('공통 피해 신고·복구'),
+                subtitle: const Text('분야와 관계없이 확인할 수 있는 기본 절차'),
+                children: const [
+              Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text(
+                      '피해 사진과 발생 시각을 기록하고, 안전을 확인한 뒤 관할 지자체 재난 담당 창구에 신고 절차를 문의하세요.'))
+            ])),
+        Card(
+            child: ExpansionTile(
+                leading: const Icon(Icons.policy_outlined),
+                title: const Text('공통 보험 확인'),
+                subtitle: const Text('보험 가입 및 보장 범위 확인'),
+                children: const [
+              Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text(
+                      '앱은 보험금 지급 여부를 확정하지 않습니다. 가입 보험사에 계약 내용과 필요한 서류를 확인하세요.'))
+            ])),
+      ],
+    );
+  }
 }
 
 class ProfileDetailsCard extends StatefulWidget {
@@ -1321,8 +1564,7 @@ class _ProfileDetailsCardState extends State<ProfileDetailsCard> {
       'originAddress',
       'originLat',
       'originLon',
-    ])
-      fields[k] = TextEditingController();
+    ]) fields[k] = TextEditingController();
     _load();
   }
 
@@ -1336,13 +1578,17 @@ class _ProfileDetailsCardState extends State<ProfileDetailsCard> {
 
   Future<void> _save() async {
     if (!(form.currentState?.validate() ?? false)) return;
+    await _persist();
+  }
+
+  Future<void> _persist({bool notify = true}) async {
     final p = <String, String>{
       for (final e in fields.entries) e.key: e.value.text.trim(),
       'transport': transport,
       'jobs': jobs.join('|'),
     };
     await AccountService().saveOptionalProfile(p);
-    if (mounted) {
+    if (mounted && notify) {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('프로필을 기기에 저장했습니다.')));
       setState(() {});
@@ -1396,11 +1642,12 @@ class _ProfileDetailsCardState extends State<ProfileDetailsCard> {
                   fields['${key}Lon']!.text = '${resolved.position.longitude}';
                   if (ctx.mounted) Navigator.pop(ctx);
                   if (mounted) setState(() {});
-                  await _save();
+                  await _persist(notify: false);
                 } on GeocodingException catch (e) {
-                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(e.message)),
-                  );
+                  if (mounted)
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(e.message)),
+                    );
                 }
               },
               child: const Text('저장'),
@@ -1409,109 +1656,112 @@ class _ProfileDetailsCardState extends State<ProfileDetailsCard> {
         );
       },
     );
-    await _save();
+  }
+
+  @override
+  void dispose() {
+    for (final controller in fields.values) {
+      controller.dispose();
+    }
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext c) => Card(
-    child: Padding(
-      padding: const EdgeInsets.all(14),
-      child: loading
-          ? const Center(child: CircularProgressIndicator())
-          : Form(
-              key: form,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    '사용자 상세',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  const Text('도로명 주소는 서버에서 좌표로 변환합니다. 좌표는 앱에서 입력하지 않습니다.'),
-                  TextFormField(
-                    controller: fields['age'],
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: '나이'),
-                    validator: (x) =>
-                        x == null || x.isEmpty || int.tryParse(x) == null
-                        ? '숫자를 입력하세요'
-                        : null,
-                  ),
-                  DropdownButtonFormField<String>(
-                    initialValue: transport,
-                    decoration: const InputDecoration(labelText: '기본 이동 수단'),
-                    items: const ['도보', '휠체어', '자동차']
-                        .map((x) => DropdownMenuItem(value: x, child: Text(x)))
-                        .toList(),
-                    onChanged: (x) => setState(() => transport = x ?? '도보'),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text('직업 (복수 선택)'),
-                  Wrap(
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: loading
+              ? const Center(child: CircularProgressIndicator())
+              : Form(
+                  key: form,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      for (final j in jobOptions)
-                        FilterChip(
-                          label: Text(j),
-                          selected: jobs.contains(j),
-                          onSelected: (v) =>
-                              setState(() => v ? jobs.add(j) : jobs.remove(j)),
+                      const Text(
+                        '사용자 상세',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                      const Text('도로명 주소는 서버에서 좌표로 변환합니다. 좌표는 앱에서 입력하지 않습니다.'),
+                      TextFormField(
+                        controller: fields['age'],
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(labelText: '나이'),
+                        validator: (x) =>
+                            x == null || x.isEmpty || int.tryParse(x) == null
+                                ? '숫자를 입력하세요'
+                                : null,
+                      ),
+                      DropdownButtonFormField<String>(
+                        initialValue: transport,
+                        decoration:
+                            const InputDecoration(labelText: '기본 이동 수단'),
+                        items: const ['도보', '휠체어', '자동차']
+                            .map((x) =>
+                                DropdownMenuItem(value: x, child: Text(x)))
+                            .toList(),
+                        onChanged: (x) => setState(() => transport = x ?? '도보'),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text('직업 (복수 선택)'),
+                      Wrap(
+                        children: [
+                          for (final j in jobOptions)
+                            FilterChip(
+                              label: Text(j),
+                              selected: jobs.contains(j),
+                              onSelected: (v) => setState(
+                                  () => v ? jobs.add(j) : jobs.remove(j)),
+                            ),
+                        ],
+                      ),
+                      for (final k in ['home', 'work', 'origin'])
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(switch (k) {
+                            'home' => '집',
+                            'work' => '직장·대표 작업장',
+                            _ => '출발 위치',
+                          }),
+                          subtitle: Text(fields['${k}Address']!.text.isEmpty
+                              ? '${fields['${k}Name']!.text} · 주소 미등록'
+                              : '${fields['${k}Name']!.text} · ${fields['${k}Address']!.text}\n주소 좌표 확인 완료'),
+                          trailing: IconButton(
+                            tooltip:
+                                '${k == 'home' ? '집' : k == 'work' ? '직장' : '출발 위치'} 수정',
+                            icon: const Icon(Icons.edit),
+                            onPressed: () => _editPlace(
+                              k,
+                              k == 'home'
+                                  ? '집'
+                                  : k == 'work'
+                                      ? '직장'
+                                      : '출발 위치',
+                            ),
+                          ),
                         ),
+                      DropdownButtonFormField<String>(
+                        initialValue: '현재 위치',
+                        decoration:
+                            const InputDecoration(labelText: '출발 위치 방식'),
+                        items: const ['현재 위치', '직접 지정']
+                            .map((x) =>
+                                DropdownMenuItem(value: x, child: Text(x)))
+                            .toList(),
+                        onChanged: (x) {
+                          fields['originName']!.text = x == '현재 위치'
+                              ? '현재 위치'
+                              : fields['originName']!.text;
+                        },
+                      ),
+                      FilledButton.icon(
+                        onPressed: _save,
+                        icon: const Icon(Icons.save),
+                        label: const Text('프로필 저장'),
+                      ),
                     ],
                   ),
-                  for (final k in ['home', 'work', 'origin'])
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(switch (k) {
-                        'home' => '집',
-                        'work' => '직장·대표 작업장',
-                        _ => '출발 위치',
-                      }),
-                      subtitle: Text(fields['${k}Address']!.text.isEmpty
-                          ? '${fields['${k}Name']!.text} · 주소 미등록'
-                          : '${fields['${k}Name']!.text} · ${fields['${k}Address']!.text}\n주소 좌표 확인 완료'),
-                      trailing: IconButton(
-                        tooltip:
-                            '${k == 'home'
-                                ? '집'
-                                : k == 'work'
-                                ? '직장'
-                                : '출발 위치'} 수정',
-                        icon: const Icon(Icons.edit),
-                        onPressed: () => _editPlace(
-                          k,
-                          k == 'home'
-                              ? '집'
-                              : k == 'work'
-                              ? '직장'
-                              : '출발 위치',
-                        ),
-                      ),
-                    ),
-                  DropdownButtonFormField<String>(
-                    initialValue: '현재 위치',
-                    decoration: const InputDecoration(labelText: '출발 위치 방식'),
-                    items: const ['현재 위치', '직접 지정']
-                        .map((x) => DropdownMenuItem(value: x, child: Text(x)))
-                        .toList(),
-                    onChanged: (x) {
-                      fields['originName']!.text = x == '현재 위치'
-                          ? '현재 위치'
-                          : fields['originName']!.text;
-                    },
-                  ),
-                  FilledButton.icon(
-                    onPressed: _save,
-                    icon: const Icon(Icons.save),
-                    label: const Text('프로필 저장'),
-                  ),
-                ],
-              ),
-            ),
-    ),
-  );
-  @override
-  void dispose() {
-    for (final x in fields.values) x.dispose();
-    super.dispose();
-  }
+                ),
+        ),
+      );
 }

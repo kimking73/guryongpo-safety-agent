@@ -60,12 +60,9 @@ def geocode_address(body: AddressGeocodeInput, u: AuthUser = Depends(current_use
 @router.post("/user/places", status_code=201, summary="장소 추가")
 def add_place(body: PlaceInput, u: AuthUser = Depends(current_user)):
     values = body.model_dump()
-    if body.address:
-        resolved = geocode_road_address(body.address)
-        values["address"] = resolved["address"]
-        values["location"] = resolved["location"]
-    elif body.location is None:
-        raise ApiError("VALIDATION_ERROR", "도로명 주소를 입력해 주세요.")
+    resolved = geocode_road_address(body.address)
+    values["address"] = resolved["address"]
+    values["location"] = resolved["location"]
 
     user_id = users.require_user_id(u)
     row = db.fetch_one("""
@@ -80,6 +77,10 @@ def add_place(body: PlaceInput, u: AuthUser = Depends(current_user)):
 def update_place(place_id: uuid.UUID, body: PlacePatch, u: AuthUser = Depends(current_user)):
     user_id = users.require_user_id(u)
     data = body.model_dump(exclude_unset=True)
+    if data.get("address"):
+        resolved = geocode_road_address(data["address"])
+        data["address"] = resolved["address"]
+        data["location"] = resolved["location"]
     sets, params = [], {"uid": user_id, "pid": str(place_id)}
     for k in ("place_type", "label", "address", "notify"):
         if k in data and (data[k] is not None or k == "address"):

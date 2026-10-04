@@ -32,7 +32,7 @@ Future<OriginSpy> boot(WidgetTester t, LocationService gps) async {
   final onError = FlutterError.onError;
   FlutterError.onError = (d) { if (d.library != 'image resource service') onError?.call(d); };
   addTearDown(() => FlutterError.onError = onError);
-  SharedPreferences.setMockInitialValues({'profile_setup_complete': true, 'user_mode': 'resident'});
+  SharedPreferences.setMockInitialValues({'profile_setup_complete': true});
   final spy = OriginSpy();
   await t.pumpWidget(ProviderScope(overrides: [repo.overrideWithValue(spy), locationService.overrideWithValue(gps)], child: const GuryongpoApp()));
   for (var i = 0; i < 10; i++) { await t.pump(const Duration(milliseconds: 300)); }
@@ -63,14 +63,14 @@ void main() {
 
   testWidgets('구룡포 밖 GPS → 예시 위치, 이유 표시', (t) async {
     final spy = await boot(t, FakeGps(const [LatLng(36.019, 129.343)]));
-    expect(spy.origins.last, originFor(UserMode.resident));
+    expect(spy.origins.last, originFor(UserMode.user));
     expect(find.textContaining('구룡포 밖이라 예시 위치'), findsOneWidget);
     await done(t);
   });
 
   testWidgets('권한 거부 → 예시 위치, 이유 표시', (t) async {
     final spy = await boot(t, FakeGps(const [], fail: const LocationUnavailable('위치 권한이 없어 예시 위치를 씁니다.')));
-    expect(spy.origins.last, originFor(UserMode.resident));
+    expect(spy.origins.last, originFor(UserMode.user));
     expect(find.textContaining('위치 권한이 없어'), findsOneWidget);
     await done(t);
   });

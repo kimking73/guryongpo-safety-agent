@@ -2,6 +2,8 @@
   "alerts": [
     {
       "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+      "is_example": true,
+      "data_label": "예시 경고 · 실제 발령 아님",
       "risk": {
         "hazard": "landslide",
         "level": "warning",
@@ -51,12 +53,14 @@
     },
     {
       "id": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+      "is_example": true,
+      "data_label": "예시 경고 · 실제 관측 아님",
       "risk": {
         "hazard": "flood",
         "level": "warning",
         "level_num": 3,
         "label": "침수 경보",
-        "reason": "구룡포환승센터 지표면 수위계 침수심 230mm (기준 150mm) · 포항 DT 4단계(경보)",
+        "reason": "예시 수심 230mm · 포항 DT 4단계(경보)를 가정한 목업이며 실제 관측값이 아닙니다.",
         "location": {
           "lat": 35.9903,
           "lng": 129.5558
@@ -65,8 +69,8 @@
         "rule_id": 23,
         "observed_at": "2026-10-05T14:27:00+09:00"
       },
-      "title": "[침수 경보] 구룡포환승센터 일대 침수",
-      "body": "현재 위치 주변 도로 침수심 23cm, 구룡포수협 맨홀도 경보 단계입니다. 맨홀·배수구를 피해 높은 곳으로 이동하세요. 선박 점검은 물이 빠진 뒤에 하세요.",
+      "title": "[예시 침수 경고] 구룡포환승센터 일대",
+      "body": "시연용 가상 수심 시나리오입니다. 실제 침수 관측이 아니며, 실제 상황은 공식 안내를 확인하세요.",
       "reason": {
         "trigger": "current_location",
         "place_label": null,
@@ -155,6 +159,36 @@
       "incident_id": "c0ffee00-1d2e-4f30-9a41-5b6c7d8e9f01",
       "my_status": null,
       "tts_text": "침수 경보입니다. 지금 계신 곳이 위험 영역 안입니다. 대피 완료, 대피 중, 도움 필요 중 하나를 눌러 주세요."
+    }
+  ],
+  "weather_bulletins": [
+    {
+      "id": "kma-warning-demo-20261005",
+      "kind": "warning",
+      "region_name": "경북 포항시 남구 구룡포읍",
+      "published_at": "2026-10-05T13:00:00+09:00",
+      "valid_from": "2026-10-05T13:00:00+09:00",
+      "valid_to": "2026-10-05T18:00:00+09:00",
+      "level": "호우주의보",
+      "content": "호우주의보 발표 상황을 가정한 예시입니다. 발표 기준 안내: 3시간 강우량 60mm 또는 12시간 강우량 110mm 이상 예상.",
+      "source": "기상청 기상특보 발표기준 (화면 검토용 시나리오)",
+      "source_url": "https://www.weather.go.kr/w/forecast/guide/standard.do",
+      "is_example": true,
+      "data_label": "예시 데이터 · 실제 기상특보 발표가 아닙니다"
+    },
+    {
+      "id": "kma-forecast-demo-20261005",
+      "kind": "forecast",
+      "region_name": "경북 포항시 남구 구룡포읍",
+      "published_at": "2026-10-05T12:00:00+09:00",
+      "valid_from": "2026-10-05T14:00:00+09:00",
+      "valid_to": "2026-10-05T18:00:00+09:00",
+      "level": null,
+      "content": "시간당 20~30mm 강한 비 가능성을 가정한 예보 예시입니다.",
+      "source": "기상청 동네예보 (화면 검토용 시나리오)",
+      "source_url": "https://www.weather.go.kr/",
+      "is_example": true,
+      "data_label": "예시 데이터 · 실제 기상예보가 아닙니다"
     }
   ],
   "mode": "emergency",

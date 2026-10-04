@@ -111,7 +111,9 @@ def poll_alerts(since: Optional[datetime] = None, device_id: Optional[uuid.UUID]
         since = since.replace(tzinfo=mocks.KST)
     rows = db.fetch_all(POLL_SQL, {"uid": user_id, "since": since or server_time - DEFAULT_LOOKBACK, "n": MAX_ALERTS})
     evac = evacuation_out(db.fetch_one(EVAC_SQL, {"uid": user_id}))
-    return {"alerts": [alert_out(r) for r in rows], "mode": "emergency" if evac else "normal", "evacuation": evac,
+    weather_bulletins = mocks.load("alerts.json").get("weather_bulletins", [])
+    return {"alerts": [alert_out(r) for r in rows], "weather_bulletins": weather_bulletins,
+            "mode": "emergency" if evac else "normal", "evacuation": evac,
             "server_time": mocks.iso(server_time), "next_poll_sec": POLL_EMERGENCY_SEC if evac else POLL_NORMAL_SEC}
 
 
