@@ -239,6 +239,11 @@ def run_alerts(run_id: int) -> int:
     return dispatch.run(run_id)
 
 
+def run_evac_followup(run_id: int) -> int:
+    from alerts import evacuation
+    return evacuation.run_followups(run_id)
+
+
 # ------------------------------------------------------------------ 목록
 EVERY_10 = {"minute": "*/10"}
 JOBS: list[Job] = [
@@ -262,6 +267,8 @@ JOBS: list[Job] = [
     Job("risk", "hazards", run_hazards_risk, {"minute": "2-59/10"}),
     # A5 선제 경고: 판정 2개가 끝난 뒤(매 10분 3분) 판정 결과·재난문자 → 대상 사용자 경고 + FCM
     Job("risk", "alerts", run_alerts, {"minute": "3-59/10"}),
+    # A12 대피 확인 후속: 미응답 2분 재알림·10분 이관, 대피 중 10분 재확인 — 2분 간격을 지키려고 1분마다
+    Job("risk", "evac_followup", run_evac_followup, {"minute": "*"}, stale_after_min=10),
 ]
 BY_KEY = {j.key: j for j in JOBS}
 

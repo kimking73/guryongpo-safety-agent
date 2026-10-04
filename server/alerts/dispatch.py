@@ -86,6 +86,8 @@ ON CONFLICT (assessment_id) WHERE closed_at IS NULL AND assessment_id IS NOT NUL
 RETURNING id
 """
 OPEN_INCIDENT_SQL = "SELECT id FROM care.incidents WHERE assessment_id = %(aid)s AND closed_at IS NULL"
+# 방재단이 종료한 상황 — 같은 판정이 계속돼도 다시 열지 않고 일반 경고로만 (A12)
+CLOSED_BY_STAFF_SQL = "SELECT 1 AS x FROM care.incidents WHERE assessment_id = %(aid)s AND closed_at IS NOT NULL LIMIT 1"
 
 STALE_INCIDENTS_SQL = """
 SELECT i.id, i.title, i.assessment_id FROM care.incidents i JOIN risk_assessments o ON o.id = i.assessment_id
@@ -173,7 +175,10 @@ def merge_groups(picked: dict) -> dict:
 
 
 # ------------------------------------------------------------------ 대피 상황 (care.incidents)
-def ensure_incident(a: dict) -> str:
+def ensure_incident(a: dict) -> Optional[str]:
+    """판정의 진행 중 대피 상황 id. 방재단이 이미 종료한 판정이면 None (다시 만들지 않음)"""
+    if db.fetch_one(CLOSED_BY_STAFF_SQL, {"aid": a["id"]}):
+        return None
     simulated = bool(_basis(a.get("basis")).get("simulated"))
     row = db.fetch_one(ENSURE_INCIDENT_SQL, {"aid": a["id"], "title": a.get("label") or _title(a),
                                              "source": "simulated" if simulated else "auto"})
@@ -245,6 +250,17 @@ def insert_alert(u: dict, event: dict, key: str, assessment_id, incident_id: Opt
     return alert_id
 
 
+def start_manual(incident_id: str, hazard: str, level: str, title: str, message: Optional[str]) -> int:
+    """방재단 수동 시작 (POST /admin/incidents) — 영역 안 등록 가구를 대상에 넣고, 영역 안 사용자에게 대피 확인 경고. 반환: 새 경고 수"""
+    db.execute(HOUSEHOLD_TARGETS_SQL, {"iid": incident_id})
+    event = {"kind": "evacuation", "hazard": hazard, "level": level, "reason": title, "notice": message}
+    new_ids = [aid for u in targets(AREA_OF_INCIDENT, {"iid": incident_id}, None)
+               if (aid := insert_alert(u, event, f"inc:{incident_id}", None, incident_id))]
+    push_alerts(new_ids)
+    log.info("수동 대피 상황 %s: 경고 %d건", incident_id, len(new_ids))
+    return len(new_ids)
+
+
 def push_alerts(ids: list[str]) -> dict:
     if not ids:
         return {}
@@ -300,6 +316,8 @@ def run(run_id: Optional[int] = None, user_id: Optional[str] = None) -> int:
             if a["id"] not in incidents:
                 incidents[a["id"]] = ensure_incident(a)
             iid = incidents[a["id"]]
+            if iid is None:                            # 방재단이 종료한 상황 → 일반 경고로
+                kind = "alert"
         event = {"kind": kind, "hazard": a["hazard"], "level": a["level"], "reason": _basis(a.get("basis")).get("reason"),
                  "also": also.get(k, [])}
         aid = insert_alert(u, event, f"ra:{a['id']}", a["id"], iid)
@@ -309,7 +327,8 @@ def run(run_id: Optional[int] = None, user_id: Optional[str] = None) -> int:
         for a in active:                               # 경보 이상이면 대상 사용자가 없어도 대피 상황·등록 가구는 만든다
             if policy.classify(a["hazard"], a["level"]) == "evacuation":
                 iid = incidents.get(a["id"]) or ensure_incident(a)
-                db.execute(HOUSEHOLD_TARGETS_SQL, {"iid": iid})
+                if iid:
+                    db.execute(HOUSEHOLD_TARGETS_SQL, {"iid": iid})
 
     # 재난문자 대피 상황 → 구룡포읍 안 사용자 전체
     for i in db.fetch_all(OPEN_MSG_INCIDENTS_SQL):

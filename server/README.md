@@ -15,6 +15,7 @@ server/
     layers.py          지도 레이어 (stations·landslide_zones 실데이터)
     mocks.py           목업 응답 (X-Mock: true)
     users.py           사용자 정보 (users·user_profiles·user_places·emergency_contacts·user_devices)
+    incidents.py       대피 상황 조회 (방재단 화면 · 내 대피 확인 카드)
     schemas.py         요청 본문 모델 (spec/openapi.yaml 과 같은 제약)
     routers/           system · user · dashboard · risk · alerts · admin · internal   (대화는 ai, 경로는 route 서비스)
   collector/           수집기 (collector 서비스 — 같은 이미지, `python -m collector`)
@@ -33,6 +34,7 @@ server/
     messages.py        경고 문구 템플릿 (B4 메시지 함수로 교체할 자리)
     dispatch.py        경고 생성 (수집기 risk.alerts · GET /alerts 즉시 판정)
     fcm.py             FCM 발송 (명세 FcmPayload)
+    evacuation.py      대피 확인 (A12) — 응답 기록 · 재알림 · 방재단 이관 (시간 규칙)
   spec/openapi.yaml    API 명세 v0.3 — api·ai·route 3개 서비스 규약 (https://editor.swagger.io 에 붙여넣으면 문서)
   mock/                목업 응답 JSON · mock/external = 원천 API 저장 원문 (replay·테스트용)
   docs/spec-v0.3.md    v0.3 데이터 구조·통신 규약 (역할·취약 가구·대피 확인·방재단, 2026-10-03 확정 사항)
@@ -116,6 +118,7 @@ DATABASE_URL=postgresql://guardian:guardian-local-only@localhost:5433/guardian .
 | `kma.typhoon` 태풍 | 3시간마다 10분 | typhoon_tracks (진행 중 태풍 없으면 건너뜀) | 7시간 |
 | `risk.flood` 침수·강우 판정 | 10분 (1·11·21…분, 수위 수집 1분 뒤) | risk_assessments | 30분 |
 | `risk.alerts` 선제 경고 (A5) | 10분 (3·13·23…분, 판정 직후) | user_alerts · care.incidents (+ FCM) | 30분 |
+| `risk.evac_followup` 대피 확인 재알림·이관 (A12) | 1분 (2분 간격 재알림을 지키려고) | care.incident_targets (+ FCM) — ingest_runs 하루 1,440행 | 10분 |
 
 - 스케줄러를 켜면 모든 작업을 **시작 직후 1회** 실행한다 (몇 초 간격으로 분산)
 - 실패해도 스케줄러는 멈추지 않고 `ingest_runs.status='failed'`, `error` 에 원인 (키는 `***` 로 가림)
@@ -138,8 +141,10 @@ DATABASE_URL=postgresql://guardian:guardian-local-only@localhost:5433/guardian .
 | `POST /user/role`, `POST /internal/invites` | **실데이터** — 초대 코드 발급·확인 → users.role (dev 모드는 `DEMO-RESPONDER` 등도 허용) |
 | `/user`, `/user/places*`, `/user/contacts*`, `/user/checklist/*`, `/device-token` | **실데이터** (A5) — 첫 실행 `POST /user` 로 등록 (다른 `/user*` 는 등록 전 404) |
 | `GET /alerts`, `POST /alerts/{id}/read` | **실데이터** (A5) — lat/lng 를 보내면 기기 위치 갱신 + 그 사용자 즉시 경고 판정 |
-| `POST /alerts/{id}/response` | 경고 확인은 실데이터, 상태 저장은 목업 (`X-Mock: true`, 실구현 A12) |
-| 그 외 (`/user/household`, `/dashboard`, `/admin/*` …) | 목업 (`X-Mock: true`) — 요청 검증·인증·권한은 실제와 동일. 방재단 화면은 `Bearer dev:responder-1` |
+| `POST /alerts/{id}/response` | **실데이터** (A12) — 대상 상태 + 이력(evacuation_responses), 도움 필요는 즉시 이관, 종료된 상황 409 |
+| `/admin/overview`, `/admin/incidents` (목록·수동 시작), `/{id}`, `/{id}/map`, `PATCH /{id}/targets/{tid}`, `/{id}/close` | **실데이터** (A12) — 생활지원사는 담당 가구만, 시작·종료는 방재단·관리자만 |
+| `GET /dashboard` | 목업 — `evacuation`(내 대피 확인 카드)만 실데이터 (A12) |
+| 그 외 (`/user/household`, `/admin/households*`, `/admin/.../visits` …) | 목업 (`X-Mock: true`) — 요청 검증·인증·권한은 실제와 동일. 방재단 화면은 `Bearer dev:responder-1` |
 
 대화(`/api/chat`)는 ai 서비스, 경로(`/api/route`)는 route 서비스 — v0.3 에서 이 서버의 목업 `/chat`·`/voice`·`/route` 는 삭제했다.
 
@@ -166,6 +171,20 @@ DATABASE_URL=postgresql://guardian:guardian-local-only@localhost:5433/guardian .
 - 대피 상황(care.incidents)은 판정 1건당 1개. 판정이 닫히면 같은 재난의 새 경보로 이어 붙이거나 종료 (FCM `incident_closed`). 재난문자 대피 상황은 6시간 뒤 종료. 영역 안 등록 가구도 대상(incident_targets)에 넣음
 - 문구는 템플릿 (`alerts/messages.py`): 판정 근거 + 행동요령 한 문장 + 사용자 사정(고령·보행 불편·어업/선박·관광객) — B4 메시지 함수가 나오면 `compose()` 만 교체
 - FCM: `FIREBASE_CREDENTIALS` 서비스 계정이 있으면 발송 (collector 컨테이너에도 `secrets/` 마운트). 없으면 발송만 건너뛰고 경고는 폴링으로 전달. 만료 토큰은 `fcm_token` 을 비움
+
+### 대피 확인 (A12)
+
+| 상태 | 서버가 하는 일 (`alerts/evacuation.py`, 1분마다) |
+|---|---|
+| 미응답 | 경고 후 **2분마다 재알림**(FCM `reminder`), **10분 뒤 방재단 이관**(FCM `escalation`, 이후 재알림 없음) |
+| 도움 필요 | 응답 즉시 이관 (이미 이관됐어도 다시) — 위치 필수 |
+| 대피 중 | **10분마다 재확인** "대피소에 도착하셨나요?" (이관 없음, 2026-10-04 결정) |
+| 대피 완료 | 끝 |
+
+- 응답 수단: 알림 버튼·대시보드·음성(B12)·방재단 대신 기록 모두 `care.evacuation_responses` 에 이력. 앱 사용자 본인 등록 가구도 같은 상황 대상이면 같은 상태로
+- 이관 받는 사람: 역할 responder·admin 기기 전체 + 그 가구 담당 생활지원사. 앱 없는 등록 가구는 알림 없이 방재단 목록에만
+- 방재단이 종료한 자동 상황은 같은 판정이 계속돼도 다시 열지 않음 (일반 경고로만). 수동 시작은 원(중심·반경) 또는 GeoJSON 영역 → 영역 안 사용자에게 대피 확인 경고 ("방재단 안내: …")
+- 장소를 등록·수정하면 그 사용자만 즉시 경고 판정 (진행 중 경보 영역 안 집 → 바로 대피 확인)
 
 ### 시연 시나리오
 
@@ -212,6 +231,7 @@ cd server/tools && python3 validate.py            # 명세(spec/openapi.yaml) �
 
 - A4 (재난 확장): `risk/engine.py` 에 호우(AWS 3·12시간 누적, 1·2번)·강풍·태풍·산사태·미세먼지·자외선 판정 추가, 시나리오 추가
 - A5 (경고) 완료: 남은 것 — 실제 기기로 FCM 수신 확인(서비스 계정 키 필요), B4 메시지 함수 연결(`alerts/messages.compose`)
+- A12 (대피 확인) 완료: 남은 것 — 재알림·이관 FCM 실기기 확인 (A9), B13 우선순위 점수(`incident_targets.priority_*`) 연결
 - A12·A13·A14 (대피 응답·취약 가구·방문): `routers/alerts.py`(response), `routers/admin.py`, `routers/user.py`(household) 를 care 스키마로 — 규약은 `docs/spec-v0.3.md`
 - A7 이후: 위험지역 고정 영역은 산사태 취약지역만 사용 (침수·해안 영역 레이어는 제거, 침수는 실시간 판정 영역 risk_areas). 새 정적 데이터는 `db/init/1x_*.sql` 로 추가 → loader 가 자동 포함 (스키마 추가분은 `01m_*.sql`, IF NOT EXISTS 로). route 서비스가 임시 GeoJSON 대신 hazard_zones·manholes 를 읽도록 B 와 합의
 - B: `/api/chat` 은 ai 서비스, `/api/route` 는 route 서비스가 실제 구현 (형식은 spec/openapi.yaml 의 ai·route 태그)

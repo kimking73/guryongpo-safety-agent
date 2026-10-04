@@ -60,21 +60,21 @@
   → 앱 사용자에게 user_alerts(response_required) + FCM kind=evacuation (버튼 3개)
 주민: 알림 버튼 / 대시보드 카드 / 음성(B12) → POST /alerts/{id}/response (via = button | dashboard | voice)
   · need_help → 즉시 방재단·담당 생활지원사에게 FCM kind=escalation
-  · evacuating → 10분 뒤 FCM kind=reminder
+  · evacuating → 10분마다 FCM kind=reminder
   · 응답 없음 → 2분마다 reminder, 10분 뒤 escalation
 방재단: GET /admin/incidents/{id} (10초 폴링) → 우선순위 순 목록
   → 스마트폰 없는 가구는 PATCH .../targets/{id} 로 대신 기록, 방문 후 POST .../visits
   → 종료 POST .../close → FCM kind=incident_closed
 ```
-- 시간 규칙 (2026-10-03 팀 결정): 미응답 2분 간격 재알림 · 10분 뒤 방재단 이관 · 대피 중 10분 뒤 재확인 — 근거 정리 대상 (프로젝트 문서 8번 4절)
+- 시간 규칙 (2026-10-03 팀 결정): 미응답 2분 간격 재알림 · 10분 뒤 방재단 이관 · 대피 중 10분마다 재확인 (반복은 2026-10-04 결정) — 근거 정리 대상 (프로젝트 문서 8번 4절)
 - 기본 정렬: 도움 필요 > 미응답 > 대피 중 > 대피 완료, 같은 상태면 사정(needs) 많은 순. B13 점수가 있으면 점수 순
 
 ## 5. 작업별 영향
 
 | 작업 | 쓰는 규약 |
 |---|---|
-| A5 선제 경고 (Day 11–13) | user_alerts(+response_required), `/alerts` 폴링, FCM alert·evacuation |
-| A12 대피 응답 (15–16) | incidents·incident_targets·evacuation_responses, `/alerts/{id}/response`, 재알림·이관 |
+| A5 선제 경고 (Day 11–13) **구현됨** | user_alerts(+response_required), `/alerts` 폴링, FCM alert·evacuation |
+| A12 대피 응답 (15–16) **구현됨** | incidents·incident_targets·evacuation_responses, `/alerts/{id}/response`, 재알림·이관, `/admin/incidents*`·`/admin/overview` |
 | A13 취약 가구·동의·권한 (17–18) | households·invite_codes·users.role, `/user/role`, `/user/household`, `/admin/households*`, `require_staff` |
 | A14 방문 기록 (19–20) | visit_logs, `/admin/incidents/{id}/targets/{tid}/visits` |
 | B11 해상 경로 (15–17) | ports, `/api/route/sea` (제안 — 확정 시 명세 수정) |
