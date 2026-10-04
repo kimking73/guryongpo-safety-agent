@@ -42,7 +42,10 @@ final customRouteFollowsUser = StateProvider<bool>((_) => true);
 
 /// 길찾기 경로를 경로 지도에 띄운다
 void startCustomRoute(WidgetRef ref,
-    {required LatLng origin, required bool followUser, required Facility destination, required RouteType routeType}) {
+    {required LatLng origin,
+    required bool followUser,
+    required Facility destination,
+    required RouteType routeType}) {
   ref.read(routeKind.notifier).state = routeType;
   ref.read(routeFacilitySnapshot.notifier).state = destination;
   ref.read(routeStartOrigin.notifier).state = origin;
@@ -59,6 +62,7 @@ void switchRouteType(WidgetRef ref, String facilityId, RouteType routeType) {
     startRouteToShelter(ref, facilityId, routeType: routeType);
   }
 }
+
 final alertCenterProvider = StateProvider<List<AlertItem>>((_) => const []);
 final alertFeedErrorProvider = StateProvider<String?>((_) => null);
 final alertFeedLoadedProvider = StateProvider<bool>((_) => false);
@@ -594,28 +598,47 @@ final appRouter = GoRouter(initialLocation: '/boot', routes: [
     GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
     GoRoute(
         path: '/typhoon',
-        builder: (_, s) => DemoSwitch(demo: TyphoonScreen(initialLocal: s.extra == 'local'), live: const LiveTyphoonScreen())),
-    GoRoute(path: '/route-search', builder: (_, __) => const CustomRouteScreen()),
-    GoRoute(path: '/support', builder: (_, __) => const DemoSwitch(demo: RecoveryScreen(), live: LiveRecoveryScreen())),
-    GoRoute(path: '/alerts-hub', builder: (_, __) => const DemoSwitch(demo: AlertHubScreen(), live: AlertsScreen())),
+        builder: (_, s) => DemoSwitch(
+            demo: TyphoonScreen(initialLocal: s.extra == 'local'),
+            live: const LiveTyphoonScreen())),
     GoRoute(
-        path: '/evacuation', builder: (_, __) => const DemoOnlyNotice(title: '대피 확인 시연', demo: EvacuationDemoRoute())),
+        path: '/route-search', builder: (_, __) => const CustomRouteScreen()),
+    GoRoute(
+        path: '/support',
+        builder: (_, __) => const DemoSwitch(
+            demo: RecoveryScreen(), live: LiveRecoveryScreen())),
+    GoRoute(
+        path: '/alerts-hub',
+        builder: (_, __) =>
+            const DemoSwitch(demo: AlertHubScreen(), live: AlertsScreen())),
+    GoRoute(
+        path: '/evacuation',
+        builder: (_, __) => const DemoOnlyNotice(
+            title: '대피 확인 시연', demo: EvacuationDemoRoute())),
     GoRoute(
         path: '/evacuation-voice',
-        builder: (_, __) => const DemoOnlyNotice(title: '음성 대피 확인 시연', demo: EvacuationVoiceDemoScreen())),
+        builder: (_, __) => const DemoOnlyNotice(
+            title: '음성 대피 확인 시연', demo: EvacuationVoiceDemoScreen())),
     GoRoute(
         path: '/accessibility',
         builder: (_, __) => const AccessibilitySettingsScreen()),
     GoRoute(
         path: '/household',
-        builder: (_, __) => const DemoSwitch(demo: HouseholdRegistrationScreen(), live: LiveHouseholdScreen())),
+        builder: (_, __) => const DemoSwitch(
+            demo: HouseholdRegistrationScreen(), live: LiveHouseholdScreen())),
     GoRoute(
         path: '/household/delegate',
-        builder: (_, __) => const DemoSwitch(demo: HouseholdRegistrationScreen(delegated: true), live: LiveResponderScreen())),
+        builder: (_, __) => const DemoSwitch(
+            demo: HouseholdRegistrationScreen(delegated: true),
+            live: LiveResponderScreen())),
     GoRoute(
         path: '/responder',
-        builder: (_, __) => const DemoSwitch(demo: ResponderDashboardScreen(), live: LiveResponderScreen())),
-    GoRoute(path: '/sea-route', builder: (_, __) => const DemoOnlyNotice(title: '해상 경로 데모', demo: SeaRouteDemoScreen())),
+        builder: (_, __) => const DemoSwitch(
+            demo: ResponderDashboardScreen(), live: LiveResponderScreen())),
+    GoRoute(
+        path: '/sea-route',
+        builder: (_, __) => const DemoOnlyNotice(
+            title: '해상 경로 데모', demo: SeaRouteDemoScreen())),
   ]),
   GoRoute(
       path: '/facility/:id',
@@ -657,8 +680,8 @@ class _BootScreenState extends ConsumerState<BootScreen> {
     setState(
         () => text = a.isMock ? 'Firebase 미설정: 목업 모드로 시작합니다.' : '로그인 확인 완료');
     await Future<void>.delayed(const Duration(milliseconds: 700));
-    // Show live emergency information before asking the user to complete profile setup.
-    if (mounted) context.go('/');
+    final setupComplete = await AccountService().hasCompletedSetup();
+    if (mounted) context.go(setupComplete ? '/' : '/location');
   }
 
   @override
@@ -778,11 +801,11 @@ class _ShellState extends ConsumerState<Shell> {
       ('태풍 정보', Icons.cyclone, '/typhoon'),
       ('선제 경고·알림', Icons.notifications_active_outlined, '/alerts-hub'),
       ('지원 및 복구', Icons.health_and_safety_outlined, '/support'),
-      ('프로필', Icons.person_outline, '/profile')
+      ('프로필', Icons.person_outline, '/profile'),
+      ('AI 채팅', Icons.chat_bubble_outline, '/ai'),
     ];
     final wide = MediaQuery.sizeOf(c).width >= 840;
-    final destinations =
-        wide ? [...nav, ('AI 채팅', Icons.chat_bubble_outline, '/ai')] : nav;
+    final destinations = nav;
     final here = GoRouterState.of(c).uri.path;
     final selected = destinations
         .indexWhere((x) => x.$3 == here)
@@ -795,12 +818,6 @@ class _ShellState extends ConsumerState<Shell> {
             ? null
             : AppBar(
                 title: const Text('구룡포 안전'),
-                actions: [
-                  IconButton(
-                      tooltip: 'AI 채팅',
-                      onPressed: () => c.go('/ai'),
-                      icon: const Icon(Icons.chat_bubble_outline))
-                ],
               ),
         body: wide
             ? Row(children: [
@@ -968,29 +985,61 @@ class Dashboard extends ConsumerWidget {
   @override
   Widget build(BuildContext c, WidgetRef ref) {
     final route = ref.watch(routeFacilityId);
-    // 시연 모드(또는 서버 없이 실행)면 가상 시나리오 상황판, 아니면 실측 상황판 (2026-10-05)
-    if (route == null) return const DemoSwitch(demo: DisasterDashboard(), live: LiveDashboard());
+    if (!ref.watch(showDemoProvider)) {
+      if (route == null) return const LiveDashboard();
+      final routeType = ref.watch(routeKind);
+      return ListView(padding: const EdgeInsets.all(16), children: [
+        Row(children: [
+          Expanded(
+              child: Text(routeType == RouteType.nearest ? '가까운 경로' : '안전 경로',
+                  style: Theme.of(c).textTheme.headlineSmall)),
+          TextButton.icon(
+              onPressed: () => ref.read(routeFacilityId.notifier).state = null,
+              icon: const Icon(Icons.dashboard_outlined),
+              label: const Text('재난 종합')),
+        ]),
+        Wrap(spacing: 8, runSpacing: 4, children: [
+          if (route != customRouteId) const OriginChip(),
+          ActionChip(
+              avatar: const Icon(Icons.alt_route, size: 18),
+              label: Text(route == customRouteId ? '길찾기 다시' : '길찾기 (주소로)'),
+              onPressed: () => c.push('/route-search')),
+        ]),
+        RouteMap(
+            key: ValueKey('route-$route-${routeType.name}'), facilityId: route),
+      ]);
+    }
+
+    final routeAsync = route == null ? null : ref.watch(routeProvider(route));
     final routeType = ref.watch(routeKind);
-    return ListView(padding: const EdgeInsets.all(16), children: [
-      Row(children: [
-        Expanded(
-            child: Text(routeType == RouteType.nearest ? '가까운 경로' : '안전 경로',
-                style: Theme.of(c).textTheme.headlineSmall)),
-        TextButton.icon(
-            onPressed: () => ref.read(routeFacilityId.notifier).state = null,
-            icon: const Icon(Icons.dashboard_outlined),
-            label: const Text('재난 종합')),
-      ]),
-      Wrap(spacing: 8, runSpacing: 4, children: [
-        if (route != customRouteId) const OriginChip(),
-        ActionChip(
-            avatar: const Icon(Icons.alt_route, size: 18),
-            label: Text(route == customRouteId ? '길찾기 다시' : '길찾기 (주소로)'),
-            onPressed: () => c.push('/route-search')),
-      ]),
-      RouteMap(
-          key: ValueKey('route-$route-${routeType.name}'), facilityId: route),
-    ]);
+    final facilities =
+        ref.watch(facilitiesProvider).valueOrNull ?? const <Facility>[];
+    final destination = route == null ? null : routeDestination(ref, route);
+    return DisasterDashboard(
+      routeActive: route != null,
+      facilities: facilities,
+      riskAreas: ref.watch(riskAreasProvider).valueOrNull ?? const <RiskArea>[],
+      currentLocation: ref.watch(userLocation).position,
+      selectedDestination: destination,
+      safetyRoute: routeAsync?.valueOrNull,
+      routeLoading: routeAsync?.isLoading ?? false,
+      routeError: routeAsync?.hasError == true ? '${routeAsync?.error}' : null,
+      routeType: routeType,
+      onChooseFacility: () => showModalBottomSheet<void>(
+        context: c,
+        showDragHandle: true,
+        builder: (_) => const ShelterPickerSheet(),
+      ),
+      onRouteTypeChanged: (type) {
+        if (destination != null) {
+          ref.read(routeKind.notifier).state = type;
+          ref.invalidate(routeProvider(destination.id));
+        }
+      },
+      onEndRoute: () => ref.read(routeFacilityId.notifier).state = null,
+      onRetryRoute:
+          route == null ? null : () => ref.invalidate(routeProvider(route)),
+    );
   }
   /*Widget build(BuildContext c, WidgetRef ref) => ref.watch(riskProvider).when(
       loading: () => const DashboardLoading(),
@@ -1414,8 +1463,13 @@ class DashboardInfo extends ConsumerWidget {
 }
 
 class MapCard extends ConsumerStatefulWidget {
-  const MapCard({super.key, required this.height});
+  const MapCard({
+    super.key,
+    required this.height,
+    this.showFloodControls = true,
+  });
   final double height;
+  final bool showFloodControls;
   @override
   ConsumerState<MapCard> createState() => _MapCardState();
 }
@@ -1491,7 +1545,9 @@ class _MapCardState extends ConsumerState<MapCard> {
 
   @override
   Widget build(BuildContext c) {
-    final active = ref.watch(floodLayer), time = ref.watch(floodTime);
+    final floodLayerEnabled = ref.watch(floodLayer);
+    final active = widget.showFloodControls && floodLayerEnabled;
+    final time = ref.watch(floodTime);
     final gridAsync = ref.watch(floodGridProvider);
     final grids = gridAsync.valueOrNull ??
         (AppConfig.isRemote ? const <FloodGrid>[] : demoFloodGrid(time));
@@ -1762,12 +1818,13 @@ class FacilitiesScreen extends StatelessWidget {
                     flex: 3,
                     child: Padding(
                         padding: EdgeInsets.all(16),
-                        child: MapCard(height: 480))),
+                        child: MapCard(height: 480, showFloodControls: false))),
                 SizedBox(width: 360, child: list)
               ])
             : Column(children: [
                 const Padding(
-                    padding: EdgeInsets.all(12), child: MapCard(height: 300)),
+                    padding: EdgeInsets.all(12),
+                    child: MapCard(height: 300, showFloodControls: false)),
                 Expanded(child: list)
               ]);
       });
@@ -1887,7 +1944,7 @@ class FacilityScreen extends ConsumerWidget {
                   : f.type == FacilityType.medical
                       ? '$label의료시설'
                       : '목적지')),
-          const MapCard(height: 240),
+          const MapCard(height: 240, showFloodControls: false),
           Card(
               child: Column(children: [
             ListTile(title: const Text('주소'), subtitle: Text(f.address)),
@@ -2005,21 +2062,22 @@ class AlertsScreen extends ConsumerWidget {
             )),
       // 가상 대피 확인 카드·시연 버튼은 시연 모드에서만 (실제 대피 확인은 위 서버 경고 카드)
       if (ref.watch(showDemoProvider)) ...[
-      EvacuationResponseCard(
-        alertId: prototypeEvacuationAlertId,
-        title: '구룡포 저지대 침수 대피 확인',
-        detail: '안전한 실내 또는 지정 대피소로 이동해 주세요.',
-        onVoice: () => c.push('/evacuation-voice'),
-        onReplayVoice: () => unawaited(DemoSpeech.instance.speak(
-            '대피 확인 경보입니다. 현재 상태를 말하거나 화면에서 선택해 주세요. 대피 완료, 대피 중, 도움 필요.')),
-        accessibleNavigation: MediaQuery.accessibleNavigationOf(c),
-        onResponse: (status) => _recordPrototypeEvacuationResponse(ref, status),
-      ),
-      OutlinedButton.icon(
-        onPressed: () => c.push('/evacuation'),
-        icon: const Icon(Icons.notifications_active_outlined),
-        label: const Text('3버튼 기기 알림 시연'),
-      ),
+        EvacuationResponseCard(
+          alertId: prototypeEvacuationAlertId,
+          title: '구룡포 저지대 침수 대피 확인',
+          detail: '안전한 실내 또는 지정 대피소로 이동해 주세요.',
+          onVoice: () => c.push('/evacuation-voice'),
+          onReplayVoice: () => unawaited(DemoSpeech.instance.speak(
+              '대피 확인 경보입니다. 현재 상태를 말하거나 화면에서 선택해 주세요. 대피 완료, 대피 중, 도움 필요.')),
+          accessibleNavigation: MediaQuery.accessibleNavigationOf(c),
+          onResponse: (status) =>
+              _recordPrototypeEvacuationResponse(ref, status),
+        ),
+        OutlinedButton.icon(
+          onPressed: () => c.push('/evacuation'),
+          icon: const Icon(Icons.notifications_active_outlined),
+          label: const Text('3버튼 기기 알림 시연'),
+        ),
       ],
       if ((!AppConfig.isRemote && s.isLoading) ||
           (AppConfig.isRemote && !feedLoaded && pollError == null))
@@ -2530,10 +2588,11 @@ class OptionalDetailsCard extends StatefulWidget {
 class _OptionalDetailsCardState extends State<OptionalDetailsCard> {
   final values = <String, String>{};
   final controller = TextEditingController();
-  String field = '자주 가는 장소';
-  final fields = [
-    '자주 가는 장소',
-    '보호 동반자',
+  String field = '자주 방문하는 장소';
+  String? selectedValue;
+  static const fields = [
+    '자주 방문하는 장소',
+    '보호가 필요한 동반자 여부',
     '보행 능력',
     '시각 지원',
     '청각 지원',
@@ -2541,6 +2600,109 @@ class _OptionalDetailsCardState extends State<OptionalDetailsCard> {
     '직업',
     '비상 연락처'
   ];
+  static const choices = <String, List<String>>{
+    '보호가 필요한 동반자 여부': ['예', '아니요'],
+    '보행 능력': ['보행 가능', '보행 불편', '보행 어려움'],
+    '시각 지원': ['필요 없음', '저시력', '전맹', '지원 필요'],
+    '청각 지원': ['필요 없음', '난청', '농·난청', '지원 필요'],
+    '혈액형': ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-', '모름'],
+    '직업': ['어업 종사자·뱃사람', '자영업자', '농업 종사자', '직장인', '학생', '기타'],
+  };
+  static const legacyFieldLabels = <String, String>{
+    '자주 가는 장소': '자주 방문하는 장소',
+    '보호 동반자': '보호가 필요한 동반자 여부',
+    '보행능력': '보행 능력',
+    '시각': '시각 지원',
+    '청각': '청각 지원',
+    '비상연락처': '비상 연락처',
+    'frequent_place': '자주 방문하는 장소',
+    'frequent_places': '자주 방문하는 장소',
+    'frequentplace': '자주 방문하는 장소',
+    'frequentplaces': '자주 방문하는 장소',
+    'has_dependents': '보호가 필요한 동반자 여부',
+    'hasdependents': '보호가 필요한 동반자 여부',
+    'dependents': '보호가 필요한 동반자 여부',
+    'protected_companion': '보호가 필요한 동반자 여부',
+    'has_protected_companion': '보호가 필요한 동반자 여부',
+    'needs_companion': '보호가 필요한 동반자 여부',
+    'walking_ability': '보행 능력',
+    'walkingability': '보행 능력',
+    'walking_impaired': '보행 능력',
+    'walkingimpaired': '보행 능력',
+    'mobility_limited': '보행 능력',
+    'vision': '시각 지원',
+    'vision_impaired': '시각 지원',
+    'visionimpaired': '시각 지원',
+    'vision_support': '시각 지원',
+    'visionsupport': '시각 지원',
+    'hearing': '청각 지원',
+    'hearing_impaired': '청각 지원',
+    'hearingimpaired': '청각 지원',
+    'hearing_support': '청각 지원',
+    'hearingsupport': '청각 지원',
+    'blood_type': '혈액형',
+    'bloodtype': '혈액형',
+    'occupation': '직업',
+    'job': '직업',
+    'emergency_contact': '비상 연락처',
+    'emergencycontact': '비상 연락처',
+  };
+
+  String? _optionalLabel(String key) {
+    if (fields.contains(key)) return key;
+    return legacyFieldLabels[key.trim().toLowerCase()];
+  }
+
+  String _koreanValue(String label, String value) {
+    final normalized = value.trim().toLowerCase().replaceAll('-', '_');
+    if (const {'true', 'yes', '1'}.contains(normalized)) {
+      return switch (label) {
+        '보호가 필요한 동반자 여부' => '예',
+        '보행 능력' => '보행 불편',
+        '시각 지원' || '청각 지원' => '지원 필요',
+        _ => '예',
+      };
+    }
+    if (const {'false', 'no', '0'}.contains(normalized)) {
+      return switch (label) {
+        '보호가 필요한 동반자 여부' => '아니요',
+        '보행 능력' => '보행 가능',
+        '시각 지원' || '청각 지원' => '필요 없음',
+        _ => '아니요',
+      };
+    }
+    return const <String, String>{
+          'not_needed': '필요 없음',
+          'none': '해당 없음',
+          'needed': '지원 필요',
+          'required': '지원 필요',
+          'walk': '도보',
+          'walking': '도보',
+          'car': '자동차',
+          'bicycle': '자전거',
+          'public_transit': '대중교통',
+          'wheelchair': '휠체어',
+          'limited': '보행 불편',
+          'mobility_limited': '보행 불편',
+          'unable': '보행 어려움',
+          'normal': '보행 가능',
+          'able': '보행 가능',
+          'blind': '전맹',
+          'low_vision': '저시력',
+          'visually_impaired': '시각 지원 필요',
+          'deaf': '농·난청',
+          'hard_of_hearing': '난청',
+          'hearing_impaired': '청각 지원 필요',
+          'fisher': '어업 종사자·뱃사람',
+          'merchant': '자영업자',
+          'farmer': '농업 종사자',
+          'office': '직장인',
+          'student': '학생',
+          'unknown': '미상',
+        }[normalized] ??
+        value;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -2549,7 +2711,17 @@ class _OptionalDetailsCardState extends State<OptionalDetailsCard> {
 
   Future<void> load() async {
     final v = await AccountService().optionalProfile();
-    if (mounted) setState(() => values.addAll(v));
+    if (!mounted) return;
+    setState(() {
+      for (final entry in v.entries) {
+        final label = _optionalLabel(entry.key);
+        if (label == null) {
+          values[entry.key] = entry.value;
+        } else {
+          values[label] = _koreanValue(label, entry.value);
+        }
+      }
+    });
   }
 
   /// 이 카드의 항목만 바꾸고 다른 화면이 저장한 값(집·직장·출발 위치·직업 …)은 그대로 둔다 (2026-10-05)
@@ -2558,8 +2730,13 @@ class _OptionalDetailsCardState extends State<OptionalDetailsCard> {
     for (final f in fields) {
       latest.remove(f);
     }
-    await AccountService().saveOptionalProfile({...latest, for (final f in fields) if (values[f] != null) f: values[f]!});
+    await AccountService().saveOptionalProfile({
+      ...latest,
+      for (final f in fields)
+        if (values[f] != null) f: values[f]!
+    });
   }
+
   @override
   Widget build(BuildContext c) => Card(
       child: Padding(
@@ -2574,41 +2751,71 @@ class _OptionalDetailsCardState extends State<OptionalDetailsCard> {
                 items: fields
                     .map((x) => DropdownMenuItem(value: x, child: Text(x)))
                     .toList(),
-                onChanged: (x) => setState(() => field = x!)),
+                onChanged: (x) => setState(() {
+                      field = x!;
+                      selectedValue = null;
+                      controller.clear();
+                    })),
             Row(children: [
               Expanded(
-                  child: TextField(
-                      controller: controller,
-                      decoration: const InputDecoration(labelText: '값 입력'))),
+                  child: choices.containsKey(field)
+                      ? DropdownButtonFormField<String>(
+                          value: selectedValue,
+                          isExpanded: true,
+                          decoration: InputDecoration(labelText: '$field 선택'),
+                          items: choices[field]!
+                              .map((x) =>
+                                  DropdownMenuItem(value: x, child: Text(x)))
+                              .toList(),
+                          onChanged: (x) => setState(() => selectedValue = x),
+                        )
+                      : TextField(
+                          controller: controller,
+                          decoration: InputDecoration(
+                              labelText:
+                                  field == '비상 연락처' ? '연락처 입력' : '장소 입력'))),
               IconButton(
                   icon: const Icon(Icons.add),
                   onPressed: () {
-                    if (controller.text.isNotEmpty) {
-                      setState(() => values[field] = controller.text);
+                    final value = choices.containsKey(field)
+                        ? selectedValue
+                        : controller.text.trim();
+                    if (value != null && value.isNotEmpty) {
+                      setState(() => values[field] = value);
                       save();
                       controller.clear();
+                      selectedValue = null;
                     }
                   })
             ]),
-            ...values.entries.map((e) => ListTile(
-                title: Text(e.key),
-                subtitle: Text(e.value),
-                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                  IconButton(
-                      icon: const Icon(Icons.edit),
-                      onPressed: () {
-                        setState(() {
-                          field = e.key;
-                          controller.text = e.value;
-                        });
-                      }),
-                  IconButton(
-                      icon: const Icon(Icons.delete_outline),
-                      onPressed: () {
-                        setState(() => values.remove(e.key));
-                        save();
-                      })
-                ])))
+            ...values.entries
+                .where((e) => fields.contains(e.key))
+                .map((e) => ListTile(
+                    title: Text(e.key),
+                    subtitle: Text(e.value),
+                    trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                      IconButton(
+                          icon: const Icon(Icons.edit),
+                          onPressed: () {
+                            setState(() {
+                              field = e.key;
+                              if (choices.containsKey(e.key)) {
+                                selectedValue =
+                                    choices[e.key]!.contains(e.value)
+                                        ? e.value
+                                        : null;
+                              } else {
+                                controller.text = e.value;
+                              }
+                            });
+                          }),
+                      IconButton(
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () {
+                            setState(() => values.remove(e.key));
+                            save();
+                          })
+                    ])))
           ])));
   @override
   void dispose() {
@@ -2653,7 +2860,7 @@ class _InitialSetupScreenState extends ConsumerState<InitialSetupScreen> {
                         hintText: '예: 경북 포항시 남구 구룡포읍 호미로 152',
                         border: OutlineInputBorder())),
                 const SizedBox(height: 6),
-                const Text('주소를 서버에서 좌표로 변환해 저장합니다.',
+                const Text('목업 모드에서는 주소와 구룡포 시연 좌표를 저장합니다.',
                     style: TextStyle(fontSize: 12)),
                 TextField(
                     controller: age,
@@ -2674,6 +2881,9 @@ class _InitialSetupScreenState extends ConsumerState<InitialSetupScreen> {
                 const SizedBox(height: 20),
                 FilledButton(
                     onPressed: age.text.isEmpty ||
+                            int.tryParse(age.text) == null ||
+                            int.parse(age.text) < 1 ||
+                            int.parse(age.text) > 120 ||
                             address.text.trim().isEmpty ||
                             resolving
                         ? null
@@ -2683,7 +2893,10 @@ class _InitialSetupScreenState extends ConsumerState<InitialSetupScreen> {
   Future<void> complete() async {
     setState(() => resolving = true);
     try {
-      final resolved = await GeocodingService().resolve(address.text);
+      final resolved = AppConfig.isRemote
+          ? await GeocodingService().resolve(address.text)
+          : GeocodedAddress(
+              address.text.trim(), const LatLng(35.961875, 129.5578125));
       final account = AccountService();
       await account.saveRequiredSetup(age: age.text, transport: transport);
       final optional = await account.optionalProfile();

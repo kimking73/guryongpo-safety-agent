@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:guryongpo_safety/dashboard_parts.dart';
+import 'package:guryongpo_safety/disaster_center.dart';
 import 'package:guryongpo_safety/main.dart';
 import 'package:guryongpo_safety/models/domain_models.dart';
 import 'package:guryongpo_safety/repositories/mock_repository.dart';
@@ -107,12 +108,12 @@ void main() {
 
   test('목업 AI가 대피소·의료시설 경로와 가까운/안전 전략을 연결한다', () async {
     final repo = MockSafetyRepository();
-    final shelter = await repo.ask(
-        '가까운 대피소까지 경로', UserMode.user, originFor(UserMode.user));
+    final shelter =
+        await repo.ask('가까운 대피소까지 경로', UserMode.user, originFor(UserMode.user));
     expect(shelter.destinationKind, 'shelter');
     expect(shelter.route?.routeType, RouteType.nearest);
-    final medical = await repo.ask(
-        '의료시설까지 안전 경로', UserMode.user, originFor(UserMode.user));
+    final medical =
+        await repo.ask('의료시설까지 안전 경로', UserMode.user, originFor(UserMode.user));
     expect(medical.destinationKind, 'medical');
     expect(medical.destinationName, contains('의료지원소'));
     expect(medical.route?.routeType, RouteType.safest);
@@ -130,9 +131,11 @@ void main() {
     addTearDown(() => FlutterError.onError = onError);
     SharedPreferences.setMockInitialValues({'profile_setup_complete': true});
     appRouter.go('/');
-    final container = ProviderContainer(overrides: [repo.overrideWithValue(RouteAnsweringRepo())]);
+    final container = ProviderContainer(
+        overrides: [repo.overrideWithValue(RouteAnsweringRepo())]);
     addTearDown(container.dispose);
-    await t.pumpWidget(UncontrolledProviderScope(container: container, child: const GuryongpoApp()));
+    await t.pumpWidget(UncontrolledProviderScope(
+        container: container, child: const GuryongpoApp()));
     for (var i = 0; i < 10; i++) {
       await t.pump(const Duration(milliseconds: 300));
     }
@@ -145,7 +148,11 @@ void main() {
     final chip = find.text('지금 침수 위험이 있어?');
     await t.ensureVisible(chip.first);
     await t.tap(chip.first);
-    expect(container.read(chatMessages).any((m) => m.mine && m.text == '지금 침수 위험이 있어?'), isTrue);
+    expect(
+        container
+            .read(chatMessages)
+            .any((m) => m.mine && m.text == '지금 침수 위험이 있어?'),
+        isTrue);
     for (var i = 0; i < 4; i++) {
       await t.pump(const Duration(milliseconds: 300));
     }
@@ -156,14 +163,30 @@ void main() {
     for (var i = 0; i < 6; i++) {
       await t.pump(const Duration(milliseconds: 300));
     }
-    expect(find.byType(RouteMap), findsOneWidget);
-    expect(find.textContaining('구룡포항 · 0.9km · 도보 12분'), findsOneWidget);
+    expect(find.byType(DisasterDashboard), findsOneWidget);
+    expect(find.byType(RouteMap), findsNothing);
+    expect(container.read(routeFacilityId), aiRouteId);
+    await t.scrollUntilVisible(
+      find.byTooltip('경로 안내 종료'),
+      400,
+      scrollable: find.descendant(
+        of: find.byType(DisasterDashboard),
+        matching: find.byType(Scrollable),
+      ),
+    );
+    expect(find.byTooltip('경로 안내 종료'), findsOneWidget);
     expect(find.text('가까운 경로'), findsWidgets);
-    await t.tap(find.text('재난 종합'));
+    await t.tap(find.byTooltip('경로 안내 종료'));
     for (var i = 0; i < 4; i++) {
       await t.pump(const Duration(milliseconds: 100));
     }
-    expect(container.read(chatMessages).any((m) => m.mine && m.text == '지금 침수 위험이 있어?'), isTrue);
+    expect(find.byType(DisasterDashboard), findsOneWidget);
+    expect(find.text('대피·의료시설'), findsOneWidget);
+    expect(
+        container
+            .read(chatMessages)
+            .any((m) => m.mine && m.text == '지금 침수 위험이 있어?'),
+        isTrue);
     appRouter.go('/ai');
     await t.pump(const Duration(milliseconds: 300));
     await t.pumpWidget(const SizedBox());
@@ -227,7 +250,9 @@ void main() {
       await t.pump(const Duration(milliseconds: 300));
     }
     expect(errors.where((e) => e.contains('cameraConstraint')), isEmpty);
-    expect(find.byType(RouteMap), findsOneWidget);
+    expect(find.byType(DisasterDashboard), findsOneWidget);
+    expect(find.byType(RouteMap), findsNothing);
+    expect(find.textContaining('경로 · 구룡포'), findsOneWidget);
     await t.pumpWidget(const SizedBox());
     await t.pump(const Duration(seconds: 1));
   });

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
 import '../models/domain_models.dart';
+import 'app_config.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'account_sync.dart';
 
@@ -59,8 +60,22 @@ class AccountService {
   Future<bool> hasCompletedSetup() async => (await SharedPreferences.getInstance()).getBool('profile_setup_complete') ?? false;
   Future<Map<String, String>> optionalProfile() async {
     final raw = (await SharedPreferences.getInstance()).getString('optional_profile');
-    if (raw == null) return {};
-    return (jsonDecode(raw) as Map).map((key, value) => MapEntry('$key', '$value'));
+    final saved = raw == null
+        ? <String, String>{}
+        : (jsonDecode(raw) as Map)
+            .map((key, value) => MapEntry('$key', '$value'));
+    if (AppConfig.isRemote) return saved;
+    return {
+      'homeName': '집',
+      'homeAddress': '구룡포읍 남쪽 시연 지점 (가상)',
+      'homeLat': '35.961875',
+      'homeLon': '129.5578125',
+      'workName': '직장',
+      'workAddress': '구룡포항 시연 지점 (가상)',
+      'workLat': '35.954375',
+      'workLon': '129.5609375',
+      ...saved,
+    };
   }
   Future<void> saveOptionalProfile(Map<String, String> values) async {
     await (await SharedPreferences.getInstance()).setString('optional_profile', jsonEncode(values));
