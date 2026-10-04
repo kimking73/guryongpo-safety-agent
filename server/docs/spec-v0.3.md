@@ -75,7 +75,7 @@
 |---|---|
 | A5 선제 경고 (Day 11–13) **구현됨** | user_alerts(+response_required), `/alerts` 폴링, FCM alert·evacuation |
 | A12 대피 응답 (15–16) **구현됨** | incidents·incident_targets·evacuation_responses, `/alerts/{id}/response`, 재알림·이관, `/admin/incidents*`·`/admin/overview` |
-| A13 취약 가구·동의·권한 (17–18) | households·invite_codes·users.role, `/user/role`, `/user/household`, `/admin/households*`, `require_staff` |
+| A13 취약 가구·동의·권한 (17–18) **구현됨** | households·invite_codes·users.role, `/user/role`, `/user/household`, `/admin/households*`, `require_staff` |
 | A14 방문 기록 (19–20) | visit_logs, `/admin/incidents/{id}/targets/{tid}/visits` |
 | B11 해상 경로 (15–17) | ports, `/api/route/sea` (제안 — 확정 시 명세 수정) |
 | B12 음성 대피 확인 (17–18) | 분류 결과 3종 → 앱이 `/alerts/{id}/response` (via=voice, transcript) |
@@ -94,7 +94,7 @@
 4. **음성 API**: B5 에서 형식 확정 후 명세에 추가
 5. **시간 규칙 근거**: 재알림 2분 간격 · 이관 10분 · 재확인 10분
 6. **항구 데이터 출처** (B11)
-7. `user_profiles` 의 건강 관련 항목(medical_note·blood_type)도 AI 계정이 읽을 수 있음 — care 로 옮길지 결정
+7. ~~`user_profiles` 의 건강 관련 항목(medical_note·blood_type)도 AI 계정이 읽을 수 있음~~ → **care.user_health 로 이동** (2026-10-04 결정, `01m_v0_4_households.sql`). 동의서 버전 `households.consent_version` 추가
 
 ## 7. B·C 검토 체크리스트
 

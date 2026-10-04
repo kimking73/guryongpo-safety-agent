@@ -1,9 +1,9 @@
-"""방재단·생활지원사 — 대피 현황 (A12 실데이터) · 취약 가구 (목업, A13) · 방문 기록 (목업, A14) · 우선순위 B13
+"""방재단·생활지원사 — 대피 현황 (A12) · 취약 가구 (A13) — 실데이터 · 방문 기록 (목업, A14) · 우선순위 B13
 
 권한: 역할 responder·caregiver·admin 만 (auth.require_staff, 아니면 403 FORBIDDEN).
   caregiver 는 담당 가구(households.caregiver_user_id) 대상만 보고, 대피 상황 시작·종료는 못 한다.
 dev 모드 시험: 'Authorization: Bearer dev:responder-1' (uid 앞부분이 역할), 'dev:test-uid' 는 resident → 403.
-목업 데이터(가구·방문): server/mock/admin.*.json
+목업 데이터(방문): server/mock/admin.visit.json
 """
 import json
 import uuid
@@ -12,7 +12,7 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, Query, Response
 from fastapi.responses import JSONResponse
 
-from .. import db, incidents, layers, mocks, users
+from .. import db, households, incidents, layers, mocks, users
 from ..auth import AuthUser, StaffUser, require_staff
 from ..errors import ApiError
 from ..schemas import HouseholdInput, HouseholdPatch, IncidentCircle, IncidentInput, TargetPatch, VisitInput
@@ -170,60 +170,50 @@ def close_incident(incident_id: uuid.UUID, staff: StaffUser = Depends(require_st
     return incidents.incident_out(incidents.get_incident(iid))
 
 
-# ------------------------------------------------------------------ 취약 가구
+# ------------------------------------------------------------------ 취약 가구 (A13)
 @router.get("/households", summary="취약 가구 목록")
 def list_households(q: Optional[str] = None, needs: Optional[str] = None, bbox: Optional[str] = Query(None),
                     staff: StaffUser = Depends(require_staff)):
-    items = mocks.load("admin.households.json")
-    if q:
-        items = [h for h in items if q in h["label"] or q in (h.get("address") or "")]
-    if needs:
-        want = {x.strip() for x in needs.split(",") if x.strip()}
-        items = [h for h in items if want <= set(h["needs"])]
-    if bbox:
-        a, b, c, e = layers.parse_bbox(bbox)
-        items = [h for h in items if a <= h["location"]["lng"] <= c and b <= h["location"]["lat"] <= e]
-    return mocks.respond(items)
+    want = [x.strip() for x in needs.split(",") if x.strip()] if needs else None
+    return households.list_households(_caregiver(staff, _me(staff)), q=q, needs=want,
+                                      bbox=layers.parse_bbox(bbox) if bbox else None)
 
 
 @router.post("/households", status_code=201, summary="취약 가구 대리 등록")
 def create_household(body: HouseholdInput, staff: StaffUser = Depends(require_staff)):
+    me = _me(staff)
     data = body.model_dump()
-    source = "caregiver" if staff.role == "caregiver" else "responder"
-    h = {"id": str(uuid.uuid4()), "label": data["label"], "address": data["address"], "location": data["location"],
-         "phone": data["phone"], "members": data["members"], "needs": data["needs"], "has_app": False,
-         "caregiver": None, "source": source,
-         "consent": {"at": mocks.now_iso(), "method": data["consent_method"], "by": data["consent_by"]},
-         "landslide_zone": None, "note": data["note"], "updated_at": mocks.now_iso()}
-    return mocks.respond(h, 201)
-
-
-def _household(household_id: uuid.UUID) -> dict:
-    h = next((x for x in mocks.load("admin.households.json") if x["id"] == str(household_id)), None)
-    if h is None:
-        raise ApiError("NOT_FOUND")
-    return h
+    if staff.role == "caregiver":
+        caregiver = me                                  # 생활지원사가 등록하면 본인이 담당
+    else:
+        caregiver = str(data["caregiver_user_id"]) if data.get("caregiver_user_id") else None
+        households.check_caregiver(caregiver)
+    hid = households.create(data, "caregiver" if staff.role == "caregiver" else "responder", caregiver, me)
+    return JSONResponse(households.get(hid), status_code=201)
 
 
 @router.get("/households/{household_id}", summary="가구 상세 + 최근 방문 기록")
 def get_household(household_id: uuid.UUID, staff: StaffUser = Depends(require_staff)):
-    h = _household(household_id)
-    v = mocks.load("admin.visit.json")
-    h["recent_visits"] = [v] if v["household_id"] == h["id"] else []
-    return mocks.respond(h)
+    h = households.get(str(household_id), _caregiver(staff, _me(staff)))
+    return {**h, "recent_visits": households.recent_visits(h["id"])}
 
 
 @router.patch("/households/{household_id}", summary="가구 정보 수정")
 def update_household(household_id: uuid.UUID, body: HouseholdPatch, staff: StaffUser = Depends(require_staff)):
-    h = _household(household_id)
+    hid = str(household_id)
+    households.get(hid, _caregiver(staff, _me(staff)))      # 없거나 남의 담당 가구면 404
     data = body.model_dump(exclude_unset=True)
-    data.pop("caregiver_user_id", None)
-    data.pop("active", None)
-    h.update(data)
-    h["updated_at"] = mocks.now_iso()
-    return mocks.respond(h)
+    if "caregiver_user_id" in data:
+        if staff.role == "caregiver":
+            raise ApiError("FORBIDDEN", "담당자 변경은 방재단·관리자만 할 수 있습니다.", detail={"role": staff.role})
+        households.check_caregiver(str(data["caregiver_user_id"]) if data["caregiver_user_id"] else None)
+    households.update(hid, data)
+    return households.get(hid)
 
 
 @router.delete("/households/{household_id}", status_code=204, summary="가구 삭제")
 def delete_household(household_id: uuid.UUID, staff: StaffUser = Depends(require_staff)):
-    return Response(status_code=204, headers={"X-Mock": "true"})
+    hid = str(household_id)
+    households.get(hid, _caregiver(staff, _me(staff)))
+    households.delete(hid)
+    return Response(status_code=204)

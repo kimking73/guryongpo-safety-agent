@@ -140,8 +140,6 @@ def test_internal_ingest(client, fake_db, monkeypatch):
 
 
 # ------------------------------------------------------------------ v0.3
-STAFF = {"Authorization": "Bearer dev:responder-1"}
-CAREGIVER = {"Authorization": "Bearer dev:caregiver-1"}
 
 
 def test_chat_route_voice_removed_from_api(client):
@@ -216,24 +214,3 @@ def test_admin_requires_staff_role(client, fake_db):
     fake_db.rows.clear()
     fake_db.fail = True                                                # DB 장애 → 권한 없음 (안전 쪽)
     assert client.get("/api/v1/admin/overview", headers=AUTH).status_code == 403
-
-
-def test_admin_households(client):
-    hs = client.get("/api/v1/admin/households", headers=STAFF, params={"needs": "living_alone"}).json()
-    assert hs and all("living_alone" in h["needs"] for h in hs)
-    body = {"label": "삼정리 이OO 댁", "location": {"lat": 35.98, "lng": 129.55}, "needs": ["elderly", "hearing"],
-            "consent_method": "written", "consent_by": "본인"}
-    r = client.post("/api/v1/admin/households", headers=CAREGIVER, json=body)
-    assert r.status_code == 201 and r.json()["source"] == "caregiver"
-    assert client.post("/api/v1/admin/households", headers=STAFF,
-                       json={**body, "needs": ["unknown"]}).status_code == 422
-    assert client.post("/api/v1/admin/households", headers=STAFF,
-                       json={k: v for k, v in body.items() if k != "consent_by"}).status_code == 422
-
-
-def test_my_household_requires_consent(client):
-    body = {"location": {"lat": 35.98, "lng": 129.55}, "members": 1, "needs": ["elderly"]}
-    assert client.put("/api/v1/user/household", headers=AUTH, json=body).status_code == 422
-    assert client.put("/api/v1/user/household", headers=AUTH, json={**body, "consent": False}).status_code == 422
-    r = client.put("/api/v1/user/household", headers=AUTH, json={**body, "consent": True})
-    assert r.status_code == 200 and r.json()["consent"]["method"] == "app"

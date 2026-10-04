@@ -18,9 +18,11 @@
   "consent": {
     "at": "2026-10-01T09:20:00+09:00",
     "method": "app",
-    "by": "본인"
+    "by": "본인",
+    "version": "v1"
   },
   "landslide_zone": "산사태위험지도 1등급 비탈 40m",
   "note": null,
-  "updated_at": "2026-10-01T09:20:00+09:00"
+  "updated_at": "2026-10-01T09:20:00+09:00",
+  "active": true
 }

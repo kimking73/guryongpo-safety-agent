@@ -212,7 +212,7 @@ def _user_rows(fake_db, created=True):
     fake_db.rows["SELECT id FROM users WHERE firebase_uid"] = [{"id": UID}]
     fake_db.rows["FROM users u LEFT JOIN user_profiles"] = [USER_ROW]
     fake_db.rows["FROM user_places pl"] = [{"id": "7b1f6a3e-2c4d-4e8f-9a01-3b5c7d9e1f20", "place_type": "home",
-                                            "label": "우리집", "address": None, "notify": True, "lat": 35.9862,
+                                            "label": "우리집", "address": "경북 포항시 남구 구룡포읍 호미로 152", "notify": True, "lat": 35.9862,
                                             "lng": 129.5489, "in_hazard_zones": ["landslide"]}]
 
 
@@ -223,7 +223,7 @@ def test_user_requires_registration(client):
 
 def test_user_register_and_get(client, fake_db):
     _user_rows(fake_db)
-    r = client.post("/api/v1/user", headers=AUTH, json={"user_type": "resident"})
+    r = client.post("/api/v1/user", headers=AUTH, json={"birth_year": 1958})
     assert r.status_code == 201 and "X-Mock" not in r.headers
     assert any("INSERT INTO user_profiles" in sql for sql, _ in fake_db.executed)
     d = client.get("/api/v1/user", headers=AUTH).json()
@@ -240,9 +240,13 @@ def test_place_add(client, fake_db, monkeypatch):
     fake_db.rows["INSERT INTO user_places"] = [{"id": "7b1f6a3e-2c4d-4e8f-9a01-3b5c7d9e1f20"}]
     ran = []
     from alerts import dispatch
+    from app.routers import user
     monkeypatch.setattr(dispatch, "run", lambda run_id=None, user_id=None: ran.append(user_id) or 0)
+    # 장소는 도로명 주소로 받고 서버가 좌표로 바꾼다 (카카오, 2026-10-04 C 변경) — 테스트는 변환을 흉내
+    monkeypatch.setattr(user, "geocode_road_address",
+                        lambda a: {"address": "경북 포항시 남구 구룡포읍 호미로 152", "location": {"lat": 35.9862, "lng": 129.5489}})
     r = client.post("/api/v1/user/places", headers=AUTH,
-                    json={"place_type": "home", "label": "우리집", "location": {"lat": 35.9862, "lng": 129.5489}})
+                    json={"place_type": "home", "label": "우리집", "address": "구룡포읍 호미로 152"})
     assert r.status_code == 201 and r.json()["label"] == "우리집"
     assert ran == [UID]                                                # 등록한 장소로 즉시 경고 판정
 
@@ -299,3 +303,76 @@ def test_alerts_poll_normal(client, fake_db):
 def test_alert_read(client, fake_db):
     assert client.post(f"/api/v1/alerts/{ALERT}/read", headers=AUTH).status_code == 204     # FakeDB execute = 1
     # 대피 확인 응답(/response)은 tests/test_evacuation.py
+
+
+# ------------------------------------------------------------------ 장소: 주소·좌표 둘 다 받음 (2026-10-04)
+def _place_rows(fake_db, address="경북 포항시 남구 구룡포읍 호미로 152"):
+    _user_rows(fake_db)
+    fake_db.rows["INSERT INTO user_places"] = [{"id": "7b1f6a3e-2c4d-4e8f-9a01-3b5c7d9e1f20"}]
+    fake_db.rows["FROM user_places pl"] = [{"id": "7b1f6a3e-2c4d-4e8f-9a01-3b5c7d9e1f20", "place_type": "home",
+                                            "label": "우리집", "address": address, "notify": True,
+                                            "lat": 35.9862, "lng": 129.5489, "in_hazard_zones": []}]
+
+
+def _spy_geocoder(monkeypatch):
+    from app.routers import user
+    calls = []
+    monkeypatch.setattr(user, "geocode_road_address", lambda a: calls.append(a) or
+                        {"address": "경북 포항시 남구 구룡포읍 호미로 152", "location": {"lat": 35.9862, "lng": 129.5489}})
+    return calls
+
+
+def _insert_params(fake_db, monkeypatch):
+    from app import db
+    seen = []
+    orig = db.fetch_one
+    monkeypatch.setattr(db, "fetch_one", lambda sql, p=None: seen.append((sql, p)) or orig(sql, p))
+    return seen
+
+
+def test_place_with_location_skips_geocoder(client, fake_db, monkeypatch):
+    """좌표가 있으면 카카오를 부르지 않는다 — 카카오 키 없이도 등록 (지번 주소·항구·GPS)"""
+    _place_rows(fake_db, address=None)
+    calls, seen = _spy_geocoder(monkeypatch), _insert_params(fake_db, monkeypatch)
+    r = client.post("/api/v1/user/places", headers=AUTH,
+                    json={"place_type": "work", "label": "구룡포항 3부두", "location": {"lat": 35.9893, "lng": 129.5571}})
+    assert r.status_code == 201 and calls == []
+    assert_spec(r.json(), "/user/places", "post", "201")
+    ins = next(p for sql, p in seen if "INSERT INTO user_places" in sql)
+    assert (ins["lat"], ins["lng"], ins["address"]) == (35.9893, 129.5571, None)
+    # 주소 + 좌표 → 좌표 그대로, 주소는 받은 글자 그대로
+    client.post("/api/v1/user/places", headers=AUTH, json={"place_type": "home", "label": "집", "address": "구룡포읍 병포리 123",
+                                                           "location": {"lat": 35.98, "lng": 129.55}})
+    ins = [p for sql, p in seen if "INSERT INTO user_places" in sql][-1]
+    assert calls == [] and (ins["address"], ins["lat"]) == ("구룡포읍 병포리 123", 35.98)
+
+
+def test_place_address_only_uses_geocoder(client, fake_db, monkeypatch):
+    _place_rows(fake_db)
+    calls = _spy_geocoder(monkeypatch)
+    assert client.post("/api/v1/user/places", headers=AUTH,
+                       json={"place_type": "home", "label": "집", "address": "구룡포읍 호미로 152"}).status_code == 201
+    assert calls == ["구룡포읍 호미로 152"]
+    assert client.post("/api/v1/user/places", headers=AUTH,
+                       json={"place_type": "home", "label": "집"}).status_code == 422             # 둘 다 없음
+
+
+def test_place_patch_location_keeps_address(client, fake_db, monkeypatch):
+    _place_rows(fake_db)
+    calls = _spy_geocoder(monkeypatch)
+    pid = "7b1f6a3e-2c4d-4e8f-9a01-3b5c7d9e1f20"
+    client.patch(f"/api/v1/user/places/{pid}", headers=AUTH, json={"location": {"lat": 35.97, "lng": 129.56}})
+    upd = next(p for sql, p in fake_db.executed if "UPDATE user_places SET" in sql)
+    assert calls == [] and upd["lat"] == 35.97 and "address" not in upd
+
+
+def test_lodging_counts_as_home_for_onboarding(client, fake_db):
+    """숙소만 등록한 관광객은 집 등록을 요구하지 않는다"""
+    _user_rows(fake_db)
+    fake_db.rows["FROM users u LEFT JOIN user_profiles"] = [{**USER_ROW, "user_type": None}]
+    fake_db.rows["FROM user_places pl"] = [{"id": "7b1f6a3e-2c4d-4e8f-9a01-3b5c7d9e1f20", "place_type": "lodging",
+                                            "label": "구룡포 게스트하우스", "address": None, "notify": True,
+                                            "lat": 35.99, "lng": 129.55, "in_hazard_zones": []}]
+    assert client.get("/api/v1/user", headers=AUTH).json()["onboarding"] == {"completed": True, "missing": []}
+    fake_db.rows["FROM user_places pl"] = []
+    assert client.get("/api/v1/user", headers=AUTH).json()["onboarding"]["missing"] == ["home_place"]

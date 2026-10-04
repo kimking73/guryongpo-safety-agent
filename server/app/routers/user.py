@@ -1,8 +1,8 @@
 """사용자 · 장소 · 비상연락처 · 체크리스트 · 기기 토큰 · 역할 · 본인 가구 등록 — 인증 필요
 
 실데이터: /user·장소·연락처·체크리스트·기기 토큰 (A5, users·user_profiles·user_places·emergency_contacts·user_devices),
-          /user/role (초대 코드 확인 → users.role). dev 모드에서는 DEMO-* 코드도 허용 (DB 없이 화면 개발용)
-목업: /user/household (실구현 A13)"""
+          /user/role (초대 코드 확인 → users.role). dev 모드에서는 DEMO-* 코드도 허용 (DB 없이 화면 개발용),
+          /user/household (A13, care.households — 앱 동의 필수, 철회 = 삭제)"""
 import logging
 import uuid
 from typing import Optional
@@ -10,7 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Response
 from fastapi.responses import JSONResponse
 
-from .. import db, mocks, users
+from .. import db, households, mocks, users
 from ..auth import AuthUser, current_user
 from ..config import settings
 from ..errors import ApiError
@@ -68,12 +68,17 @@ def geocode_address(body: AddressGeocodeInput, u: AuthUser = Depends(current_use
     return geocode_road_address(body.address)
 
 
+def _resolve(address: Optional[str], location: Optional[dict]) -> dict:
+    """좌표가 오면 그대로(주소는 받은 글자 그대로 저장), 주소만 오면 카카오로 도로명 주소·좌표 변환"""
+    if location:
+        return {"address": address, "location": location}
+    return geocode_road_address(address)
+
+
 @router.post("/user/places", status_code=201, summary="장소 추가")
 def add_place(body: PlaceInput, u: AuthUser = Depends(current_user)):
     values = body.model_dump()
-    resolved = geocode_road_address(body.address)
-    values["address"] = resolved["address"]
-    values["location"] = resolved["location"]
+    values.update(_resolve(body.address, values.get("location")))
 
     user_id = users.require_user_id(u)
     row = db.fetch_one("""
@@ -89,10 +94,10 @@ def add_place(body: PlaceInput, u: AuthUser = Depends(current_user)):
 def update_place(place_id: uuid.UUID, body: PlacePatch, u: AuthUser = Depends(current_user)):
     user_id = users.require_user_id(u)
     data = body.model_dump(exclude_unset=True)
-    if data.get("address"):
-        resolved = geocode_road_address(data["address"])
-        data["address"] = resolved["address"]
-        data["location"] = resolved["location"]
+    if data.get("location") or data.get("address"):
+        data.update(_resolve(data.get("address"), data.get("location")))
+        if "address" not in body.model_fields_set:
+            data.pop("address")                  # 좌표만 고치면 저장된 주소는 그대로
     sets, params = [], {"uid": user_id, "pid": str(place_id)}
     for k in ("place_type", "label", "address", "notify"):
         if k in data and (data[k] is not None or k == "address"):
@@ -215,22 +220,30 @@ def drop_role(u: AuthUser = Depends(current_user)):
     return Response(status_code=204)
 
 
-# ------------------------------------------------------------------ 본인 가구 등록 (목업, 실구현 A13)
+# ------------------------------------------------------------------ 본인 가구 등록 (A13)
 @router.get("/user/household", summary="내 취약 가구 정보")
 def get_my_household(u: AuthUser = Depends(current_user)):
-    return mocks.mock("household.json")
+    h = households.get_mine(users.require_user_id(u))
+    if h is None:
+        raise ApiError("NOT_FOUND", "등록한 취약 가구 정보가 없습니다.", detail="household_not_registered")
+    return h
 
 
 @router.put("/user/household", summary="취약 가구로 본인 등록·수정 (동의 필수)")
 def put_my_household(body: SelfHouseholdInput, u: AuthUser = Depends(current_user)):
-    d = mocks.load("household.json")
-    data = body.model_dump(exclude={"consent"}, exclude_unset=True)
-    d.update({k: v for k, v in data.items() if v is not None})
-    d["consent"] = {"at": mocks.now_iso(), "method": "app", "by": "본인"}
-    d["updated_at"] = mocks.now_iso()
-    return mocks.respond(d)
+    # consent=true 가 아니면 SelfHouseholdInput 검증에서 422 — 동의 없이는 아무것도 저장하지 않는다
+    user_id = users.require_user_id(u)
+    me = users.load_user(user_id)
+    nick = me["profile"].get("nickname")
+    households.upsert_self(user_id, body.model_dump(exclude={"consent"}), f"{nick} 댁" if nick else "본인 등록 가구")
+    return households.get_mine(user_id)
 
 
 @router.delete("/user/household", status_code=204, summary="동의 철회 — 가구 정보 삭제")
 def delete_my_household(u: AuthUser = Depends(current_user)):
-    return Response(status_code=204, headers={"X-Mock": "true"})
+    user_id = users.require_user_id(u)
+    # 본인 등록 가구만 삭제. 방재단이 대리 등록한 가구에 연결만 된 경우는 연결을 끊는다 (서면 동의는 방재단이 철회 처리)
+    db.execute("DELETE FROM care.households WHERE linked_user_id = %(uid)s AND source = 'self'", {"uid": user_id})
+    db.execute("UPDATE care.households SET linked_user_id = NULL, updated_at = now() WHERE linked_user_id = %(uid)s",
+               {"uid": user_id})
+    return Response(status_code=204)

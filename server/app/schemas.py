@@ -7,7 +7,7 @@ from __future__ import annotations
 from typing import Literal, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class _In(BaseModel):
@@ -45,16 +45,26 @@ class AlertPrefs(_In):
 
 
 class PlaceInput(_In):
+    """도로명 주소·좌표 중 하나 이상 (2026-10-04). 좌표가 있으면 그대로 쓰고, 주소만 오면 서버가 카카오로 좌표 변환
+    — 지번만 있는 집·항구, 지도에서 찍기·GPS 로 집 등록, 카카오 장애에도 등록 가능"""
     place_type: Literal["home", "work", "frequent", "lodging"]
     label: str = Field(min_length=1)
-    address: str = Field(min_length=1, max_length=300)
+    address: Optional[str] = Field(default=None, min_length=1, max_length=300)
+    location: Optional[LatLng] = None
     notify: bool = True
+
+    @model_validator(mode="after")
+    def _address_or_location(self):
+        if not self.address and self.location is None:
+            raise ValueError("address 또는 location 중 하나는 있어야 합니다")
+        return self
 
 
 class PlacePatch(_In):
     place_type: Optional[Literal["home", "work", "frequent", "lodging"]] = None
     label: Optional[str] = None
-    address: Optional[str] = None
+    address: Optional[str] = Field(default=None, max_length=300)
+    location: Optional[LatLng] = None
     notify: Optional[bool] = None
 
 
@@ -75,7 +85,8 @@ class DeviceTokenInput(_In):
 
 
 class SimulateRequest(_In):
-    scenario: Literal["heavy_rain_flood", "clear"]       # 구현된 시나리오만 (새로 만들면 명세와 함께 추가)
+    # 구현된 시나리오만 (새로 만들면 명세와 함께 추가)
+    scenario: Literal["heavy_rain_flood", "clear", "demo_households", "demo_households_clear"]
 
 
 # ------------------------------------------------------------------ v0.3 역할 · 가구 · 대피 확인 (A5·A12~A14)

@@ -15,8 +15,9 @@ from .mocks import iso
 # 명세 ProfileInput 에서 null 을 허용하는 항목 — 나머지는 값이 없으면 응답에서 뺀다 (enum·boolean 에 null 금지)
 NULLABLE = {"occupation", "blood_type", "dependents_note", "medical_note"}
 PROFILE_COLS = ["user_type", "birth_year", "mobility", "occupation", "owns_vessel", "walking_ability",
-                "vision_impaired", "hearing_impaired", "blood_type", "has_dependents", "dependents_note", "medical_note",
-                "prefers_voice", "language"]
+                "vision_impaired", "hearing_impaired", "has_dependents", "dependents_note", "prefers_voice", "language"]
+# 건강 정보는 care.user_health (AI 읽기 전용 계정이 못 읽는 스키마, 2026-10-04 A13) — 응답에서는 profile 안에 그대로
+HEALTH_COLS = ["blood_type", "medical_note"]
 ENUM_CAST = {"user_type": "user_type", "mobility": "mobility_mode", "walking_ability": "walking_ability"}
 
 ENSURE_SQL = """
@@ -48,9 +49,15 @@ def require_user_id(u: AuthUser) -> str:
 
 # ------------------------------------------------------------------ 프로필
 def save_profile(user_id: str, data: dict) -> None:
-    """보낸 항목만 저장 (PATCH 의미). alert_prefs 는 jsonb 병합. 별명은 users 테이블"""
+    """보낸 항목만 저장 (PATCH 의미). alert_prefs 는 jsonb 병합. 별명은 users, 혈액형·병력 메모는 care.user_health"""
     if "nickname" in data:
         db.execute("UPDATE users SET nickname = %(n)s WHERE id = %(uid)s", {"n": data["nickname"], "uid": user_id})
+    health = [c for c in HEALTH_COLS if c in data]
+    if health:
+        db.execute(f"""
+            INSERT INTO care.user_health (user_id, {", ".join(health)}) VALUES (%(uid)s, {", ".join(f"%({c})s" for c in health)})
+            ON CONFLICT (user_id) DO UPDATE SET {", ".join(f"{c} = EXCLUDED.{c}" for c in health)}, updated_at = now()""",
+                   {"uid": user_id, **{c: data[c] for c in health}})
     cols = [c for c in PROFILE_COLS if c in data]
     prefs = data.get("alert_prefs")
     if not cols and prefs is None:
@@ -82,10 +89,10 @@ def default_alert_prefs(p: dict) -> dict:
 USER_SQL = """
 SELECT u.id, u.firebase_uid, u.is_anonymous, u.role::text AS role, u.created_at,
        u.nickname, p.user_type::text AS user_type, p.birth_year, p.mobility::text AS mobility, p.occupation,
-       p.owns_vessel, p.walking_ability::text AS walking_ability, p.vision_impaired, p.hearing_impaired, p.blood_type,
-       p.has_dependents, p.dependents_note, p.medical_note, p.prefers_voice, p.language, p.alert_prefs,
+       p.owns_vessel, p.walking_ability::text AS walking_ability, p.vision_impaired, p.hearing_impaired, uh.blood_type,
+       p.has_dependents, p.dependents_note, uh.medical_note, p.prefers_voice, p.language, p.alert_prefs,
        (p.user_id IS NOT NULL) AS has_profile
-FROM users u LEFT JOIN user_profiles p ON p.user_id = u.id
+FROM users u LEFT JOIN user_profiles p ON p.user_id = u.id LEFT JOIN care.user_health uh ON uh.user_id = u.id
 WHERE u.id = %(uid)s
 """
 # 정적 위험지역(지금은 산사태: 위험지도 1·2등급 100m 범위·지정 취약지역) 안이면 그 재난
@@ -123,7 +130,7 @@ def load_user(user_id: str) -> dict:
     if not r:
         raise ApiError("NOT_FOUND", detail="user_not_found")
     profile = {"nickname": r["nickname"]} if r.get("nickname") else {}
-    for c in PROFILE_COLS:
+    for c in PROFILE_COLS + HEALTH_COLS:
         v = r.get(c)
         if c == "language":
             continue                              # 명세 ProfileInput 에 없음 (저장만)
@@ -132,9 +139,9 @@ def load_user(user_id: str) -> dict:
     profile["alert_prefs"] = default_alert_prefs(r)
     pl = places(user_id)
     hh = db.fetch_one(HOUSEHOLD_SQL, {"uid": user_id})
-    missing = [k for k in ("user_type", "birth_year", "mobility") if r.get(k) is None]
-    # 관광객은 집 대신 숙소라 home 장소를 요구하지 않음
-    if r.get("user_type") != "tourist" and not any(p["place_type"] == "home" for p in pl):
+    missing = [k for k in ("birth_year", "mobility") if r.get(k) is None]    # 명세 onboarding.missing (user_type 은 입력에서 빠짐)
+    # 집 또는 숙소 중 하나 — 숙소를 등록한 사람(관광객)은 집을 요구하지 않음 (2026-10-04, 사용자 유형 입력 대신)
+    if r.get("user_type") != "tourist" and not any(p["place_type"] in ("home", "lodging") for p in pl):
         missing.append("home_place")
     return {
         "id": str(r["id"]), "firebase_uid": r["firebase_uid"], "is_anonymous": bool(r["is_anonymous"]),
