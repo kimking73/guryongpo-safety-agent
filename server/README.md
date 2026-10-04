@@ -146,7 +146,8 @@ DATABASE_URL=postgresql://guardian:guardian-local-only@localhost:5433/guardian .
 | `/admin/overview`, `/admin/incidents` (목록·수동 시작), `/{id}`, `/{id}/map`, `PATCH /{id}/targets/{tid}`, `/{id}/close` | **실데이터** (A12) — 생활지원사는 담당 가구만, 시작·종료는 방재단·관리자만 |
 | `GET /dashboard` | 목업 — `evacuation`(내 대피 확인 카드)만 실데이터 (A12) |
 | `/user/household` (GET·PUT·DELETE), `/admin/households*` | **실데이터** (A13) — 동의 없으면 422·저장 안 함, 철회 = 삭제, 생활지원사는 담당 가구만(남의 가구 404), 주민은 /admin 403 |
-| 그 외 (`/admin/.../visits` …) | 목업 (`X-Mock: true`) — 요청 검증·인증·권한은 실제와 동일. 방재단 화면은 `Bearer dev:responder-1` |
+| `POST /admin/incidents/{id}/targets/{tid}/visits` | **실데이터** (A14) — 등록 가구·앱 사용자 모두, 방문 결과에 따라 상태 변경, 종료된 상황 409 |
+| 그 외 (`/dashboard` 본문 …) | 목업 (`X-Mock: true`) — 요청 검증·인증·권한은 실제와 동일. 방재단 화면은 `Bearer dev:responder-1` |
 
 대화(`/api/chat`)는 ai 서비스, 경로(`/api/route`)는 route 서비스 — v0.3 에서 이 서버의 목업 `/chat`·`/voice`·`/route` 는 삭제했다.
 
@@ -193,6 +194,12 @@ DATABASE_URL=postgresql://guardian:guardian-local-only@localhost:5433/guardian .
 - `POST /user/places` 는 도로명 주소(`address`)·좌표(`location`) 중 하나 이상. 좌표가 있으면 그대로 쓰고(카카오 호출 없음), 주소만 오면 서버가 카카오로 도로명 주소·좌표 변환 — `KAKAO_REST_KEY` 가 없으면 주소만 보낸 요청은 503
 - 지번만 있는 집·항구, 지도에서 찍기·현재 위치(GPS)로 등록할 때는 좌표를 보낸다 (2026-10-04 결정, C 와 합의)
 - 숙소(`lodging`)만 있고 집이 없으면 관광객 — 집 등록을 요구하지 않고, 대피 확인 경고에 관광객 안내 문장이 붙는다 (사용자 유형 입력 대신)
+
+### 방문 기록 (A14)
+
+- 대상: 등록 가구 + 가구 등록 없는 앱 사용자(도움 요청한 사람 등) — `visit_logs.household_id` 는 선택, 앱 사용자는 `target_id` 로 연결 (`01m_v0_5_visits.sql`, 2026-10-04 결정)
+- 방문 후 상태: 함께 대피·이송·이미 대피 → 대피 완료 / 부재·거부·기타 → **상태 그대로, 기록만** (대상 `last_visit` 으로 다시 갈 곳이 보임) / `status_after` 를 보내면 그 값
+- 집계: 대피 상황 `summary.visited`(방문한 대상 수)·`unvisited_need_help`(도움 필요인데 아직 아무도 안 간 대상 수). 가구 상세에 최근 방문 5건
 
 ### 취약 가구·민감정보 (A13)
 
@@ -246,7 +253,7 @@ cd server/tools && python3 validate.py            # 명세(spec/openapi.yaml) �
 
 - A4 (재난 확장): `risk/engine.py` 에 호우(AWS 3·12시간 누적, 1·2번)·강풍·태풍·산사태·미세먼지·자외선 판정 추가, 시나리오 추가
 - A5 (경고) 완료: 남은 것 — 실제 기기로 FCM 수신 확인(서비스 계정 키 필요), B4 메시지 함수 연결(`alerts/messages.compose`)
-- A13 (취약 가구) 완료: 남은 것 — 방문 기록(A14), B13 우선순위가 가구 사정(needs)·산사태 위치를 점수에 반영
+- A13 (취약 가구)·A14 (방문 기록) 완료: 남은 것 — B13 우선순위가 가구 사정(needs)·산사태 위치·방문 결과를 점수에 반영 (`incident_targets.priority_*`)
 - A12 (대피 확인) 완료: 남은 것 — 재알림·이관 FCM 실기기 확인 (A9), B13 우선순위 점수(`incident_targets.priority_*`) 연결
 - A12·A13·A14 (대피 응답·취약 가구·방문): `routers/alerts.py`(response), `routers/admin.py`, `routers/user.py`(household) 를 care 스키마로 — 규약은 `docs/spec-v0.3.md`
 - A7 이후: 위험지역 고정 영역은 산사태 취약지역만 사용 (침수·해안 영역 레이어는 제거, 침수는 실시간 판정 영역 risk_areas). 새 정적 데이터는 `db/init/1x_*.sql` 로 추가 → loader 가 자동 포함 (스키마 추가분은 `01m_*.sql`, IF NOT EXISTS 로). route 서비스가 임시 GeoJSON 대신 hazard_zones·manholes 를 읽도록 B 와 합의

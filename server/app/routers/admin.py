@@ -1,9 +1,8 @@
-"""방재단·생활지원사 — 대피 현황 (A12) · 취약 가구 (A13) — 실데이터 · 방문 기록 (목업, A14) · 우선순위 B13
+"""방재단·생활지원사 — 대피 현황 (A12) · 취약 가구 (A13) · 방문 기록 (A14) — 모두 실데이터 · 우선순위 B13
 
 권한: 역할 responder·caregiver·admin 만 (auth.require_staff, 아니면 403 FORBIDDEN).
   caregiver 는 담당 가구(households.caregiver_user_id) 대상만 보고, 대피 상황 시작·종료는 못 한다.
 dev 모드 시험: 'Authorization: Bearer dev:responder-1' (uid 앞부분이 역할), 'dev:test-uid' 는 resident → 403.
-목업 데이터(방문): server/mock/admin.visit.json
 """
 import json
 import uuid
@@ -20,8 +19,10 @@ from ..schemas import HouseholdInput, HouseholdPatch, IncidentCircle, IncidentIn
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 STATUS_ORDER = {"need_help": 0, "no_response": 1, "evacuating": 2, "evacuated": 3}   # B13 점수가 없을 때 기본 순서
+# 방문 결과 → 대상 상태 (status_after 를 보내면 그 값). 부재·거부·기타는 상태를 바꾸지 않고 기록만 —
+# 목록에 '최근 방문: 부재'로 남아 다시 갈 곳으로 보인다 (2026-10-04 결정)
 VISIT_STATUS = {"evacuated_with_help": "evacuated", "already_evacuated": "evacuated", "transported": "evacuated",
-                "refused": "no_response", "not_home": "no_response", "other": None}
+                "refused": None, "not_home": None, "other": None}
 
 
 def default_rank(targets: list[dict]) -> list[dict]:
@@ -146,17 +147,35 @@ def update_target(incident_id: uuid.UUID, target_id: uuid.UUID, body: TargetPatc
     return next(x for x in d["targets"] if x["id"] == tid)
 
 
-@router.post("/incidents/{incident_id}/targets/{target_id}/visits", status_code=201, summary="방문 기록 (목업, A14)")
+VISIT_SQL = """
+INSERT INTO care.visit_logs (household_id, target_id, responder_id, result, status_after, location, note)
+VALUES (%(hid)s, %(tid)s, %(me)s, %(result)s, %(after)s::evac_status,
+        ST_SetSRID(ST_MakePoint(%(lng)s, %(lat)s), 4326), %(note)s)
+RETURNING id, visited_at
+"""
+
+
+@router.post("/incidents/{incident_id}/targets/{target_id}/visits", status_code=201, summary="방문 기록")
 def add_visit(incident_id: uuid.UUID, target_id: uuid.UUID, body: VisitInput, staff: StaffUser = Depends(require_staff)):
+    """등록 가구·앱 사용자 모두 (2026-10-04). 방문 후 상태가 정해지면 대상 상태도 바꾼다 (via=responder, 이력 남음)"""
+    from alerts import evacuation
+    iid, tid = str(incident_id), str(target_id)
     me = _me(staff)
-    t = incidents.find_target(str(incident_id), str(target_id), _caregiver(staff, me))
-    if not t.get("household_id"):
-        raise ApiError("VALIDATION_ERROR", "등록 가구에만 방문 기록을 남길 수 있습니다.", detail="not_household")
-    v = mocks.load("admin.visit.json")
-    v.update(household_id=str(t["household_id"]), target_id=str(target_id), visited_at=mocks.now_iso(), result=body.result,
-             status_after=body.status_after or VISIT_STATUS[body.result], note=body.note,
-             responder={"user_id": me, "nickname": None})
-    return mocks.respond(v, 201)
+    _open_incident(iid)
+    t = incidents.find_target(iid, tid, _caregiver(staff, me))
+    after = body.status_after or VISIT_STATUS[body.result]
+    loc = body.location.model_dump() if body.location else {"lat": None, "lng": None}
+    hid = str(t["household_id"]) if t.get("household_id") else None
+    row = db.fetch_one(VISIT_SQL, {"hid": hid, "tid": tid, "me": me, "result": body.result, "after": after,
+                                   "note": body.note, **loc})
+    if after:
+        evacuation.record({"id": tid, "incident_id": iid, "user_id": t.get("user_id")}, after, "responder",
+                          by_user_id=me, location=body.location.model_dump() if body.location else None)
+    nick = db.fetch_one("SELECT nickname FROM users WHERE id = %(u)s", {"u": me})
+    return JSONResponse({"id": row["id"], "household_id": hid, "target_id": tid,
+                         "responder": {"user_id": me, "nickname": (nick or {}).get("nickname")},
+                         "visited_at": mocks.iso(row["visited_at"]), "result": body.result, "status_after": after,
+                         "note": body.note}, status_code=201)
 
 
 @router.post("/incidents/{incident_id}/close", summary="대피 상황 종료")

@@ -24,7 +24,9 @@
         "no_response": 1,
         "evacuating": 1,
         "evacuated": 1,
-        "need_help": 1
+        "need_help": 1,
+        "visited": 1,
+        "unvisited_need_help": 0
       }
     }
   ],
