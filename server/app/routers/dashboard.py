@@ -4,7 +4,7 @@ from typing import Literal, Optional, get_args
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
-from .. import db, layers, mocks
+from .. import db, layers
 from ..auth import AuthUser, current_user
 from ..errors import ApiError
 
@@ -13,15 +13,13 @@ router = APIRouter(tags=["dashboard"])
 LayerId = Literal["shelters", "medical", "landslide_zones", "manholes", "stations", "risk_areas", "flood_grid"]
 
 
-@router.get("/dashboard", summary="맞춤 대시보드 (목업 — evacuation 만 실데이터)")
+@router.get("/dashboard", summary="맞춤 대시보드 (실데이터 — app/widgets.py)")
 def get_dashboard(lat: float = Query(ge=-90, le=90), lng: float = Query(ge=-180, le=180),
-                  scenario: Literal["normal", "emergency"] = Query("normal", description="목업 전용: 재난 모드 화면 확인"),
                   u: AuthUser = Depends(current_user)):
-    from .. import incidents, users
-    d = mocks.load(f"dashboard.{scenario}.json")
+    from .. import incidents, users, widgets
+    user_id = users.find_user_id(u)
     # 내 대피 확인 카드 (A12) — 진행 중인 대피 상황이 있으면 실제 상태, 없으면 null
-    d["evacuation"] = incidents.my_evacuation(users.find_user_id(u))
-    return mocks.respond(d)
+    return widgets.build(lat, lng, user_id, incidents.my_evacuation(user_id))
 
 
 @router.get("/dashboard/layers/{layer_id}", summary="지도 레이어 GeoJSON (전부 실데이터)")
@@ -53,6 +51,22 @@ FROM public_hotlines
 WHERE %(h)s::text IS NULL OR cardinality(hazards) = 0 OR %(h)s::hazard_type = ANY (hazards)
 ORDER BY priority, id
 """
+
+
+SUPPORT_SQL = """
+SELECT id, category, hazards::text[] AS hazards, targets, name, summary, eligibility, how_to_apply, apply_period,
+       department, contact, url, updated_at
+FROM support_programs
+WHERE %(h)s::text IS NULL OR cardinality(hazards) = 0 OR %(h)s::hazard_type = ANY (hazards)
+ORDER BY category, id
+"""
+
+
+@router.get("/support-programs", summary="재난 복구·지원 제도 (실데이터, support_programs)")
+def get_support_programs(hazard: Optional[Hazard] = None):
+    from ..mocks import iso
+    return [{**r, "hazards": list(r["hazards"] or []), "targets": list(r["targets"] or []), "updated_at": iso(r["updated_at"])}
+            for r in db.fetch_all(SUPPORT_SQL, {"h": hazard})]
 
 
 @router.get("/hotlines", summary="긴급 전화 목록 (실데이터)")

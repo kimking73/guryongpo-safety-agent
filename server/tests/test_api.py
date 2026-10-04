@@ -50,10 +50,62 @@ def test_validation_error_format(client):
     assert r.status_code == 422
 
 
-def test_dashboard_modes(client):
-    q = "/api/v1/dashboard?lat=35.98&lng=129.55"
-    assert client.get(q, headers=AUTH).json()["mode"] == "normal"
-    assert client.get(q + "&scenario=emergency", headers=AUTH).json()["mode"] == "emergency"
+def test_dashboard_empty_db_is_normal_and_says_no_data(client):
+    """실데이터 대시보드 (2026-10-05): 자료가 없으면 지어내지 않고 available=false + 사유"""
+    from test_alerts import assert_spec
+    r = client.get("/api/v1/dashboard?lat=35.98&lng=129.55", headers=AUTH)
+    d = r.json()
+    assert r.status_code == 200 and "X-Mock" not in r.headers
+    assert_spec(d, "/dashboard")
+    assert d["mode"] == "normal" and d["headline"] is None
+    w = {x["type"]: x["data"] for x in d["widgets"]}
+    assert w["warnings"] == {"items": []}
+    for t in ("rain", "wind", "water_level", "wave", "typhoon", "forecast", "disaster_messages", "life_safety"):
+        assert w[t]["available"] is False and w[t]["reason"], t
+
+
+def test_dashboard_real_values_and_emergency_order(client, fake_db):
+    from datetime import timedelta
+    from test_alerts import assert_spec
+    now = datetime.now(KST)
+    fake_db.rows["FROM shelters s"] = [
+        {"id": 1, "name": "구룡포초등학교", "shelter_types": ["earthquake"], "address": "구룡포읍", "capacity": 300, "phone": None,
+         "is_indoor": False, "is_accessible": True, "lng": 129.552, "lat": 35.986, "in_risk_area": False, "landslide_g1_m": None},
+        {"id": 2, "name": "침수된 대피소", "shelter_types": [], "address": None, "capacity": None, "phone": None,
+         "is_indoor": False, "is_accessible": None, "lng": 129.556, "lat": 35.990, "in_risk_area": True, "landslide_g1_m": None}]
+    fake_db.rows["FROM risk_assessments ra, (SELECT"] = [{
+        "id": 7, "hazard": "heavy_rain", "level": "warning", "label": "호우경보", "rule_id": 2, "computed_at": now,
+        "distance_m": 0, "source_distance_m": 0,
+        "basis": {"reason": "3시간 누적강수 92.0mm (구룡포 AWS)", "station_lat": 35.99, "station_lng": 129.55, "observed_at": now.isoformat()}}]
+    fake_db.rows["FROM weather_warnings"] = [{"hazard": "heavy_rain", "level": "warning", "region_name": "포항시",
+                                              "issued_at": now, "effective_at": now, "headline": "포항시 호우경보"}]
+    fake_db.rows["AND o.metric = ANY(%(metrics)s)"] = [
+        {"metric": "rain_1h", "value": 31.5, "unit": "mm", "observed_at": now - timedelta(minutes=10)},
+        {"metric": "rain_day", "value": 120.0, "unit": "mm", "observed_at": now - timedelta(minutes=10)}]
+    fake_db.rows["FROM typhoon_tracks t JOIN cur"] = [
+        {"typhoon_code": "2627", "name_ko": "초이완", "observed_at": now - timedelta(hours=3), "is_forecast": False,
+         "lat": 33.0, "lng": 128.0, "max_wind_ms": 35, "central_pressure_hpa": 960, "radius_15ms_km": 300, "location_text": "제주 남쪽 해상"},
+        {"typhoon_code": "2627", "name_ko": "초이완", "observed_at": now + timedelta(hours=21), "is_forecast": True,
+         "lat": 35.9, "lng": 129.7, "max_wind_ms": 30, "central_pressure_hpa": 975, "radius_15ms_km": 250, "location_text": None}]
+    d = client.get("/api/v1/dashboard?lat=35.985&lng=129.55", headers=AUTH).json()
+    assert_spec(d, "/dashboard")
+    assert d["mode"] == "emergency" and d["headline"]["action"] == "open_route"
+    assert [s["name"] for s in d["nearest_shelters"]] == ["구룡포초등학교"]          # 위험 영역 안 대피소 제외
+    w = {x["type"]: x for x in d["widgets"]}
+    assert d["widgets"][0]["type"] == "warnings" and w["rain"]["emphasized"]
+    assert w["rain"]["data"]["value"] == 31.5 and w["rain"]["data"]["rain_day"] == 120.0 and w["rain"]["data"]["level"] == "warning"
+    t = w["typhoon"]["data"]
+    assert t["name_ko"] == "초이완" and t["closest_km"] < t["distance_km"] and len(t["track"]) == 2
+
+
+def test_support_programs(client, fake_db):
+    fake_db.rows["FROM support_programs"] = [{
+        "id": 1, "category": "recovery", "hazards": ["flood"], "targets": ["all"], "name": "재난지원금", "summary": "주택 침수 지원",
+        "eligibility": None, "how_to_apply": "읍사무소", "apply_period": None, "department": "포항시", "contact": None, "url": None,
+        "updated_at": datetime.now(KST)}]
+    r = client.get("/api/v1/support-programs?hazard=flood")
+    assert r.status_code == 200 and r.json()[0]["name"] == "재난지원금"
+    assert client.get("/api/v1/support-programs?hazard=nope").status_code == 422
 
 
 def test_layers(client, fake_db):

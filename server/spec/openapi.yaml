@@ -446,6 +446,38 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/Hotline' }
+  /support-programs:
+    get:
+      tags: [dashboard]
+      summary: 재난 복구·지원 제도 (보험·복구·법률·어업·생계, 실데이터 support_programs) — 복구 화면 (2026-10-05)
+      operationId: getSupportPrograms
+      security: []
+      parameters:
+        - { name: hazard, in: query, schema: { $ref: '#/components/schemas/Hazard' } }
+      responses:
+        '200':
+          description: 재난을 주면 그 재난용과 공통 제도
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [id, category, name, summary]
+                  properties:
+                    id: { type: integer }
+                    category: { type: string }
+                    hazards: { type: array, items: { type: string } }
+                    targets: { type: array, items: { type: string } }
+                    name: { type: string }
+                    summary: { type: string }
+                    eligibility: { type: [string, 'null'] }
+                    how_to_apply: { type: [string, 'null'] }
+                    apply_period: { type: [string, 'null'] }
+                    department: { type: [string, 'null'] }
+                    contact: { type: [string, 'null'] }
+                    url: { type: [string, 'null'] }
+                    updated_at: { type: [string, 'null'], format: date-time }
 
   # ================================================================ risk
   /risk:
@@ -1363,7 +1395,7 @@ components:
         data:
           type: object
           description: |
-            type 별 내용
+            type 별 내용 (2026-10-05 실데이터: 자료가 없으면 어느 type 이든 { available: false, reason } )
             - warnings: { items: [ { label, region_name, issued_at } ] }
             - rain / wind / wave: { station_name, value, unit, observed_at, level, series: [ { t, v } ] }
             - water_level: { observed_at, stations: [ { station_id, station_name, kind, metric, value, unit, source_level, source_level_label, level, location } ], series: { station_id, metric, points: [ { t, v } ] } }
