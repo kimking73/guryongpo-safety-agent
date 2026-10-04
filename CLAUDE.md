@@ -22,12 +22,13 @@ Lanes: **A** server/DB/data collection/risk engine (`server/`, `db/`) · **B** A
 - Routing (B6 done, B7 in progress): GraphHopper 11 (Java 21, foot profile, flexible mode) + OSM + elevation (SRTM 90m, or 국토지리정보원 DEM via `graphhopper/build_dem.sh`)
 - Client (planned, C2): Flutter; Firebase anonymous auth + FCM
 - Infra: Docker Compose (OrbStack on Mac, Docker Desktop + WSL2 on Windows); GCP project
-  `guryong-guardian-0924` (asia-northeast3), deploy VM + Caddy planned in B10
+  `guryong-guardian-0924` (asia-northeast3); deploy VM (another GCP project, static IP 34.64.177.195) + Caddy at
+  https://34-64-177-195.nip.io (B10, see README "배포 서버")
 
 ## Key directories
 | Path | Purpose |
 | --- | --- |
-| `docker-compose.yml` | Services shared by local and server: `db`, `api`, `collector`, `ai`, `graphhopper`, `route`; one-shot `loader` (profile `tools`, `docker compose run --rm loader`); project name fixed |
+| `docker-compose.yml` | Services shared by local and server: `db`, `api`, `collector`, `ai`, `graphhopper`, `route`; one-shot `loader` (profile `tools`, `docker compose run --rm loader`); `caddy` (profile `deploy`, VM only via `COMPOSE_PROFILES=deploy`); project name fixed |
 | `docker-compose.override.yml` | Local-only: DB host port 5433, graphhopper 8989, code mounts + `--reload` |
 | `server/` | Lane A: FastAPI API (`/api/v1`, mostly mock responses with `X-Mock: true`; real: `/api/health`, `/api/v1/risk*`, map layers), `collector/` (Pohang DT + KMA ingestion, APScheduler, runs as the `collector` service), `risk/` (flood risk engine → `risk_assessments`), `spec/openapi.yaml`, `mock/`, `tools/`. See `server/README.md` |
 | `ai/` | LangGraph multi-agent + `POST /api/chat` (also `/api/voice`·`/api/tts`, 503 without `secrets/gcp-voice.json`); reads the DB directly with a read-only role (B3). See `ai/CLAUDE.md` |
@@ -35,6 +36,7 @@ Lanes: **A** server/DB/data collection/risk engine (`server/`, `db/`) · **B** A
 | `graphhopper/` | GraphHopper 11 image + `config.yml` (foot, no CH); `fetch_osm.sh` builds `data/guryongpo.osm.pbf`; `build_dem.sh` turns 국토지리정보원 DEM in `dem/ngii/` into `data/dem-hgt/`; `entrypoint.sh` picks DEM (NGII if present, else SRTM) and rebuilds the graph when it changes (data/ and dem/ngii/ gitignored) |
 | `app/` | Lane C: Flutter app/web. Mock by default; `--dart-define=APP_MODE=remote` connects to api/ai/route (J1, `lib/repositories/remote_repository.dart`; base URLs `API_BASE_URL`/`AI_BASE_URL`/`ROUTE_BASE_URL`). See `app/README.md` |
 | `db/init/` | SQL run once on an empty DB volume: 00 PostGIS, 01 schema, 02–06 seeds (rules/stations/manholes, landslide zones, knowledge, shelters, medical); seeds are re-runnable and re-applied to an existing DB by `server/loader` (A7) — lane A. `07_ai_readonly.sh` (lane B) creates the AI's SELECT-only role from `AI_DB_*`; `08_ai_memory.sh` (lane B) creates schema `ai_memory` + role `AI_MEM_DB_*` for the AI's long-term memory (LangGraph PostgresStore; no access to public) |
+| `deploy/` | B10: `Caddyfile` (HTTPS for `DEPLOY_DOMAIN`; /api/chat·voice·tts·ai → ai, /api/route → route, other /api → api, / → Flutter web; blocks /api/ai/memory·/api/ai/usage·/api/v1/internal), `deploy.sh` (run on VM: backup → pull → loader → rebuild → health), `push_web.sh` (run on Mac: build web in an ASCII temp dir → rsync to VM `deploy/web/`, gitignored); Firebase web config in `deploy/web-defines.json` (gitignored) |
 | `secrets/` | Credential files, gitignored except `.gitkeep` (e.g. `firebase-admin.json`) |
 | `.env.example` | Every env key with local defaults; rules in its header (.env.example:2-8) |
 | `README.md` | Team-facing setup (Mac/Windows), common commands, env and service rules |

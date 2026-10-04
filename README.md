@@ -116,7 +116,7 @@ docker compose run --rm loader                        # 정적 데이터(대피�
 - **`db/init`의 시드(02~)가 바뀌었으면** `docker compose run --rm loader` (DB 데이터 유지). **스키마(01)가 바뀌었으면** loader가 알려 주고 멈추므로 `docker compose down -v` 후 다시 `up`.
 - 서버 API 대부분은 아직 목업(응답 헤더 `X-Mock: true`)이다. 실데이터: `/api/health`, `/api/v1/risk*`, 지도 레이어 `stations`·`landslide_zones`·`risk_areas`·`shelters`·`medical`·`manholes`. 자세한 건 `server/README.md`.
 - `server/app/`·`server/collector/`·`server/risk/`(api), `ai/guardian_ai/`, `route/guardian_route/` 코드를 고치면 해당 서버가 자동으로 재시작된다 (재빌드 불필요).
-- 배포 시 Caddy가 `/api/chat`·`/api/voice`·`/api/tts`는 ai(8001)로, `/api/route`는 route(8002)로, 나머지 `/api`는 서버(8000)로 넘긴다 (B10).
+- 배포 시 Caddy가 `/api/chat`·`/api/voice`·`/api/tts`·`/api/ai`는 ai(8001)로, `/api/route`는 route(8002)로, 나머지 `/api`는 서버(8000)로, 그 외는 웹앱으로 넘긴다 (B10, `deploy/Caddyfile`). 아래 "배포 서버" 참고.
 - `graphhopper/config.yml`을 바꾸면 `rm -rf graphhopper/data/graph-cache` 후 `docker compose up -d --build graphhopper` (설정이 이미지에 들어가므로 재빌드, 그래프도 다시 만든다).
 
 ## 환경 변수 규칙
@@ -145,5 +145,16 @@ docker compose run --rm loader                        # 정적 데이터(대피�
 
 - GCP 콘솔: https://console.cloud.google.com/home/dashboard?project=guryong-guardian-0924
 - Firebase 콘솔: https://console.firebase.google.com/project/guryong-guardian-0924/overview
+
+## 배포 서버 (B10)
+
+- 주소: **https://34-64-177-195.nip.io** — `/`는 웹앱, `/api/...`는 서버들. 상태: `curl https://34-64-177-195.nip.io/api/health`
+- VM: `guryongpo-safety-agent` (e2-medium, 서울 b), 고정 IP `34.64.177.195`(`guryongpo-ip`). 접속 `ssh jongyeonkim@34.64.177.195`
+- 서버 업데이트 (main에 올라간 코드 반영): VM에서 `cd ~/guryongpo-safety-agent && ./deploy/deploy.sh`
+  — DB 백업(`~/backups/`, 최근 10개) → `git pull` → loader(시드·스키마 추가분) → 재빌드 → 상태 확인
+- 웹앱 업데이트: 맥에서 `./deploy/push_web.sh` — 배포 주소로 Flutter 웹을 빌드해 VM에 올린다(재시작 불필요).
+  Firebase 웹 설정값은 `deploy/web-defines.json`(커밋 안 함, `{"FIREBASE_API_KEY": "...", "FIREBASE_APP_ID": "...", "FIREBASE_PROJECT_ID": "...", "FIREBASE_MESSAGING_SENDER_ID": "..."}`)
+- VM `.env`는 맥 `.env`와 다르다 (DB 비밀번호들·`DEPLOY_DOMAIN`·`COMPOSE_PROFILES=deploy`·`CORS_ORIGINS`). **맥 `.env`를 통째로 복사하지 말고** 바뀐 키만 넣는다
+- 밖에서 막힌 경로(404): `/api/ai/memory`, `/api/ai/usage`, `/api/v1/internal`. 8000–8002·DB 포트는 외부에 안 열림
 
 김다인바보
