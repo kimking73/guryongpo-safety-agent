@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../firebase_options.dart';
+import 'account_sync.dart';
 import 'app_config.dart';
 
 class AuthStateInfo {
@@ -68,6 +69,7 @@ class AuthService {
       final auth = FirebaseAuth.instance;
       final user = auth.currentUser ?? (await auth.signInAnonymously()).user;
       await syncServerUser();
+      await AccountSync.instance.pullOrPush(); // 계정에 저장된 앱 정보 내려받기 (없으면 기기 값 올리기)
       return AuthStateInfo(isMock: false, userId: user?.uid, token: await user?.getIdToken());
     } catch (_) {
       // 오프라인 등으로 로그인 실패 — 재난 정보는 토큰 없이도 보이게 계속 진행
@@ -134,6 +136,8 @@ class AuthService {
 
   /// 로그아웃 → 다시 익명으로 (재난 앱이라 로그인 없이도 계속 쓸 수 있게)
   Future<void> signOut() => _run(() async {
+        await AccountSync.instance.push(); // 못 올린 변경을 계정에 남기고
+        await AccountSync.instance.clearLocal(); // 이 기기에서는 지운다
         await FirebaseAuth.instance.signOut();
         await FirebaseAuth.instance.signInAnonymously();
       });
@@ -146,7 +150,10 @@ class AuthService {
     } on FirebaseAuthException catch (e) {
       throw AuthFailure(authErrorMessage(e.code));
     }
-    if (sync) await syncServerUser();
+    if (sync) {
+      await syncServerUser();
+      await AccountSync.instance.pullOrPush();
+    }
   }
 
   /// 서버에 사용자 등록 (POST /api/v1/user, uid 기준 멱등). 실패해도 로그인은 그대로 둔다

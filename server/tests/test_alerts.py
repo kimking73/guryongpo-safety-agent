@@ -235,6 +235,15 @@ def test_user_register_and_get(client, fake_db):
     assert client.post("/api/v1/user", headers=AUTH, json={}).status_code == 200    # 이미 있음
 
 
+def test_app_state(client, fake_db):
+    _user_rows(fake_db)
+    r = client.put("/api/v1/user/app-state", headers=AUTH, json={"state": {"version": 1, "prefs": {"profile_age": "67"}}})
+    assert r.status_code == 204
+    assert any("app_state" in sql for sql, _ in fake_db.executed)
+    assert client.put("/api/v1/user/app-state", headers=AUTH, json={"state": {"x": "a" * 70000}}).status_code == 422
+    assert client.put("/api/v1/user/app-state", headers=AUTH, json={}).status_code == 422
+
+
 def test_place_add(client, fake_db, monkeypatch):
     _user_rows(fake_db)
     fake_db.rows["INSERT INTO user_places"] = [{"id": "7b1f6a3e-2c4d-4e8f-9a01-3b5c7d9e1f20"}]

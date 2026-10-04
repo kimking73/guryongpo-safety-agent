@@ -152,6 +152,42 @@ paths:
         '401': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
         '503': { $ref: '#/components/responses/Error' }
+  /user/app-state:
+    get:
+      tags: [user]
+      summary: 앱 입력값 통째 조회 — 다른 기기에서 같은 계정으로 로그인하면 복원 (2026-10-05)
+      operationId: getAppState
+      responses:
+        '200':
+          description: 저장한 적 없으면 state null
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [state, updated_at]
+                properties:
+                  state: { type: [object, 'null'], description: '앱이 정한 형식 (서버는 해석하지 않음)' }
+                  updated_at: { type: [string, 'null'], format: date-time }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+    put:
+      tags: [user]
+      summary: 앱 입력값 통째 저장 (덮어쓰기, 최대 64KB). 서버 판단용 값(출생연도·이동수단·장소 등)은 PATCH /user·/user/places 로 따로
+      operationId: putAppState
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state]
+              properties:
+                state: { type: object }
+      responses:
+        '204': { description: 저장됨 }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
   /user/places:
     post:
       tags: [user]

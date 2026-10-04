@@ -68,6 +68,11 @@ class PlacePatch(_In):
     notify: Optional[bool] = None
 
 
+class AppStateInput(_In):
+    """앱 화면 입력값 통째 (서버는 해석하지 않고 저장·반환만)"""
+    state: dict
+
+
 class AddressGeocodeInput(_In):
     address: str = Field(min_length=1, max_length=300)
 

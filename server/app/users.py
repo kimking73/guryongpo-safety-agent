@@ -77,6 +77,26 @@ def save_profile(user_id: str, data: dict) -> None:
         ON CONFLICT (user_id) DO UPDATE SET {sets}, updated_at = now()""", params)
 
 
+APP_STATE_MAX_BYTES = 64 * 1024
+
+
+def load_app_state(user_id: str) -> dict:
+    r = db.fetch_one("SELECT app_state, app_state_at FROM user_profiles WHERE user_id = %(uid)s", {"uid": user_id})
+    return {"state": (r or {}).get("app_state"), "updated_at": iso((r or {}).get("app_state_at"))}
+
+
+def save_app_state(user_id: str, state: dict) -> None:
+    """앱 입력값 통째 저장 (덮어쓰기). 너무 크면 거절"""
+    import json
+    raw = json.dumps(state, ensure_ascii=False)
+    if len(raw.encode()) > APP_STATE_MAX_BYTES:
+        raise ApiError("VALIDATION_ERROR", "저장할 정보가 너무 큽니다.", detail="app_state_too_large")
+    db.execute("""
+        INSERT INTO user_profiles (user_id, app_state, app_state_at) VALUES (%(uid)s, %(s)s::jsonb, now())
+        ON CONFLICT (user_id) DO UPDATE SET app_state = EXCLUDED.app_state, app_state_at = now(), updated_at = now()""",
+               {"uid": user_id, "s": raw})
+
+
 def default_alert_prefs(p: dict) -> dict:
     """저장값이 없으면 시각장애 → tts, 청각장애 → 강한 진동 + 화면 깜빡임 (01m_v0_3.sql 규칙)"""
     saved = p.get("alert_prefs") or {}

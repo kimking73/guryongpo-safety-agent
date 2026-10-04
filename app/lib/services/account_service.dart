@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 import '../models/domain_models.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'account_sync.dart';
 
 class AccountService {
   static const _modeKey = 'user_mode';
@@ -19,6 +20,7 @@ class AccountService {
     await prefs.setString('profile_age', age);
     await prefs.setString('profile_transport', transport);
     await prefs.setBool('profile_setup_complete', true);
+    await AccountSync.instance.changed();
   }
   /// (연령, 이동수단). 입력 전이면 null
   Future<(int?, String?)> requiredSetup() async {
@@ -44,8 +46,10 @@ class AccountService {
     if (raw == null) return [];
     return (jsonDecode(raw) as List).map((j) => SavedPlace.fromJson(j as Map<String, dynamic>)).toList();
   }
-  Future<void> _savePlaces(List<SavedPlace> places) async =>
-      (await SharedPreferences.getInstance()).setString(_placesKey, jsonEncode(places.map((p) => p.toJson()).toList()));
+  Future<void> _savePlaces(List<SavedPlace> places) async {
+    await (await SharedPreferences.getInstance()).setString(_placesKey, jsonEncode(places.map((p) => p.toJson()).toList()));
+    await AccountSync.instance.changed();
+  }
   Future<void> addPlace(SavedPlace place) async => _savePlaces([...await places(), place]);
   Future<void> removePlace(String id) async => _savePlaces([...(await places()).where((p) => p.id != id)]);
 
@@ -55,6 +59,8 @@ class AccountService {
     if (raw == null) return {};
     return (jsonDecode(raw) as Map).map((key, value) => MapEntry('$key', '$value'));
   }
-  Future<void> saveOptionalProfile(Map<String, String> values) async =>
-      (await SharedPreferences.getInstance()).setString('optional_profile', jsonEncode(values));
+  Future<void> saveOptionalProfile(Map<String, String> values) async {
+    await (await SharedPreferences.getInstance()).setString('optional_profile', jsonEncode(values));
+    await AccountSync.instance.changed();
+  }
 }

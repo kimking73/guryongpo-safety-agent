@@ -15,7 +15,7 @@ from ..auth import AuthUser, current_user
 from ..config import settings
 from ..errors import ApiError
 from ..geocoding import geocode_road_address
-from ..schemas import (AddressGeocodeInput, DeviceTokenInput, EmergencyContactInput, PlaceInput, PlacePatch,
+from ..schemas import (AddressGeocodeInput, AppStateInput, DeviceTokenInput, EmergencyContactInput, PlaceInput, PlacePatch,
                        ProfileInput, RoleClaim, SelfHouseholdInput)
 
 router = APIRouter(tags=["user"])
@@ -61,6 +61,17 @@ def _check_alerts(user_id: str) -> None:
         log.exception("장소 변경 후 경고 판정 실패 user=%s", user_id)
 
 
+
+
+@router.get("/user/app-state", summary="앱 입력값 통째 (다른 기기에서 복원)")
+def get_app_state(u: AuthUser = Depends(current_user)):
+    return users.load_app_state(users.require_user_id(u))
+
+
+@router.put("/user/app-state", status_code=204, summary="앱 입력값 통째 저장 (덮어쓰기)")
+def put_app_state(body: AppStateInput, u: AuthUser = Depends(current_user)):
+    users.save_app_state(users.require_user_id(u), body.state)
+    return Response(status_code=204)
 
 
 @router.post("/user/geocode", summary="도로명 주소를 좌표로 변환")

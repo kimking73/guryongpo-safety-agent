@@ -40,6 +40,10 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS role_granted_at timestamptz;
 -- C7 접근성 알림 설정: {"tts": bool, "strong_vibration": bool, "screen_flash": bool, "large_text": bool}
 -- 비어 있으면 서버가 vision_impaired → tts, hearing_impaired → strong_vibration + screen_flash 로 기본값을 채워 응답
 ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS alert_prefs jsonb NOT NULL DEFAULT '{}';
+-- 앱 화면 입력값 통째 (연령·이동수단·집/직장/출발지·직업·선택 정보·저장 장소 …) — 다른 기기에서 같은 계정으로 로그인하면 그대로 복원.
+-- 서버 판단에 쓰는 값(birth_year·mobility·occupation·walking_ability·user_places)은 앱이 따로 채운다. 서버는 내용을 해석하지 않는다 (2026-10-05)
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS app_state jsonb;
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS app_state_at timestamptz;
 
 -- A5·A12: 대피 확인이 필요한 경고 (3버튼) + 음성으로 읽어 줄 짧은 문장
 ALTER TABLE user_alerts ADD COLUMN IF NOT EXISTS response_required boolean NOT NULL DEFAULT false;
