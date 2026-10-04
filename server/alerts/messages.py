@@ -2,7 +2,7 @@
 
 B4 함수로 바꿀 때는 compose() 의 입출력만 지키면 된다.
   입력 event: {kind, hazard, level, reason(판정 근거 문장), message(재난문자 원문, 문자일 때만),
-               also(묶어서 함께 알리는 재난 [{hazard, level}])}
+               also(묶어서 함께 알리는 재난 [{hazard, level}]), notice(방재단 수동 시작 안내문)}
   입력 user : {trigger, place_label, birth_year, walking_ability, mobility, occupation, owns_vessel,
                vision_impaired, hearing_impaired, user_type, contact{name, relation, phone}}
   출력      : {title, body, tts_text, actions[], reason{trigger, place_label, profile_tags[]}}
@@ -89,7 +89,12 @@ def compose(event: dict, u: dict) -> dict:
 
     if kind == "evacuation":
         title = f"[대피 확인] {hz} {lv} · {where_t}"
-        lead = f"긴급재난문자: {msg[:120]}" if msg else (f"{event['reason']}." if event.get("reason") else f"{hz} {lv}입니다.")
+        if event.get("notice"):                          # 방재단이 직접 시작한 대피 상황의 안내문
+            lead = f"방재단 안내: {event['notice'][:160]}"
+        elif msg:
+            lead = f"긴급재난문자: {msg[:120]}"
+        else:
+            lead = f"{event['reason']}." if event.get("reason") else f"{hz} {lv}입니다."
         body = " ".join([lead, *also_s, f"{where_s} 위험 영역 안입니다.", action, *extra,
                          "대피를 시작하셨으면 '대피 중', 대피소에 도착하셨으면 '대피 완료', 혼자 움직이기 어려우면 '도움 필요'를 눌러 주세요."])
         tts = (f"{hz} {lv}입니다. {' '.join(also_s) + ' ' if also_s else ''}{where_s} 위험 영역 안입니다. "

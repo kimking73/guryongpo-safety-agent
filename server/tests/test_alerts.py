@@ -235,12 +235,16 @@ def test_user_register_and_get(client, fake_db):
     assert client.post("/api/v1/user", headers=AUTH, json={}).status_code == 200    # 이미 있음
 
 
-def test_place_add(client, fake_db):
+def test_place_add(client, fake_db, monkeypatch):
     _user_rows(fake_db)
     fake_db.rows["INSERT INTO user_places"] = [{"id": "7b1f6a3e-2c4d-4e8f-9a01-3b5c7d9e1f20"}]
+    ran = []
+    from alerts import dispatch
+    monkeypatch.setattr(dispatch, "run", lambda run_id=None, user_id=None: ran.append(user_id) or 0)
     r = client.post("/api/v1/user/places", headers=AUTH,
                     json={"place_type": "home", "label": "우리집", "location": {"lat": 35.9862, "lng": 129.5489}})
     assert r.status_code == 201 and r.json()["label"] == "우리집"
+    assert ran == [UID]                                                # 등록한 장소로 즉시 경고 판정
 
 
 def test_device_token(client, fake_db):
@@ -292,23 +296,6 @@ def test_alerts_poll_normal(client, fake_db):
     assert d["alerts"] == [] and d["mode"] == "normal" and d["evacuation"] is None and d["next_poll_sec"] == 60
 
 
-def test_alert_read_and_response(client, fake_db):
+def test_alert_read(client, fake_db):
     assert client.post(f"/api/v1/alerts/{ALERT}/read", headers=AUTH).status_code == 204     # FakeDB execute = 1
-    fake_db.rows["SELECT response_required, incident_id FROM user_alerts"] = [
-        {"response_required": True, "incident_id": INCIDENT}]
-    r = client.post(f"/api/v1/alerts/{ALERT}/response", headers=AUTH, json={"status": "evacuating", "via": "button"})
-    assert r.status_code == 200 and r.json()["incident_id"] == INCIDENT and r.json()["recheck_after_min"] == 10
-    assert client.post(f"/api/v1/alerts/{ALERT}/response", headers=AUTH,
-                       json={"status": "need_help", "via": "voice"}).status_code == 422      # 도움 요청은 위치 필수
-    r = client.post(f"/api/v1/alerts/{ALERT}/response", headers=AUTH,
-                    json={"status": "need_help", "via": "voice", "location": {"lat": 35.99, "lng": 129.55}})
-    assert r.json()["call_suggested"] is True
-    assert client.post(f"/api/v1/alerts/{ALERT}/response", headers=AUTH,
-                       json={"status": "no_response", "via": "button"}).status_code == 422
-    fake_db.rows["SELECT response_required, incident_id FROM user_alerts"] = [
-        {"response_required": False, "incident_id": None}]
-    assert client.post(f"/api/v1/alerts/{ALERT}/response", headers=AUTH,
-                       json={"status": "evacuated", "via": "button"}).status_code == 422
-    del fake_db.rows["SELECT response_required, incident_id FROM user_alerts"]
-    assert client.post(f"/api/v1/alerts/{ALERT}/response", headers=AUTH,
-                       json={"status": "evacuated", "via": "button"}).status_code == 404
+    # 대피 확인 응답(/response)은 tests/test_evacuation.py

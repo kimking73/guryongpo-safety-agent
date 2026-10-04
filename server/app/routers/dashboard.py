@@ -13,11 +13,15 @@ router = APIRouter(tags=["dashboard"])
 LayerId = Literal["shelters", "medical", "landslide_zones", "manholes", "stations", "risk_areas"]
 
 
-@router.get("/dashboard", summary="맞춤 대시보드 (목업)")
+@router.get("/dashboard", summary="맞춤 대시보드 (목업 — evacuation 만 실데이터)")
 def get_dashboard(lat: float = Query(ge=-90, le=90), lng: float = Query(ge=-180, le=180),
                   scenario: Literal["normal", "emergency"] = Query("normal", description="목업 전용: 재난 모드 화면 확인"),
                   u: AuthUser = Depends(current_user)):
-    return mocks.mock(f"dashboard.{scenario}.json")
+    from .. import incidents, users
+    d = mocks.load(f"dashboard.{scenario}.json")
+    # 내 대피 확인 카드 (A12) — 진행 중인 대피 상황이 있으면 실제 상태, 없으면 null
+    d["evacuation"] = incidents.my_evacuation(users.find_user_id(u))
+    return mocks.respond(d)
 
 
 @router.get("/dashboard/layers/{layer_id}", summary="지도 레이어 GeoJSON (전부 실데이터)")

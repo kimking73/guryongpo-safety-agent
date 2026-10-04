@@ -94,3 +94,82 @@ def test_alert_pipeline_end_to_end(real_db):
     finally:
         simulate.apply("clear")
         real_db.execute("DELETE FROM users WHERE firebase_uid IN ('a5-near', 'a5-far')")
+
+
+def test_evacuation_response_end_to_end(real_db):
+    """A12 완료 기준: 가상 경고에 응답하면 DB 와 /dashboard 에 상태가 반영됨 (+ 재알림·이관·방재단 대신 기록·종료)"""
+    from datetime import datetime, timedelta, timezone
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from alerts import evacuation
+    from risk import simulate
+    c = TestClient(app)
+    me = {"Authorization": "Bearer dev:a12-me"}
+    staff = {"Authorization": "Bearer dev:responder-a12"}
+    dash = {"lat": 35.99069, "lng": 129.556057}
+    try:
+        c.post("/api/v1/user", headers=me, json={})
+        c.post("/api/v1/user/places", headers=me, json={"place_type": "home", "label": "우리집",
+                                                        "location": {"lat": 35.99069, "lng": 129.556057}})
+        simulate.apply("heavy_rain_flood")
+        alert = next(a for a in c.get("/api/v1/alerts", headers=me).json()["alerts"] if a["response_required"])
+        iid = alert["incident_id"]
+        target = real_db.fetch_one("""SELECT t.id FROM care.incident_targets t JOIN users u ON u.id = t.user_id
+                                      WHERE u.firebase_uid = 'a12-me' AND t.incident_id = %(i)s""", {"i": iid})["id"]
+
+        # 미응답 3분 → 재알림, 11분 → 이관 (시간을 당겨서)
+        real_db.execute("UPDATE care.incident_targets SET created_at = now() - interval '3 minutes' WHERE id = %(t)s", {"t": target})
+        evacuation.run_followups()
+        assert real_db.fetch_one("SELECT reminder_count FROM care.incident_targets WHERE id = %(t)s", {"t": target})["reminder_count"] == 1
+        real_db.execute("UPDATE care.incident_targets SET created_at = now() - interval '11 minutes' WHERE id = %(t)s", {"t": target})
+        evacuation.run_followups()
+        assert real_db.fetch_one("SELECT escalated_at FROM care.incident_targets WHERE id = %(t)s", {"t": target})["escalated_at"]
+
+        # 응답 → DB · /dashboard · /alerts · 방재단 화면
+        r = c.post(f"/api/v1/alerts/{alert['id']}/response", headers=me, json={"status": "evacuating", "via": "button"})
+        assert r.status_code == 200 and r.json()["recheck_after_min"] == 10
+        assert c.get("/api/v1/dashboard", headers=me, params=dash).json()["evacuation"]["status"] == "evacuating"
+        polled = c.get("/api/v1/alerts", headers=me).json()
+        assert polled["evacuation"]["status"] == "evacuating"
+        assert next(a for a in polled["alerts"] if a["id"] == alert["id"])["my_status"] == "evacuating"
+        hist = real_db.fetch_all("SELECT status::text, via::text FROM care.evacuation_responses WHERE target_id = %(t)s", {"t": target})
+        assert [(h["status"], h["via"]) for h in hist] == [("evacuating", "button")]
+        d = c.get(f"/api/v1/admin/incidents/{iid}", headers=staff).json()
+        mine = next(t for t in d["targets"] if t["id"] == str(target))
+        assert mine["status"] == "evacuating" and mine["escalated"] and mine["reminder_count"] == 1
+
+        # 대피 중 10분 → 재확인
+        real_db.execute("UPDATE care.incident_targets SET status_at = now() - interval '10 minutes', "
+                        "last_reminder_at = now() - interval '12 minutes' WHERE id = %(t)s", {"t": target})
+        assert evacuation.next_action(real_db.fetch_one(
+            "SELECT status::text, created_at, status_at, last_reminder_at, escalated_at, user_id, alert_id "
+            "FROM care.incident_targets WHERE id = %(t)s", {"t": target}), datetime.now(timezone.utc)) == "reminder"
+
+        # 방재단이 대신 기록 + 담당 지정 → 종료 → 응답 409
+        t = c.patch(f"/api/v1/admin/incidents/{iid}/targets/{target}", headers=staff,
+                    json={"status": "evacuated", "assigned_to": "me"}).json()
+        assert t["status"] == "evacuated" and t["status_via"] == "responder" and t["assigned_to"]["is_me"]
+        assert c.post(f"/api/v1/admin/incidents/{iid}/close", headers=staff).json()["closed_at"]
+        r = c.post(f"/api/v1/alerts/{alert['id']}/response", headers=me, json={"status": "evacuated", "via": "button"})
+        assert r.status_code == 409
+        assert c.get("/api/v1/dashboard", headers=me, params=dash).json()["evacuation"] is None
+
+        # 방재단이 닫은 상황은 같은 판정이 계속돼도 다시 열지 않음
+        simulate.apply("heavy_rain_flood")
+        assert real_db.fetch_one("SELECT count(*) AS n FROM care.incidents WHERE id <> %(i)s AND closed_at IS NULL "
+                                 "AND assessment_id = (SELECT assessment_id FROM care.incidents WHERE id = %(i)s)",
+                                 {"i": iid})["n"] == 0
+
+        # 수동 시작 (원 500m) → 영역 안 사용자에게 대피 확인 경고
+        r = c.post("/api/v1/admin/incidents", headers=staff, json={
+            "hazard": "landslide", "level": "warning", "title": "시험 대피", "message": "구룡포초로 대피하세요",
+            "area": {"center": {"lat": 35.99069, "lng": 129.556057}, "radius_m": 500}})
+        assert r.status_code == 201
+        manual = r.json()["id"]
+        a = next(a for a in c.get("/api/v1/alerts", headers=me).json()["alerts"] if a["incident_id"] == manual)
+        assert a["response_required"] and a["body"].startswith("방재단 안내: 구룡포초로 대피하세요")
+        c.post(f"/api/v1/admin/incidents/{manual}/close", headers=staff)
+    finally:
+        simulate.apply("clear")
+        real_db.execute("DELETE FROM care.incidents WHERE created_by IN (SELECT id FROM users WHERE firebase_uid = 'responder-a12')")
+        real_db.execute("DELETE FROM users WHERE firebase_uid IN ('a12-me', 'responder-a12')")
