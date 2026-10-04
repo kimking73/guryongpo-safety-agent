@@ -144,10 +144,11 @@ DATABASE_URL=postgresql://guardian:guardian-local-only@localhost:5433/guardian .
 | `GET /alerts`, `POST /alerts/{id}/read` | **실데이터** (A5) — lat/lng 를 보내면 기기 위치 갱신 + 그 사용자 즉시 경고 판정 |
 | `POST /alerts/{id}/response` | **실데이터** (A12) — 대상 상태 + 이력(evacuation_responses), 도움 필요는 즉시 이관, 종료된 상황 409 |
 | `/admin/overview`, `/admin/incidents` (목록·수동 시작), `/{id}`, `/{id}/map`, `PATCH /{id}/targets/{tid}`, `/{id}/close` | **실데이터** (A12) — 생활지원사는 담당 가구만, 시작·종료는 방재단·관리자만 |
-| `GET /dashboard` | 목업 — `evacuation`(내 대피 확인 카드)만 실데이터 (A12) |
+| `GET /dashboard` | **실데이터** (2026-10-05, `app/widgets.py`) — 위험 판정·머리 배너·장소별 위험·가까운 대피소 + 위젯: 특보·강수/바람(구룡포 AWS 6시간)·수위(포항 DT)·파고(단기예보 WAV)·단기예보·태풍(실황+예측)·재난문자·자외선/미세먼지. 자료 없으면 `{available:false, reason}` |
+| `GET /support-programs` | **실데이터** — 복구·지원 제도 (`support_programs`) |
 | `/user/household` (GET·PUT·DELETE), `/admin/households*` | **실데이터** (A13) — 동의 없으면 422·저장 안 함, 철회 = 삭제, 생활지원사는 담당 가구만(남의 가구 404), 주민은 /admin 403 |
 | `POST /admin/incidents/{id}/targets/{tid}/visits` | **실데이터** (A14) — 등록 가구·앱 사용자 모두, 방문 결과에 따라 상태 변경, 종료된 상황 409 |
-| 그 외 (`/dashboard` 본문 …) | 목업 (`X-Mock: true`) — 요청 검증·인증·권한은 실제와 동일. 방재단 화면은 `Bearer dev:responder-1` |
+| 그 외 | 목업 (`X-Mock: true`) — 요청 검증·인증·권한은 실제와 동일. 방재단 화면은 `Bearer dev:responder-1` |
 
 대화(`/api/chat`)는 ai 서비스, 경로(`/api/route`)는 route 서비스 — v0.3 에서 이 서버의 목업 `/chat`·`/voice`·`/route` 는 삭제했다.
 

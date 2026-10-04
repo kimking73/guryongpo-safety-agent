@@ -59,6 +59,14 @@ flutter run -d chrome --dart-define=APP_MODE=remote
 - 연결 코드: `lib/repositories/remote_repository.dart` (서버 응답 → 화면 모델 변환은 `test/remote_mapping_test.dart`에서 검사).
 - 한글 경로에서 `flutter analyze`가 죽는 Flutter 버그가 있다. 영문 경로에 복사해서 돌린다.
 
+## 실측 모드와 시연 모드 (2026-10-05)
+
+- `APP_MODE=remote`에서 기본은 **실측 모드**: 홈·태풍·복구 지원·방재단·내 가구 등록이 서버 실데이터 화면(`lib/live_screens.dart`, `GET /api/v1/dashboard` 등)이다.
+  자료가 없으면 지어내지 않고 "자료 없음 · 사유"를 보여 준다(예: 재난문자 키 없음, 진행 중인 태풍 없음).
+- 프로필 → **시연 모드**를 켜면 가상 시나리오 화면(`disaster_center.dart`·`prototype_safety_screens.dart`: 가상 태풍·가상 위험 구역·예시 가구·대피 확인 시연·해상 경로 데모)이 나온다.
+  기기마다 저장(`demo_mode`), `lib/services/demo_mode.dart`의 `showDemoProvider`. `APP_MODE=mock`이면 늘 가상 화면.
+- 실제 재난 흐름을 시연할 때는 가상 화면 대신 서버 `/api/v1/internal/simulate`(시연용 모의 관측값 → 실제 판정·경고·화면)를 권장.
+
 ## Firebase와 원격 API 설정
 
 ### 로그인 (Google · 이메일/비밀번호, 2026-10-04)
