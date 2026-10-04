@@ -808,7 +808,7 @@ class _AiPanelState extends ConsumerState<AiPanel> {
     }
     ChatAnswer? answer;
     try {
-      final v = await ref.read(repo).askVoice(wav, ref.read(mode), ref.read(userLocation).position);
+      final v = await ref.read(repo).askVoice(wav, UserMode.user, ref.read(userLocation).position);
       answer = v.answer;
       if (mounted) addMessages([ChatMessage('🎤 ${v.transcript}', true), ChatMessage(v.answer.text, false, answer: v.answer)]);
     } catch (e) {

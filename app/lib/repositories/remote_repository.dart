@@ -118,7 +118,7 @@ class RemoteSafetyRepository implements SafetyRepository {
     final places = await _account.places();
     return (uid, <String, Object>{
       'user_id': uid,
-      'user_type': userMode == UserMode.resident ? 'resident' : 'tourist',
+      // 사용자 유형 구분(주민·관광객)이 앱에서 빠져 서버 기본값(resident)을 쓴다
       if (age != null) 'age': age,
       'mobility': transport == '휠체어' ? 'wheelchair' : 'walk',
       if (walking) 'walking_impaired': true,
