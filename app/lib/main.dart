@@ -603,6 +603,7 @@ final appRouter = GoRouter(initialLocation: '/boot', routes: [
             live: const LiveTyphoonScreen())),
     GoRoute(
         path: '/route-search', builder: (_, __) => const CustomRouteScreen()),
+    GoRoute(path: '/route-follow', builder: (_, __) => const RouteFollowScreen()),
     GoRoute(
         path: '/support',
         builder: (_, __) => const DemoSwitch(
@@ -985,41 +986,45 @@ class Dashboard extends ConsumerWidget {
   @override
   Widget build(BuildContext c, WidgetRef ref) {
     final route = ref.watch(routeFacilityId);
-    if (!ref.watch(showDemoProvider)) {
-      if (route == null) return const LiveDashboard();
-      final routeType = ref.watch(routeKind);
-      return ListView(padding: const EdgeInsets.all(16), children: [
-        Row(children: [
-          Expanded(
-              child: Text(routeType == RouteType.nearest ? '가까운 경로' : '안전 경로',
-                  style: Theme.of(c).textTheme.headlineSmall)),
-          TextButton.icon(
-              onPressed: () => ref.read(routeFacilityId.notifier).state = null,
-              icon: const Icon(Icons.dashboard_outlined),
-              label: const Text('재난 종합')),
-        ]),
-        Wrap(spacing: 8, runSpacing: 4, children: [
-          if (route != customRouteId) const OriginChip(),
-          ActionChip(
-              avatar: const Icon(Icons.alt_route, size: 18),
-              label: Text(route == customRouteId ? '길찾기 다시' : '길찾기 (주소로)'),
-              onPressed: () => c.push('/route-search')),
-        ]),
-        RouteMap(
-            key: ValueKey('route-$route-${routeType.name}'), facilityId: route),
-      ]);
-    }
-
+    // 화면은 김다인 대시보드 UI 하나. 시연 모드면 가상 시나리오, 아니면 서버 실측 데이터로 채운다 (2026-10-05)
+    final demo = ref.watch(showDemoProvider);
     final routeAsync = route == null ? null : ref.watch(routeProvider(route));
     final routeType = ref.watch(routeKind);
     final facilities =
         ref.watch(facilitiesProvider).valueOrNull ?? const <Facility>[];
     final destination = route == null ? null : routeDestination(ref, route);
+    final live = demo ? null : ref.watch(liveDashboardProvider).valueOrNull;
     return DisasterDashboard(
+      demo: demo,
+      floodGrids: demo ? null : ref.watch(floodGridProvider).valueOrNull,
+      riskItems: liveRiskItems(live),
+      windPoints: demo
+          ? const []
+          : [
+              for (final w in ref.watch(windPointsProvider).valueOrNull ?? const <WindPoint>[])
+                (w.position, w.speed, w.dirDeg, w.name, w.observedAt)
+            ],
+      liveTop: demo ? null : const LiveDashboardTop(),
+      liveBottom: demo ? null : const LiveObservationCards(),
+      routeExtras: Wrap(spacing: 8, runSpacing: 4, children: [
+        if (route != customRouteId) const OriginChip(),
+        ActionChip(
+            avatar: const Icon(Icons.alt_route, size: 18),
+            label: Text(route == customRouteId ? '길찾기 다시' : '길찾기 (주소로)'),
+            onPressed: () => c.push('/route-search')),
+        if (route != null && !demo)
+          ActionChip(
+              avatar: const Icon(Icons.navigation_outlined, size: 18),
+              label: const Text('이동 중 안내'),
+              onPressed: () => c.push('/route-follow')),
+      ]),
       routeActive: route != null,
       facilities: facilities,
       riskAreas: ref.watch(riskAreasProvider).valueOrNull ?? const <RiskArea>[],
-      currentLocation: ref.watch(userLocation).position,
+      // 길찾기 경로는 사용자가 정한 출발지에서 그린다
+      currentLocation: route == customRouteId
+          ? (ref.watch(routeStartOrigin) ?? ref.watch(userLocation).position)
+          : ref.watch(userLocation).position,
       selectedDestination: destination,
       safetyRoute: routeAsync?.valueOrNull,
       routeLoading: routeAsync?.isLoading ?? false,
@@ -1128,6 +1133,29 @@ class Dashboard extends ConsumerWidget {
                       ModeCards(risk: risk)
                     ])));
       });*/
+}
+
+/// 이동 중 안내: 경로 지도 + 30초마다 현재 위치로 경로 재확인 (POST /api/route/check, C5) — 대시보드 경로 패널의 '이동 중 안내'
+class RouteFollowScreen extends ConsumerWidget {
+  const RouteFollowScreen({super.key});
+  @override
+  Widget build(BuildContext c, WidgetRef ref) {
+    final route = ref.watch(routeFacilityId);
+    final routeType = ref.watch(routeKind);
+    if (route == null) {
+      return const Center(child: Text('진행 중인 경로가 없습니다. 대시보드에서 목적지를 고르세요.'));
+    }
+    return ListView(padding: const EdgeInsets.all(16), children: [
+      Row(children: [
+        Expanded(
+            child: Text('이동 중 안내 · ${routeType == RouteType.nearest ? '가까운 경로' : '안전 경로'}',
+                style: Theme.of(c).textTheme.headlineSmall)),
+        TextButton.icon(
+            onPressed: () => c.pop(), icon: const Icon(Icons.dashboard_outlined), label: const Text('대시보드')),
+      ]),
+      RouteMap(key: ValueKey('follow-$route-${routeType.name}'), facilityId: route),
+    ]);
+  }
 }
 
 class RiskCard extends StatelessWidget {

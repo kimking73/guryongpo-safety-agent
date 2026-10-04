@@ -147,74 +147,92 @@ class _Spark extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------------ 홈: 긴급 재난 종합 (실측)
-class LiveDashboard extends ConsumerWidget {
-  const LiveDashboard({super.key});
+// ------------------------------------------------------------------ 홈 (김다인 대시보드 UI에 넣는 실측 부분, 2026-10-05)
+/// 실측 바람 화살표 (구룡포 AWS + 포항 DT 대기 센서): 관측소 레이어에서 wind_speed·wind_dir이 있는 지점
+class WindPoint {
+  const WindPoint(this.position, this.speed, this.dirDeg, this.name, {this.gust, this.observedAt});
+  final LatLng position;
+  final double speed;
+  final double dirDeg;
+  final double? gust;
+  final String name;
+  final String? observedAt;
+}
 
+final windPointsProvider = FutureProvider<List<WindPoint>>((ref) async {
+  final fc = await ref.watch(liveApiProvider).stationsLayer();
+  return [
+    for (final f in fc['features'] as List? ?? const [])
+      if (((f as Map)['properties'] as Map)['metrics'] case final Map m
+          when m['wind_speed'] is num && m['wind_dir'] is num && f['properties']['stale'] != true)
+        WindPoint(
+            LatLng(((f['geometry'] as Map)['coordinates'] as List)[1].toDouble(), ((f['geometry'] as Map)['coordinates'] as List)[0].toDouble()),
+            (m['wind_speed'] as num).toDouble(),
+            (m['wind_dir'] as num).toDouble(),
+            '${f['properties']['name']}',
+            gust: (m['wind_gust'] as num?)?.toDouble(),
+            observedAt: f['properties']['observed_at'] as String?),
+  ];
+});
+
+/// 대시보드 위쪽: 판정 시각·출발 위치·바로가기·머리 배너
+class LiveDashboardTop extends ConsumerWidget {
+  const LiveDashboardTop({super.key});
+  @override
+  Widget build(BuildContext c, WidgetRef ref) {
+    final d = ref.watch(liveDashboardProvider).valueOrNull;
+    final point = Map<String, dynamic>.from(d?['point_risk'] as Map? ?? const {});
+    final headline = d?['headline'] as Map?;
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Text(
+          d == null
+              ? '실시간 정보를 불러오는 중…'
+              : '실시간 데이터 · 위험 판정 ${hhmm(point['computed_at'])} 기준'
+                  '${point['data_stale'] == true ? ' · 판정이 30분 넘게 갱신되지 않았습니다' : ''}',
+          style: Theme.of(c).textTheme.bodySmall),
+      if (ref.watch(liveDashboardProvider).hasError)
+        Text('실시간 정보를 불러오지 못했습니다: ${liveError(ref.watch(liveDashboardProvider).error!)}',
+            style: TextStyle(color: Theme.of(c).colorScheme.error)),
+      const SizedBox(height: 6),
+      Wrap(spacing: 8, runSpacing: 6, children: [
+        const OriginChip(),
+        ActionChip(avatar: const Icon(Icons.alt_route, size: 18), label: const Text('길찾기'), onPressed: () => c.push('/route-search')),
+        ActionChip(avatar: const Icon(Icons.chat_bubble_outline, size: 18), label: const Text('AI 채팅'), onPressed: () => c.go('/ai')),
+        ActionChip(
+            avatar: const Icon(Icons.refresh, size: 18),
+            label: const Text('새로고침'),
+            onPressed: () {
+              ref.invalidate(liveDashboardProvider);
+              ref.invalidate(riskAreasProvider);
+              ref.invalidate(floodGridProvider);
+              ref.invalidate(windPointsProvider);
+            }),
+      ]),
+      if (headline != null) ...[const SizedBox(height: 8), _Headline(headline: Map<String, dynamic>.from(headline))],
+    ]);
+  }
+}
+
+/// 서버 판정 위험 항목 (대시보드 위험 카드용)
+List<Map<String, dynamic>> liveRiskItems(Map<String, dynamic>? dashboard) => [
+      for (final i in (dashboard?['point_risk'] as Map?)?['items'] as List? ?? const []) Map<String, dynamic>.from(i as Map)
+    ];
+
+/// 대시보드 아래쪽 '실시간 정보': 서버 위젯 카드(특보·강수·바람·수위·파고·태풍·예보·재난문자·자외선/미세먼지) + 가까운 대피소
+class LiveObservationCards extends ConsumerWidget {
+  const LiveObservationCards({super.key});
   @override
   Widget build(BuildContext c, WidgetRef ref) {
     final async = ref.watch(liveDashboardProvider);
-    Future<void> refresh() async {
-      ref.invalidate(liveDashboardProvider);
-      ref.invalidate(riskAreasProvider);
-      ref.invalidate(floodGridProvider);
-      await ref.read(liveDashboardProvider.future).catchError((_) => <String, dynamic>{});
-    }
-
     return async.when(
-      loading: () => const DashboardLoading(),
-      error: (e, _) => LoadError(message: '실시간 정보를 불러오지 못했습니다.\n${liveError(e)}', onRetry: refresh),
+      loading: () => const LinearProgressIndicator(),
+      error: (e, _) => Card(child: Padding(padding: const EdgeInsets.all(12), child: _NoData(liveError(e)))),
       data: (d) {
-        final point = Map<String, dynamic>.from(d['point_risk'] as Map? ?? const {});
-        final items = [for (final i in point['items'] as List? ?? const []) Map<String, dynamic>.from(i as Map)];
-        final headline = d['headline'] as Map?;
         final widgets = [for (final w in d['widgets'] as List? ?? const []) Map<String, dynamic>.from(w as Map)];
-        final places = d['places'] as List? ?? const [];
         final shelters = d['nearest_shelters'] as List? ?? const [];
-        return _Page(title: '긴급 재난 종합', onRefresh: refresh, children: [
-          Text(
-              '실시간 데이터 · 위험 판정 ${hhmm(point['computed_at'])} 기준'
-              '${point['data_stale'] == true ? ' · 판정이 30분 넘게 갱신되지 않았습니다' : ''}',
-              style: Theme.of(c).textTheme.bodySmall),
-          const Align(alignment: Alignment.centerLeft, child: OriginChip()),
-          const SizedBox(height: 8),
-          if (headline != null) _Headline(headline: Map<String, dynamic>.from(headline)),
-          Wrap(spacing: 8, runSpacing: 8, children: [
-            FilledButton.icon(
-                onPressed: () => c.go('/map'), icon: const Icon(Icons.directions_walk), label: const Text('대피소·의료시설 경로')),
-            OutlinedButton.icon(
-                onPressed: () => c.go('/ai'), icon: const Icon(Icons.chat_bubble_outline), label: const Text('AI 채팅')),
-            OutlinedButton.icon(
-                onPressed: () => c.push('/route-search'), icon: const Icon(Icons.alt_route), label: const Text('길찾기')),
-            OutlinedButton.icon(
-                onPressed: () => c.push('/typhoon'), icon: const Icon(Icons.cyclone), label: const Text('태풍')),
-            OutlinedButton.icon(
-                onPressed: () => c.push('/support'), icon: const Icon(Icons.volunteer_activism_outlined), label: const Text('복구 지원')),
-          ]),
-          const SizedBox(height: 12),
-          _RiskItems(items: items),
-          const SizedBox(height: 8),
-          const MapCard(height: 390),
-          const SizedBox(height: 14),
-          const Text('등록 장소 위험', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          if (places.isEmpty)
-            Card(
-                child: ListTile(
-                    leading: const Icon(Icons.add_location_alt_outlined),
-                    title: const Text('등록한 장소가 없습니다'),
-                    subtitle: const Text('집·직장을 등록하면 그곳의 위험도 알려 드립니다.'),
-                    onTap: () => c.push('/profile')))
-          else
-            for (final p in places)
-              Card(
-                  child: ListTile(
-                      leading: const Icon(Icons.place_outlined),
-                      title: Text('${(p as Map)['label']}'),
-                      trailing: _LevelChip(p['max_level'] as String?))),
-          const SizedBox(height: 14),
-          const Text('실시간 관측·예보', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          for (final w in widgets) _WidgetCard(widget: w),
-          const SizedBox(height: 14),
+        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          for (final w in widgets) LiveWidgetCard(widget: w),
+          const SizedBox(height: 10),
           const Text('가까운 대피소', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           if (shelters.isEmpty) const Card(child: Padding(padding: EdgeInsets.all(12), child: _NoData('안내할 대피소가 없습니다'))),
           for (final s in shelters)
@@ -267,38 +285,8 @@ class _Headline extends ConsumerWidget {
   }
 }
 
-class _RiskItems extends StatelessWidget {
-  const _RiskItems({required this.items});
-  final List<Map<String, dynamic>> items;
-  @override
-  Widget build(BuildContext c) {
-    if (items.isEmpty) {
-      return const Card(
-          child: ListTile(
-              leading: Icon(Icons.verified_outlined, color: Color(0xff2e7d32)),
-              title: Text('현재 위치 주변 위험 없음 (정상)'),
-              subtitle: Text('침수·호우·강풍·산사태·태풍·풍랑·생활안전 판정 결과, 주의 이상 위험 영역이 없습니다.')));
-    }
-    return Column(children: [
-      for (final i in items)
-        Card(
-            child: ListTile(
-                leading: CircleAvatar(
-                    backgroundColor: levelColor(i['level'] as String?),
-                    child: const Icon(Icons.warning_amber_rounded, color: Colors.white)),
-                title: Text('${i['label']}'),
-                subtitle: Text([
-                  if (i['reason'] != null) '${i['reason']}',
-                  if (i['observed_at'] != null) '${hhmm(i['observed_at'])} 관측',
-                  if (i['simulated'] == true) '시연용 모의값',
-                ].join(' · ')),
-                trailing: _LevelChip(i['level'] as String?))),
-    ]);
-  }
-}
-
-class _WidgetCard extends StatelessWidget {
-  const _WidgetCard({required this.widget});
+class LiveWidgetCard extends StatelessWidget {
+  const LiveWidgetCard({super.key, required this.widget});
   final Map<String, dynamic> widget;
 
   static const _titles = {

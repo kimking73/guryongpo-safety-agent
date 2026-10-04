@@ -16,6 +16,9 @@ class LiveApi {
   /// 맞춤 대시보드: 위험도·특보·강수·바람·수위·파고·태풍·예보·재난문자·자외선/미세먼지·장소별 위험·가까운 대피소
   Future<Map<String, dynamic>> dashboard(double lat, double lng) => _get('/api/v1/dashboard', {'lat': lat, 'lng': lng});
 
+  /// 관측소 + 최신값 GeoJSON (바람 화살표·센서 표시)
+  Future<Map<String, dynamic>> stationsLayer() => _get('/api/v1/dashboard/layers/stations');
+
   Future<List<Map<String, dynamic>>> supportPrograms({String? hazard}) =>
       _list('/api/v1/support-programs', {if (hazard != null) 'hazard': hazard});
 

@@ -243,6 +243,13 @@ class DisasterDashboard extends StatefulWidget {
     this.onRouteTypeChanged,
     this.onEndRoute,
     this.onRetryRoute,
+    this.demo = true,
+    this.floodGrids,
+    this.riskItems = const [],
+    this.windPoints = const [],
+    this.liveTop,
+    this.liveBottom,
+    this.routeExtras,
   });
 
   final bool routeActive;
@@ -258,6 +265,18 @@ class DisasterDashboard extends StatefulWidget {
   final ValueChanged<RouteType>? onRouteTypeChanged;
   final VoidCallback? onEndRoute;
   final VoidCallback? onRetryRoute;
+
+  /// 시연 모드(가상 시나리오). false = 실측: 아래 값으로 위험 카드·침수 격자·바람·장소 위험·실시간 정보를 채운다 (2026-10-05)
+  final bool demo;
+  final List<FloodGrid>? floodGrids;
+  /// 서버 위험 판정 항목 (/dashboard point_risk.items)
+  final List<Map<String, dynamic>> riskItems;
+  /// 실측 바람 (위치, 평균풍속 m/s, 풍향(불어오는 방향 °), 지점 이름, 관측 시각)
+  final List<(LatLng, double, double, String, String?)> windPoints;
+  /// 실측 모드 위쪽(판정 시각·출발 위치·바로가기·머리 배너)과 아래쪽(실시간 관측 카드·가까운 대피소)
+  final Widget? liveTop, liveBottom;
+  /// 경로 패널에 붙일 것 (출발 위치·길찾기·이동 중 안내)
+  final Widget? routeExtras;
 
   @override
   State<DisasterDashboard> createState() => _DisasterDashboardState();
@@ -275,6 +294,18 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
   Map<String, String> savedProfile = {};
   List<SavedPlace> savedPlaces = [];
   String? fittedRouteKey;
+  /// 시연 = 가상 격자, 실측 = 서버 침수 격자
+  List<FloodGrid> get _grids => widget.demo ? demoFloodGrid(0) : (widget.floodGrids ?? const <FloodGrid>[]);
+  /// 지점의 위험 단계 (주의·경계·심각 / 미확인 또는 정상)
+  String _levelAt(LatLng p) {
+    if (widget.demo) return _riskForPosition(p, _grids);
+    const order = ['주의', '경계', '심각'];
+    var best = _riskForPosition(p, _grids);
+    for (final a in widget.riskAreas) {
+      if (a.contains(p) && order.indexOf(a.level) > order.indexOf(best)) best = a.level;
+    }
+    return order.contains(best) ? best : '정상';
+  }
   late final MapOptions mapOptions = MapOptions(
     initialCenter: guryongpo,
     initialZoom: 11.5,
@@ -294,7 +325,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
     },
     onTap: (_, point) {
       if (!compositeView && !activeLayers.contains(HazardKind.flood)) return;
-      final grids = demoFloodGrid(0);
+      final grids = _grids;
       final cell = grids
           .where((g) =>
               point.latitude >= g.south &&
@@ -416,8 +447,8 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
   }
 
   Widget _personalizedMockAlerts(BuildContext context) {
-    if (AppConfig.isRemote) return const SizedBox.shrink();
-    final grids = demoFloodGrid(0);
+    if (AppConfig.isRemote || !widget.demo) return const SizedBox.shrink();
+    final grids = _grids;
     final alerts = <(String, String, LatLng, String)>[];
     for (final key in ['home', 'work']) {
       final position = _position(savedProfile, key);
@@ -511,7 +542,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                 HazardKind.overlap,
               }
             : activeLayers;
-    final floodGrids = demoFloodGrid(0);
+    final floodGrids = _grids;
     final destination = routeMode ? widget.selectedDestination : null;
     final route = routeMode ? widget.safetyRoute : null;
     final facilityMarkers = _clusteredFacilities(widget.facilities, mapZoom,
@@ -580,19 +611,26 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
         ),
         const SizedBox(height: 12),
         if (!routeMode) ...[
-          const _DemoBanner(),
-          const SizedBox(height: 10),
-          const PrototypeFeatureLinks(),
+          if (widget.demo) ...[
+            const _DemoBanner(),
+            const SizedBox(height: 10),
+            const PrototypeFeatureLinks(),
+          ] else if (widget.liveTop != null)
+            widget.liveTop!,
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,
             runSpacing: 6,
-            children: [
-              _riskCard(context, demoHazards[0]),
-              _riskCard(context, demoHazards[1]),
-              _riskCard(context, demoHazards[2]),
-              _riskCard(context, demoHazards[3]),
-            ],
+            children: widget.demo
+                ? [
+                    _riskCard(context, demoHazards[0]),
+                    _riskCard(context, demoHazards[1]),
+                    _riskCard(context, demoHazards[2]),
+                    _riskCard(context, demoHazards[3]),
+                  ]
+                : widget.riskItems.isEmpty
+                    ? [_liveRiskCard(context, null)]
+                    : [for (final i in widget.riskItems) _liveRiskCard(context, i)],
           ),
           const SizedBox(height: 12),
           _emergencyLayerControls(visible),
@@ -669,7 +707,27 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                                         color: Colors.white, width: 2))),
                           ),
                         ),
-                    if (visible.contains(HazardKind.wind))
+                    if (visible.contains(HazardKind.wind) && !widget.demo)
+                      for (final w in widget.windPoints)
+                        Marker(
+                          point: w.$1,
+                          width: 76,
+                          height: 64,
+                          child: GestureDetector(
+                            onTap: () => _showLiveWind(context, w),
+                            child: Column(children: [
+                              // 화살표는 불어가는 방향 = 풍향(불어오는 방향) + 180°
+                              Transform.rotate(
+                                angle: (w.$3 + 180) * math.pi / 180,
+                                child: Icon(Icons.navigation,
+                                    color: _windColor(w.$2, w.$2), size: 18 + math.min(w.$2, 24)),
+                              ),
+                              Text('${w.$2.toStringAsFixed(1)}m/s',
+                                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                            ]),
+                          ),
+                        ),
+                    if (visible.contains(HazardKind.wind) && widget.demo)
                       for (final w in const [
                         (LatLng(35.9892, 129.5620), 21.0, '북동풍'),
                         (LatLng(35.9902, 129.5550), 17.0, '북동풍'),
@@ -705,7 +763,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                             ),
                           ),
                         ),
-                    if (visible.contains(HazardKind.slide))
+                    if (widget.demo && visible.contains(HazardKind.slide))
                       Marker(
                         point: demoHazards[1].point,
                         width: 54,
@@ -719,7 +777,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                           ),
                         ),
                       ),
-                    if (visible.contains(HazardKind.overlap))
+                    if (widget.demo && visible.contains(HazardKind.overlap))
                       Marker(
                         point: demoHazards[3].point,
                         width: 56,
@@ -736,6 +794,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                     ...demoHazards
                         .where(
                           (h) =>
+                              widget.demo &&
                               h.kind != HazardKind.overlap &&
                               h.kind != HazardKind.flood &&
                               visible.contains(h.kind),
@@ -766,15 +825,14 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                                 place.$2.contains('집')
                                     ? Icons.home
                                     : Icons.business,
-                                color: _riskColor(
-                                    _riskForPosition(place.$1, floodGrids)),
+                                color: _riskColor(_levelAt(place.$1)),
                                 size: 28),
                             Container(
                                 color: Colors.white.withValues(alpha: .92),
                                 padding:
                                     const EdgeInsets.symmetric(horizontal: 3),
                                 child: Text(
-                                    '${place.$2} · ${_riskForPosition(place.$1, floodGrids)}',
+                                    '${place.$2} · ${_levelAt(place.$1)}',
                                     style: const TextStyle(
                                         fontSize: 8,
                                         fontWeight: FontWeight.bold))),
@@ -822,14 +880,13 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                       height: 54,
                       child: Column(children: [
                         Icon(Icons.my_location,
-                            color: _riskColor(_riskForPosition(
-                                widget.currentLocation, floodGrids)),
+                            color: _riskColor(_levelAt(widget.currentLocation)),
                             size: 30),
                         Container(
                           color: Colors.white.withValues(alpha: .94),
                           padding: const EdgeInsets.symmetric(horizontal: 4),
                           child: Text(
-                              '현위치 · ${_riskForPosition(widget.currentLocation, floodGrids)}',
+                              '현위치 · ${_levelAt(widget.currentLocation)}',
                               style: const TextStyle(
                                   fontSize: 9, fontWeight: FontWeight.bold)),
                         ),
@@ -865,15 +922,18 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                                   style: TextStyle(fontSize: 11)),
                               Text('실측 수심 구간 기준이 아님',
                                   style: TextStyle(fontSize: 10)),
-                              Text('목업 격자는 예시 데이터',
-                                  style: TextStyle(fontSize: 10)),
                             ],
                             if (!compositeView &&
+                                visible.contains(HazardKind.flood) &&
+                                widget.demo)
+                              const Text('목업 격자는 예시 데이터',
+                                  style: TextStyle(fontSize: 10)),
+                            if (!compositeView &&
                                 visible.contains(HazardKind.slide))
-                              const Text('산사태 표식은 목업 알림 위치입니다.',
-                                  style: TextStyle(fontSize: 11)),
-                            const Text('가상 시연 데이터',
-                                style: TextStyle(fontSize: 10)),
+                              Text(widget.demo ? '산사태 표식은 목업 알림 위치입니다.' : '산사태는 판정된 위험 영역으로 표시',
+                                  style: const TextStyle(fontSize: 11)),
+                            Text(widget.demo ? '가상 시연 데이터' : '실측 · 서버 위험 판정',
+                                style: const TextStyle(fontSize: 10)),
                           ],
                         ),
                       ),
@@ -963,7 +1023,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                 leading: const Icon(Icons.terrain, color: Colors.brown),
                 title: const Text('산림청 산사태 위험지도(2025)'),
                 subtitle: const Text(
-                    '공식 산사태 위험지도 열기 · 위험등급 1~5(1등급이 가장 높음). 앱 지도는 등급 격자 미연동이며 표식은 목업입니다.'),
+                    '공식 산사태 위험지도 열기 · 위험등급 1~5(1등급이 가장 높음). 앱 지도에는 판정된 산사태 위험 영역만 표시합니다.'),
                 trailing: const Icon(Icons.open_in_new),
                 onTap: () => launchUrl(Uri.parse(
                   'https://sansatai.forest.go.kr/mhms_pub/mhms/lndsInfo/lndsMapViewPage.do',
@@ -978,14 +1038,17 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
           _SavedPlaceSummary(
             currentLocation: widget.currentLocation,
             onFocus: (p) => focusOn(p),
+            levelAt: widget.demo ? null : _levelAt,
           ),
           _personalizedMockAlerts(context),
           const SizedBox(height: 8),
-          const Text(
-            '실시간 정보 · 각 지점은 서로 다른 측정 위치의 가상 자료',
-            style: TextStyle(fontWeight: FontWeight.bold),
+          Text(
+            widget.demo
+                ? '실시간 정보 · 각 지점은 서로 다른 측정 위치의 가상 자료'
+                : '실시간 관측·예보 · 기상청·포항 디지털 트윈',
+            style: const TextStyle(fontWeight: FontWeight.bold),
           ),
-          const _RealtimeCards(),
+          if (widget.demo) const _RealtimeCards() else if (widget.liveBottom != null) widget.liveBottom!,
           const SizedBox(height: 20),
         ],
       ],
@@ -1037,6 +1100,62 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
         ),
       );
 
+  /// 실측 위험 카드: 서버 판정 항목 1개 (null = 위험 없음)
+  Widget _liveRiskCard(BuildContext context, Map<String, dynamic>? i) {
+    final kind = switch (i?['hazard']) {
+      'landslide' => HazardKind.slide,
+      'strong_wind' || 'high_seas' => HazardKind.wind,
+      'typhoon' => HazardKind.storm,
+      null => HazardKind.flood,
+      _ => HazardKind.flood,
+    };
+    final loc = i?['location'] as Map?;
+    final point = loc == null ? null : LatLng((loc['lat'] as num).toDouble(), (loc['lng'] as num).toDouble());
+    final level = _levelKoFromServer('${i?['level'] ?? 'normal'}');
+    return SizedBox(
+      width: MediaQuery.sizeOf(context).width > 850 ? 300 : null,
+      child: Card(
+        color: (i == null ? Colors.green : _hazardColor(kind)).withValues(alpha: .06),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: point == null
+              ? null
+              : () {
+                  setState(() {
+                    compositeView = false;
+                    activeLayers.add(kind);
+                  });
+                  mapController.move(point, 15);
+                },
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(i == null ? Icons.verified_outlined : _hazardIcon(kind),
+                  color: i == null ? Colors.green.shade700 : _hazardColor(kind)),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(i == null ? '현재 위치 주변 위험 없음 · 정상' : '${i['label']} · $level',
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Text(
+                    i == null
+                        ? '침수·호우·강풍·산사태·태풍·풍랑·생활안전 판정 결과 주의 이상 위험이 없습니다.'
+                        : [
+                            if (i['reason'] != null) '${i['reason']}',
+                            if (i['observed_at'] != null) '기준 ${_hhmm('${i['observed_at']}')}',
+                            if (i['simulated'] == true) '시연용 모의값',
+                          ].join(' · '),
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ]),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _integratedRoutePanel(BuildContext context) {
     final destination = widget.selectedDestination;
     final route = widget.safetyRoute;
@@ -1055,7 +1174,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
               child: Text(
                 destination == null
                     ? '대피·의료시설'
-                    : '${destination.type == FacilityType.shelter ? '대피소' : '의료시설'} 경로 · ${destination.name}',
+                    : '${switch (destination.type) { FacilityType.shelter => '대피소', FacilityType.medical => '의료시설', _ => '목적지' }} 경로 · ${destination.name}',
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
             ),
@@ -1128,6 +1247,10 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
           if (destination == null)
             const Text('확대하면 시설이 개별 표시됩니다. 묶음 표식을 누르면 해당 구역으로 확대합니다.',
                 style: TextStyle(fontSize: 12)),
+          if (widget.routeExtras != null) ...[
+            const SizedBox(height: 6),
+            widget.routeExtras!,
+          ],
         ]),
       ),
     );
@@ -1228,6 +1351,28 @@ void _showWind(
         '관측(가상 시연 자료)',
       ),
     );
+void _showLiveWind(BuildContext c, (LatLng, double, double, String, String?) w) =>
+    showModalBottomSheet<void>(
+      context: c,
+      showDragHandle: true,
+      builder: (context) => _detailSheet(
+        context,
+        w.$4,
+        '평균풍속 ${w.$2.toStringAsFixed(1)}m/s · 풍향 ${w.$3.round()}°(불어오는 방향)\n지도 화살표는 불어가는 방향',
+        _hhmm(w.$5),
+        w.$2 >= 14 ? '해안가·옥외 시설물 주변을 피하세요.' : '강풍 주의보 기준(평균 14m/s) 아래입니다.',
+        '실측 (기상청 AWS·포항 디지털 트윈 대기 센서)',
+      ),
+    );
+
+String _levelKoFromServer(String level) =>
+    const {'watch': '관심', 'advisory': '주의', 'warning': '경보', 'critical': '위험'}[level] ?? '정상';
+
+String _hhmm(String? iso) {
+  final t = DateTime.tryParse(iso ?? '')?.toLocal();
+  return t == null ? '-' : '${t.month}/${t.day} ${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+}
+
 Widget _detailSheet(
   BuildContext context,
   String title,
@@ -1286,9 +1431,12 @@ class _SavedPlaceSummary extends StatefulWidget {
   const _SavedPlaceSummary({
     required this.currentLocation,
     required this.onFocus,
+    this.levelAt,
   });
   final LatLng currentLocation;
   final ValueChanged<LatLng> onFocus;
+  /// 실측: 위험 영역·침수 격자로 판정한 단계. null = 시연(가상 격자)
+  final String Function(LatLng)? levelAt;
   @override
   State<_SavedPlaceSummary> createState() => _SavedPlaceSummaryState();
 }
@@ -1323,7 +1471,7 @@ class _SavedPlaceSummaryState extends State<_SavedPlaceSummary> {
               c,
               '현위치',
               widget.currentLocation,
-              '현재 위치 기준 · 예시 판정',
+              widget.levelAt == null ? '현재 위치 기준 · 예시 판정' : '현재 위치 기준 · 서버 위험 판정',
               grids,
               Icons.my_location,
             ),
@@ -1370,7 +1518,8 @@ class _SavedPlaceSummaryState extends State<_SavedPlaceSummary> {
     IconData icon,
   ) {
     final cell = _gridForPosition(p, grids);
-    final level = cell?.hasRisk == true ? cell!.level : '미확인';
+    final live = widget.levelAt != null;
+    final level = live ? widget.levelAt!(p) : (cell?.hasRisk == true ? cell!.level : '미확인');
     final color = _riskColor(level);
     final progress = switch (level) {
       '심각' => 1.0,
@@ -1382,11 +1531,15 @@ class _SavedPlaceSummaryState extends State<_SavedPlaceSummary> {
       '심각' => '위험 구간 접근을 피하고 고지대로 이동하세요.',
       '경계' => '저지대·지하 공간 접근을 피하세요.',
       '주의' => '배수 상태와 주변 상황을 확인하세요.',
+      '정상' => '현재 주의 이상 위험 구역 밖입니다.',
       _ => '위험 정보 미확인 · 공식 안내를 확인하세요.',
     };
     final depth = cell?.hasRisk == true ? cell!.depthCm : null;
-    final summary =
-        depth == null ? '예상 침수 깊이 미확인' : '예시 침수 깊이 ${depth.round()}cm';
+    final summary = live
+        ? (level == '정상' ? '위험 구역 밖' : depth == null ? '위험 구역 안' : '침수 깊이 ${depth.round()}cm (센서)')
+        : depth == null
+            ? '예상 침수 깊이 미확인'
+            : '예시 침수 깊이 ${depth.round()}cm';
     return SizedBox(
       width: 245,
       child: Card(
@@ -1395,7 +1548,7 @@ class _SavedPlaceSummaryState extends State<_SavedPlaceSummary> {
         child: InkWell(
           onTap: () {
             widget.onFocus(p);
-            _placeDetail(c, title, address, '$level 위험 · $summary');
+            _placeDetail(c, title, address, '$level 위험 · $summary', demo: !live);
           },
           child: Padding(
             padding: const EdgeInsets.all(12),
@@ -1478,6 +1631,7 @@ String _riskForPosition(LatLng p, [List<FloodGrid>? grids]) {
 }
 
 Color _riskColor(String level) => switch (level) {
+      '정상' => const Color(0xff2e7d32),
       '주의' => const Color(0xffe7ac16),
       '경계' => const Color(0xffe56717),
       '심각' => const Color(0xffd93232),
@@ -1488,14 +1642,15 @@ void _placeDetail(
   BuildContext c,
   String name,
   String address,
-  String risk,
-) =>
+  String risk, {
+  bool demo = true,
+}) =>
     showDialog<void>(
       context: c,
       builder: (ctx) => AlertDialog(
         title: Text(name),
         content: Text(
-          '도로명 주소: $address\n위험 요약: $risk\n특이사항: 가상 시연 정보',
+          '도로명 주소: $address\n위험 요약: $risk${demo ? '\n특이사항: 가상 시연 정보' : ''}',
         ),
         actions: [
           TextButton(
