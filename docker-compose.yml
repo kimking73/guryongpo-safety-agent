@@ -187,7 +187,8 @@ services:
       route:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:2019/config/"]
+      # localhost 는 IPv6(::1)로 풀려 관리 포트(127.0.0.1:2019)에 닿지 않는다
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:2019/config/"]
       interval: 10s
       timeout: 5s
       retries: 5
