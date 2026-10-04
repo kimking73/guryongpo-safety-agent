@@ -38,7 +38,7 @@ services:
       retries: 10
 
   api:
-    # 앱·웹이 부르는 REST API (A2~). 배포 시 Caddy가 /api/chat·/api/route 외의 /api를 여기로 넘긴다 (B10).
+    # 앱·웹이 부르는 REST API (A2~). 배포 시 Caddy가 /api/chat·/api/route 외의 /api를 여기로 넘긴다 (B10, deploy/Caddyfile).
     build: ./server
     restart: unless-stopped
     env_file: .env
@@ -161,6 +161,39 @@ services:
       timeout: 5s
       retries: 5
 
+  caddy:
+    # 배포 입구 (B10): HTTPS 인증서 자동 발급 + 경로별로 api·ai·route·웹앱에 나눠 준다. 규칙은 deploy/Caddyfile.
+    # 서버에서만 켠다 (profiles). VM .env 의 COMPOSE_PROFILES=deploy 로 `up` 에 포함된다. 로컬 `up` 에는 뜨지 않는다.
+    image: caddy:2-alpine
+    profiles: ["deploy"]
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Flutter 웹 빌드 결과 (deploy/push_web.sh 가 채운다, gitignore)
+      - ./deploy/web:/srv/web:ro
+      # 인증서·계정 키 보관. 지우면 재발급 (Let's Encrypt 주간 발급 한도 주의)
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+      ai:
+        condition: service_healthy
+      route:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:2019/config/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   db-data:
   ai-data:
+  caddy-data:
+  caddy-config:

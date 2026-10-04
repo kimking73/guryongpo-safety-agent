@@ -40,3 +40,7 @@ server/mock/external/kma_awsh_wind.txt
 server/mock/external/geocode_log.json
 # 경로 시연 산출물 (route/scripts/avoid_demo.py)
 route/out/
+
+# 배포 (B10): Flutter 웹 빌드 결과, Firebase 웹 설정값
+deploy/web/
+deploy/web-defines.json

@@ -1,0 +1,37 @@
+# 구룡가디언 배포 입구 (B10) — 한 주소에서 HTTPS로 웹앱과 API 세 서버를 묶는다.
+# 주소는 .env 의 DEPLOY_DOMAIN (VM: 34-64-177-195.nip.io). Let's Encrypt 인증서는 Caddy가 자동 발급·갱신한다.
+# 경로 나누기: /api/chat·/api/voice·/api/tts·/api/ai → ai, /api/route → route, 나머지 /api → api, 그 외 → 웹앱(deploy/web)
+
+{$DEPLOY_DOMAIN:localhost} {
+	encode gzip
+
+	# 인증 없는 내부용 경로는 밖에 열지 않는다 (AI 기억 조회·OpenAI 비용·수집 수동 실행)
+	@blocked path /api/ai/memory* /api/ai/usage* /api/v1/internal*
+	handle @blocked {
+		respond 404
+	}
+
+	@ai path /api/chat* /api/voice* /api/tts* /api/ai/*
+	handle @ai {
+		# 음성 업로드(/api/voice) 여유
+		request_body {
+			max_size 10MB
+		}
+		reverse_proxy ai:8001
+	}
+
+	handle /api/route* {
+		reverse_proxy route:8002
+	}
+
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	# Flutter 웹 (deploy/push_web.sh 가 빌드해 올린다). 없는 경로는 앱이 처리하도록 index.html
+	handle {
+		root * /srv/web
+		try_files {path} /index.html
+		file_server
+	}
+}
