@@ -13,7 +13,7 @@ import 'mock_repository.dart';
 /// - api(8000): 위험도 /api/v1/risk, 위험 영역 /api/v1/risk/areas, 시설 /api/v1/dashboard/layers/{shelters,medical}
 /// - ai(8001): /api/chat, 음성 /api/voice·/api/tts
 /// - route(8002): /api/route
-/// 알림은 /api/v1/alerts가 아직 목업(A5)이라 위험도 판정 항목으로 만든다.
+/// 알림은 /api/v1/alerts에서 실시간 수신하고, /api/route는 이동 경로를 계산한다.
 class RemoteSafetyRepository implements SafetyRepository {
   RemoteSafetyRepository({ApiClient? client, AccountService? account})
       : _client = client ?? ApiClient(AuthService()),
@@ -43,6 +43,93 @@ class RemoteSafetyRepository implements SafetyRepository {
   @override
   Future<List<AlertItem>> alerts(LatLng origin) async =>
       alertsFromRiskJson(await _risk(origin));
+
+  @override
+  Future<AlertPollResult> pollAlerts(
+    LatLng origin, {
+    String? since,
+    String? deviceId,
+  }) async {
+    final r = await _guard(() => _client.api.get<Map<String, dynamic>>(
+          '/api/v1/alerts',
+          queryParameters: {
+            if (since != null) 'since': since,
+            if (deviceId != null) 'device_id': deviceId,
+            'lat': origin.latitude,
+            'lng': origin.longitude,
+          },
+        ));
+    return alertPollResultFromJson(r.data!);
+  }
+
+  @override
+  Future<RouteCheckResult> checkRoute({
+    required LatLng current,
+    required LatLng destination,
+    required String geometry,
+    required String profile,
+    required String facilityId,
+    required RouteType routeType,
+  }) async {
+    final r = await _guard(() => _client.route.post<Map<String, dynamic>>(
+          '/api/route/check',
+          data: {
+            'current': {'lat': current.latitude, 'lon': current.longitude},
+            'destination': {
+              'lat': destination.latitude,
+              'lon': destination.longitude,
+            },
+            'geometry': geometry,
+            'profile': profile,
+          },
+        ));
+    return routeCheckResultFromJson(
+      r.data!,
+      facilityId: facilityId,
+      routeType: routeType,
+      names: await _routeHazardNames(),
+    );
+  }
+
+  @override
+  Future<String?> registerDeviceToken(String token, String platform) async {
+    final r = await _guard(() => _client.api.post<Map<String, dynamic>>(
+          '/api/v1/device-token',
+          data: {'token': token, 'platform': platform},
+        ));
+    return r.data?['device_id'] as String?;
+  }
+
+  @override
+  Future<void> unregisterDeviceToken(String token) async {
+    await _guard(() => _client.api.delete<void>(
+          '/api/v1/device-token',
+          queryParameters: {'token': token},
+        ));
+  }
+
+  @override
+  Future<void> markAlertRead(String alertId) async {
+    await _guard(() => _client.api.post<void>(
+          '/api/v1/alerts/$alertId/read',
+        ));
+  }
+
+  @override
+  Future<void> respondToAlert({
+    required String alertId,
+    required String status,
+    required LatLng location,
+  }) async {
+    await _client.api.post<void>(
+      '/api/v1/alerts/$alertId/response',
+      data: {
+        'status': status,
+        'via': 'button',
+        'location': {'lat': location.latitude, 'lng': location.longitude},
+      },
+    );
+  }
 
   @override
   Future<List<RiskArea>> riskAreas() async {
@@ -85,9 +172,7 @@ class RemoteSafetyRepository implements SafetyRepository {
               // 두 전략 모두 활성 위험 영역은 회피한다. 가까운 경로는 시간 우선,
               // 안전 경로는 사용자 이동 조건(고령·휠체어·보행 불편)을 반영한다.
               'strategy': routeType == RouteType.nearest ? 'fastest' : 'safest',
-              'profile': routeType == RouteType.safest
-                  ? routeProfileFor(age, transport, walkingImpaired: walking)
-                  : 'adult',
+              'profile': routeProfileFor(age, transport, walkingImpaired: walking),
             }),
         notFound: '이 시설까지 걸어서 갈 수 있는 길을 찾지 못했습니다.');
     return routeFromJson(r.data!, facility.id, routeType,
@@ -118,7 +203,7 @@ class RemoteSafetyRepository implements SafetyRepository {
     final places = await _account.places();
     return (uid, <String, Object>{
       'user_id': uid,
-      'user_type': userMode == UserMode.resident ? 'resident' : 'tourist',
+      'user_type': 'tourist',
       if (age != null) 'age': age,
       'mobility': transport == '휠체어' ? 'wheelchair' : 'walk',
       if (walking) 'walking_impaired': true,
@@ -301,6 +386,52 @@ List<AlertItem> alertsFromRiskJson(Map<String, dynamic> j) {
   ];
 }
 
+AlertPollResult alertPollResultFromJson(Map<String, dynamic> json) {
+  final alerts = (json['alerts'] as List? ?? const [])
+      .cast<Map<String, dynamic>>()
+      .map((item) {
+    final risk = item['risk'] as Map<String, dynamic>? ?? const {};
+    final level = levelKo(risk['level'] as String?);
+    return AlertItem(
+      id: '${item['id']}',
+      title: item['title'] as String? ?? '재난 알림',
+      level: level,
+      time: _hhmm(item['created_at'] as String? ?? ''),
+      summary: item['body'] as String? ?? '',
+      guide: guideFor(level),
+      read: item['read_at'] != null,
+      responseRequired: item['response_required'] == true,
+      myStatus: item['my_status'] as String?,
+    );
+  }).toList();
+  return AlertPollResult(
+    alerts: alerts,
+    serverTime: DateTime.tryParse(json['server_time'] as String? ?? ''),
+    nextPollSeconds: (json['next_poll_sec'] as num?)?.toInt() ?? 60,
+    mode: json['mode'] as String? ?? 'normal',
+    evacuation: json['evacuation'] as Map<String, dynamic>?,
+  );
+}
+
+RouteCheckResult routeCheckResultFromJson(
+  Map<String, dynamic> json, {
+  required String facilityId,
+  required RouteType routeType,
+  Map<String, String> names = const {},
+}) {
+  final routeJson = json['route'] as Map<String, dynamic>?;
+  return RouteCheckResult(
+    reroute: json['reroute'] == true,
+    reasons: (json['reasons'] as List? ?? const []).cast<String>(),
+    offRouteMeters: (json['off_route_m'] as num?)?.toInt() ?? 0,
+    hazardsAhead: (json['hazards_ahead'] as List? ?? const []).cast<String>(),
+    arrived: json['arrived'] == true,
+    route: routeJson == null
+        ? null
+        : routeFromJson(routeJson, facilityId, routeType, names: names),
+  );
+}
+
 List<RiskArea> riskAreasFromGeoJson(Map<String, dynamic> fc) {
   List<LatLng> ring(List coords) => [
         for (final c in coords)
@@ -376,9 +507,7 @@ List<Facility> facilitiesFromGeoJson(
 /// 65세 이상·휠체어·보행 불편이면 급경사를 피하는 노약자 경로 (AI tools.route_profile과 같은 기준)
 String routeProfileFor(int? age, String? transport,
         {bool walkingImpaired = false}) =>
-    (age != null && age >= 65) || transport == '휠체어' || walkingImpaired
-        ? 'elderly'
-        : 'adult';
+    deriveRouteProfile(age, transport, walkingImpaired: walkingImpaired);
 
 /// 등록 장소 → AI 요청 profile (집 → home, 나머지 → frequent_places). AI가 "집까지", "직장까지"를 찾는다
 Map<String, Object> placesForProfile(List<SavedPlace> places) {
@@ -431,7 +560,7 @@ SafetyRoute routeFromJson(
       '위험 구역 ${avoided.length}곳을 피했습니다: ${avoided.join(', ')}',
     if (inside.isNotEmpty) '주의: 다른 길이 없어 지나는 위험 구역 — ${inside.join(', ')}',
     if (avoided.isEmpty && inside.isEmpty) '경로 위에 알려진 위험 구역이 없습니다.',
-    if (j['profile'] == 'elderly') '급경사·계단 부담을 줄이는 경로 (최대 경사 $slope%)',
+    if (j['profile'] == 'elderly') '노약자 프로필: 급경사·계단 부담을 줄이는 경로 (최대 경사 $slope%)',
     if (j['hazards_ok'] == false) '주의: 위험 정보를 확인하지 못해 위험 영역 회피 없이 계산한 경로입니다',
   ].join('\n');
   return SafetyRoute(
@@ -443,5 +572,9 @@ SafetyRoute routeFromJson(
     riskAvoidanceSummary: summary,
     avoided: avoided,
     stillInside: inside,
+    profile: j['profile'] as String? ?? 'adult',
+    maxSlopePercent: slope,
+    hazardsOk: j['hazards_ok'] != false,
+    encodedGeometry: j['geometry'] as String,
   );
 }

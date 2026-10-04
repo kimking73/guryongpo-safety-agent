@@ -40,9 +40,36 @@ class AlertItem {
       required this.time,
       required this.summary,
       required this.guide,
-      this.read = false});
+      this.read = false,
+      this.responseRequired = false,
+      this.myStatus});
   final String id, title, level, time, summary, guide;
   final bool read;
+  final bool responseRequired;
+  final String? myStatus;
+
+  AlertItem copyWith({bool? read, String? myStatus}) => AlertItem(
+        id: id,
+        title: title,
+        level: level,
+        time: time,
+        summary: summary,
+        guide: guide,
+        read: read ?? this.read,
+        responseRequired: responseRequired,
+        myStatus: myStatus ?? this.myStatus,
+      );
+}
+
+List<AlertItem> mergeAlertsById(
+    Iterable<AlertItem> existing, Iterable<AlertItem> incoming) {
+  final merged = <String, AlertItem>{
+    for (final alert in existing) alert.id: alert,
+  };
+  for (final alert in incoming) {
+    merged[alert.id] = alert;
+  }
+  return merged.values.toList();
 }
 
 class RiskStatus {
@@ -189,6 +216,13 @@ String? shelterExclusion(Facility f, List<RiskArea> areas) {
 
 enum RouteType { safest, nearest }
 
+/// 65세 이상, 휠체어 사용자 또는 보행 불편 사용자는 접근성 경로를 사용한다.
+String deriveRouteProfile(int? age, String? transport,
+        {bool walkingImpaired = false}) =>
+    (age != null && age >= 65) || transport == '휠체어' || walkingImpaired
+        ? 'elderly'
+        : 'adult';
+
 /// AI 답변 한 개. 경로 안내가 있으면 route·목적지가 함께 온다 ("지도에서 경로 보기").
 /// voiceText = 음성으로 읽을 짧은 문장(서버 voice_text), audio = 음성 질문의 답 음성(mp3)
 class ChatAnswer {
@@ -266,6 +300,10 @@ class SafetyRoute {
     required this.riskAvoidanceSummary,
     this.avoided = const [],
     this.stillInside = const [],
+    this.profile = 'adult',
+    this.maxSlopePercent = 0,
+    this.hazardsOk = true,
+    this.encodedGeometry,
   });
 
   final String shelterId;
@@ -280,4 +318,44 @@ class SafetyRoute {
 
   /// 다른 길이 없어 이 경로도 지나는 위험 구역 이름
   final List<String> stillInside;
+
+  /// Profile and route diagnostics returned by the route API.
+  final String profile;
+  final int maxSlopePercent;
+  final bool hazardsOk;
+  final String? encodedGeometry;
+}
+
+class RouteCheckResult {
+  const RouteCheckResult({
+    required this.reroute,
+    required this.reasons,
+    required this.offRouteMeters,
+    required this.hazardsAhead,
+    required this.arrived,
+    this.route,
+  });
+
+  final bool reroute;
+  final List<String> reasons;
+  final int offRouteMeters;
+  final List<String> hazardsAhead;
+  final bool arrived;
+  final SafetyRoute? route;
+}
+
+class AlertPollResult {
+  const AlertPollResult({
+    required this.alerts,
+    required this.serverTime,
+    required this.nextPollSeconds,
+    required this.mode,
+    this.evacuation,
+  });
+
+  final List<AlertItem> alerts;
+  final DateTime? serverTime;
+  final int nextPollSeconds;
+  final String mode;
+  final Map<String, dynamic>? evacuation;
 }

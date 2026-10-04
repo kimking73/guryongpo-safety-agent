@@ -9,7 +9,12 @@ class AuthStateInfo {
 }
 
 class AuthService {
-  Future<AuthStateInfo> initialize() async {
+  static Future<AuthStateInfo>? _initialization;
+
+  Future<AuthStateInfo> initialize() =>
+      _initialization ??= _initialize();
+
+  Future<AuthStateInfo> _initialize() async {
     if (!AppConfig.hasFirebaseConfig) return const AuthStateInfo(isMock: true, userId: 'mock-guryongpo-user');
     await Firebase.initializeApp(options: FirebaseOptions(apiKey: AppConfig.firebaseApiKey, appId: AppConfig.firebaseAppId, messagingSenderId: AppConfig.firebaseSenderId, projectId: AppConfig.firebaseProjectId));
     final auth = FirebaseAuth.instance;
