@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,6 +10,7 @@ import 'repositories/remote_repository.dart' show RemoteError;
 import 'services/app_config.dart';
 import 'services/voice_service.dart';
 import 'services/account_service.dart';
+import 'services/location_service.dart';
 
 Color riskColor(String level) => switch (level) {
       '주의' || 'advisory' || 'watch' => const Color(0xffe7ac16),
@@ -182,13 +184,125 @@ class RouteMap extends ConsumerStatefulWidget {
   ConsumerState<RouteMap> createState() => _RouteMapState();
 }
 
-class _RouteMapState extends ConsumerState<RouteMap> {
+class _RouteMapState extends ConsumerState<RouteMap> with WidgetsBindingObserver {
   final mapController = MapController();
   final mapOptions = const MapOptions();
   String? fittedBounds;
+  Timer? _checkTimer;
+  SafetyRoute? _updatedRoute;
+  String? _monitorMessage;
+  String? _monitorError;
+  bool _checkInFlight = false;
+  bool _arrived = false;
+
+  SafetyRoute? get _activeRoute =>
+      _updatedRoute ?? ref.read(routeProvider(widget.facilityId)).valueOrNull;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _ensureRouteMonitoring(_activeRoute);
+    } else {
+      _checkTimer?.cancel();
+      _checkTimer = null;
+    }
+  }
+
+  void _ensureRouteMonitoring(SafetyRoute? route) {
+    if (!AppConfig.isRemote ||
+        route?.encodedGeometry == null ||
+        _arrived ||
+        _checkTimer != null ||
+        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+      return;
+    }
+    _checkTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => unawaited(_checkCurrentRoute()),
+    );
+  }
+
+  Future<void> _checkCurrentRoute() async {
+    if (_checkInFlight || _arrived || !mounted) return;
+    final route = _activeRoute ??
+        ref.read(routeProvider(widget.facilityId)).valueOrNull;
+    final facility = routeDestination(ref, widget.facilityId);
+    if (route?.encodedGeometry == null || facility == null) return;
+    setState(() => _checkInFlight = true);
+    try {
+      final last = ref.read(gpsPosition);
+      final current = last != null && last.$2
+          ? last.$1
+          : await ref.read(locationService).current();
+      if (!inServiceArea(current)) {
+        throw const LocationUnavailable('경로 안내 범위를 벗어나 현재 위치를 확인할 수 없습니다.');
+      }
+      setPosition(ref, current);
+      final result = await ref.read(repo).checkRoute(
+            current: current,
+            destination: facility.position,
+            geometry: route!.encodedGeometry!,
+            profile: route.profile,
+            facilityId: facility.id,
+            routeType: route.routeType,
+          );
+      if (!mounted) return;
+      if (result.arrived) {
+        _arrived = true;
+        _checkTimer?.cancel();
+        _checkTimer = null;
+        setState(() {
+          _monitorMessage = '목적지에 도착했습니다.';
+          _monitorError = null;
+        });
+      } else if (result.reroute && result.route != null) {
+        setState(() {
+          _updatedRoute = result.route;
+          _monitorMessage = result.reasons.contains('hazard_on_route')
+              ? '앞 경로에 새 위험 구역이 생겨 안전 경로를 갱신했습니다.'
+              : '경로에서 벗어나 현재 위치 기준으로 경로를 갱신했습니다.';
+          _monitorError = null;
+          fittedBounds = null;
+        });
+      } else if (result.hazardsAhead.isNotEmpty) {
+        setState(() {
+          _monitorMessage = '앞 경로에 위험 구역이 있습니다. 다른 대피 경로를 확인하세요.';
+          _monitorError = null;
+        });
+      } else {
+        setState(() { _monitorMessage = null; _monitorError = null; });
+      }
+    } catch (error) {
+      if (mounted) {
+        if (error is LocationUnavailable) {
+          // GPS/permission failures should not prompt the user every 30 seconds.
+          // Keep the current route visible and let an explicit retry restart it.
+          _checkTimer?.cancel();
+          _checkTimer = null;
+        }
+        setState(() => _monitorError =
+            error is LocationUnavailable
+                ? '${error.message} 현재 경로를 유지합니다. 위치 권한과 GPS를 확인한 뒤 다시 시도하세요.'
+                : '$error · 현재 경로를 유지합니다. 위치를 확인한 뒤 다시 시도하세요.');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _checkInFlight = false);
+        if (!_arrived && _monitorError == null) _ensureRouteMonitoring(_activeRoute);
+      }
+    }
+  }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _checkTimer?.cancel();
     mapController.dispose();
     super.dispose();
   }
@@ -198,35 +312,58 @@ class _RouteMapState extends ConsumerState<RouteMap> {
     final facility = routeDestination(ref, widget.facilityId);
     final routeType = ref.watch(routeKind);
     final routeAsync = ref.watch(routeProvider(widget.facilityId));
-    final route = routeAsync.valueOrNull;
+    final route = _updatedRoute ?? routeAsync.valueOrNull;
     final loading = routeAsync.isLoading;
     final current = ref.watch(userLocation).position;
     if (facility == null || route == null) {
+      final hasError = routeAsync.hasError;
+      final showLoading = loading && !hasError;
       return Card(
           child: SizedBox(
               height: 470,
               child: Center(
-                  child: routeAsync.hasError
-                      ? Column(mainAxisSize: MainAxisSize.min, children: [
-                          Padding(
-                              padding: const EdgeInsets.all(16),
-                              child: Text('${routeAsync.error}',
-                                  textAlign: TextAlign.center)),
-                          FilledButton(
-                              onPressed: () => ref
-                                  .invalidate(routeProvider(widget.facilityId)),
-                              child: const Text('다시 시도')),
-                          TextButton(
-                              onPressed: () => ref
-                                  .read(routeFacilityId.notifier)
-                                  .state = null,
-                              child: const Text('경로 안내 종료'))
-                        ])
-                      : const Column(mainAxisSize: MainAxisSize.min, children: [
-                          CircularProgressIndicator(),
-                          SizedBox(height: 10),
-                          Text('안전 경로를 준비하고 있습니다')
-                        ]))));
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+            if (showLoading) ...const [
+              CircularProgressIndicator(),
+              SizedBox(height: 10),
+              Text('안전 경로를 준비하고 있습니다'),
+            ] else ...[
+              Icon(
+                hasError ? Icons.route_outlined : Icons.location_searching,
+                size: 38,
+                color: hasError ? Colors.deepOrange : null,
+              ),
+              const SizedBox(height: 10),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Text(
+                  hasError
+                      ? '${routeAsync.error}'
+                      : '목적지 또는 경로를 찾지 못했습니다. 다른 대피 시설을 선택해 주세요.',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              const SizedBox(height: 12),
+              if (hasError)
+                FilledButton(
+                  onPressed: () => ref.invalidate(routeProvider(widget.facilityId)),
+                  child: const Text('경로 다시 찾기'),
+                )
+              else
+                FilledButton(
+                  onPressed: () => showModalBottomSheet<void>(
+                    context: context,
+                    showDragHandle: true,
+                    builder: (_) => const ShelterPickerSheet(),
+                  ),
+                  child: const Text('대피 시설 선택'),
+                ),
+              TextButton(
+                onPressed: () => ref.read(routeFacilityId.notifier).state = null,
+                child: const Text('경로 안내 종료'),
+              ),
+            ],
+          ]))));
     }
     final bounds = LatLngBounds.fromPoints([current, ...route.polylinePoints]);
     final boundsKey = '${bounds.northWest}:${bounds.southEast}';
@@ -240,6 +377,9 @@ class _RouteMapState extends ConsumerState<RouteMap> {
         }
       });
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _ensureRouteMonitoring(route);
+    });
     final warn = shelterExclusion(
         facility, ref.watch(riskAreasProvider).valueOrNull ?? const []);
     return Card(
@@ -325,10 +465,31 @@ class _RouteMapState extends ConsumerState<RouteMap> {
                   color: Colors.white,
                   padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
                   child: Column(children: [
+                    if (_monitorMessage != null)
+                      ListTile(
+                        dense: true,
+                        leading: Icon(_arrived
+                            ? Icons.check_circle_outline
+                            : Icons.warning_amber_rounded),
+                        title: Text(_monitorMessage!),
+                      ),
+                    if (_monitorError != null)
+                      ListTile(
+                        dense: true,
+                        leading: const Icon(Icons.location_off_outlined),
+                        title: Text(_monitorError!),
+                        trailing: IconButton(
+                          tooltip: '지금 경로 재확인',
+                          onPressed: _checkInFlight
+                              ? null
+                              : () => unawaited(_checkCurrentRoute()),
+                          icon: const Icon(Icons.refresh),
+                        ),
+                      ),
                     Row(children: [
                       Expanded(
                           child: Text(
-                              '${warn != null ? '⚠ $warn — 다른 대피소를 먼저 확인하세요\n' : ''}${routeType == RouteType.nearest ? '최단 시간 우선 · 확인된 위험 구역 회피' : '안전·접근성 우선 · 확인된 위험 구역 회피'} · ${AppConfig.dataLabel}\n${facility.name} · ${(route.distanceMeters / 1000).toStringAsFixed(1)}km · 도보 ${route.estimatedMinutes}분\n${route.riskAvoidanceSummary}',
+                              '${warn != null ? '⚠ $warn — 다른 대피소를 먼저 확인하세요\n' : ''}${routeType == RouteType.nearest ? '최단 시간 우선 · 확인된 위험 구역 회피' : '안전·접근성 우선 · 확인된 위험 구역 회피'} · ${route.profile == 'elderly' ? '노약자 프로필' : '성인 프로필'} · ${AppConfig.dataLabel}\n${facility.name} · ${(route.distanceMeters / 1000).toStringAsFixed(1)}km · 도보 ${route.estimatedMinutes}분 · 최대 경사 ${route.maxSlopePercent}%\n${route.hazardsOk ? '' : '⚠ 위험 정보를 불러오지 못한 경로입니다.\n'}${route.riskAvoidanceSummary}',
                               style: const TextStyle(fontSize: 12))),
                       IconButton(
                           tooltip: '경로 안내 종료',
@@ -627,7 +788,11 @@ class AlertCards extends ConsumerWidget {
 
   /// 실시간 위험 판정 항목 (/risk items)
   Widget _live(WidgetRef ref) {
-    final alerts = ref.watch(alertsProvider).valueOrNull ?? const <AlertItem>[];
+    final legacyAlerts =
+        ref.watch(alertsProvider).valueOrNull ?? const <AlertItem>[];
+    final alerts = AppConfig.isRemote
+        ? ref.watch(alertCenterProvider)
+        : legacyAlerts;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Text('선제 경고 알림',
           style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),

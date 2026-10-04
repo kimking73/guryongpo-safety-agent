@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,15 +14,36 @@ import 'services/auth_service.dart';
 import 'services/account_service.dart';
 import 'services/location_service.dart';
 import 'services/geocoding_service.dart';
+import 'services/demo_speech.dart';
 import 'dashboard_parts.dart';
 import 'disaster_center.dart';
 import 'login_screen.dart';
+import 'prototype_safety_screens.dart';
+import 'services/demo_notifications.dart';
+import 'services/prototype_safety_store.dart';
+import 'services/fcm_notification_service.dart';
+import 'services/evacuation_response_queue.dart';
 
 /// APP_MODE=remote면 실제 서버, 아니면 예시 데이터
 final repo = Provider<SafetyRepository>((_) =>
     AppConfig.isRemote ? RemoteSafetyRepository() : MockSafetyRepository());
 final offline = StateProvider<bool>((_) => false);
 final routeFacilityId = StateProvider<String?>((_) => null);
+final routeFacilitySnapshot = StateProvider<Facility?>((_) => null);
+final routeStartOrigin = StateProvider<LatLng?>((_) => null);
+final alertCenterProvider = StateProvider<List<AlertItem>>((_) => const []);
+final alertFeedErrorProvider = StateProvider<String?>((_) => null);
+final alertFeedLoadedProvider = StateProvider<bool>((_) => false);
+final alertPollIntervalProvider = StateProvider<int>((_) => 60);
+final alertModeProvider = StateProvider<String>((_) => 'normal');
+final alertServerTimeProvider = StateProvider<DateTime?>((_) => null);
+final alertEvacuationProvider =
+    StateProvider<Map<String, dynamic>?>((_) => null);
+final alertSinceProvider = StateProvider<String?>((_) => null);
+final pendingResponseIdsProvider =
+    StateProvider<Set<String>>((_) => <String>{});
+final responseSendingProvider = StateProvider<String?>((_) => null);
+final rootMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
 /// `safe` avoids the illustrated hazard; `near` illustrates the shorter route.
 final routeKind = StateProvider<RouteType>((_) => RouteType.safest);
@@ -97,6 +119,39 @@ final facilitiesProvider = FutureProvider<List<Facility>>(
 final alertsProvider = FutureProvider<List<AlertItem>>(
     (ref) => ref.watch(repo).alerts(ref.watch(userLocation).position));
 
+void mergeAlertItems(WidgetRef ref, List<AlertItem> incoming) {
+  ref.read(alertCenterProvider.notifier).state = mergeAlertsById(
+    ref.read(alertCenterProvider),
+    incoming,
+  );
+}
+
+Future<void> refreshAlertFeed(WidgetRef ref, {bool fullRefresh = true}) async {
+  if (!AppConfig.isRemote) {
+    ref.invalidate(alertsProvider);
+    return;
+  }
+  try {
+    final result = await ref.read(repo).pollAlerts(
+          ref.read(userLocation).position,
+          since: fullRefresh ? null : ref.read(alertSinceProvider),
+          deviceId: await FcmNotificationService.instance.deviceId,
+        );
+    ref.read(alertSinceProvider.notifier).state =
+        result.serverTime?.toUtc().toIso8601String();
+    ref.read(alertServerTimeProvider.notifier).state = result.serverTime;
+    ref.read(alertModeProvider.notifier).state = result.mode;
+    mergeAlertItems(ref, result.alerts);
+    ref.read(alertFeedErrorProvider.notifier).state = null;
+    ref.read(alertFeedLoadedProvider.notifier).state = true;
+    ref.read(alertPollIntervalProvider.notifier).state =
+        result.nextPollSeconds.clamp(5, 300).toInt();
+    ref.read(alertEvacuationProvider.notifier).state = result.evacuation;
+  } catch (error) {
+    ref.read(alertFeedErrorProvider.notifier).state = '$error';
+  }
+}
+
 /// AI 답의 "지도에서 경로 보기"로 고른 경로 (routeFacilityId == aiRouteId일 때 지도에 그린다)
 const aiRouteId = 'ai';
 final aiRoute = StateProvider<ChatAnswer?>((_) => null);
@@ -109,10 +164,15 @@ final routeProvider =
     if (route == null) throw StateError('AI 경로가 없습니다.');
     return route;
   }
-  final facility = (await ref.watch(facilitiesProvider.future))
-      .firstWhere((f) => f.id == facilityId);
-  return ref.watch(repo).routeFor(facility, UserMode.user, ref.watch(routeKind),
-      ref.watch(userLocation).position);
+  final selected = ref.watch(routeFacilitySnapshot);
+  final facility = selected?.id == facilityId
+      ? selected!
+      : (await ref.read(facilitiesProvider.future))
+          .firstWhere((f) => f.id == facilityId);
+  final origin = ref.watch(routeStartOrigin) ?? ref.read(userLocation).position;
+  return ref
+      .watch(repo)
+      .routeFor(facility, UserMode.user, ref.watch(routeKind), origin);
 });
 
 /// AI가 안내한 경로를 대시보드 지도에 띄운다 (서버를 다시 부르지 않고 AI가 계산한 경로 그대로)
@@ -147,6 +207,8 @@ Facility? routeDestination(WidgetRef ref, String id) {
         walkMinutes: 0,
         accessible: false);
   }
+  final selected = ref.watch(routeFacilitySnapshot);
+  if (selected?.id == id) return selected;
   return ref
       .watch(facilitiesProvider)
       .valueOrNull
@@ -174,16 +236,315 @@ String nearestShelterId(WidgetRef ref) {
 void startRouteToShelter(WidgetRef ref, String shelterId,
     {RouteType routeType = RouteType.safest}) {
   ref.read(routeKind.notifier).state = routeType;
+  final facility = ref
+      .read(facilitiesProvider)
+      .valueOrNull
+      ?.where((f) => f.id == shelterId)
+      .firstOrNull;
+  ref.read(routeFacilitySnapshot.notifier).state = facility;
+  ref.read(routeStartOrigin.notifier).state = ref.read(userLocation).position;
   ref.read(routeFacilityId.notifier).state = shelterId;
 }
 
-void main() => runApp(const ProviderScope(child: GuryongpoApp()));
+Future<void> _recordPrototypeEvacuationResponse(
+  WidgetRef ref,
+  EvacuationResponseStatus status,
+) async {
+  if (ref.read(offline)) {
+    _showResponseMessage('오프라인 상태입니다. 온라인 상태로 바꾸어서 다시 응답을 시도하십시오');
+    return;
+  }
+  try {
+    await ref
+        .read(prototypeSafetyProvider)
+        .respond(prototypeEvacuationAlertId, status);
+    if (status == EvacuationResponseStatus.evacuating) {
+      try {
+        await ref.read(facilitiesProvider.future);
+      } catch (_) {
+        // Use the existing fallback shelter when live facility loading fails.
+      }
+      startRouteToShelter(ref, nearestShelterId(ref),
+          routeType: RouteType.nearest);
+      appRouter.go('/');
+    } else if (status == EvacuationResponseStatus.needHelp) {
+      _showResponseMessage('방재단에게 도움을 요청했습니다');
+    }
+  } catch (error) {
+    _showResponseMessage('응답을 저장하지 못했습니다. $error');
+  }
+}
+
+enum _ResponseSubmitResult { sent, queued, blockedOffline, failed }
+
+final _responseQueue = EvacuationResponseQueue();
+bool _retryingEvacuationResponses = false;
+
+void _showResponseMessage(String message) {
+  rootMessengerKey.currentState?.showSnackBar(SnackBar(
+    content: Text(message),
+    duration: const Duration(seconds: 5),
+  ));
+}
+
+void _setAlertResponse(WidgetRef ref, String alertId, String status) {
+  final alerts = ref.read(alertCenterProvider);
+  ref.read(alertCenterProvider.notifier).state = [
+    for (final alert in alerts)
+      if (alert.id == alertId) alert.copyWith(myStatus: status) else alert,
+  ];
+  ref.read(pendingResponseIdsProvider.notifier).state = {
+    ...ref.read(pendingResponseIdsProvider),
+  }..remove(alertId);
+}
+
+Future<void> _afterResponseSuccess(
+    WidgetRef ref, String alertId, String status) async {
+  _setAlertResponse(ref, alertId, status);
+  if (status == 'need_help') {
+    _showResponseMessage('방재단에게 도움을 요청했습니다');
+  } else if (status == 'evacuating') {
+    try {
+      await ref.read(facilitiesProvider.future);
+    } catch (_) {
+      // Use the existing fallback shelter if live facility loading fails.
+    }
+    startRouteToShelter(ref, nearestShelterId(ref),
+        routeType: RouteType.nearest);
+    appRouter.go('/');
+  }
+}
+
+Future<_ResponseSubmitResult> _submitEvacuationResponse(
+  WidgetRef ref,
+  AlertItem alert,
+  String status,
+) async {
+  if (ref.read(offline)) {
+    _showResponseMessage('오프라인 상태입니다. 온라인 상태로 바꾸어서 다시 응답을 시도하십시오');
+    return _ResponseSubmitResult.blockedOffline;
+  }
+  ref.read(responseSendingProvider.notifier).state = alert.id;
+  final location = ref.read(userLocation).position;
+  try {
+    await ref.read(repo).respondToAlert(
+          alertId: alert.id,
+          status: status,
+          location: location,
+        );
+    await _responseQueue.remove(alert.id);
+    await _afterResponseSuccess(ref, alert.id, status);
+    return _ResponseSubmitResult.sent;
+  } catch (error) {
+    if (isTransientNetworkFailure(error)) {
+      try {
+        await _responseQueue.enqueue(PendingEvacuationResponse(
+          alertId: alert.id,
+          status: status,
+          location: location,
+        ));
+      } catch (_) {
+        _showResponseMessage('응답을 기기에 저장하지 못했습니다. 온라인 연결 후 다시 시도해 주세요.');
+        return _ResponseSubmitResult.failed;
+      }
+      ref.read(pendingResponseIdsProvider.notifier).state = {
+        ...ref.read(pendingResponseIdsProvider),
+        alert.id,
+      };
+      _showResponseMessage('네트워크가 끊겼습니다. 보관 후 전송하겠습니다');
+      return _ResponseSubmitResult.queued;
+    }
+    _showResponseMessage('응답을 전송하지 못했습니다. $error');
+    return _ResponseSubmitResult.failed;
+  } finally {
+    ref.read(responseSendingProvider.notifier).state = null;
+  }
+}
+
+Future<void> retryQueuedEvacuationResponses(WidgetRef ref) async {
+  if (_retryingEvacuationResponses || ref.read(offline)) return;
+  _retryingEvacuationResponses = true;
+  try {
+    for (final response in await _responseQueue.read()) {
+      if (ref.read(offline)) return;
+      ref.read(responseSendingProvider.notifier).state = response.alertId;
+      _showResponseMessage('재시도 중입니다');
+      try {
+        await ref.read(repo).respondToAlert(
+              alertId: response.alertId,
+              status: response.status,
+              location: response.location,
+            );
+        await _responseQueue.remove(response.alertId);
+        await _afterResponseSuccess(ref, response.alertId, response.status);
+      } catch (error) {
+        if (isTransientNetworkFailure(error)) {
+          return;
+        }
+        await _responseQueue.remove(response.alertId);
+        ref.read(pendingResponseIdsProvider.notifier).state = {
+          ...ref.read(pendingResponseIdsProvider),
+        }..remove(response.alertId);
+        _showResponseMessage('저장한 응답을 전송하지 못했습니다. 다시 응답해 주세요. $error');
+      } finally {
+        ref.read(responseSendingProvider.notifier).state = null;
+      }
+    }
+  } finally {
+    _retryingEvacuationResponses = false;
+  }
+}
+
+void main() => runApp(
+    const ProviderScope(child: _NotificationBootstrap(child: GuryongpoApp())));
+
+class _NotificationBootstrap extends ConsumerStatefulWidget {
+  const _NotificationBootstrap({required this.child});
+  final Widget child;
+
+  @override
+  ConsumerState<_NotificationBootstrap> createState() =>
+      _NotificationBootstrapState();
+}
+
+class _NotificationBootstrapState extends ConsumerState<_NotificationBootstrap>
+    with WidgetsBindingObserver {
+  Timer? _pollTimer;
+  bool _pollInFlight = false;
+  String? _since;
+  ProviderSubscription<bool>? _offlineSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _offlineSubscription = ref.listenManual<bool>(offline, (previous, next) {
+      if (previous == true && !next) {
+        unawaited(retryQueuedEvacuationResponses(ref));
+      }
+    });
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final controller = ref.read(prototypeSafetyProvider);
+      await controller.load();
+      final queuedResponses = await _responseQueue.read();
+      ref.read(pendingResponseIdsProvider.notifier).state = {
+        for (final response in queuedResponses) response.alertId,
+      };
+      await DemoNotifications.instance.initialize(
+        (alertId, status) => controller.respond(alertId, status),
+      );
+      try {
+        await AuthService().initialize();
+        await FcmNotificationService.instance.initialize(
+          repository: ref.read(repo),
+          onForeground: (alert) async {
+            _mergeAlerts([alert]);
+            rootMessengerKey.currentState?.showSnackBar(SnackBar(
+              content: Text('새 알림: ${alert.title}'),
+              duration: const Duration(seconds: 8),
+              action: SnackBarAction(
+                label: '확인',
+                onPressed: () =>
+                    appRouter.go('/alert/${Uri.encodeComponent(alert.id)}'),
+              ),
+            ));
+            await _pollAlerts(fullRefresh: true);
+          },
+          onOpen: (id, preview) async {
+            _mergeAlerts([preview]);
+            await _pollAlerts(fullRefresh: true);
+            try {
+              await ref.read(repo).markAlertRead(id);
+              _mergeAlerts([preview.copyWith(read: true)]);
+            } catch (_) {
+              // A stale push must not prevent opening the alert screen.
+            }
+            if (mounted) appRouter.go('/alert/$id');
+          },
+        );
+      } catch (_) {
+        // Auth or push setup must never prevent mock mode and polling fallback.
+      }
+      await _pollAlerts();
+      unawaited(retryQueuedEvacuationResponses(ref));
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _pollTimer?.cancel();
+      unawaited(_pollAlerts());
+    } else {
+      _pollTimer?.cancel();
+      _pollTimer = null;
+    }
+  }
+
+  void _mergeAlerts(List<AlertItem> incoming) {
+    mergeAlertItems(ref, incoming);
+  }
+
+  Future<void> _pollAlerts({bool fullRefresh = false}) async {
+    if (_pollInFlight || !mounted) return;
+    unawaited(retryQueuedEvacuationResponses(ref));
+    if (!AppConfig.isRemote) return;
+    _pollInFlight = true;
+    _pollTimer?.cancel();
+    try {
+      final result = await ref.read(repo).pollAlerts(
+            ref.read(userLocation).position,
+            since: fullRefresh ? null : _since,
+            deviceId: await FcmNotificationService.instance.deviceId,
+          );
+      if (!mounted) return;
+      _since = result.serverTime?.toUtc().toIso8601String() ?? _since;
+      ref.read(alertSinceProvider.notifier).state = _since;
+      ref.read(alertServerTimeProvider.notifier).state = result.serverTime;
+      ref.read(alertModeProvider.notifier).state = result.mode;
+      _mergeAlerts(result.alerts);
+      ref.read(alertFeedErrorProvider.notifier).state = null;
+      ref.read(alertFeedLoadedProvider.notifier).state = true;
+      ref.read(alertPollIntervalProvider.notifier).state =
+          result.nextPollSeconds.clamp(5, 300).toInt();
+      ref.read(alertEvacuationProvider.notifier).state = result.evacuation;
+      ref.invalidate(alertsProvider);
+    } catch (error) {
+      if (mounted) {
+        ref.read(alertFeedErrorProvider.notifier).state = '$error';
+        ref.read(alertPollIntervalProvider.notifier).state = 60;
+      }
+    } finally {
+      _pollInFlight = false;
+      if (mounted &&
+          WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
+        _pollTimer = Timer(
+          Duration(seconds: ref.read(alertPollIntervalProvider)),
+          () => unawaited(_pollAlerts()),
+        );
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _pollTimer?.cancel();
+    _offlineSubscription?.close();
+    unawaited(FcmNotificationService.instance.dispose());
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
 
 class GuryongpoApp extends StatelessWidget {
   const GuryongpoApp({super.key});
   @override
   Widget build(BuildContext c) => MaterialApp.router(
         title: '구룡포 안전',
+        scaffoldMessengerKey: rootMessengerKey,
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
             useMaterial3: true,
@@ -208,6 +569,24 @@ final appRouter = GoRouter(initialLocation: '/boot', routes: [
         builder: (_, s) => TyphoonScreen(initialLocal: s.extra == 'local')),
     GoRoute(path: '/support', builder: (_, __) => const RecoveryScreen()),
     GoRoute(path: '/alerts-hub', builder: (_, __) => const AlertHubScreen()),
+    GoRoute(
+        path: '/evacuation', builder: (_, __) => const EvacuationDemoRoute()),
+    GoRoute(
+        path: '/evacuation-voice',
+        builder: (_, __) => const EvacuationVoiceDemoScreen()),
+    GoRoute(
+        path: '/accessibility',
+        builder: (_, __) => const AccessibilitySettingsScreen()),
+    GoRoute(
+        path: '/household',
+        builder: (_, __) => const HouseholdRegistrationScreen()),
+    GoRoute(
+        path: '/household/delegate',
+        builder: (_, __) => const HouseholdRegistrationScreen(delegated: true)),
+    GoRoute(
+        path: '/responder',
+        builder: (_, __) => const ResponderDashboardScreen()),
+    GoRoute(path: '/sea-route', builder: (_, __) => const SeaRouteDemoScreen()),
   ]),
   GoRoute(
       path: '/facility/:id',
@@ -216,6 +595,15 @@ final appRouter = GoRouter(initialLocation: '/boot', routes: [
       path: '/alert/:id',
       builder: (_, s) => AlertScreen(id: s.pathParameters['id']!)),
 ]);
+
+class EvacuationDemoRoute extends ConsumerWidget {
+  const EvacuationDemoRoute({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => EvacuationDemoScreen(
+        onResponse: (status) => _recordPrototypeEvacuationResponse(ref, status),
+      );
+}
 
 class BootScreen extends ConsumerStatefulWidget {
   const BootScreen({super.key});
@@ -290,11 +678,70 @@ class LocationScreen extends StatelessWidget {
                   ]))));
 }
 
-class Shell extends ConsumerWidget {
+class Shell extends ConsumerStatefulWidget {
   const Shell({super.key, required this.child});
   final Widget child;
+
   @override
-  Widget build(BuildContext c, WidgetRef ref) {
+  ConsumerState<Shell> createState() => _ShellState();
+}
+
+class _ShellState extends ConsumerState<Shell> {
+  bool _showingEvacuationAlert = false;
+  final Set<String> _shownAlertIds = {};
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _presentNextAlert());
+  }
+
+  void _scheduleAlertCheck() {
+    WidgetsBinding.instance.addPostFrameCallback((_) => _presentNextAlert());
+  }
+
+  Future<void> _presentNextAlert() async {
+    if (!mounted || _showingEvacuationAlert) return;
+    final pending = ref.read(pendingResponseIdsProvider);
+    final alert = ref
+        .read(alertCenterProvider)
+        .where((item) =>
+            item.responseRequired &&
+            item.myStatus == null &&
+            !pending.contains(item.id) &&
+            !_shownAlertIds.contains(item.id))
+        .firstOrNull;
+    if (alert == null) return;
+    _showingEvacuationAlert = true;
+    _shownAlertIds.add(alert.id);
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => EvacuationAlertDialog(alert: alert),
+      );
+    } finally {
+      _showingEvacuationAlert = false;
+      _scheduleAlertCheck();
+    }
+  }
+
+  @override
+  Widget build(BuildContext c) {
+    ref.listen<List<AlertItem>>(
+        alertCenterProvider, (_, __) => _scheduleAlertCheck());
+    ref.listen<Set<String>>(pendingResponseIdsProvider, (previous, next) {
+      for (final id in previous ?? const <String>{}) {
+        if (!next.contains(id) &&
+            ref.read(alertCenterProvider).any((item) =>
+                item.id == id &&
+                item.responseRequired &&
+                item.myStatus == null)) {
+          _shownAlertIds.remove(id);
+        }
+      }
+      _scheduleAlertCheck();
+    });
     const nav = [
       ('대시보드', Icons.dashboard_outlined, '/'),
       ('태풍 정보', Icons.cyclone, '/typhoon'),
@@ -310,7 +757,8 @@ class Shell extends ConsumerWidget {
         .indexWhere((x) => x.$3 == here)
         .clamp(0, destinations.length - 1) as int;
     ref.watch(gpsTracker);
-    final body = Column(children: [const StatusLine(), Expanded(child: child)]);
+    final body =
+        Column(children: [const StatusLine(), Expanded(child: widget.child)]);
     return Scaffold(
         appBar: wide
             ? null
@@ -349,12 +797,114 @@ class Shell extends ConsumerWidget {
   }
 }
 
+class EvacuationAlertDialog extends ConsumerStatefulWidget {
+  const EvacuationAlertDialog({super.key, required this.alert});
+  final AlertItem alert;
+
+  @override
+  ConsumerState<EvacuationAlertDialog> createState() =>
+      _EvacuationAlertDialogState();
+}
+
+class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
+  bool _busy = false;
+
+  Future<void> _respond(String status) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    final result = await _submitEvacuationResponse(ref, widget.alert, status);
+    if (!mounted) return;
+    if (result == _ResponseSubmitResult.sent ||
+        result == _ResponseSubmitResult.queued) {
+      Navigator.of(context).pop();
+      return;
+    }
+    setState(() => _busy = false);
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        icon: const Icon(Icons.warning_amber_rounded,
+            color: Colors.red, size: 38),
+        title: const Text('지금 당장 대피해야 합니다'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(widget.alert.title,
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Text(widget.alert.summary),
+              if (widget.alert.guide.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(widget.alert.guide),
+              ],
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _busy ? null : () => _respond('evacuating'),
+                  icon: const Icon(Icons.directions_run),
+                  label: const Text('대피 중'),
+                ),
+              ),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _busy ? null : () => _respond('evacuated'),
+                  icon: const Icon(Icons.check_circle_outline),
+                  label: const Text('대피 완료'),
+                ),
+              ),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.tonalIcon(
+                  onPressed: _busy ? null : () => _respond('need_help'),
+                  icon: const Icon(Icons.support_agent),
+                  label: const Text('도움 필요'),
+                ),
+              ),
+              if (_busy)
+                const Center(
+                    child: Padding(
+                  padding: EdgeInsets.all(8),
+                  child: CircularProgressIndicator(),
+                )),
+            ],
+          ),
+        ),
+      );
+}
+
 class StatusLine extends ConsumerWidget {
   const StatusLine({super.key});
   @override
   Widget build(BuildContext c, WidgetRef ref) {
     final isOffline = ref.watch(offline);
     final here = ref.watch(userLocation);
+    final prototypeResponse = ref
+        .watch(prototypeSafetyProvider)
+        .responseFor(prototypeEvacuationAlertId)
+        ?.wireValue;
+    final responseStatus = ref
+        .watch(alertCenterProvider)
+        .reversed
+        .map((alert) => alert.myStatus)
+        .where((status) =>
+            status == 'evacuating' ||
+            status == 'evacuated' ||
+            status == 'need_help')
+        .firstOrNull;
+    final status = prototypeResponse ??
+        responseStatus ??
+        (ref.watch(alertEvacuationProvider)?['status'] as String?);
+    final statusLabel = switch (status) {
+      'evacuating' => '대피 중',
+      'evacuated' => '대피 완료',
+      'need_help' => '도움 필요',
+      _ => null,
+    };
     return Material(
         color: isOffline ? Colors.amber.shade100 : Colors.teal.shade50,
         child: Padding(
@@ -366,6 +916,14 @@ class StatusLine extends ConsumerWidget {
                   child: Text(isOffline
                       ? '오프라인 · 저장된 예시 정보 · 10:42'
                       : '온라인 · ${AppConfig.dataLabel}${AppConfig.isRemote ? '' : ' · 10:42'} · ${here.fromGps ? (here.manual ? '지도에서 고른 위치' : 'GPS 위치') : '예시 위치'} 기준${!here.fromGps && ref.watch(gpsNote) != null ? ' (${ref.watch(gpsNote)})' : ''}')),
+              if (statusLabel != null) ...[
+                Chip(
+                  avatar: const Icon(Icons.directions_run, size: 16),
+                  label: Text(statusLabel),
+                  visualDensity: VisualDensity.compact,
+                ),
+                const SizedBox(width: 4),
+              ],
               TextButton(
                   onPressed: () =>
                       ref.read(offline.notifier).state = !isOffline,
@@ -1338,23 +1896,104 @@ class AlertsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext c, WidgetRef ref) {
     final s = ref.watch(alertsProvider);
+    final liveAlerts = AppConfig.isRemote
+        ? ref.watch(alertCenterProvider)
+        : s.valueOrNull ?? const <AlertItem>[];
+    final pollError = ref.watch(alertFeedErrorProvider);
+    final feedLoaded = ref.watch(alertFeedLoadedProvider);
+    final evacuation =
+        AppConfig.isRemote ? ref.watch(alertEvacuationProvider) : null;
+    final pollInterval = ref.watch(alertPollIntervalProvider);
+    final alertMode = ref.watch(alertModeProvider);
+    final serverTime = ref.watch(alertServerTimeProvider);
     return ListView(padding: const EdgeInsets.all(16), children: [
-      Text('알림', style: Theme.of(c).textTheme.headlineSmall),
+      Row(children: [
+        Expanded(child: Text('알림', style: Theme.of(c).textTheme.headlineSmall)),
+        IconButton(
+          tooltip: '알림 새로고침',
+          onPressed: () => unawaited(refreshAlertFeed(ref)),
+          icon: const Icon(Icons.refresh),
+        ),
+      ]),
       Text(AppConfig.isRemote
           ? '현재 위치 주변의 실시간 위험 판정입니다. 공식 재난 문자를 함께 확인하세요.'
           : '모든 항목은 예시 알림이며 실제 재난 경보가 아닙니다.'),
+      if (AppConfig.isRemote)
+        Text(
+          '${alertMode == 'emergency' ? '비상 모드' : '일반 모드'} · $pollInterval초마다 확인${serverTime == null ? '' : ' · 서버 ${TimeOfDay.fromDateTime(serverTime.toLocal()).format(c)} 기준'}',
+          style: Theme.of(c).textTheme.bodySmall,
+        ),
+      if (kIsWeb)
+        OutlinedButton.icon(
+          onPressed: () {
+            final alert = AlertItem(
+              id: 'web-demo-${DateTime.now().microsecondsSinceEpoch}',
+              title: '웹 알림 수신 시연',
+              level: '경보',
+              time: TimeOfDay.now().format(c),
+              summary: 'FCM 없이 웹에서 알림 수신과 알림 화면 열기를 시험합니다.',
+              guide: '주변 상황을 확인하고 안전한 장소로 이동하세요.',
+            );
+            mergeAlertItems(ref, [alert]);
+            rootMessengerKey.currentState?.showSnackBar(SnackBar(
+              content: Text('새 알림: ${alert.title}'),
+              action: SnackBarAction(
+                label: '확인',
+                onPressed: () =>
+                    c.go('/alert/${Uri.encodeComponent(alert.id)}'),
+              ),
+            ));
+          },
+          icon: const Icon(Icons.notification_add_outlined),
+          label: const Text('웹 알림 수신 시뮬레이션'),
+        ),
       const SizedBox(height: 10),
-      if (s.isLoading) const LinearProgressIndicator(),
-      if (s.hasError)
+      if (evacuation != null)
+        Card(
+            color: Theme.of(c).colorScheme.errorContainer,
+            child: ListTile(
+              leading: const Icon(Icons.directions_run),
+              title: Text(evacuation['title'] as String? ?? '진행 중인 대피 상황'),
+              subtitle: Text(
+                  '상태: ${evacuation['status'] == 'evacuating' ? '대피 중' : evacuation['status'] ?? '확인 필요'} · ${evacuation['hazard'] ?? ''}'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                final alertId = evacuation['alert_id'] as String?;
+                if (alertId != null && alertId.isNotEmpty) {
+                  c.go('/alert/${Uri.encodeComponent(alertId)}');
+                }
+              },
+            )),
+      EvacuationResponseCard(
+        alertId: prototypeEvacuationAlertId,
+        title: '구룡포 저지대 침수 대피 확인',
+        detail: '안전한 실내 또는 지정 대피소로 이동해 주세요.',
+        onVoice: () => c.push('/evacuation-voice'),
+        onReplayVoice: () => unawaited(DemoSpeech.instance.speak(
+            '대피 확인 경보입니다. 현재 상태를 말하거나 화면에서 선택해 주세요. 대피 완료, 대피 중, 도움 필요.')),
+        accessibleNavigation: MediaQuery.accessibleNavigationOf(c),
+        onResponse: (status) => _recordPrototypeEvacuationResponse(ref, status),
+      ),
+      OutlinedButton.icon(
+        onPressed: () => c.push('/evacuation'),
+        icon: const Icon(Icons.notifications_active_outlined),
+        label: const Text('3버튼 기기 알림 시연'),
+      ),
+      if ((!AppConfig.isRemote && s.isLoading) ||
+          (AppConfig.isRemote && !feedLoaded && pollError == null))
+        const LinearProgressIndicator(),
+      if ((!AppConfig.isRemote && s.hasError) || pollError != null)
         LoadError(
-            message: '${s.error}',
-            onRetry: () => ref.invalidate(alertsProvider)),
-      if (s.valueOrNull?.isEmpty ?? false)
+            message: pollError ?? '${s.error}',
+            onRetry: () => unawaited(refreshAlertFeed(ref))),
+      if (liveAlerts.isEmpty &&
+          ((!AppConfig.isRemote && !s.isLoading) ||
+              (AppConfig.isRemote && feedLoaded && pollError == null)))
         const Card(
             child: ListTile(
                 leading: Icon(Icons.check_circle_outline),
                 title: Text('현재 알림이 없습니다'))),
-      ...?(s.valueOrNull?.map((a) => Card(
+      ...liveAlerts.map((a) => Card(
           child: ListTile(
               leading: Icon(a.read
                   ? Icons.notifications_none
@@ -1362,7 +2001,14 @@ class AlertsScreen extends ConsumerWidget {
               title: Text('${a.level} · ${a.title}'),
               subtitle: Text('${a.summary}\n${a.time}'),
               isThreeLine: true,
-              onTap: () => c.go('/alert/${a.id}')))))
+              onTap: () {
+                if (AppConfig.isRemote && !a.id.startsWith('web-demo-')) {
+                  mergeAlertItems(ref, [a.copyWith(read: true)]);
+                  unawaited(
+                      ref.read(repo).markAlertRead(a.id).catchError((_) {}));
+                }
+                c.go('/alert/${Uri.encodeComponent(a.id)}');
+              })))
     ]);
   }
 }
@@ -1373,7 +2019,10 @@ class AlertScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext c, WidgetRef ref) {
     final s = ref.watch(alertsProvider);
-    final a = s.valueOrNull?.where((x) => x.id == id).firstOrNull;
+    final items = AppConfig.isRemote
+        ? ref.watch(alertCenterProvider)
+        : s.valueOrNull ?? const <AlertItem>[];
+    final a = items.where((x) => x.id == id).firstOrNull;
     if (a == null)
       return Scaffold(
           appBar: AppBar(title: const Text('알림 상세')),
@@ -1579,6 +2228,9 @@ class ProfileScreen extends ConsumerWidget {
       const ProfileDetailsCard(),
       const SizedBox(height: 12),
       const AccountCard(),
+      const PrototypeFeatureLinks(),
+      const DemoRoleClaimCard(),
+      const FcmPushSettingsCard(),
       Card(
           child: Column(children: const [
         ListTile(title: Text('이동수단'), subtitle: Text('도보')),
@@ -1646,6 +2298,78 @@ class ProfileScreen extends ConsumerWidget {
 }
 
 /// 주소는 앱에서 좌표화하지 않는다. 카카오 키를 보관한 서버가 좌표를 반환한다.
+class FcmPushSettingsCard extends ConsumerStatefulWidget {
+  const FcmPushSettingsCard({super.key});
+
+  @override
+  ConsumerState<FcmPushSettingsCard> createState() =>
+      _FcmPushSettingsCardState();
+}
+
+class _FcmPushSettingsCardState extends ConsumerState<FcmPushSettingsCard> {
+  bool enabled = false;
+  bool loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    FcmNotificationService.instance.isEnabled.then((value) {
+      if (mounted)
+        setState(() {
+          enabled = value;
+          loading = false;
+        });
+    });
+  }
+
+  Future<void> _toggle(bool value) async {
+    setState(() => loading = true);
+    if (value) {
+      final status = await FcmNotificationService.instance.enablePush();
+      final granted =
+          status.name == 'authorized' || status.name == 'provisional';
+      if (mounted) {
+        setState(() {
+          enabled = granted;
+          loading = false;
+        });
+        if (!granted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('푸시 알림 권한을 허용하지 않아 알림 폴링을 계속 사용합니다.')),
+          );
+        }
+      }
+      return;
+    }
+    await FcmNotificationService.instance.disablePush();
+    if (mounted)
+      setState(() {
+        enabled = false;
+        loading = false;
+      });
+  }
+
+  @override
+  Widget build(BuildContext context) => Card(
+        child: SwitchListTile(
+          value: enabled,
+          onChanged: loading || !AppConfig.isRemote ? null : _toggle,
+          title: const Text('재난 푸시 알림'),
+          subtitle: Text(!AppConfig.isRemote
+              ? '실제 FCM은 원격 모드 Android/iOS에서 설정할 수 있습니다.'
+              : enabled
+                  ? 'FCM 토큰을 등록했습니다. 앱을 열면 경고도 주기적으로 확인합니다.'
+                  : '켜면 기기 토큰을 등록합니다. 권한이 없어도 경고 폴링은 계속됩니다.'),
+          secondary: loading
+              ? const SizedBox.square(
+                  dimension: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.notifications_active_outlined),
+        ),
+      );
+}
+
 class _PlaceForm extends ConsumerStatefulWidget {
   const _PlaceForm();
   @override

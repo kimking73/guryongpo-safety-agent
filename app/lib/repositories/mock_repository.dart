@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'package:latlong2/latlong.dart';
 import '../models/domain_models.dart';
+import '../services/account_service.dart';
 
 /// 화면이 쓰는 데이터 창구. 목업(MockSafetyRepository)과 실제 서버(RemoteSafetyRepository)가 같은 형식으로 돌려준다.
 /// origin = 사용자 현재 위치 (구룡포 안 GPS, 아니면 사용자 유형별 예시 좌표 — main.dart userLocation).
@@ -10,6 +11,27 @@ abstract class SafetyRepository {
   Future<List<FloodGrid>> floodGrid({int timeIndex = 0});
   Future<List<Facility>> getFacilities(LatLng origin);
   Future<List<AlertItem>> alerts(LatLng origin);
+  Future<AlertPollResult> pollAlerts(
+    LatLng origin, {
+    String? since,
+    String? deviceId,
+  });
+  Future<RouteCheckResult> checkRoute({
+    required LatLng current,
+    required LatLng destination,
+    required String geometry,
+    required String profile,
+    required String facilityId,
+    required RouteType routeType,
+  });
+  Future<String?> registerDeviceToken(String token, String platform);
+  Future<void> unregisterDeviceToken(String token);
+  Future<void> markAlertRead(String alertId);
+  Future<void> respondToAlert({
+    required String alertId,
+    required String status,
+    required LatLng location,
+  });
   Future<SafetyRoute> routeFor(Facility facility, UserMode userMode, RouteType routeType, LatLng origin);
   Future<ChatAnswer> ask(String question, UserMode userMode, LatLng origin);
 
@@ -21,6 +43,56 @@ abstract class SafetyRepository {
 }
 
 class MockSafetyRepository implements SafetyRepository {
+  final AccountService _account = AccountService();
+  final Map<String, String> _alertResponses = {};
+
+  @override
+  Future<AlertPollResult> pollAlerts(
+    LatLng origin, {
+    String? since,
+    String? deviceId,
+  }) async => AlertPollResult(
+    alerts: await alerts(origin),
+    serverTime: DateTime.now().toUtc(),
+    nextPollSeconds: 60,
+    mode: 'normal',
+  );
+
+  @override
+  Future<RouteCheckResult> checkRoute({
+    required LatLng current,
+    required LatLng destination,
+    required String geometry,
+    required String profile,
+    required String facilityId,
+    required RouteType routeType,
+  }) async => const RouteCheckResult(
+    reroute: false,
+    reasons: [],
+    offRouteMeters: 0,
+    hazardsAhead: [],
+    arrived: false,
+  );
+
+  @override
+  Future<String?> registerDeviceToken(String token, String platform) async =>
+      null;
+
+  @override
+  Future<void> unregisterDeviceToken(String token) async {}
+
+  @override
+  Future<void> markAlertRead(String alertId) async {}
+
+  @override
+  Future<void> respondToAlert({
+    required String alertId,
+    required String status,
+    required LatLng location,
+  }) async {
+    _alertResponses[alertId] = status;
+  }
+
   @override
   Future<List<FloodGrid>> floodGrid({int timeIndex = 0}) async => demoFloodGrid(timeIndex);
 
@@ -131,11 +203,31 @@ class MockSafetyRepository implements SafetyRepository {
     }
     return route;
   }
+
+  Future<SafetyRoute> _applySavedProfile(SafetyRoute route) async {
+    final (age, transport) = await _account.requiredSetup();
+    final walking = await _account.walkingImpaired();
+    final profile = deriveRouteProfile(age, transport, walkingImpaired: walking);
+    return SafetyRoute(
+      shelterId: route.shelterId,
+      routeType: route.routeType,
+      polylinePoints: route.polylinePoints,
+      distanceMeters: route.distanceMeters,
+      estimatedMinutes: route.estimatedMinutes,
+      riskAvoidanceSummary: route.riskAvoidanceSummary,
+      avoided: route.avoided,
+      stillInside: route.stillInside,
+      profile: profile,
+      maxSlopePercent: route.routeType == RouteType.safest ? 5 : 9,
+      hazardsOk: true,
+    );
+  }
+
   @override
   Future<SafetyRoute> routeFor(
       Facility facility, UserMode userMode, RouteType routeType, LatLng origin) async {
     await Future<void>.delayed(const Duration(milliseconds: 550));
-    return exampleRoute(facility.id, userMode, routeType);
+    return _applySavedProfile(exampleRoute(facility.id, userMode, routeType));
   }
   @override
   Future<List<RiskArea>> riskAreas() async => const [];
@@ -149,7 +241,9 @@ class MockSafetyRepository implements SafetyRepository {
   @override
   Future<List<Facility>> getFacilities(LatLng origin) async { await Future<void>.delayed(const Duration(milliseconds: 350)); return facilities; }
   @override
-  Future<List<AlertItem>> alerts(LatLng origin) async { await Future<void>.delayed(const Duration(milliseconds: 350)); return const [
+  Future<List<AlertItem>> alerts(LatLng origin) async {
+    await Future<void>.delayed(const Duration(milliseconds: 350));
+    const items = [
         AlertItem(
             id: 'work-flood',
             title: '선제 경고: 등록된 직장 침수 위험',
@@ -171,7 +265,12 @@ class MockSafetyRepository implements SafetyRepository {
             time: '08:00',
             summary: '생활 안전 정보입니다.',
             guide: '외출 시 모자와 자외선 차단을 사용하세요.')
-      ]; }
+      ];
+    return items.map((alert) {
+      final status = _alertResponses[alert.id];
+      return status == null ? alert : alert.copyWith(myStatus: status);
+    }).toList();
+  }
   @override
   Future<ChatAnswer> ask(String question, UserMode userMode, LatLng origin) async {
     await Future<void>.delayed(const Duration(milliseconds: 300));
@@ -180,7 +279,8 @@ class MockSafetyRepository implements SafetyRepository {
     final medical = question.contains('의료') || question.contains('병원');
     final facility = facilities.firstWhere((f) => f.type == (medical ? FacilityType.medical : FacilityType.shelter));
     final routeType = question.contains('가까운') || question.contains('최단') ? RouteType.nearest : RouteType.safest;
-    final route = exampleRoute(facility.id, userMode, routeType);
+    final route = await _applySavedProfile(
+        exampleRoute(facility.id, userMode, routeType));
     return ChatAnswer(
       '${_mockAnswer(question)}\n목업 경로 · ${route.distanceMeters}m · 도보 약 ${route.estimatedMinutes}분',
       route: route,

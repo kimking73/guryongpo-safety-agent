@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'services/account_service.dart';
 import 'services/geocoding_service.dart';
 import 'models/domain_models.dart';
+import 'prototype_safety_screens.dart';
 
 const demoTime = '시연 기준 시각 · 가상 시나리오 당일 14:00';
 const guryongpo = LatLng(35.9910, 129.5530);
@@ -264,6 +265,8 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
           ],
         ),
         const _DemoBanner(),
+        const SizedBox(height: 10),
+        const PrototypeFeatureLinks(),
         const SizedBox(height: 10),
         Wrap(spacing: 8, runSpacing: 8, children: [
           FilledButton.icon(
@@ -1275,6 +1278,7 @@ class _AlertHubScreenState extends State<AlertHubScreen> {
           '선제 경고·알림',
           style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
         ),
+        const SizedBox(height: 8),
         const _DemoBanner(),
         const Text(
           '사용자 맞춤형 선제 경고',
