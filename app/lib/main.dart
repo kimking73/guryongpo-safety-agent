@@ -626,8 +626,8 @@ class _BootScreenState extends ConsumerState<BootScreen> {
     setState(
         () => text = a.isMock ? 'Firebase 미설정: 목업 모드로 시작합니다.' : '로그인 확인 완료');
     await Future<void>.delayed(const Duration(milliseconds: 700));
-    // Show live emergency information before asking the user to complete profile setup.
-    if (mounted) context.go('/');
+    final setupComplete = await AccountService().hasCompletedSetup();
+    if (mounted) context.go(setupComplete ? '/' : '/location');
   }
 
   @override
@@ -747,11 +747,11 @@ class _ShellState extends ConsumerState<Shell> {
       ('태풍 정보', Icons.cyclone, '/typhoon'),
       ('선제 경고·알림', Icons.notifications_active_outlined, '/alerts-hub'),
       ('지원 및 복구', Icons.health_and_safety_outlined, '/support'),
-      ('프로필', Icons.person_outline, '/profile')
+      ('프로필', Icons.person_outline, '/profile'),
+      ('AI 채팅', Icons.chat_bubble_outline, '/ai'),
     ];
     final wide = MediaQuery.sizeOf(c).width >= 840;
-    final destinations =
-        wide ? [...nav, ('AI 채팅', Icons.chat_bubble_outline, '/ai')] : nav;
+    final destinations = nav;
     final here = GoRouterState.of(c).uri.path;
     final selected = destinations
         .indexWhere((x) => x.$3 == here)
@@ -764,12 +764,6 @@ class _ShellState extends ConsumerState<Shell> {
             ? null
             : AppBar(
                 title: const Text('구룡포 안전'),
-                actions: [
-                  IconButton(
-                      tooltip: 'AI 채팅',
-                      onPressed: () => c.go('/ai'),
-                      icon: const Icon(Icons.chat_bubble_outline))
-                ],
               ),
         body: wide
             ? Row(children: [
@@ -937,21 +931,36 @@ class Dashboard extends ConsumerWidget {
   @override
   Widget build(BuildContext c, WidgetRef ref) {
     final route = ref.watch(routeFacilityId);
-    if (route == null) return const DisasterDashboard();
+    final routeAsync = route == null ? null : ref.watch(routeProvider(route));
     final routeType = ref.watch(routeKind);
-    return ListView(padding: const EdgeInsets.all(16), children: [
-      Row(children: [
-        Expanded(
-            child: Text(routeType == RouteType.nearest ? '가까운 경로' : '안전 경로',
-                style: Theme.of(c).textTheme.headlineSmall)),
-        TextButton.icon(
-            onPressed: () => ref.read(routeFacilityId.notifier).state = null,
-            icon: const Icon(Icons.dashboard_outlined),
-            label: const Text('재난 종합')),
-      ]),
-      RouteMap(
-          key: ValueKey('route-$route-${routeType.name}'), facilityId: route),
-    ]);
+    final facilities =
+        ref.watch(facilitiesProvider).valueOrNull ?? const <Facility>[];
+    final destination = route == null ? null : routeDestination(ref, route);
+    return DisasterDashboard(
+      routeActive: route != null,
+      facilities: facilities,
+      riskAreas: ref.watch(riskAreasProvider).valueOrNull ?? const <RiskArea>[],
+      currentLocation: ref.watch(userLocation).position,
+      selectedDestination: destination,
+      safetyRoute: routeAsync?.valueOrNull,
+      routeLoading: routeAsync?.isLoading ?? false,
+      routeError: routeAsync?.hasError == true ? '${routeAsync?.error}' : null,
+      routeType: routeType,
+      onChooseFacility: () => showModalBottomSheet<void>(
+        context: c,
+        showDragHandle: true,
+        builder: (_) => const ShelterPickerSheet(),
+      ),
+      onRouteTypeChanged: (type) {
+        if (destination != null) {
+          ref.read(routeKind.notifier).state = type;
+          ref.invalidate(routeProvider(destination.id));
+        }
+      },
+      onEndRoute: () => ref.read(routeFacilityId.notifier).state = null,
+      onRetryRoute:
+          route == null ? null : () => ref.invalidate(routeProvider(route)),
+    );
   }
   /*Widget build(BuildContext c, WidgetRef ref) => ref.watch(riskProvider).when(
       loading: () => const DashboardLoading(),
@@ -1375,8 +1384,13 @@ class DashboardInfo extends ConsumerWidget {
 }
 
 class MapCard extends ConsumerStatefulWidget {
-  const MapCard({super.key, required this.height});
+  const MapCard({
+    super.key,
+    required this.height,
+    this.showFloodControls = true,
+  });
   final double height;
+  final bool showFloodControls;
   @override
   ConsumerState<MapCard> createState() => _MapCardState();
 }
@@ -1452,7 +1466,9 @@ class _MapCardState extends ConsumerState<MapCard> {
 
   @override
   Widget build(BuildContext c) {
-    final active = ref.watch(floodLayer), time = ref.watch(floodTime);
+    final floodLayerEnabled = ref.watch(floodLayer);
+    final active = widget.showFloodControls && floodLayerEnabled;
+    final time = ref.watch(floodTime);
     final gridAsync = ref.watch(floodGridProvider);
     final grids = gridAsync.valueOrNull ??
         (AppConfig.isRemote ? const <FloodGrid>[] : demoFloodGrid(time));
@@ -1723,12 +1739,13 @@ class FacilitiesScreen extends StatelessWidget {
                     flex: 3,
                     child: Padding(
                         padding: EdgeInsets.all(16),
-                        child: MapCard(height: 480))),
+                        child: MapCard(height: 480, showFloodControls: false))),
                 SizedBox(width: 360, child: list)
               ])
             : Column(children: [
                 const Padding(
-                    padding: EdgeInsets.all(12), child: MapCard(height: 300)),
+                    padding: EdgeInsets.all(12),
+                    child: MapCard(height: 300, showFloodControls: false)),
                 Expanded(child: list)
               ]);
       });
@@ -1848,7 +1865,7 @@ class FacilityScreen extends ConsumerWidget {
                   : f.type == FacilityType.medical
                       ? '$label의료시설'
                       : '목적지')),
-          const MapCard(height: 240),
+          const MapCard(height: 240, showFloodControls: false),
           Card(
               child: Column(children: [
             ListTile(title: const Text('주소'), subtitle: Text(f.address)),
@@ -2228,7 +2245,6 @@ class ProfileScreen extends ConsumerWidget {
       const ProfileDetailsCard(),
       const SizedBox(height: 12),
       const AccountCard(),
-      const PrototypeFeatureLinks(),
       const DemoRoleClaimCard(),
       const FcmPushSettingsCard(),
       Card(
@@ -2482,10 +2498,11 @@ class OptionalDetailsCard extends StatefulWidget {
 class _OptionalDetailsCardState extends State<OptionalDetailsCard> {
   final values = <String, String>{};
   final controller = TextEditingController();
-  String field = '자주 가는 장소';
-  final fields = [
-    '자주 가는 장소',
-    '보호 동반자',
+  String field = '자주 방문하는 장소';
+  String? selectedValue;
+  static const fields = [
+    '자주 방문하는 장소',
+    '보호가 필요한 동반자 여부',
     '보행 능력',
     '시각 지원',
     '청각 지원',
@@ -2493,6 +2510,109 @@ class _OptionalDetailsCardState extends State<OptionalDetailsCard> {
     '직업',
     '비상 연락처'
   ];
+  static const choices = <String, List<String>>{
+    '보호가 필요한 동반자 여부': ['예', '아니요'],
+    '보행 능력': ['보행 가능', '보행 불편', '보행 어려움'],
+    '시각 지원': ['필요 없음', '저시력', '전맹', '지원 필요'],
+    '청각 지원': ['필요 없음', '난청', '농·난청', '지원 필요'],
+    '혈액형': ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-', '모름'],
+    '직업': ['어업 종사자·뱃사람', '자영업자', '농업 종사자', '직장인', '학생', '기타'],
+  };
+  static const legacyFieldLabels = <String, String>{
+    '자주 가는 장소': '자주 방문하는 장소',
+    '보호 동반자': '보호가 필요한 동반자 여부',
+    '보행능력': '보행 능력',
+    '시각': '시각 지원',
+    '청각': '청각 지원',
+    '비상연락처': '비상 연락처',
+    'frequent_place': '자주 방문하는 장소',
+    'frequent_places': '자주 방문하는 장소',
+    'frequentplace': '자주 방문하는 장소',
+    'frequentplaces': '자주 방문하는 장소',
+    'has_dependents': '보호가 필요한 동반자 여부',
+    'hasdependents': '보호가 필요한 동반자 여부',
+    'dependents': '보호가 필요한 동반자 여부',
+    'protected_companion': '보호가 필요한 동반자 여부',
+    'has_protected_companion': '보호가 필요한 동반자 여부',
+    'needs_companion': '보호가 필요한 동반자 여부',
+    'walking_ability': '보행 능력',
+    'walkingability': '보행 능력',
+    'walking_impaired': '보행 능력',
+    'walkingimpaired': '보행 능력',
+    'mobility_limited': '보행 능력',
+    'vision': '시각 지원',
+    'vision_impaired': '시각 지원',
+    'visionimpaired': '시각 지원',
+    'vision_support': '시각 지원',
+    'visionsupport': '시각 지원',
+    'hearing': '청각 지원',
+    'hearing_impaired': '청각 지원',
+    'hearingimpaired': '청각 지원',
+    'hearing_support': '청각 지원',
+    'hearingsupport': '청각 지원',
+    'blood_type': '혈액형',
+    'bloodtype': '혈액형',
+    'occupation': '직업',
+    'job': '직업',
+    'emergency_contact': '비상 연락처',
+    'emergencycontact': '비상 연락처',
+  };
+
+  String? _optionalLabel(String key) {
+    if (fields.contains(key)) return key;
+    return legacyFieldLabels[key.trim().toLowerCase()];
+  }
+
+  String _koreanValue(String label, String value) {
+    final normalized = value.trim().toLowerCase().replaceAll('-', '_');
+    if (const {'true', 'yes', '1'}.contains(normalized)) {
+      return switch (label) {
+        '보호가 필요한 동반자 여부' => '예',
+        '보행 능력' => '보행 불편',
+        '시각 지원' || '청각 지원' => '지원 필요',
+        _ => '예',
+      };
+    }
+    if (const {'false', 'no', '0'}.contains(normalized)) {
+      return switch (label) {
+        '보호가 필요한 동반자 여부' => '아니요',
+        '보행 능력' => '보행 가능',
+        '시각 지원' || '청각 지원' => '필요 없음',
+        _ => '아니요',
+      };
+    }
+    return const <String, String>{
+          'not_needed': '필요 없음',
+          'none': '해당 없음',
+          'needed': '지원 필요',
+          'required': '지원 필요',
+          'walk': '도보',
+          'walking': '도보',
+          'car': '자동차',
+          'bicycle': '자전거',
+          'public_transit': '대중교통',
+          'wheelchair': '휠체어',
+          'limited': '보행 불편',
+          'mobility_limited': '보행 불편',
+          'unable': '보행 어려움',
+          'normal': '보행 가능',
+          'able': '보행 가능',
+          'blind': '전맹',
+          'low_vision': '저시력',
+          'visually_impaired': '시각 지원 필요',
+          'deaf': '농·난청',
+          'hard_of_hearing': '난청',
+          'hearing_impaired': '청각 지원 필요',
+          'fisher': '어업 종사자·뱃사람',
+          'merchant': '자영업자',
+          'farmer': '농업 종사자',
+          'office': '직장인',
+          'student': '학생',
+          'unknown': '미상',
+        }[normalized] ??
+        value;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -2501,7 +2621,17 @@ class _OptionalDetailsCardState extends State<OptionalDetailsCard> {
 
   Future<void> load() async {
     final v = await AccountService().optionalProfile();
-    if (mounted) setState(() => values.addAll(v));
+    if (!mounted) return;
+    setState(() {
+      for (final entry in v.entries) {
+        final label = _optionalLabel(entry.key);
+        if (label == null) {
+          values[entry.key] = entry.value;
+        } else {
+          values[label] = _koreanValue(label, entry.value);
+        }
+      }
+    });
   }
 
   Future<void> save() async => AccountService().saveOptionalProfile(values);
@@ -2519,41 +2649,71 @@ class _OptionalDetailsCardState extends State<OptionalDetailsCard> {
                 items: fields
                     .map((x) => DropdownMenuItem(value: x, child: Text(x)))
                     .toList(),
-                onChanged: (x) => setState(() => field = x!)),
+                onChanged: (x) => setState(() {
+                      field = x!;
+                      selectedValue = null;
+                      controller.clear();
+                    })),
             Row(children: [
               Expanded(
-                  child: TextField(
-                      controller: controller,
-                      decoration: const InputDecoration(labelText: '값 입력'))),
+                  child: choices.containsKey(field)
+                      ? DropdownButtonFormField<String>(
+                          value: selectedValue,
+                          isExpanded: true,
+                          decoration: InputDecoration(labelText: '$field 선택'),
+                          items: choices[field]!
+                              .map((x) =>
+                                  DropdownMenuItem(value: x, child: Text(x)))
+                              .toList(),
+                          onChanged: (x) => setState(() => selectedValue = x),
+                        )
+                      : TextField(
+                          controller: controller,
+                          decoration: InputDecoration(
+                              labelText:
+                                  field == '비상 연락처' ? '연락처 입력' : '장소 입력'))),
               IconButton(
                   icon: const Icon(Icons.add),
                   onPressed: () {
-                    if (controller.text.isNotEmpty) {
-                      setState(() => values[field] = controller.text);
+                    final value = choices.containsKey(field)
+                        ? selectedValue
+                        : controller.text.trim();
+                    if (value != null && value.isNotEmpty) {
+                      setState(() => values[field] = value);
                       save();
                       controller.clear();
+                      selectedValue = null;
                     }
                   })
             ]),
-            ...values.entries.map((e) => ListTile(
-                title: Text(e.key),
-                subtitle: Text(e.value),
-                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                  IconButton(
-                      icon: const Icon(Icons.edit),
-                      onPressed: () {
-                        setState(() {
-                          field = e.key;
-                          controller.text = e.value;
-                        });
-                      }),
-                  IconButton(
-                      icon: const Icon(Icons.delete_outline),
-                      onPressed: () {
-                        setState(() => values.remove(e.key));
-                        save();
-                      })
-                ])))
+            ...values.entries
+                .where((e) => fields.contains(e.key))
+                .map((e) => ListTile(
+                    title: Text(e.key),
+                    subtitle: Text(e.value),
+                    trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                      IconButton(
+                          icon: const Icon(Icons.edit),
+                          onPressed: () {
+                            setState(() {
+                              field = e.key;
+                              if (choices.containsKey(e.key)) {
+                                selectedValue =
+                                    choices[e.key]!.contains(e.value)
+                                        ? e.value
+                                        : null;
+                              } else {
+                                controller.text = e.value;
+                              }
+                            });
+                          }),
+                      IconButton(
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () {
+                            setState(() => values.remove(e.key));
+                            save();
+                          })
+                    ])))
           ])));
   @override
   void dispose() {
@@ -2597,7 +2757,7 @@ class _InitialSetupScreenState extends ConsumerState<InitialSetupScreen> {
                         hintText: '예: 경북 포항시 남구 구룡포읍 호미로 152',
                         border: OutlineInputBorder())),
                 const SizedBox(height: 6),
-                const Text('주소를 서버에서 좌표로 변환해 저장합니다.',
+                const Text('목업 모드에서는 주소와 구룡포 시연 좌표를 저장합니다.',
                     style: TextStyle(fontSize: 12)),
                 TextField(
                     controller: age,
@@ -2618,6 +2778,9 @@ class _InitialSetupScreenState extends ConsumerState<InitialSetupScreen> {
                 const SizedBox(height: 20),
                 FilledButton(
                     onPressed: age.text.isEmpty ||
+                            int.tryParse(age.text) == null ||
+                            int.parse(age.text) < 1 ||
+                            int.parse(age.text) > 120 ||
                             address.text.trim().isEmpty ||
                             resolving
                         ? null
@@ -2627,7 +2790,10 @@ class _InitialSetupScreenState extends ConsumerState<InitialSetupScreen> {
   Future<void> complete() async {
     setState(() => resolving = true);
     try {
-      final resolved = await GeocodingService().resolve(address.text);
+      final resolved = AppConfig.isRemote
+          ? await GeocodingService().resolve(address.text)
+          : GeocodedAddress(
+              address.text.trim(), const LatLng(35.961875, 129.5578125));
       final account = AccountService();
       await account.saveRequiredSetup(age: age.text, transport: transport);
       final optional = await account.optionalProfile();
