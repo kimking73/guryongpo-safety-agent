@@ -120,6 +120,7 @@ AI = OpenAI gpt-6-luna. 실제 노드 전부 구현(관리자·전문 agent 5종
 - [ ] **음성 대화 — 나중에** (사용자 결정 2026-10-03, B12 전에 다시 결정). 시작할 때 GCP 음성 키: Speech-to-Text·Text-to-Speech API 사용 설정 + 서비스 계정 키 → `secrets/gcp-voice.json`. VM에도 같은 파일(B10과 함께)
 - [ ] 조위(만조) 데이터: 기획서·목업은 쓰지만 수집 목록에 없음 → A에게 제안 (tools에는 `tide` 종류만 있음)
 - [ ] 조하린 GCP·GitHub 권한, 팀원 로컬 실행 확인 — 사용자가 직접 진행
+- [ ] **로그인(2026-10-04) 공유·확인**: C(김다인)에게 앱 ID `kr.guryong.guardian` 변경·`firebase_options.dart`·`login_screen.dart`, A(조하린)에게 `users.py` ENSURE_SQL(is_anonymous 갱신)·앱이 이제 `POST /api/v1/user` 호출. 안드로이드: 빌드 확인 못 함(맥에 SDK 없음) — Google 로그인 시험할 PC의 디버그 SHA-1을 Firebase 안드로이드 앱에 등록. 브라우저·시뮬레이터에서 Google 팝업 로그인 실제 확인 필요
 - [ ] **해커톤 끝나면 고정 IP 해제** — `gcloud compute addresses delete guryongpo-ip --region=asia-northeast3 --project=project-265888b6-2837-43d6-9d8` (VM을 지운 뒤 남겨 두면 요금)
 - [ ] **C에게 알리기**: 김다인 커밋(e2f6abf·629dccf) 이후 앱이 컴파일 안 되던 2곳을 B10 배포용으로 최소 수정(40b3faa, 사용자 승인). 앱 테스트 5개 실패(거리 추정 0.1→0.2, 경로 문구 '노약자', location_test 3개 StateError) — C 확인 필요
 - [ ] 사용자 기억 정식 서비스 전: 앱 동의 화면·"기억 보기/끄기/지우기"(C), Firebase 인증 연결(A 방식), 익명 로그인은 재설치 시 다른 사용자
@@ -185,3 +186,4 @@ AI = OpenAI gpt-6-luna. 실제 노드 전부 구현(관리자·전문 agent 5종
 - 2026-10-03 사용자 결정: 음성 대화 기능(실제 Google 음성 왕복)은 나중에 구현. 코드는 그대로 두고(키 없으면 503, 채팅 영향 없음) B12 전에 다시 정한다.
 - 2026-10-03 세션 정리: ai/CLAUDE.md 현재 상태·주요 파일 표(B4·B5 파일, 줄 번호), 루트 CLAUDE.md 음성 상태, 다음 세션 시작점 갱신.
 - 2026-10-04 B10(사용자 계획 승인 — nip.io, 웹앱 포함): VM 최신화(35커밋 뒤 → 5295361, DB 백업·loader·재빌드), 카카오·응급실 병상 키 VM 반영(nmc ok), 고정 IP 예약, Caddy·`deploy/deploy.sh`·`push_web.sh` 추가, VM DB 비밀번호 교체·내부 토큰 생성, https://34-64-177-195.nip.io 외부 확인(health 3종 200, 차단 3종 404, http→https, AI 질문 1회), 앱 컴파일 오류 2곳 최소 수정 후 웹 배포(Firebase 웹 설정 없이).
+- 2026-10-04 로그인(사용자 계획 승인 — Google+이메일, 웹·iOS·안드로이드, 앱 ID kr.guryong.guardian): Firebase에 안드로이드·iOS 앱 등록, 사용자가 콘솔에서 Google·이메일 켬, `firebase_options.dart`·`auth_service.dart`(익명 계정에 연결, 서버 등록)·`login_screen.dart`, AI user_id = Firebase uid, server ENSURE_SQL is_anonymous 갱신. 앱 테스트 30 통과·5 실패(이전부터), 웹·iOS 시뮬레이터 빌드 성공, VM deploy·웹 배포, REST로 익명→이메일 연결 uid 유지·is_anonymous false 확인. OSM guryongpo.osm.pbf 커밋(7085b8f).
