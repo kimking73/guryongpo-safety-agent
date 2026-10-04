@@ -19,6 +19,7 @@ import 'dashboard_parts.dart';
 import 'disaster_center.dart';
 import 'live_screens.dart';
 import 'origin_picker.dart';
+import 'custom_route.dart';
 import 'login_screen.dart';
 import 'services/demo_mode.dart';
 import 'prototype_safety_screens.dart';
@@ -34,6 +35,30 @@ final offline = StateProvider<bool>((_) => false);
 final routeFacilityId = StateProvider<String?>((_) => null);
 final routeFacilitySnapshot = StateProvider<Facility?>((_) => null);
 final routeStartOrigin = StateProvider<LatLng?>((_) => null);
+
+/// 길찾기(custom_route.dart)로 정한 목적지 id. 출발지가 내 위치가 아니면 이동 중 경로 재확인(GPS)을 끈다
+const customRouteId = 'custom';
+final customRouteFollowsUser = StateProvider<bool>((_) => true);
+
+/// 길찾기 경로를 경로 지도에 띄운다
+void startCustomRoute(WidgetRef ref,
+    {required LatLng origin, required bool followUser, required Facility destination, required RouteType routeType}) {
+  ref.read(routeKind.notifier).state = routeType;
+  ref.read(routeFacilitySnapshot.notifier).state = destination;
+  ref.read(routeStartOrigin.notifier).state = origin;
+  ref.read(customRouteFollowsUser.notifier).state = followUser;
+  ref.invalidate(routeProvider(customRouteId));
+  ref.read(routeFacilityId.notifier).state = customRouteId;
+}
+
+/// 경로 화면의 '가까운/안전 경로' 전환. 길찾기 경로는 출발·목적지를 그대로 두고 종류만 바꾼다
+void switchRouteType(WidgetRef ref, String facilityId, RouteType routeType) {
+  if (facilityId == customRouteId) {
+    ref.read(routeKind.notifier).state = routeType;
+  } else {
+    startRouteToShelter(ref, facilityId, routeType: routeType);
+  }
+}
 final alertCenterProvider = StateProvider<List<AlertItem>>((_) => const []);
 final alertFeedErrorProvider = StateProvider<String?>((_) => null);
 final alertFeedLoadedProvider = StateProvider<bool>((_) => false);
@@ -570,6 +595,7 @@ final appRouter = GoRouter(initialLocation: '/boot', routes: [
     GoRoute(
         path: '/typhoon',
         builder: (_, s) => DemoSwitch(demo: TyphoonScreen(initialLocal: s.extra == 'local'), live: const LiveTyphoonScreen())),
+    GoRoute(path: '/route-search', builder: (_, __) => const CustomRouteScreen()),
     GoRoute(path: '/support', builder: (_, __) => const DemoSwitch(demo: RecoveryScreen(), live: LiveRecoveryScreen())),
     GoRoute(path: '/alerts-hub', builder: (_, __) => const DemoSwitch(demo: AlertHubScreen(), live: AlertsScreen())),
     GoRoute(
@@ -955,7 +981,13 @@ class Dashboard extends ConsumerWidget {
             icon: const Icon(Icons.dashboard_outlined),
             label: const Text('재난 종합')),
       ]),
-      const Align(alignment: Alignment.centerLeft, child: OriginChip()),
+      Wrap(spacing: 8, runSpacing: 4, children: [
+        if (route != customRouteId) const OriginChip(),
+        ActionChip(
+            avatar: const Icon(Icons.alt_route, size: 18),
+            label: Text(route == customRouteId ? '길찾기 다시' : '길찾기 (주소로)'),
+            onPressed: () => c.push('/route-search')),
+      ]),
       RouteMap(
           key: ValueKey('route-$route-${routeType.name}'), facilityId: route),
     ]);

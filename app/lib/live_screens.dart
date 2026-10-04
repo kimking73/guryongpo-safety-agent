@@ -185,6 +185,8 @@ class LiveDashboard extends ConsumerWidget {
             OutlinedButton.icon(
                 onPressed: () => c.go('/ai'), icon: const Icon(Icons.chat_bubble_outline), label: const Text('AI 채팅')),
             OutlinedButton.icon(
+                onPressed: () => c.push('/route-search'), icon: const Icon(Icons.alt_route), label: const Text('길찾기')),
+            OutlinedButton.icon(
                 onPressed: () => c.push('/typhoon'), icon: const Icon(Icons.cyclone), label: const Text('태풍')),
             OutlinedButton.icon(
                 onPressed: () => c.push('/support'), icon: const Icon(Icons.volunteer_activism_outlined), label: const Text('복구 지원')),
