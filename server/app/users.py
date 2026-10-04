@@ -22,7 +22,8 @@ ENUM_CAST = {"user_type": "user_type", "mobility": "mobility_mode", "walking_abi
 
 ENSURE_SQL = """
 INSERT INTO users (firebase_uid, is_anonymous, last_active_at) VALUES (%(uid)s, %(anon)s, now())
-ON CONFLICT (firebase_uid) DO UPDATE SET last_active_at = now()
+ON CONFLICT (firebase_uid) DO UPDATE SET last_active_at = now(),
+    is_anonymous = EXCLUDED.is_anonymous   -- 익명 계정에 Google·이메일을 연결하면 uid는 그대로, 익명 표시만 해제
 RETURNING id, (xmax = 0) AS created
 """
 

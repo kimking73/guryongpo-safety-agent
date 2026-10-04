@@ -1,5 +1,8 @@
+import 'package:dio/dio.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import '../firebase_options.dart';
 import 'app_config.dart';
 
 class AuthStateInfo {
@@ -8,13 +11,152 @@ class AuthStateInfo {
   final String? userId, token;
 }
 
+/// 지금 로그인한 계정 (화면 표시용)
+class AccountInfo {
+  const AccountInfo({required this.uid, required this.isAnonymous, this.email, this.provider});
+  final String uid;
+  final bool isAnonymous;
+  final String? email;
+  /// 'google.com' · 'password' · null(익명)
+  final String? provider;
+  String get providerLabel => switch (provider) { 'google.com' => 'Google', 'password' => '이메일', _ => '익명' };
+}
+
+/// 로그인 실패를 화면에 보여 줄 한국어 문구로
+class AuthFailure implements Exception {
+  const AuthFailure(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+
+/// Firebase 오류 코드 → 사용자 문구
+String authErrorMessage(String code) => switch (code) {
+      'invalid-email' => '이메일 형식이 올바르지 않습니다.',
+      'weak-password' => '비밀번호는 6자 이상으로 정해 주세요.',
+      'email-already-in-use' || 'credential-already-in-use' => '이미 가입된 이메일입니다. 로그인해 주세요.',
+      'user-not-found' || 'wrong-password' || 'invalid-credential' || 'INVALID_LOGIN_CREDENTIALS' =>
+        '이메일 또는 비밀번호가 맞지 않습니다.',
+      'too-many-requests' => '시도가 너무 많습니다. 잠시 뒤 다시 해 주세요.',
+      'popup-closed-by-user' || 'cancelled-popup-request' || 'web-context-canceled' || 'canceled' =>
+        '로그인을 취소했습니다.',
+      'popup-blocked' => '브라우저가 로그인 창을 막았습니다. 팝업을 허용해 주세요.',
+      'network-request-failed' => '인터넷 연결을 확인해 주세요.',
+      'operation-not-allowed' => '이 로그인 방식이 아직 켜져 있지 않습니다. 관리자에게 알려 주세요.',
+      'requires-recent-login' => '보안을 위해 다시 로그인해 주세요.',
+      _ => '로그인하지 못했습니다. 다시 시도해 주세요. ($code)',
+    };
+
+/// Firebase 로그인. 시작하면 익명으로 들어오고, 원하면 Google·이메일 계정을 **연결**한다.
+/// 연결하면 uid가 그대로라 익명일 때 저장한 정보(서버 사용자·장소·AI 기억)가 이어진다.
 class AuthService {
+  /// Firebase 설정: --dart-define 값이 있으면 그것(예전 방식), 없으면 firebase_options.dart
+  static FirebaseOptions? get _options => AppConfig.hasFirebaseConfig
+      ? FirebaseOptions(apiKey: AppConfig.firebaseApiKey, appId: AppConfig.firebaseAppId,
+          messagingSenderId: AppConfig.firebaseSenderId, projectId: AppConfig.firebaseProjectId,
+          authDomain: DefaultFirebaseOptions.web.authDomain)
+      : DefaultFirebaseOptions.currentPlatform;
+
+  /// 목업 모드(APP_MODE=mock)이거나 이 플랫폼 설정이 없으면 Firebase를 쓰지 않는다
+  static bool get enabled => AppConfig.isRemote && _options != null;
+  static bool get ready => Firebase.apps.isNotEmpty;
+
   Future<AuthStateInfo> initialize() async {
-    if (!AppConfig.hasFirebaseConfig) return const AuthStateInfo(isMock: true, userId: 'mock-guryongpo-user');
-    await Firebase.initializeApp(options: FirebaseOptions(apiKey: AppConfig.firebaseApiKey, appId: AppConfig.firebaseAppId, messagingSenderId: AppConfig.firebaseSenderId, projectId: AppConfig.firebaseProjectId));
-    final auth = FirebaseAuth.instance;
-    final user = auth.currentUser ?? (await auth.signInAnonymously()).user;
-    return AuthStateInfo(isMock: false, userId: user?.uid, token: await user?.getIdToken());
+    if (!enabled) return const AuthStateInfo(isMock: true, userId: 'mock-guryongpo-user');
+    try {
+      if (!ready) await Firebase.initializeApp(options: _options);
+      final auth = FirebaseAuth.instance;
+      final user = auth.currentUser ?? (await auth.signInAnonymously()).user;
+      await syncServerUser();
+      return AuthStateInfo(isMock: false, userId: user?.uid, token: await user?.getIdToken());
+    } catch (_) {
+      // 오프라인 등으로 로그인 실패 — 재난 정보는 토큰 없이도 보이게 계속 진행
+      return const AuthStateInfo(isMock: false);
+    }
   }
-  Future<String?> token() async => Firebase.apps.isEmpty ? null : FirebaseAuth.instance.currentUser?.getIdToken();
+
+  Future<String?> token() async => ready ? FirebaseAuth.instance.currentUser?.getIdToken() : null;
+
+  /// 로그인한 Firebase uid (없으면 null — 목업·초기화 전)
+  String? get uid => ready ? FirebaseAuth.instance.currentUser?.uid : null;
+
+  /// 로그인 상태가 바뀔 때마다 (연결·로그인·로그아웃 포함)
+  Stream<AccountInfo?> accountChanges() =>
+      ready ? FirebaseAuth.instance.userChanges().map(_info) : Stream.value(null);
+
+  AccountInfo? get account => ready ? _info(FirebaseAuth.instance.currentUser) : null;
+
+  static AccountInfo? _info(User? u) {
+    if (u == null) return null;
+    final p = u.providerData.map((d) => d.providerId).where((id) => id != 'firebase').toList();
+    return AccountInfo(uid: u.uid, isAnonymous: u.isAnonymous, email: u.email,
+        provider: p.contains('google.com') ? 'google.com' : (p.isNotEmpty ? p.first : null));
+  }
+
+  /// Google 로그인. 익명이면 지금 계정에 연결, 이미 다른 계정에 묶인 Google이면 그 계정으로 로그인
+  Future<void> signInWithGoogle() => _run(() async {
+        final auth = FirebaseAuth.instance;
+        final provider = GoogleAuthProvider()..setCustomParameters({'prompt': 'select_account'});
+        final user = auth.currentUser;
+        if (user != null && user.isAnonymous) {
+          try {
+            kIsWeb ? await user.linkWithPopup(provider) : await user.linkWithProvider(provider);
+            return;
+          } on FirebaseAuthException catch (e) {
+            if (e.code != 'credential-already-in-use') rethrow;
+            // 이미 가입된 Google 계정 → 그 계정으로 로그인 (지금 익명 기록은 이 기기에만 남는다)
+            if (e.credential != null) {
+              await auth.signInWithCredential(e.credential!);
+              return;
+            }
+          }
+        }
+        kIsWeb ? await auth.signInWithPopup(provider) : await auth.signInWithProvider(provider);
+      });
+
+  /// 이메일 가입: 익명 계정에 이메일·비밀번호를 연결
+  Future<void> signUpWithEmail(String email, String password) => _run(() async {
+        final auth = FirebaseAuth.instance;
+        final cred = EmailAuthProvider.credential(email: email.trim(), password: password);
+        final user = auth.currentUser;
+        if (user != null && user.isAnonymous) {
+          await user.linkWithCredential(cred);
+        } else {
+          await auth.createUserWithEmailAndPassword(email: email.trim(), password: password);
+        }
+      });
+
+  Future<void> signInWithEmail(String email, String password) =>
+      _run(() => FirebaseAuth.instance.signInWithEmailAndPassword(email: email.trim(), password: password));
+
+  Future<void> sendPasswordReset(String email) =>
+      _run(() => FirebaseAuth.instance.sendPasswordResetEmail(email: email.trim()), sync: false);
+
+  /// 로그아웃 → 다시 익명으로 (재난 앱이라 로그인 없이도 계속 쓸 수 있게)
+  Future<void> signOut() => _run(() async {
+        await FirebaseAuth.instance.signOut();
+        await FirebaseAuth.instance.signInAnonymously();
+      });
+
+  /// Firebase 작업 실행 → 오류는 AuthFailure(한국어), 성공하면 서버 사용자 등록
+  Future<void> _run(Future<void> Function() action, {bool sync = true}) async {
+    if (!ready) throw const AuthFailure('로그인 기능을 쓸 수 없는 상태입니다 (Firebase 미설정).');
+    try {
+      await action();
+    } on FirebaseAuthException catch (e) {
+      throw AuthFailure(authErrorMessage(e.code));
+    }
+    if (sync) await syncServerUser();
+  }
+
+  /// 서버에 사용자 등록 (POST /api/v1/user, uid 기준 멱등). 실패해도 로그인은 그대로 둔다
+  Future<void> syncServerUser() async {
+    final t = await token();
+    if (t == null) return;
+    try {
+      await Dio(BaseOptions(baseUrl: AppConfig.apiBaseUrl, connectTimeout: const Duration(seconds: 5),
+              receiveTimeout: const Duration(seconds: 10)))
+          .post<Object?>('/api/v1/user', options: Options(headers: {'Authorization': 'Bearer $t'}));
+    } catch (_) {}
+  }
 }

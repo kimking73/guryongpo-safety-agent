@@ -70,5 +70,18 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<!-- Firebase 로그인(Google)이 끝나고 앱으로 돌아오는 주소: 인코딩된 iOS 앱 ID, REVERSED_CLIENT_ID (Firebase 콘솔 → 프로젝트 설정 → iOS 앱) -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>app-1-959823576613-ios-000ea056e57a3a3731c9cc</string>
+				<string>com.googleusercontent.apps.959823576613-ib7ddu7h17g71k3m487jr3liugpulfmk</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

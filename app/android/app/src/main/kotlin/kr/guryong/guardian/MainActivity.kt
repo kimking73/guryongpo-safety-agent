@@ -1,4 +1,4 @@
-package com.example.guryongpo_safety
+package kr.guryong.guardian
 
 import io.flutter.embedding.android.FlutterActivity
 

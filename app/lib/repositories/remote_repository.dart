@@ -15,9 +15,11 @@ import 'mock_repository.dart';
 /// - route(8002): /api/route
 /// 알림은 /api/v1/alerts가 아직 목업(A5)이라 위험도 판정 항목으로 만든다.
 class RemoteSafetyRepository implements SafetyRepository {
-  RemoteSafetyRepository({ApiClient? client, AccountService? account})
-      : _client = client ?? ApiClient(AuthService()),
-        _account = account ?? AccountService();
+  RemoteSafetyRepository({ApiClient? client, AccountService? account, AuthService? auth})
+      : _auth = auth ?? AuthService(),
+        _account = account ?? AccountService(),
+        _client = client ?? ApiClient(auth ?? AuthService());
+  final AuthService _auth;
   final ApiClient _client;
   final AccountService _account;
   String? _conversationId;
@@ -112,7 +114,8 @@ class RemoteSafetyRepository implements SafetyRepository {
 
   /// /api/chat·/api/voice 공통 사용자 정보 (서버 ChatRequest.profile)
   Future<(String, Map<String, Object>)> _profile(UserMode userMode) async {
-    final uid = await _account.deviceUserId();
+    // 로그인했으면 Firebase uid (AI 기억이 계정을 따라감), Firebase가 없으면 기기 ID
+    final uid = _auth.uid ?? await _account.deviceUserId();
     final (age, transport) = await _account.requiredSetup();
     final walking = await _account.walkingImpaired();
     final places = await _account.places();

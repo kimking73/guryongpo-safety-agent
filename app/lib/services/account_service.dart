@@ -3,11 +3,8 @@ import 'dart:math';
 import '../models/domain_models.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-enum SignInMethod { anonymous, google, naver, email }
-
 class AccountService {
   static const _modeKey = 'user_mode';
-  static const _methodKey = 'sign_in_method';
   Future<void> clearLegacyMode() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_modeKey);
@@ -60,9 +57,4 @@ class AccountService {
   }
   Future<void> saveOptionalProfile(Map<String, String> values) async =>
       (await SharedPreferences.getInstance()).setString('optional_profile', jsonEncode(values));
-  Future<String?> savedMethod() async =>
-      (await SharedPreferences.getInstance()).getString(_methodKey);
-  Future<void> signInMock(SignInMethod method) async =>
-      (await SharedPreferences.getInstance())
-          .setString(_methodKey, method.name);
 }

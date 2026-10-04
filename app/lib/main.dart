@@ -15,6 +15,7 @@ import 'services/location_service.dart';
 import 'services/geocoding_service.dart';
 import 'dashboard_parts.dart';
 import 'disaster_center.dart';
+import 'login_screen.dart';
 
 /// APP_MODE=remote면 실제 서버, 아니면 예시 데이터
 final repo = Provider<SafetyRepository>((_) =>
@@ -194,6 +195,7 @@ class GuryongpoApp extends StatelessWidget {
 
 final appRouter = GoRouter(initialLocation: '/boot', routes: [
   GoRoute(path: '/boot', builder: (_, __) => const BootScreen()),
+  GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
   GoRoute(path: '/location', builder: (_, __) => const InitialSetupScreen()),
   ShellRoute(builder: (_, __, child) => Shell(child: child), routes: [
     GoRoute(path: '/', builder: (_, __) => const Dashboard()),
@@ -234,7 +236,7 @@ class _BootScreenState extends ConsumerState<BootScreen> {
     await AccountService().clearLegacyMode();
     if (!mounted) return;
     setState(
-        () => text = a.isMock ? 'Firebase 미설정: 목업 모드로 시작합니다.' : '익명 로그인 완료');
+        () => text = a.isMock ? 'Firebase 미설정: 목업 모드로 시작합니다.' : '로그인 확인 완료');
     await Future<void>.delayed(const Duration(milliseconds: 700));
     // Show live emergency information before asking the user to complete profile setup.
     if (mounted) context.go('/');
@@ -1576,24 +1578,11 @@ class ProfileScreen extends ConsumerWidget {
       Text('사용자 정보', style: Theme.of(c).textTheme.headlineSmall),
       const ProfileDetailsCard(),
       const SizedBox(height: 12),
+      const AccountCard(),
       Card(
           child: Column(children: const [
-        ListTile(title: Text('익명 사용자'), subtitle: Text('mock-guryongpo-user')),
         ListTile(title: Text('이동수단'), subtitle: Text('도보')),
         ListTile(title: Text('접근성'), subtitle: Text('휠체어 접근 우선 (예시)'))
-      ])),
-      Card(
-          child: Column(children: [
-        const ListTile(
-            title: Text('계정 연결'), subtitle: Text('설정값이 없으면 목업 로그인으로 동작합니다.')),
-        ListTile(
-            leading: const Icon(Icons.g_mobiledata),
-            title: const Text('Google 로그인'),
-            onTap: () => AccountService().signInMock(SignInMethod.google)),
-        ListTile(
-            leading: const Icon(Icons.mail_outline),
-            title: const Text('Naver 이메일 로그인'),
-            onTap: () => AccountService().signInMock(SignInMethod.naver))
       ])),
       Card(
           child: Column(children: [

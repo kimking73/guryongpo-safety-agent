@@ -61,19 +61,35 @@ flutter run -d chrome --dart-define=APP_MODE=remote
 
 ## Firebase와 원격 API 설정
 
-### 초기 설정과 계정 연결
+### 로그인 (Google · 이메일/비밀번호, 2026-10-04)
 
-첫 실행에서는 주민 또는 관광객, 구룡포 내 예시 주거·출발 위치, 연령, 이동수단을 입력한 뒤 대시보드로 이동합니다. 주민/관광객 선택은 로컬 저장소에 보존됩니다. 프로필의 Google·Naver·이메일 항목은 설정값이 없을 때 명확히 목업 연결로 동작합니다.
+- 시작하면 Firebase **익명 로그인** → 서버에 사용자 등록(`POST /api/v1/user`, 멱등). 로그인은 선택이고 익명으로도 전부 쓸 수 있다.
+- 프로필 → **계정** 카드: "Google로 계속하기"(웹 팝업, 모바일 브라우저 화면) / "이메일로 로그인·가입"(`/login`, 비밀번호 찾기 포함).
+  가입·Google은 지금 익명 계정에 **연결**(link)해서 uid가 그대로 — 익명일 때 저장한 장소·AI 기억이 이어진다.
+  이미 가입된 계정이면 그 계정으로 로그인한다. 로그아웃하면 다시 익명.
+- AI 대화 `user_id`는 Firebase uid(없으면 기기 ID) → 로그인하면 AI 기억이 계정을 따라간다.
+- 코드: `lib/services/auth_service.dart`(로그인·오류 문구·서버 등록), `lib/login_screen.dart`(계정 카드·이메일 화면).
+- Naver는 Firebase 기본 지원이 아니라 넣지 않았다(서버에서 Naver OAuth → Firebase Custom Token 발급이 필요).
 
-Google과 이메일은 Firebase Authentication provider 연결 지점이며, 익명 계정은 이후 `linkWithCredential` 방식으로 연결하도록 인증과 프로필 데이터가 분리되어 있습니다. Naver 로그인은 클라이언트에 Client Secret을 두지 않고, Naver OAuth 완료 후 신뢰 가능한 서버 또는 Cloud Functions가 Firebase Custom Token을 발급하는 구조로 연결해야 합니다. Firebase 서비스 계정 키와 Naver Client Secret은 어떤 클라이언트 파일에도 넣지 마세요.
+### Firebase 설정값
 
-기본값은 `mock`입니다. 비밀 값이나 `google-services.json`, `GoogleService-Info.plist`는 저장소에 넣지 마세요. `.env.example`을 참고하여 CI 또는 로컬 런 설정에 `--dart-define`으로 전달합니다.
+- `lib/firebase_options.dart`(커밋됨): 웹·안드로이드·iOS별 Firebase **클라이언트** 설정. 비밀이 아니다(앱에 그대로 배포되는 공개 식별자,
+  승인된 도메인·앱 ID로 보호). 그래서 `--dart-define` 없이 `APP_MODE=remote`만 주면 로그인이 켜진다. `--dart-define=FIREBASE_*`를 주면 그 값이 우선.
+- 앱 ID: 안드로이드·iOS 모두 **`kr.guryong.guardian`** (Firebase 프로젝트 `guryong-guardian-0924`에 등록).
+- iOS: `ios/Runner/Info.plist`의 `CFBundleURLTypes` = Google 로그인 후 돌아오는 주소(인코딩된 iOS 앱 ID).
+- 안드로이드: Google 로그인을 시험할 PC마다 디버그 서명 SHA-1을 Firebase 콘솔(프로젝트 설정 → Android 앱 → 지문 추가)에 등록한다.
+  확인: `keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android | grep SHA1`
+- 웹: 배포 주소가 Firebase Authentication → 설정 → **승인된 도메인**에 있어야 한다(`34-64-177-195.nip.io`, `localhost` 등록됨).
+- 서비스 계정 키(`secrets/firebase-admin.json`)는 서버용 비밀이라 앱에 절대 넣지 않는다.
 
-```powershell
-flutter run -d chrome --dart-define=APP_MODE=remote --dart-define=API_BASE_URL=https://api.example.com --dart-define=FIREBASE_API_KEY=... --dart-define=FIREBASE_APP_ID=... --dart-define=FIREBASE_PROJECT_ID=... --dart-define=FIREBASE_MESSAGING_SENDER_ID=...
+```bash
+flutter run -d chrome --dart-define=APP_MODE=remote                     # 로컬 서버 + 로그인
+flutter run -d "iPhone 17 Pro" --dart-define=APP_MODE=remote \
+  --dart-define=API_BASE_URL=https://34-64-177-195.nip.io --dart-define=AI_BASE_URL=https://34-64-177-195.nip.io \
+  --dart-define=ROUTE_BASE_URL=https://34-64-177-195.nip.io           # 아이폰 시뮬레이터 + 배포 서버
 ```
 
-`lib/services/auth_service.dart`가 익명 로그인 및 ID 토큰을 담당하고, `lib/services/api_client.dart`가 인증 헤더를 삽입합니다. 익명 계정을 이메일 계정으로 연결할 때에도 프로필·저장 데이터는 인증 사용자와 분리된 사용자 데이터 키로 유지하도록 서버에서 설계합니다.
+`lib/services/api_client.dart`가 모든 요청에 Firebase ID 토큰을 붙인다.
 
 현재 저장소의 `MockSafetyRepository`는 고정 fixture를 반환합니다. 실제 서버 연결은 이 인터페이스의 remote 구현체를 추가해 교체합니다. 포항 디지털 트윈·기상청·재난안전24·생활안전지도 데이터 통합, GraphHopper 실제 길찾기, 위험 레이어 및 푸시 알림도 동일한 repository/service 경계에 연결합니다.
 
