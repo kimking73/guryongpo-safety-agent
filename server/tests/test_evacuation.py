@@ -138,7 +138,8 @@ def test_dashboard_evacuation_is_real(client, fake_db):
 INC_ROW = {"id": INCIDENT, "hazard": "flood", "level": "warning", "title": "침수 경보 (포항 DT 4단계)", "source": "simulated",
            "area_id": 12, "started_at": NOW, "closed_at": None,
            "area_geojson": '{"type":"MultiPolygon","coordinates":[[[[129.55,35.98],[129.56,35.98],[129.56,35.99],[129.55,35.98]]]]}',
-           "total": 2, "no_response": 1, "evacuating": 0, "evacuated": 0, "need_help": 1}
+           "total": 2, "no_response": 1, "evacuating": 0, "evacuated": 0, "need_help": 1, "visited": 1,
+           "unvisited_need_help": 1}
 BASE_T = {"reminder_count": 0, "escalated_at": None, "priority_score": None, "priority_reasons": [], "note": None,
           "created_at": datetime.now(timezone.utc) - timedelta(minutes=7, seconds=30), "alert_at": None, "status_via": None, "status_at": None,
           "assigned_to": None, "assigned_nickname": None, "last_lat": None, "last_lng": None, "v_id": None}
@@ -240,3 +241,62 @@ def test_manual_notice_in_message():
     m = compose({"kind": "evacuation", "hazard": "landslide", "level": "warning", "reason": "삼정리 산사태 대피",
                  "notice": "삼정리 주민은 구룡포초로 대피"}, {"trigger": "place", "place_label": "우리집"})
     assert m["body"].startswith("방재단 안내: 삼정리 주민은 구룡포초로 대피")
+
+
+# ------------------------------------------------------------------ 방문 기록 (A14)
+@pytest.fixture
+def visit_db(admin_db, monkeypatch):
+    from alerts import evacuation
+    admin_db.rows["INSERT INTO care.visit_logs"] = [{"id": 9, "visited_at": NOW}]
+    admin_db.rows["SELECT nickname FROM users WHERE id"] = [{"nickname": "방재단 김OO"}]
+    calls = []
+    monkeypatch.setattr(evacuation, "record", lambda t, st, via, **kw: calls.append((t, st, via, kw)))
+    seen = []
+    from app import db
+    orig = db.fetch_one
+    monkeypatch.setattr(db, "fetch_one", lambda sql, p=None: seen.append((sql, p)) or orig(sql, p))
+    return calls, seen
+
+
+def _visit(client, target, **body):
+    return client.post(f"/api/v1/admin/incidents/{INCIDENT}/targets/{target}/visits", headers=STAFF, json=body)
+
+
+def test_visit_household_transported(client, visit_db):
+    calls, seen = visit_db
+    r = _visit(client, HH_TARGET, result="transported", note="차량으로 대피소 이송", location={"lat": 35.99, "lng": 129.556})
+    assert r.status_code == 201
+    assert_spec(r.json(), "/admin/incidents/{incident_id}/targets/{target_id}/visits", "post", "201")
+    assert r.json()["status_after"] == "evacuated" and r.json()["responder"]["nickname"] == "방재단 김OO"
+    ins = next(p for sql, p in seen if "INSERT INTO care.visit_logs" in sql)
+    assert (ins["hid"], ins["tid"], ins["me"], ins["after"], ins["lat"]) == (HOUSEHOLD, HH_TARGET, STAFF_ID, "evacuated", 35.99)
+    assert calls[0][:3] == ({"id": HH_TARGET, "incident_id": INCIDENT, "user_id": None}, "evacuated", "responder")
+
+
+@pytest.mark.parametrize("result", ["not_home", "refused", "other"])
+def test_visit_without_status_change(client, visit_db, result):
+    """부재·거부·기타는 상태를 바꾸지 않고 기록만 (2026-10-04 결정)"""
+    calls, seen = visit_db
+    r = _visit(client, HH_TARGET, result=result)
+    assert r.status_code == 201 and r.json()["status_after"] is None and calls == []
+
+
+def test_visit_app_user_allowed(client, visit_db, admin_db):
+    """가구 등록 없이 앱으로 도움 요청한 사람도 방문 기록 (household_id 없음)"""
+    calls, seen = visit_db
+    admin_db.rows["FROM care.incident_targets t\nJOIN care.incidents i ON i.id = t.incident_id"] = [TARGET_ROWS[1]]
+    r = _visit(client, TARGET, result="evacuated_with_help")
+    assert r.status_code == 201 and r.json()["household_id"] is None and r.json()["target_id"] == TARGET
+    assert calls[0][0] == {"id": TARGET, "incident_id": INCIDENT, "user_id": UID}
+    r = _visit(client, TARGET, result="not_home", status_after="need_help")     # 직접 지정하면 그 상태
+    assert r.json()["status_after"] == "need_help" and calls[-1][1] == "need_help"
+
+
+def test_visit_closed_incident(client, visit_db, admin_db):
+    admin_db.rows["LEFT JOIN care.incident_targets t ON t.incident_id = i.id"] = [{**INC_ROW, "closed_at": NOW}]
+    assert _visit(client, HH_TARGET, result="transported").status_code == 409
+
+
+def test_summary_has_visit_counts(client, admin_db):
+    d = client.get(f"/api/v1/admin/incidents/{INCIDENT}", headers=STAFF).json()
+    assert d["summary"]["visited"] == 1 and d["summary"]["unvisited_need_help"] == 1

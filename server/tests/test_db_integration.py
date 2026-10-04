@@ -243,3 +243,54 @@ def test_households_end_to_end(real_db):
         real_db.execute("DELETE FROM care.households WHERE label = '삼정리 이OO 댁'")
         real_db.execute("DELETE FROM care.incidents WHERE source = 'simulated'")
         real_db.execute("DELETE FROM users WHERE firebase_uid IN ('a13-me', 'responder-a13', 'caregiver-a13')")
+
+
+def test_visits_end_to_end(real_db):
+    """A14 완료 기준: 방재단 계정으로 명단 조회 → 방문 기록 → 집계 반영"""
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from risk import simulate
+    c = TestClient(app)
+    me = {"Authorization": "Bearer dev:a14-me"}
+    staff = {"Authorization": "Bearer dev:responder-a14"}
+    try:
+        c.post("/api/v1/user", headers=me, json={})
+        c.post("/api/v1/user/places", headers=me, json={"place_type": "home", "label": "우리집", "address": "환승센터"})
+        simulate.apply("demo_households")
+        simulate.apply("heavy_rain_flood")
+        alert = next(a for a in c.get("/api/v1/alerts", headers=me).json()["alerts"] if a["response_required"])
+        c.post(f"/api/v1/alerts/{alert['id']}/response", headers=me,
+               json={"status": "need_help", "via": "button", "location": {"lat": 35.9906, "lng": 129.5561}})
+        iid = alert["incident_id"]
+
+        d = c.get(f"/api/v1/admin/incidents/{iid}", headers=staff).json()            # 명단 조회
+        assert d["targets"][0]["kind"] == "app_user" and d["targets"][0]["status"] == "need_help"   # 도움 요청이 1순위
+        assert d["summary"]["unvisited_need_help"] == 1 and d["summary"]["visited"] == 0
+        app_t = d["targets"][0]["id"]
+        hh_t = next(t["id"] for t in d["targets"] if t["label"] == "[시연] 환승센터 옆 휠체어 어르신 댁")
+
+        # 가구: 부재 → 상태 그대로, 기록만
+        v = c.post(f"/api/v1/admin/incidents/{iid}/targets/{hh_t}/visits", headers=staff, json={"result": "not_home"})
+        assert v.status_code == 201 and v.json()["status_after"] is None
+        # 앱 사용자: 함께 대피 → 대피 완료
+        v = c.post(f"/api/v1/admin/incidents/{iid}/targets/{app_t}/visits", headers=staff,
+                   json={"result": "evacuated_with_help", "note": "부축해서 대피소 도착"})
+        assert v.status_code == 201 and v.json()["household_id"] is None and v.json()["status_after"] == "evacuated"
+
+        d = c.get(f"/api/v1/admin/incidents/{iid}", headers=staff).json()            # 집계 반영
+        assert d["summary"]["visited"] == 2 and d["summary"]["unvisited_need_help"] == 0
+        tt = {t["id"]: t for t in d["targets"]}
+        assert tt[app_t]["status"] == "evacuated" and tt[app_t]["status_via"] == "responder"
+        assert tt[app_t]["last_visit"]["note"] == "부축해서 대피소 도착"
+        assert tt[hh_t]["status"] == "no_response" and tt[hh_t]["last_visit"]["result"] == "not_home"
+        assert c.get("/api/v1/dashboard", headers=me, params={"lat": 35.99, "lng": 129.556}).json()["evacuation"]["status"] == "evacuated"
+        hh_id = tt[hh_t]["household_id"]
+        assert c.get(f"/api/v1/admin/households/{hh_id}", headers=staff).json()["recent_visits"][0]["result"] == "not_home"
+        c.post(f"/api/v1/admin/incidents/{iid}/close", headers=staff)
+        assert c.post(f"/api/v1/admin/incidents/{iid}/targets/{hh_t}/visits", headers=staff,
+                      json={"result": "transported"}).status_code == 409
+    finally:
+        simulate.apply("clear")
+        simulate.apply("demo_households_clear")
+        real_db.execute("DELETE FROM care.incidents WHERE source = 'simulated'")
+        real_db.execute("DELETE FROM users WHERE firebase_uid IN ('a14-me', 'responder-a14')")

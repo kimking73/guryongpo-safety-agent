@@ -31,7 +31,7 @@ def test_migrations_rerunnable_and_care_schema():
     """01m_* 는 기존 DB 에 매번 적용 → 모든 CREATE 는 IF NOT EXISTS, ENUM 은 duplicate_object 무시.
     민감정보 테이블은 care 스키마 (AI 읽기 전용 계정은 public 만 SELECT)"""
     migs = migration_files(SEED_DIR)
-    assert [f.name for f in migs] == ["01m_v0_3.sql", "01m_v0_4_households.sql"]
+    assert [f.name for f in migs] == ["01m_v0_3.sql", "01m_v0_4_households.sql", "01m_v0_5_visits.sql"]
     sql = migs[0].read_text(encoding="utf-8")
     for st in _statements(sql):
         if re.match(r"CREATE (TABLE|INDEX|UNIQUE INDEX|SCHEMA)", st):
@@ -112,7 +112,7 @@ def test_apply_empty_db_creates_schema():
 def test_apply_existing_db_skips_schema_and_dry_run_rolls_back():
     c = FakeConn(_all_tables())
     rep = apply(c, SEED_DIR, dry_run=True, log=lambda *_: None)
-    assert not rep.created_schema and rep.applied[:2] == ["01m_v0_3.sql", "01m_v0_4_households.sql"] and rep.applied[2].startswith("02_")
+    assert not rep.created_schema and rep.applied[:3] == ["01m_v0_3.sql", "01m_v0_4_households.sql", "01m_v0_5_visits.sql"] and rep.applied[3].startswith("02_")
     assert c.rolled_back and not c.committed
     assert not any("INSERT INTO ingest_runs" in s for s in c.sql)
 

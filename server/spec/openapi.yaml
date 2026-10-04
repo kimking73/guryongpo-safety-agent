@@ -655,6 +655,10 @@ paths:
     post:
       tags: [admin]
       summary: 방문 기록 (A14) — 결과와 방문 후 상태
+      description: |
+        등록 가구와 가구 등록 없는 앱 사용자 모두 (2026-10-04 — 앱으로 도움 요청한 사람도 방문 기록).
+        방문 후 상태: status_after 를 보내면 그 값, 생략하면 함께 대피·이송·이미 대피 → evacuated,
+        부재·거부·기타 → 상태를 바꾸지 않음 (기록만 — 대상의 last_visit 로 보임). 대피 상황이 종료됐으면 409.
       operationId: addVisit
       parameters:
         - { name: incident_id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -672,6 +676,7 @@ paths:
               schema: { $ref: '#/components/schemas/VisitLog' }
         '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
 
   /admin/incidents/{incident_id}/close:
     post:
@@ -1607,6 +1612,8 @@ components:
         evacuating: { type: integer }
         evacuated: { type: integer }
         need_help: { type: integer }
+        visited: { type: integer, description: '한 번이라도 방문 기록이 있는 대상 수 (A14)' }
+        unvisited_need_help: { type: integer, description: '도움 필요인데 아직 방문 기록이 없는 대상 수 (A14)' }
     Incident:
       type: object
       required: [id, hazard, level, title, source, started_at, summary]
@@ -1710,10 +1717,10 @@ components:
         note: { type: string, maxLength: 300 }
     VisitLog:
       type: object
-      required: [id, household_id, visited_at, result]
+      required: [id, visited_at, result]
       properties:
         id: { type: integer }
-        household_id: { type: string, format: uuid }
+        household_id: { type: [string, 'null'], format: uuid, description: '가구 등록 없는 앱 사용자 방문이면 null (target_id 로 연결)' }
         target_id: { type: [string, 'null'], format: uuid }
         responder: { type: object, properties: { user_id: { type: string, format: uuid }, nickname: { type: [string, 'null'] } } }
         visited_at: { type: string, format: date-time }

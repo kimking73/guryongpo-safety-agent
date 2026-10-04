@@ -27,7 +27,11 @@ SELECT i.id, i.hazard::text AS hazard, i.level::text AS level, i.title, i.source
        count(t.id) FILTER (WHERE t.status = 'no_response') AS no_response,
        count(t.id) FILTER (WHERE t.status = 'evacuating') AS evacuating,
        count(t.id) FILTER (WHERE t.status = 'evacuated') AS evacuated,
-       count(t.id) FILTER (WHERE t.status = 'need_help') AS need_help
+       count(t.id) FILTER (WHERE t.status = 'need_help') AS need_help,
+       -- 방문 집계 (A14): 한 번이라도 방문한 대상 · 도움 필요인데 아직 아무도 안 간 대상
+       count(t.id) FILTER (WHERE EXISTS (SELECT 1 FROM care.visit_logs v WHERE v.target_id = t.id)) AS visited,
+       count(t.id) FILTER (WHERE t.status = 'need_help'
+                           AND NOT EXISTS (SELECT 1 FROM care.visit_logs v WHERE v.target_id = t.id)) AS unvisited_need_help
 FROM care.incidents i
 LEFT JOIN care.incident_targets t ON t.incident_id = i.id AND {VISIBLE}
 WHERE (%(iid)s::uuid IS NULL OR i.id = %(iid)s::uuid)
@@ -68,7 +72,8 @@ def _json(v, default):
 def incident_out(r: dict) -> dict:
     return {"id": str(r["id"]), "hazard": r["hazard"], "level": r["level"], "title": r["title"], "source": r["source"],
             "area_id": r.get("area_id"), "started_at": iso(r["started_at"]), "closed_at": iso(r.get("closed_at")),
-            "summary": {"total": r["total"], **{s: r[s] for s in STATUSES}}}
+            "summary": {"total": r["total"], **{s: r[s] for s in STATUSES},
+                        "visited": r.get("visited") or 0, "unvisited_need_help": r.get("unvisited_need_help") or 0}}
 
 
 def target_out(r: dict, me: Optional[str], now: datetime) -> dict:
@@ -76,7 +81,7 @@ def target_out(r: dict, me: Optional[str], now: datetime) -> dict:
     since = r.get("alert_at") or r["created_at"]
     visit = None
     if r.get("v_id") is not None:
-        visit = {"id": r["v_id"], "household_id": str(r["household_id"]), "target_id": str(r["id"]),
+        visit = {"id": r["v_id"], "household_id": str(r["household_id"]) if hh else None, "target_id": str(r["id"]),
                  "responder": {"user_id": str(r["v_responder"]), "nickname": r.get("v_responder_nick")} if r.get("v_responder") else None,
                  "visited_at": iso(r["v_at"]), "result": r["v_result"], "status_after": r.get("v_status_after"),
                  "note": r.get("v_note")}
