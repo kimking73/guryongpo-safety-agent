@@ -187,3 +187,12 @@ def test_typhoon_inside_storm_radius_is_warning():
     impacts = {"2611": {"in_15ms_now": True, "in_25ms_now": True, "now_distance_km": 30}}
     r = evaluate_typhoon([], impacts, TYPHOON_RULES)
     assert (r.level, r.rule_id) == ("warning", 8)
+
+
+def test_aws_station_id_matches_collector():
+    """판정이 찾는 구룡포 AWS 이름 = 수집기가 저장하는 이름 (2026-10-05: "816" vs "aws_816" 로 호우·강풍 판정이 늘 건너뛰어졌다)"""
+    from collector.converters import kma_warn_aws
+    from collector.jobs import AWS_STN
+    from risk import hazards
+    st = kma_warn_aws.aws_station(AWS_STN)
+    assert (hazards.AWS_SOURCE, hazards.AWS_EXTERNAL_ID) == (st["source_code"], st["external_id"])

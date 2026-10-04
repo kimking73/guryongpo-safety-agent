@@ -45,7 +45,7 @@ log = logging.getLogger("risk.hazards")
 KST = timezone(timedelta(hours=9))
 ENGINE = "hazards_v1"
 HAZARDS = ["heavy_rain", "strong_wind", "landslide", "typhoon"]
-AWS_SOURCE, AWS_EXTERNAL_ID = "kma", "816"
+AWS_SOURCE, AWS_EXTERNAL_ID = "kma", "aws_816"   # 수집기 kma_warn_aws.aws_station 과 같은 이름 (2026-10-05 수정: "816" 이라 관측소를 못 찾아 호우·강풍 판정이 늘 건너뛰어짐)
 STA_HEAVY_RAIN, STA_STRONG_WIND, STA_TYPHOON = -1, -2, -3   # basis.station_id sentinel (실제 관측소 id 와 겹치지 않게 음수)
 
 
