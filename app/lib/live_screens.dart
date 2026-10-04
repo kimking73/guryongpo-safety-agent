@@ -8,6 +8,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'main.dart';
+import 'origin_picker.dart';
 import 'services/demo_mode.dart';
 import 'services/live_api.dart';
 
@@ -175,6 +176,7 @@ class LiveDashboard extends ConsumerWidget {
               '실시간 데이터 · 위험 판정 ${hhmm(point['computed_at'])} 기준'
               '${point['data_stale'] == true ? ' · 판정이 30분 넘게 갱신되지 않았습니다' : ''}',
               style: Theme.of(c).textTheme.bodySmall),
+          const Align(alignment: Alignment.centerLeft, child: OriginChip()),
           const SizedBox(height: 8),
           if (headline != null) _Headline(headline: Map<String, dynamic>.from(headline)),
           Wrap(spacing: 8, runSpacing: 8, children: [

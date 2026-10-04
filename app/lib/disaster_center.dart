@@ -1542,6 +1542,7 @@ class _ProfileDetailsCardState extends State<ProfileDetailsCard> {
   final fields = <String, TextEditingController>{};
   final jobs = <String>{};
   String transport = '도보';
+  String originMode = '현재 위치';
   bool loading = true;
   static const jobOptions = [
     '어업 종사자·뱃사람',
@@ -1577,6 +1578,7 @@ class _ProfileDetailsCardState extends State<ProfileDetailsCard> {
     for (final e in fields.entries) e.value.text = p[e.key] ?? '';
     jobs.addAll((p['jobs'] ?? '').split('|').where((x) => x.isNotEmpty));
     transport = p['transport'] ?? '도보';
+    originMode = p['originMode'] == '직접 지정' ? '직접 지정' : '현재 위치';
     if (mounted) setState(() => loading = false);
   }
 
@@ -1586,10 +1588,13 @@ class _ProfileDetailsCardState extends State<ProfileDetailsCard> {
   }
 
   Future<void> _persist({bool notify = true}) async {
+    // 다른 화면이 저장한 항목(선택 정보 '보행 능력' 등)을 지우지 않게 기존 값에 덮어쓴다 (2026-10-05)
     final p = <String, String>{
+      ...await AccountService().optionalProfile(),
       for (final e in fields.entries) e.key: e.value.text.trim(),
       'transport': transport,
       'jobs': jobs.join('|'),
+      'originMode': originMode,
     };
     await AccountService().saveOptionalProfile(p);
     if (mounted && notify) {
@@ -1745,14 +1750,16 @@ class _ProfileDetailsCardState extends State<ProfileDetailsCard> {
                           ),
                         ),
                       DropdownButtonFormField<String>(
-                        initialValue: '현재 위치',
-                        decoration:
-                            const InputDecoration(labelText: '출발 위치 방식'),
+                        initialValue: originMode,
+                        decoration: const InputDecoration(
+                            labelText: '출발 위치 방식',
+                            helperText: '직접 지정: 위 출발 위치를 앱 시작 때 기준 위치로 씀 (화면 위 "출발" 칩으로도 바꿀 수 있음)'),
                         items: const ['현재 위치', '직접 지정']
                             .map((x) =>
                                 DropdownMenuItem(value: x, child: Text(x)))
                             .toList(),
                         onChanged: (x) {
+                          originMode = x ?? '현재 위치';
                           fields['originName']!.text = x == '현재 위치'
                               ? '현재 위치'
                               : fields['originName']!.text;

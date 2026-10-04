@@ -18,6 +18,7 @@ import 'services/demo_speech.dart';
 import 'dashboard_parts.dart';
 import 'disaster_center.dart';
 import 'live_screens.dart';
+import 'origin_picker.dart';
 import 'login_screen.dart';
 import 'services/demo_mode.dart';
 import 'prototype_safety_screens.dart';
@@ -623,6 +624,8 @@ class _BootScreenState extends ConsumerState<BootScreen> {
 
   Future<void> start() async {
     final a = await AuthService().initialize();
+    // 프로필에서 '직접 지정'한 출발 위치가 있으면 그 위치로 시작 (계정 정보를 내려받은 뒤)
+    await restoreSavedOrigin(ref);
     await AccountService().clearLegacyMode();
     if (!mounted) return;
     setState(
@@ -917,7 +920,7 @@ class StatusLine extends ConsumerWidget {
               Expanded(
                   child: Text(isOffline
                       ? '오프라인 · 저장된 예시 정보 · 10:42'
-                      : '온라인 · ${AppConfig.dataLabel}${AppConfig.isRemote ? '' : ' · 10:42'} · ${here.fromGps ? (here.manual ? '지도에서 고른 위치' : 'GPS 위치') : '예시 위치'} 기준${!here.fromGps && ref.watch(gpsNote) != null ? ' (${ref.watch(gpsNote)})' : ''}')),
+                      : '온라인 · ${AppConfig.dataLabel}${AppConfig.isRemote ? '' : ' · 10:42'} · ${here.fromGps ? (here.manual ? (ref.watch(originLabelProvider) ?? '지도에서 고른 위치') : 'GPS 위치') : (AppConfig.isRemote ? '구룡포 기본 위치' : '예시 위치')} 기준${!here.fromGps && ref.watch(gpsNote) != null ? ' (${ref.watch(gpsNote)})' : ''}')),
               if (statusLabel != null) ...[
                 Chip(
                   avatar: const Icon(Icons.directions_run, size: 16),
@@ -952,6 +955,7 @@ class Dashboard extends ConsumerWidget {
             icon: const Icon(Icons.dashboard_outlined),
             label: const Text('재난 종합')),
       ]),
+      const Align(alignment: Alignment.centerLeft, child: OriginChip()),
       RouteMap(
           key: ValueKey('route-$route-${routeType.name}'), facilityId: route),
     ]);
@@ -2516,7 +2520,14 @@ class _OptionalDetailsCardState extends State<OptionalDetailsCard> {
     if (mounted) setState(() => values.addAll(v));
   }
 
-  Future<void> save() async => AccountService().saveOptionalProfile(values);
+  /// 이 카드의 항목만 바꾸고 다른 화면이 저장한 값(집·직장·출발 위치·직업 …)은 그대로 둔다 (2026-10-05)
+  Future<void> save() async {
+    final latest = await AccountService().optionalProfile();
+    for (final f in fields) {
+      latest.remove(f);
+    }
+    await AccountService().saveOptionalProfile({...latest, for (final f in fields) if (values[f] != null) f: values[f]!});
+  }
   @override
   Widget build(BuildContext c) => Card(
       child: Padding(
