@@ -1,4 +1,4 @@
-"""경고 폴링 · 읽음 (A5 실데이터) · 대피 확인 응답 (목업 — 실구현 A12)"""
+"""경고 폴링 · 읽음 (A5) · 대피 확인 응답 (A12) — 모두 실데이터"""
 import json
 import logging
 import uuid
@@ -7,7 +7,9 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, Response
 
-from .. import db, mocks, users
+from alerts.evacuation import ESCALATE_AFTER_MIN, EVACUATING_RECHECK_MIN, REMINDER_INTERVAL_MIN  # noqa: F401 (admin 이 import)
+
+from .. import db, incidents, mocks, users
 from ..auth import AuthUser, current_user
 from ..errors import ApiError
 from ..schemas import EvacuationResponseInput
@@ -15,11 +17,7 @@ from ..schemas import EvacuationResponseInput
 router = APIRouter(tags=["alerts"])
 log = logging.getLogger(__name__)
 
-# 대피 확인 시간 규칙 (분) — 2026-10-03 팀 결정, 근거 정리 중 (프로젝트 문서 8-판단기준-근거현황 4절). 명세 IncidentDetail.rules 와 같음
-REMINDER_INTERVAL_MIN = 2       # 응답 없으면 2분마다 다시 알림 (방재단에 넘길 때까지)
-ESCALATE_AFTER_MIN = 10         # 응답 없으면 10분 뒤 방재단에 넘김
-EVACUATING_RECHECK_MIN = 10     # '대피 중'이면 10분 뒤 다시 확인
-
+# 대피 확인 시간 규칙은 alerts/evacuation.py (재알림 2분 · 이관 10분 · 대피 중 재확인 10분)
 RESPONSE_MESSAGES = {
     "evacuated": "대피 완료로 기록했어요. 대피소에서 안내를 기다려 주세요.",
     "evacuating": f"대피 중으로 기록했어요. {EVACUATING_RECHECK_MIN}분 뒤 다시 확인할게요. 도착하면 '대피 완료'를 눌러 주세요.",
@@ -44,16 +42,6 @@ SELECT * FROM (
   ORDER BY a.created_at DESC LIMIT %(n)s
 ) x ORDER BY created_at
 """
-# 진행 중인 대피 상황에서 내 상태 (대시보드 상단 카드) — 여럿이면 높은 단계·최근 것
-EVAC_SQL = """
-SELECT i.id AS incident_id, t.alert_id, i.hazard::text AS hazard, i.level::text AS level, i.title,
-       t.status::text AS status, t.status_at, i.started_at
-FROM care.incident_targets t JOIN care.incidents i ON i.id = t.incident_id
-WHERE t.user_id = %(uid)s AND t.household_id IS NULL AND t.alert_id IS NOT NULL AND i.closed_at IS NULL
-ORDER BY i.level DESC, i.started_at DESC LIMIT 1
-"""
-
-
 def _json(v, default):
     if v is None:
         return default
@@ -86,14 +74,6 @@ def alert_out(r: dict) -> dict:
     }
 
 
-def evacuation_out(r: Optional[dict]) -> Optional[dict]:
-    if not r:
-        return None
-    return {"incident_id": str(r["incident_id"]), "alert_id": str(r["alert_id"]), "hazard": r["hazard"],
-            "level": r["level"], "title": r["title"], "status": r["status"], "status_at": mocks.iso(r.get("status_at")),
-            "started_at": mocks.iso(r["started_at"])}
-
-
 @router.get("/alerts", summary="새 경고 폴링 + 위치 보고")
 def poll_alerts(since: Optional[datetime] = None, device_id: Optional[uuid.UUID] = None,
                 lat: Optional[float] = Query(None, ge=-90, le=90), lng: Optional[float] = Query(None, ge=-180, le=180),
@@ -110,7 +90,7 @@ def poll_alerts(since: Optional[datetime] = None, device_id: Optional[uuid.UUID]
     if since is not None and since.tzinfo is None:
         since = since.replace(tzinfo=mocks.KST)
     rows = db.fetch_all(POLL_SQL, {"uid": user_id, "since": since or server_time - DEFAULT_LOOKBACK, "n": MAX_ALERTS})
-    evac = evacuation_out(db.fetch_one(EVAC_SQL, {"uid": user_id}))
+    evac = incidents.my_evacuation(user_id)
     weather_bulletins = mocks.load("alerts.json").get("weather_bulletins", [])
     return {"alerts": [alert_out(r) for r in rows], "weather_bulletins": weather_bulletins,
             "mode": "emergency" if evac else "normal", "evacuation": evac,
@@ -127,20 +107,39 @@ def read_alert(alert_id: uuid.UUID, u: AuthUser = Depends(current_user)):
     return Response(status_code=204)
 
 
+# 내 경고 + 그 대피 상황의 내 대상 행 (없으면 만든다 — 경고만 있고 대상 행이 빠진 경우 대비)
+RESPOND_ALERT_SQL = """
+SELECT a.response_required, a.incident_id, a.user_id, i.closed_at, (i.id IS NOT NULL) AS incident_exists
+FROM user_alerts a JOIN users u ON u.id = a.user_id AND u.firebase_uid = %(uid)s
+LEFT JOIN care.incidents i ON i.id = a.incident_id
+WHERE a.id = %(aid)s
+"""
+TARGET_UPSERT_SQL = """
+INSERT INTO care.incident_targets (incident_id, user_id, alert_id) VALUES (%(iid)s, %(uid)s, %(aid)s)
+ON CONFLICT (incident_id, user_id) WHERE household_id IS NULL DO UPDATE SET updated_at = now()
+RETURNING id
+"""
+
+
 @router.post("/alerts/{alert_id}/response", summary="대피 확인 응답 (대피 완료 / 대피 중 / 도움 필요)")
 def respond_alert(alert_id: uuid.UUID, body: EvacuationResponseInput, u: AuthUser = Depends(current_user)):
-    # 경고 확인은 실데이터, 상태 저장·재알림·이관은 A12 에서 (응답은 X-Mock: true)
-    a = db.fetch_one("""SELECT response_required, incident_id FROM user_alerts
-                        WHERE id = %(aid)s AND user_id = (SELECT id FROM users WHERE firebase_uid = %(uid)s)""",
-                     {"aid": str(alert_id), "uid": u.uid})
+    from alerts import evacuation
+    a = db.fetch_one(RESPOND_ALERT_SQL, {"aid": str(alert_id), "uid": u.uid})
     if a is None:
         raise ApiError("NOT_FOUND")
-    if not a.get("response_required"):
+    if not a.get("response_required") or not a.get("incident_exists"):
         raise ApiError("VALIDATION_ERROR", "대피 확인이 필요한 경고가 아닙니다.", detail="response_not_required")
+    if a.get("closed_at") is not None:
+        raise ApiError("CONFLICT", "이미 종료된 대피 상황입니다.", detail="incident_closed")
     if body.status == "need_help" and body.location is None:
         raise ApiError("VALIDATION_ERROR", "도움 요청에는 현재 위치가 필요합니다.", detail="location_required")
-    return mocks.respond({
+    t = db.fetch_one(TARGET_UPSERT_SQL, {"iid": str(a["incident_id"]), "uid": str(a["user_id"]), "aid": str(alert_id)})
+    note = body.note or (f"음성: {body.transcript}" if body.via == "voice" and body.transcript else None)
+    evacuation.record({"id": t["id"], "incident_id": str(a["incident_id"]), "user_id": str(a["user_id"])}, body.status,
+                      body.via, by_user_id=str(a["user_id"]),
+                      location=body.location.model_dump() if body.location else None, note=note)
+    return {
         "alert_id": str(alert_id), "incident_id": str(a["incident_id"]), "status": body.status, "recorded_at": mocks.now_iso(),
         "recheck_after_min": EVACUATING_RECHECK_MIN if body.status == "evacuating" else None,
         "message": RESPONSE_MESSAGES[body.status], "call_suggested": body.status == "need_help",
-    })
+    }

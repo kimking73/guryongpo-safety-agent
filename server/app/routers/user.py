@@ -3,6 +3,7 @@
 실데이터: /user·장소·연락처·체크리스트·기기 토큰 (A5, users·user_profiles·user_places·emergency_contacts·user_devices),
           /user/role (초대 코드 확인 → users.role). dev 모드에서는 DEMO-* 코드도 허용 (DB 없이 화면 개발용)
 목업: /user/household (실구현 A13)"""
+import logging
 import uuid
 from typing import Optional
 
@@ -18,6 +19,7 @@ from ..schemas import (AddressGeocodeInput, DeviceTokenInput, EmergencyContactIn
                        ProfileInput, RoleClaim, SelfHouseholdInput)
 
 router = APIRouter(tags=["user"])
+log = logging.getLogger(__name__)
 
 
 @router.post("/user", status_code=201, summary="첫 실행 등록 (uid 기준 멱등)")
@@ -49,7 +51,16 @@ def delete_user(u: AuthUser = Depends(current_user)):
     return Response(status_code=204)
 
 
-PLACE_COLS = "place_type, label, address, geom, notify"
+def _check_alerts(user_id: str) -> None:
+    """장소가 바뀌면 그 사용자만 즉시 경고 판정 (진행 중인 경보 영역 안에 집을 등록하면 다음 10분 주기를 기다리지 않게).
+    실패해도 장소 저장은 성공으로 응답 — 수집기 주기 실행이 다시 확인"""
+    try:
+        from alerts import dispatch
+        dispatch.run(user_id=user_id)
+    except Exception:  # noqa: BLE001
+        log.exception("장소 변경 후 경고 판정 실패 user=%s", user_id)
+
+
 
 
 @router.post("/user/geocode", summary="도로명 주소를 좌표로 변환")
@@ -70,6 +81,7 @@ def add_place(body: PlaceInput, u: AuthUser = Depends(current_user)):
         VALUES (%(uid)s, %(place_type)s::place_type, %(label)s, %(address)s,
                 ST_SetSRID(ST_MakePoint(%(lng)s, %(lat)s), 4326), %(notify)s)
         RETURNING id""", {"uid": user_id, **values, **values["location"]})
+    _check_alerts(user_id)
     return JSONResponse(users.places(user_id, str(row["id"]))[0], status_code=201)
 
 
@@ -91,6 +103,7 @@ def update_place(place_id: uuid.UUID, body: PlacePatch, u: AuthUser = Depends(cu
         params.update(data["location"])
     if sets:
         db.execute(f"UPDATE user_places SET {', '.join(sets)} WHERE id = %(pid)s AND user_id = %(uid)s", params)
+        _check_alerts(user_id)
     found = users.places(user_id, str(place_id))
     if not found:
         raise ApiError("NOT_FOUND")

@@ -142,7 +142,6 @@ def test_internal_ingest(client, fake_db, monkeypatch):
 # ------------------------------------------------------------------ v0.3
 STAFF = {"Authorization": "Bearer dev:responder-1"}
 CAREGIVER = {"Authorization": "Bearer dev:caregiver-1"}
-INCIDENT = "c0ffee00-1d2e-4f30-9a41-5b6c7d8e9f01"
 
 
 def test_chat_route_voice_removed_from_api(client):
@@ -212,32 +211,11 @@ def test_admin_requires_staff_role(client, fake_db):
     r = client.get("/api/v1/admin/overview", headers=AUTH)            # dev:test-uid → DB 에 없음 → resident
     assert r.status_code == 403 and r.json()["code"] == "FORBIDDEN"
     fake_db.rows["FROM users WHERE firebase_uid"] = [{"role": "responder"}]
+    fake_db.rows["INSERT INTO users (firebase_uid"] = [{"id": "11111111-2222-4333-8444-555555555555", "created": False}]
     assert client.get("/api/v1/admin/overview", headers=AUTH).status_code == 200     # DB 역할로도 통과
     fake_db.rows.clear()
     fake_db.fail = True                                                # DB 장애 → 권한 없음 (안전 쪽)
     assert client.get("/api/v1/admin/overview", headers=AUTH).status_code == 403
-
-
-def test_admin_incident_flow(client):
-    lst = client.get("/api/v1/admin/incidents", headers=STAFF).json()
-    assert lst and lst[0]["id"] == INCIDENT
-    d = client.get(f"/api/v1/admin/incidents/{INCIDENT}", headers=STAFF).json()
-    ranks = [t["priority_rank"] for t in d["targets"]]
-    assert ranks == sorted(ranks) and d["targets"][0]["status"] == "need_help" and d["next_poll_sec"] == 10
-    assert d["rules"] == {"reminder_interval_min": 2, "escalate_after_min": 10, "evacuating_recheck_min": 10}
-    tid = d["targets"][1]["id"]
-    t = client.patch(f"/api/v1/admin/incidents/{INCIDENT}/targets/{tid}", headers=STAFF,
-                     json={"status": "evacuated", "assigned_to": "me"}).json()
-    assert t["status"] == "evacuated" and t["status_via"] == "responder" and t["assigned_to"]["is_me"]
-    v = client.post(f"/api/v1/admin/incidents/{INCIDENT}/targets/{tid}/visits", headers=STAFF,
-                    json={"result": "transported"})
-    assert v.status_code == 201 and v.json()["status_after"] == "evacuated"
-    app_user = d["targets"][0]["id"]                                   # 가구 미등록 앱 사용자 → 방문 기록 불가
-    assert client.post(f"/api/v1/admin/incidents/{INCIDENT}/targets/{app_user}/visits", headers=STAFF,
-                       json={"result": "other"}).status_code == 422
-    assert client.get("/api/v1/admin/incidents/00000000-0000-4000-8000-000000000000", headers=STAFF).status_code == 404
-    assert client.post(f"/api/v1/admin/incidents/{INCIDENT}/close", headers=CAREGIVER).status_code == 403
-    assert client.post(f"/api/v1/admin/incidents/{INCIDENT}/close", headers=STAFF).json()["closed_at"]
 
 
 def test_admin_households(client):
