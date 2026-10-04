@@ -69,6 +69,10 @@ flutter run -d chrome --dart-define=APP_MODE=remote
   이미 가입된 계정이면 그 계정으로 로그인한다. 로그아웃하면 다시 익명.
 - AI 대화 `user_id`는 Firebase uid(없으면 기기 ID) → 로그인하면 AI 기억이 계정을 따라간다.
 - 코드: `lib/services/auth_service.dart`(로그인·오류 문구·서버 등록), `lib/login_screen.dart`(계정 카드·이메일 화면).
+- **앱 정보가 계정을 따라간다** (2026-10-05, `lib/services/account_sync.dart`): 화면은 지금처럼 `AccountService`(기기 저장)만 쓰고, 저장할 때마다 1초 뒤 서버로 올린다.
+  ① 통째 저장본 `PUT /api/v1/user/app-state`(연령·이동수단·선택 정보·집/직장·저장 장소) → 다른 기기에서 같은 계정으로 로그인하면 그대로 복원,
+  ② 서버 판단용 칸 `PATCH /api/v1/user`(출생연도·이동수단·직업·보행·시각·청각)와 `/api/v1/user/places`(집·직장·저장 장소) → 선제 경고(A5)가 사용.
+  앱 시작·로그인 때 계정 저장본을 내려받고(못 올린 변경이 있으면 기기 값 우선), 로그아웃하면 이 기기에서 지운다. 새 저장 항목을 계정에 태우려면 `AccountSync.syncedKeys`에 키를 추가.
 - Naver는 Firebase 기본 지원이 아니라 넣지 않았다(서버에서 Naver OAuth → Firebase Custom Token 발급이 필요).
 
 ### Firebase 설정값
