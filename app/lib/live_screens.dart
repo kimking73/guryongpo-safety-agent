@@ -1,12 +1,12 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'disaster_center.dart';
 import 'main.dart';
 import 'origin_picker.dart';
 import 'services/demo_mode.dart';
@@ -218,39 +218,50 @@ List<Map<String, dynamic>> liveRiskItems(Map<String, dynamic>? dashboard) => [
       for (final i in (dashboard?['point_risk'] as Map?)?['items'] as List? ?? const []) Map<String, dynamic>.from(i as Map)
     ];
 
-/// 대시보드 아래쪽 '실시간 정보': 서버 위젯 카드(특보·강수·바람·수위·파고·태풍·예보·재난문자·자외선/미세먼지) + 가까운 대피소
-class LiveObservationCards extends ConsumerWidget {
-  const LiveObservationCards({super.key});
+/// 대시보드 아래쪽 '실시간 정보': 김다인 디자인 카드(LiveRealtimeCards, disaster_center.dart)에 서버 위젯 값
+class LiveRealtimeSection extends ConsumerWidget {
+  const LiveRealtimeSection({super.key});
   @override
-  Widget build(BuildContext c, WidgetRef ref) {
-    final async = ref.watch(liveDashboardProvider);
-    return async.when(
-      loading: () => const LinearProgressIndicator(),
-      error: (e, _) => Card(child: Padding(padding: const EdgeInsets.all(12), child: _NoData(liveError(e)))),
-      data: (d) {
-        final widgets = [for (final w in d['widgets'] as List? ?? const []) Map<String, dynamic>.from(w as Map)];
-        final shelters = d['nearest_shelters'] as List? ?? const [];
-        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          for (final w in widgets) LiveWidgetCard(widget: w),
-          const SizedBox(height: 10),
-          const Text('가까운 대피소', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          if (shelters.isEmpty) const Card(child: Padding(padding: EdgeInsets.all(12), child: _NoData('안내할 대피소가 없습니다'))),
-          for (final s in shelters)
-            Card(
-                child: ListTile(
-                    leading: const Icon(Icons.home_work_outlined),
-                    title: Text('${(s as Map)['name']}'),
-                    subtitle: Text([
-                      '${((s['distance_m'] as num? ?? 0) / 1000).toStringAsFixed(1)}km',
-                      if (s['is_accessible'] == true) '휠체어 접근',
-                      if ((s['unsuitable_reason'] as String?) != null) '⚠ ${s['unsuitable_reason']}',
-                    ].join(' · ')),
-                    trailing: const Icon(Icons.directions_walk),
-                    onTap: () => startRouteToShelter(ref, 'shelter-${s['id']}'))),
-        ]);
-      },
-    );
-  }
+  Widget build(BuildContext c, WidgetRef ref) => ref.watch(liveDashboardProvider).when(
+        loading: () => const LinearProgressIndicator(),
+        error: (e, _) => Card(child: Padding(padding: const EdgeInsets.all(12), child: _NoData(liveError(e)))),
+        data: (d) => LiveRealtimeCards(
+            widgets: [for (final w in d['widgets'] as List? ?? const []) Map<String, dynamic>.from(w as Map)]),
+      );
+}
+
+/// 태풍 정보 (실측): 김다인 TyphoonScreen 디자인 + 서버 typhoon 위젯
+class LiveTyphoonRoute extends ConsumerWidget {
+  const LiveTyphoonRoute({super.key, this.initialLocal = false});
+  final bool initialLocal;
+  @override
+  Widget build(BuildContext c, WidgetRef ref) => ref.watch(liveDashboardProvider).when(
+        loading: () => const DashboardLoading(),
+        error: (e, _) => TyphoonScreen(
+            key: const ValueKey('typhoon-error'),
+            initialLocal: initialLocal,
+            demo: false,
+            live: {'available': false, 'reason': '태풍 정보를 불러오지 못했습니다 (${liveError(e)})'}),
+        data: (d) {
+          final t = Map<String, dynamic>.from(
+              (d['widgets'] as List? ?? const []).cast<Map>().where((w) => w['type'] == 'typhoon').firstOrNull?['data'] as Map? ??
+                  const {'available': false, 'reason': '현재 진행 중인 태풍이 없습니다'});
+          return TyphoonScreen(
+              key: ValueKey('typhoon-${t['code']}-${(t['current'] as Map?)?['t']}'), initialLocal: initialLocal, demo: false, live: t);
+        },
+      );
+}
+
+/// 선제 경고·알림 (실측): 김다인 AlertHubScreen 디자인 + 서버 특보·예보·재난문자·내 경고·위험 영역
+class LiveAlertHubRoute extends ConsumerWidget {
+  const LiveAlertHubRoute({super.key});
+  @override
+  Widget build(BuildContext c, WidgetRef ref) => AlertHubScreen(
+        demo: false,
+        dashboard: ref.watch(liveDashboardProvider).valueOrNull,
+        alerts: ref.watch(alertCenterProvider).reversed.toList(),
+        areas: ref.watch(riskAreasProvider).valueOrNull ?? const [],
+      );
 }
 
 class _Headline extends ConsumerWidget {
@@ -421,76 +432,6 @@ class LiveWidgetCard extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------------ 태풍 (실측)
-class LiveTyphoonScreen extends ConsumerWidget {
-  const LiveTyphoonScreen({super.key});
-  @override
-  Widget build(BuildContext c, WidgetRef ref) {
-    final async = ref.watch(liveDashboardProvider);
-    return async.when(
-      loading: () => const DashboardLoading(),
-      error: (e, _) => LoadError(message: liveError(e), onRetry: () => ref.invalidate(liveDashboardProvider)),
-      data: (d) {
-        final w = [for (final x in d['widgets'] as List? ?? const []) Map<String, dynamic>.from(x as Map)]
-            .where((x) => x['type'] == 'typhoon')
-            .firstOrNull;
-        final t = Map<String, dynamic>.from(w?['data'] as Map? ?? const {'available': false, 'reason': '태풍 정보를 받지 못했습니다'});
-        if (!_available(t)) {
-          return _Page(title: '태풍', onRefresh: () async => ref.invalidate(liveDashboardProvider), children: [
-            Card(child: Padding(padding: const EdgeInsets.all(12), child: _NoData('${t['reason']}'))),
-            Card(
-                child: ListTile(
-                    leading: const Icon(Icons.open_in_new),
-                    title: const Text('기상청 태풍 정보 열기'),
-                    onTap: () => launchUrl(Uri.parse('https://www.weather.go.kr/w/typhoon/report.do')))),
-          ]);
-        }
-        final track = [for (final p in t['track'] as List? ?? const []) Map<String, dynamic>.from(p as Map)];
-        final past = [for (final p in track.where((p) => p['is_forecast'] != true)) LatLng((p['lat'] as num).toDouble(), (p['lng'] as num).toDouble())];
-        final future = [for (final p in track.where((p) => p['is_forecast'] == true)) LatLng((p['lat'] as num).toDouble(), (p['lng'] as num).toDouble())];
-        final all = [...past, ...future, homeCenter];
-        final cur = Map<String, dynamic>.from(t['current'] as Map? ?? const {});
-        return _Page(title: '태풍 ${t['name_ko'] ?? t['code']}', onRefresh: () async => ref.invalidate(liveDashboardProvider), children: [
-          Text('구룡포에서 ${t['distance_km']}km · 예상 최근접 ${t['closest_km']}km (${hhmm(t['eta_closest'])})',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          Text('${hhmm(cur['t'])} 분석 · 최대풍속 ${_num(cur['max_wind_ms'], 0)}m/s · 중심기압 ${cur['central_pressure_hpa'] ?? '-'}hPa'
-              '${cur['location_text'] != null ? ' · ${cur['location_text']}' : ''}'),
-          const SizedBox(height: 8),
-          SizedBox(
-              height: 420,
-              child: ClipRRect(
-                  borderRadius: BorderRadius.circular(14),
-                  child: FlutterMap(
-                      options: MapOptions(
-                          initialCameraFit: CameraFit.bounds(bounds: LatLngBounds.fromPoints(all), padding: const EdgeInsets.all(36))),
-                      children: [
-                        TileLayer(
-                            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                            userAgentPackageName: 'kr.guryong.guardian'),
-                        PolylineLayer(polylines: [
-                          if (past.length > 1) Polyline(points: past, color: Colors.indigo, strokeWidth: 4),
-                          if (future.isNotEmpty)
-                            Polyline(
-                                points: [if (past.isNotEmpty) past.last, ...future],
-                                color: Colors.deepOrange,
-                                strokeWidth: 3,
-                                pattern: StrokePattern.dashed(segments: const [10, 8])),
-                        ]),
-                        MarkerLayer(markers: [
-                          if (past.isNotEmpty)
-                            Marker(point: past.last, width: 36, height: 36, child: const Icon(Icons.cyclone, color: Colors.indigo, size: 32)),
-                          Marker(point: homeCenter, width: 36, height: 36, child: const Icon(Icons.location_on, color: Colors.teal, size: 32)),
-                        ]),
-                      ]))),
-          const SizedBox(height: 6),
-          Text('실선 = 지난 경로(실황) · 점선 = 예측 경로 · 출처 ${t['source'] ?? '기상청 태풍 정보'}', style: Theme.of(c).textTheme.bodySmall),
-        ]);
-      },
-    );
-  }
-}
-
-const homeCenter = LatLng(35.9910, 129.5530);
 
 // ------------------------------------------------------------------ 복구 지원 (실측)
 final supportProgramsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) => ref.watch(liveApiProvider).supportPrograms());

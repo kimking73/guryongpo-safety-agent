@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:guryongpo_safety/disaster_center.dart';
 import 'package:guryongpo_safety/live_screens.dart';
 import 'package:guryongpo_safety/services/demo_mode.dart';
 
@@ -26,16 +27,22 @@ void main() {
     expect(find.text('가상'), findsOneWidget);
   });
 
-  testWidgets('태풍이 없으면 지어내지 않고 "자료 없음 · 사유"', (t) async {
-    await t.pumpWidget(_app(const LiveTyphoonScreen(), [
-      liveDashboardProvider.overrideWith((_) async => {
-            'widgets': [
-              {'type': 'typhoon', 'emphasized': false, 'data': {'available': false, 'reason': '현재 진행 중인 태풍이 없습니다'}},
-            ],
-          }),
-    ]));
-    await t.pumpAndSettle();
-    expect(find.textContaining('자료 없음 · 현재 진행 중인 태풍이 없습니다'), findsOneWidget);
+  testWidgets('실시간 정보 카드: 김다인 디자인에 실측 값, 자료 없으면 지어내지 않음', (t) async {
+    await t.pumpWidget(const MaterialApp(
+        home: Scaffold(
+            body: SingleChildScrollView(
+                child: LiveRealtimeCards(widgets: [
+      {'type': 'rain', 'emphasized': false, 'data': {'available': false, 'reason': '구룡포 AWS 관측값이 6시간 동안 없습니다'}},
+      {
+        'type': 'wind',
+        'emphasized': false,
+        'data': {'station_name': '구룡포 AWS (기상청)', 'value': 2.9, 'unit': 'm/s', 'wind_gust': 4.1, 'wind_dir': 315, 'observed_at': '2026-10-05T01:00:00+09:00', 'level': 'normal', 'series': []}
+      },
+    ])))));
+    expect(find.textContaining('구룡포 AWS 관측값이 6시간 동안 없습니다'), findsOneWidget);
+    expect(find.text('평균 2.9 · 순간 4.1m/s'), findsOneWidget);
+    expect(find.textContaining('북서풍'), findsOneWidget);
+    expect(find.text('실측'), findsOneWidget);
     expect(find.textContaining('가상'), findsNothing);
   });
 

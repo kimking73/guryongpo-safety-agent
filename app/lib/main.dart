@@ -600,7 +600,7 @@ final appRouter = GoRouter(initialLocation: '/boot', routes: [
         path: '/typhoon',
         builder: (_, s) => DemoSwitch(
             demo: TyphoonScreen(initialLocal: s.extra == 'local'),
-            live: const LiveTyphoonScreen())),
+            live: LiveTyphoonRoute(initialLocal: s.extra == 'local'))),
     GoRoute(
         path: '/route-search', builder: (_, __) => const CustomRouteScreen()),
     GoRoute(path: '/route-follow', builder: (_, __) => const RouteFollowScreen()),
@@ -611,7 +611,7 @@ final appRouter = GoRouter(initialLocation: '/boot', routes: [
     GoRoute(
         path: '/alerts-hub',
         builder: (_, __) =>
-            const DemoSwitch(demo: AlertHubScreen(), live: AlertsScreen())),
+            const DemoSwitch(demo: AlertHubScreen(), live: LiveAlertHubRoute())),
     GoRoute(
         path: '/evacuation',
         builder: (_, __) => const DemoOnlyNotice(
@@ -1005,7 +1005,7 @@ class Dashboard extends ConsumerWidget {
                 (w.position, w.speed, w.dirDeg, w.name, w.observedAt)
             ],
       liveTop: demo ? null : const LiveDashboardTop(),
-      liveBottom: demo ? null : const LiveObservationCards(),
+      liveBottom: demo ? null : const LiveRealtimeSection(),
       routeExtras: Wrap(spacing: 8, runSpacing: 4, children: [
         if (route != customRouteId) const OriginChip(),
         ActionChip(

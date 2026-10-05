@@ -1804,14 +1804,197 @@ Widget _rainfallMetric() {
   );
 }
 
-Widget _exampleBadge() => Container(
+Widget _exampleBadge() => _badge('예시');
+
+/// 자료 구분 배지: 예시(가상) · 실측 · 예보 · 자료 없음
+Widget _badge(String text) => Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: .06),
+          color: (text == '실측' ? Colors.teal : text == '예보' ? Colors.indigo : Colors.black).withValues(alpha: .08),
           borderRadius: BorderRadius.circular(20)),
-      child: const Text('예시',
-          style: TextStyle(fontSize: 11, color: Colors.black54)),
+      child: Text(text, style: const TextStyle(fontSize: 11, color: Colors.black54)),
     );
+
+/// 실측 '실시간 정보' (2026-10-05): 김다인 디자인(_rainfallMetric·_metric) 그대로, 값은 서버 /dashboard 위젯
+class LiveRealtimeCards extends StatelessWidget {
+  const LiveRealtimeCards({super.key, required this.widgets});
+  final List<Map<String, dynamic>> widgets;
+
+  Map<String, dynamic> _w(String type) => Map<String, dynamic>.from(
+      widgets.where((w) => w['type'] == type).firstOrNull?['data'] as Map? ?? const {'available': false, 'reason': '서버 자료 없음'});
+
+  static bool _ok(Map<String, dynamic> d) => d['available'] != false;
+  static String _n(Object? v, [int f = 1]) => v is num ? v.toStringAsFixed(f) : '-';
+
+  @override
+  Widget build(BuildContext c) {
+    final rain = _w('rain'), wind = _w('wind'), wave = _w('wave'), water = _w('water_level');
+    final life = _w('life_safety'), fc = _w('forecast');
+    return Column(children: [
+      _ok(rain)
+          ? _liveRainfall(rain)
+          : _metric(Icons.water_drop_outlined, '강수', '자료 없음', '${rain['reason']}', '구룡포 AWS', Colors.indigo,
+              badge: '자료 없음', suffix: ''),
+      _ok(wind)
+          ? _metric(Icons.navigation, '바람', '평균 ${_n(wind['value'])} · 순간 ${_n(wind['wind_gust'])}m/s',
+              '${_windFromKo(wind['wind_dir'])} · 화살표는 바람이 불어가는 방향', '${wind['station_name']} · ${_hhmm('${wind['observed_at']}')}',
+              Colors.deepOrange,
+              rotation: wind['wind_dir'] is num ? ((wind['wind_dir'] as num) + 180) * math.pi / 180 : 0, badge: '실측', suffix: ' · 기상청 관측')
+          : _metric(Icons.navigation, '바람', '자료 없음', '${wind['reason']}', '구룡포 AWS', Colors.deepOrange, badge: '자료 없음', suffix: ''),
+      _ok(wave)
+          ? _metric(
+              Icons.waves,
+              '파고',
+              '예보 ${_n(wave['value'])}m',
+              '앞으로 24시간 최대 ${_n([for (final p in wave['series'] as List? ?? const []) ((p as Map)['v'] as num?)?.toDouble() ?? 0].fold<double>(0, math.max))}m · 실측 파고는 수집하지 않음',
+              '구룡포항 앞바다 · ${_hhmm('${wave['observed_at']}')}부터',
+              Colors.blue,
+              badge: '예보',
+              suffix: ' · 기상청 단기예보')
+          : _metric(Icons.waves, '파고', '자료 없음', '${wave['reason']}', '구룡포항 앞바다', Colors.blue, badge: '자료 없음', suffix: ''),
+      _liveWater(water),
+      if (_ok(fc)) _liveForecast(fc),
+      if (_ok(life))
+        for (final i in life['items'] as List? ?? const [])
+          _metric(
+              Icons.wb_sunny_outlined,
+              '${(i as Map)['label']}',
+              '${_n(i['value'], 0)}${i['unit'] ?? ''}',
+              '판정 ${const {'watch': '관심', 'advisory': '주의', 'warning': '경보', 'critical': '위험'}[i['level']] ?? '정상'}',
+              '${i['station_name']} · ${_hhmm('${i['observed_at']}')}',
+              Colors.amber.shade800,
+              badge: '실측',
+              suffix: ''),
+    ]);
+  }
+
+  Widget _liveWater(Map<String, dynamic> d) {
+    if (!_ok(d)) {
+      return _metric(Icons.height, '수위', '자료 없음', '${d['reason']}', '포항 디지털 트윈', Colors.teal, badge: '자료 없음', suffix: '');
+    }
+    final st = [for (final s in d['stations'] as List? ?? const []) Map<String, dynamic>.from(s as Map)];
+    final river = st.where((s) => s['kind'] == 'river_level').firstOrNull;
+    final warn = st.where((s) => const {'advisory', 'warning', 'critical'}.contains(s['level'])).toList();
+    final flood = st.where((s) => s['kind'] == 'road_flood' && s['value'] is num).toList();
+    final maxFlood = flood.isEmpty ? null : flood.map((s) => (s['value'] as num).toDouble()).reduce(math.max);
+    return _metric(
+      Icons.height,
+      '수위',
+      river?['value'] is num ? '하천 ${((river!['value'] as num) / 1000).toStringAsFixed(2)}m' : '센서 ${st.length}곳',
+      '${warn.isEmpty ? '센서 ${st.length}곳 모두 정상' : '주의 이상 ${warn.length}곳: ${warn.map((s) => s['station_name']).join(', ')}'}'
+          '${maxFlood == null ? '' : ' · 지표면 침수심 최고 ${maxFlood.toStringAsFixed(0)}mm'}',
+      '포항 디지털 트윈 · ${_hhmm('${d['observed_at']}')} 수집',
+      Colors.teal,
+      badge: '실측',
+      suffix: '',
+    );
+  }
+
+  Widget _liveForecast(Map<String, dynamic> d) {
+    final slots = [for (final s in d['slots'] as List? ?? const []) Map<String, dynamic>.from(s as Map)];
+    if (slots.isEmpty) return const SizedBox.shrink();
+    double mx(String k) => slots.map((s) => (s[k] as num?)?.toDouble() ?? 0).reduce(math.max);
+    final rainSum = slots.map((s) => (s['pcp_mm'] as num?)?.toDouble() ?? 0).fold<double>(0, (a, b) => a + b);
+    final temps = slots.map((s) => (s['tmp'] as num?)?.toDouble()).whereType<double>().toList();
+    return _metric(
+      Icons.wb_cloudy_outlined,
+      '예보 (12시간)',
+      '강수확률 최고 ${mx('pop').round()}%',
+      '예상 강수 ${rainSum.toStringAsFixed(1)}mm · 최고 풍속 ${mx('wsd').toStringAsFixed(1)}m/s'
+          '${temps.isEmpty ? '' : ' · ${temps.reduce(math.min).round()}~${temps.reduce(math.max).round()}℃'}',
+      '구룡포읍 · ${_hhmm('${slots.first['t']}')}부터',
+      Colors.blueGrey,
+      badge: '예보',
+      suffix: ' · 기상청 단기예보',
+    );
+  }
+}
+
+/// 김다인 _rainfallMetric 디자인 + 실측: 1시간 강수·오늘 누적·최근 6시간 시간별 막대
+Widget _liveRainfall(Map<String, dynamic> d) {
+  const color = Colors.indigo;
+  final now = (d['value'] as num?)?.toDouble() ?? 0;
+  // 10분 간격 '1시간 강수' 값에서 시각별 마지막 값 → 최근 6시간 막대
+  final byHour = <int, (String, double)>{};
+  for (final p in d['series'] as List? ?? const []) {
+    final t = DateTime.tryParse('${(p as Map)['t']}')?.toLocal();
+    if (t == null) continue;
+    byHour[t.year * 1000000 + t.month * 10000 + t.day * 100 + t.hour] = ('${t.hour}시', (p['v'] as num?)?.toDouble() ?? 0);
+  }
+  final hourly = (byHour.keys.toList()..sort()).map((k) => byHour[k]!).toList();
+  final bars = hourly.length > 6 ? hourly.sublist(hourly.length - 6) : hourly;
+  final top = bars.isEmpty ? 0.0 : bars.map((e) => e.$2).reduce(math.max);
+  final label = now <= 0 ? '비 없음' : now < 3 ? '약한 비' : now < 15 ? '보통 비' : now < 30 ? '강한 비' : '매우 강한 비';
+  return Card(
+    child: Padding(
+      padding: const EdgeInsets.all(14),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.water_drop_outlined, color: color),
+          const SizedBox(width: 8),
+          const Expanded(child: Text('강수', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold))),
+          _badge('실측'),
+        ]),
+        const SizedBox(height: 8),
+        Wrap(spacing: 10, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+          RichText(
+            text: TextSpan(style: const TextStyle(color: Colors.black87), children: [
+              TextSpan(text: now.toStringAsFixed(1), style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
+              const TextSpan(text: ' mm/h', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+            ]),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(color: color.withValues(alpha: .10), borderRadius: BorderRadius.circular(20)),
+            child: Text(label, style: const TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13)),
+          ),
+          Text('오늘 누적 ${((d['rain_day'] as num?) ?? 0).toStringAsFixed(1)} mm',
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+        ]),
+        const SizedBox(height: 12),
+        const Text('최근 6시간 시간당 강수량', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 6),
+        SizedBox(
+          height: 78,
+          child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            for (var i = 0; i < bars.length; i++)
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 3),
+                  child: Column(mainAxisAlignment: MainAxisAlignment.end, children: [
+                    Text(bars[i].$2.toStringAsFixed(bars[i].$2 < 10 ? 1 : 0),
+                        style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: i == bars.length - 1 ? FontWeight.bold : FontWeight.normal,
+                            color: i == bars.length - 1 ? color : Colors.black54)),
+                    const SizedBox(height: 3),
+                    Container(
+                      height: top <= 0 ? 2 : math.max(2, 38 * bars[i].$2 / top),
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: i == bars.length - 1 ? .92 : .30 + .08 * i),
+                        borderRadius: const BorderRadius.vertical(top: Radius.circular(5)),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(bars[i].$1, style: const TextStyle(fontSize: 10, color: Colors.black54)),
+                  ]),
+                ),
+              ),
+          ]),
+        ),
+        const Divider(height: 18),
+        Text('${d['station_name']} · ${_hhmm('${d['observed_at']}')} · 기상청 관측',
+            style: const TextStyle(fontSize: 12, color: Colors.black54)),
+      ]),
+    ),
+  );
+}
+
+String _windFromKo(Object? deg) {
+  const dirs = ['북', '북북동', '북동', '동북동', '동', '동남동', '남동', '남남동', '남', '남남서', '남서', '서남서', '서', '서북서', '북서', '북북서'];
+  return deg is num ? '${dirs[((deg % 360) / 22.5).round() % 16]}풍' : '풍향 미확인';
+}
+
 
 Widget _metric(
   IconData icon,
@@ -1821,6 +2004,8 @@ Widget _metric(
   String locationTime,
   Color color, {
   double rotation = 0,
+  String badge = '예시',
+  String suffix = ' · 가상 시연 자료',
 }) =>
     Card(
       child: Padding(
@@ -1846,13 +2031,13 @@ Widget _metric(
                       style: const TextStyle(
                           fontWeight: FontWeight.bold, fontSize: 15)),
                   const Spacer(),
-                  _exampleBadge(),
+                  _badge(badge),
                 ]),
                 Text(value,
                     style: const TextStyle(
                         fontSize: 20, fontWeight: FontWeight.w800)),
                 Text(description, style: const TextStyle(fontSize: 13)),
-                Text('$locationTime · 가상 시연 자료',
+                Text('$locationTime$suffix',
                     style:
                         const TextStyle(fontSize: 12, color: Colors.black54)),
               ])),
@@ -1861,8 +2046,11 @@ Widget _metric(
     );
 
 class TyphoonScreen extends StatefulWidget {
-  const TyphoonScreen({super.key, this.initialLocal = false});
+  const TyphoonScreen({super.key, this.initialLocal = false, this.demo = true, this.live});
   final bool initialLocal;
+  /// false = 실측: [live] (서버 /dashboard typhoon 위젯 data)로 그린다. 진행 중인 태풍이 없으면 available=false (2026-10-05)
+  final bool demo;
+  final Map<String, dynamic>? live;
   @override
   State<TyphoonScreen> createState() => _TyphoonScreenState();
 }
@@ -1877,9 +2065,34 @@ class _TyphoonScreenState extends State<TyphoonScreen> {
     super.initState();
     local = widget.initialLocal;
     mapOptions = MapOptions(
-      initialCenter: local ? localMapCenter : const LatLng(35.0, 130.0),
-      initialZoom: local ? 7.2 : 5.1,
+      initialCenter: widget.demo
+          ? (local ? localMapCenter : const LatLng(35.0, 130.0))
+          : (local ? _localCenter : _overallCenter),
+      initialZoom: local ? 7.2 : (widget.demo ? 5.1 : 4.6),
     );
+  }
+
+  // ---- 실측 태풍 (live) ----
+  bool get _hasLive => !widget.demo && widget.live != null && widget.live!['available'] != false;
+  List<Map<String, dynamic>> get _liveTrack =>
+      [for (final p in widget.live?['track'] as List? ?? const []) Map<String, dynamic>.from(p as Map)];
+  Map<String, dynamic> get _cur => Map<String, dynamic>.from(widget.live?['current'] as Map? ?? const {});
+  LatLng _ll(Map p) => LatLng((p['lat'] as num).toDouble(), (p['lng'] as num).toDouble());
+  List<LatLng> get _past => [for (final p in _liveTrack.where((p) => p['is_forecast'] != true)) _ll(p)];
+  List<LatLng> get _future => [for (final p in _liveTrack.where((p) => p['is_forecast'] == true)) _ll(p)];
+  LatLng get _livePos => _cur['lat'] is num ? _ll(_cur) : (_past.isNotEmpty ? _past.last : const LatLng(35.0, 130.0));
+  LatLng get _overallCenter {
+    final pts = [..._past, ..._future, guryongpo];
+    if (pts.length < 2) return const LatLng(35.0, 130.0);
+    final b = LatLngBounds.fromPoints(pts);
+    return b.center;
+  }
+  LatLng get _localCenter => _hasLive
+      ? LatLng((guryongpo.latitude * 2 + _livePos.latitude) / 3, (guryongpo.longitude * 2 + _livePos.longitude) / 3)
+      : localMapCenter;
+  static String _t(Object? iso) {
+    final t = DateTime.tryParse('${iso ?? ''}')?.toLocal();
+    return t == null ? '-' : '${t.month}/${t.day} ${t.hour}시';
   }
 
   static const track = <LatLng>[
@@ -1917,7 +2130,7 @@ class _TyphoonScreenState extends State<TyphoonScreen> {
           '태풍 정보',
           style: TextStyle(fontSize: 30, fontWeight: FontWeight.bold),
         ),
-        const _DemoBanner(),
+        if (widget.demo) const _DemoBanner(),
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -1929,7 +2142,13 @@ class _TyphoonScreenState extends State<TyphoonScreen> {
                   const SizedBox(width: 9),
                   Expanded(
                     child: Text(
-                      local ? '구룡포 태풍 영향 요약' : '태풍 시연 현황',
+                      local
+                          ? '구룡포 태풍 영향 요약'
+                          : widget.demo
+                              ? '태풍 시연 현황'
+                              : _hasLive
+                                  ? '태풍 ${widget.live!['name_ko'] ?? widget.live!['code']} 현황'
+                                  : '태풍 현황',
                       style: const TextStyle(
                           fontSize: 18, fontWeight: FontWeight.bold),
                     ),
@@ -1941,8 +2160,8 @@ class _TyphoonScreenState extends State<TyphoonScreen> {
                       color: Colors.deepOrange.withValues(alpha: .10),
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    child: const Text('가상 시나리오',
-                        style: TextStyle(
+                    child: Text(widget.demo ? '가상 시나리오' : '기상청 실측',
+                        style: const TextStyle(
                             color: Colors.deepOrange,
                             fontSize: 12,
                             fontWeight: FontWeight.bold)),
@@ -1952,13 +2171,26 @@ class _TyphoonScreenState extends State<TyphoonScreen> {
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
-                  children: [
-                    _typhoonStat(
-                        Icons.air, '최대 풍속', '35 m/s', Colors.deepOrange),
-                    _typhoonStat(
-                        Icons.speed, '이동 속도', '25 km/h', Colors.indigo),
-                    _typhoonStat(Icons.radar, '영향 반경', '150 km', Colors.orange),
-                  ],
+                  children: widget.demo
+                      ? [
+                          _typhoonStat(
+                              Icons.air, '최대 풍속', '35 m/s', Colors.deepOrange),
+                          _typhoonStat(
+                              Icons.speed, '이동 속도', '25 km/h', Colors.indigo),
+                          _typhoonStat(Icons.radar, '영향 반경', '150 km', Colors.orange),
+                        ]
+                      : _hasLive
+                          ? [
+                              _typhoonStat(Icons.air, '최대 풍속',
+                                  _cur['max_wind_ms'] is num ? '${(_cur['max_wind_ms'] as num).round()} m/s' : '-', Colors.deepOrange),
+                              _typhoonStat(Icons.speed, '이동 속도',
+                                  _cur['speed_kmh'] is num ? '${(_cur['speed_kmh'] as num).round()} km/h${_cur['direction'] != null ? ' ${_cur['direction']}' : ''}' : '-',
+                                  Colors.indigo),
+                              _typhoonStat(Icons.radar, '강풍 반경',
+                                  _cur['radius_15ms_km'] is num ? '${(_cur['radius_15ms_km'] as num).round()} km' : '-', Colors.orange),
+                              _typhoonStat(Icons.social_distance, '구룡포까지', '${widget.live!['distance_km']} km', Colors.teal),
+                            ]
+                          : [],
                 ),
                 const SizedBox(height: 10),
                 Container(
@@ -1974,9 +2206,15 @@ class _TyphoonScreenState extends State<TyphoonScreen> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        local
-                            ? '구룡포가 가상 강풍 영향 반경 안에 있습니다 · 기준 시각 14:00'
-                            : '구룡포 예상 영향과 태풍 경로를 지도에서 확인하세요 · 기준 시각 14:00',
+                        !widget.demo
+                            ? (!_hasLive
+                                ? '${widget.live?['reason'] ?? '현재 진행 중인 태풍이 없습니다'} · 기상청 태풍 정보 기준'
+                                : (_cur['radius_15ms_km'] is num && (widget.live!['distance_km'] as num) <= (_cur['radius_15ms_km'] as num))
+                                    ? '구룡포가 강풍 반경 안에 있습니다 · ${_t(_cur['t'])} 분석'
+                                    : '구룡포에서 ${widget.live!['distance_km']}km · 예상 최근접 ${widget.live!['closest_km']}km (${_t(widget.live!['eta_closest'])}) · ${_t(_cur['t'])} 분석')
+                            : local
+                                ? '구룡포가 가상 강풍 영향 반경 안에 있습니다 · 기준 시각 14:00'
+                                : '구룡포 예상 영향과 태풍 경로를 지도에서 확인하세요 · 기준 시각 14:00',
                         style: const TextStyle(
                             fontSize: 14, fontWeight: FontWeight.w600),
                       ),
@@ -1997,8 +2235,10 @@ class _TyphoonScreenState extends State<TyphoonScreen> {
             final next = v.first;
             setState(() => local = next);
             mapController.move(
-              next ? localMapCenter : const LatLng(35.0, 130.0),
-              next ? 7.2 : 5.1,
+              widget.demo
+                  ? (next ? localMapCenter : const LatLng(35.0, 130.0))
+                  : (next ? _localCenter : _overallCenter),
+              next ? 7.2 : (widget.demo ? 5.1 : 4.6),
             );
           },
         ),
@@ -2013,6 +2253,52 @@ class _TyphoonScreenState extends State<TyphoonScreen> {
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'guryongpo.safety.demo',
               ),
+              if (!widget.demo) ...[
+                if (_hasLive && _cur['radius_15ms_km'] is num)
+                  CircleLayer(circles: [
+                    CircleMarker(
+                      point: _livePos,
+                      radius: (_cur['radius_15ms_km'] as num).toDouble() * 1000,
+                      useRadiusInMeter: true,
+                      color: Colors.orange.withValues(alpha: .15),
+                      borderColor: Colors.deepOrange,
+                      borderStrokeWidth: 2,
+                    ),
+                  ]),
+                if (_hasLive)
+                  PolylineLayer(polylines: [
+                    if (_past.length > 1) Polyline(points: _past, color: Colors.indigo, strokeWidth: 4),
+                    if (_future.isNotEmpty) ..._dashed([if (_past.isNotEmpty) _past.last, ..._future]),
+                  ]),
+                MarkerLayer(markers: [
+                  for (final p in _liveTrack)
+                    Marker(
+                      point: _ll(p),
+                      width: 70,
+                      height: 50,
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(
+                          p['is_forecast'] == true
+                              ? Icons.trip_origin
+                              : (_ll(p) == _livePos ? Icons.cyclone : Icons.place),
+                          color: _ll(p) == _livePos ? Colors.red : Colors.indigo,
+                          size: 22,
+                        ),
+                        Text('${_t(p['t'])}${p['is_forecast'] == true ? ' 예측' : _ll(p) == _livePos ? ' 현재' : ''}',
+                            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600)),
+                      ]),
+                    ),
+                  Marker(
+                    point: guryongpo,
+                    width: 60,
+                    height: 48,
+                    child: const Column(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.home, color: Colors.teal),
+                      Text('구룡포', style: TextStyle(fontSize: 9)),
+                    ]),
+                  ),
+                ]),
+              ] else ...[
               CircleLayer(
                 circles: [
                   CircleMarker(
@@ -2074,6 +2360,7 @@ class _TyphoonScreenState extends State<TyphoonScreen> {
                   ),
                 ],
               ),
+              ],
             ],
           ),
         ),
@@ -2092,10 +2379,18 @@ class _TyphoonScreenState extends State<TyphoonScreen> {
                   style: const TextStyle(fontSize: 14, height: 1.4),
                 ),
                 const SizedBox(height: 6),
-                const Text(
-                  '태풍 이름·경로·풍속·반경·시각은 모두 시연용 가상값이며 기상청 발표 정보가 아닙니다.',
-                  style: TextStyle(fontSize: 12, color: Colors.black54),
+                Text(
+                  widget.demo
+                      ? '태풍 이름·경로·풍속·반경·시각은 모두 시연용 가상값이며 기상청 발표 정보가 아닙니다.'
+                      : '출처: ${widget.live?['source'] ?? '기상청 태풍 정보'}. 주황색 원은 초속 15m 이상 강풍 반경입니다.',
+                  style: const TextStyle(fontSize: 12, color: Colors.black54),
                 ),
+                if (!widget.demo)
+                  TextButton.icon(
+                    onPressed: () => launchUrl(Uri.parse('https://www.weather.go.kr/w/typhoon/report.do')),
+                    icon: const Icon(Icons.open_in_new, size: 16),
+                    label: const Text('기상청 태풍 정보 열기'),
+                  ),
               ],
             ),
           ),
@@ -2155,10 +2450,61 @@ List<Polyline> _dashed(List<LatLng> pts) {
 }
 
 class _WeatherBulletins extends StatelessWidget {
-  const _WeatherBulletins();
+  const _WeatherBulletins({this.warnings, this.forecast});
+  /// 실측: 서버 warnings·forecast 위젯 data. 둘 다 null = 시연(가상 특보·예보)
+  final Map<String, dynamic>? warnings, forecast;
+
+  Widget _live(BuildContext context) {
+    final items = [for (final w in warnings?['items'] as List? ?? const []) Map<String, dynamic>.from(w as Map)];
+    final slots = [for (final x in forecast?['slots'] as List? ?? const []) Map<String, dynamic>.from(x as Map)];
+    double mx(String k) => slots.isEmpty ? 0 : slots.map((x) => (x[k] as num?)?.toDouble() ?? 0).reduce(math.max);
+    final rain = slots.fold<double>(0, (a, x) => a + ((x['pcp_mm'] as num?)?.toDouble() ?? 0));
+    final types = {for (final x in slots) if (x['pty'] != null && x['pty'] != '없음') '${x['pty']}'};
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const SizedBox(height: 10),
+      const Text('기상 특보', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+      if (warnings?['available'] == false)
+        Card(child: ListTile(leading: const Icon(Icons.info_outline), title: Text('자료 없음 · ${warnings?['reason']}')))
+      else if (items.isEmpty)
+        const Card(
+            child: ListTile(
+                leading: Icon(Icons.verified_outlined, color: Colors.green),
+                title: Text('발효 중인 기상특보가 없습니다'),
+                subtitle: Text('대상: 포항시·경북남부앞바다 · 기상청 특보 기준')))
+      else
+        for (final w in items)
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.warning_amber_rounded, color: Colors.deepOrange),
+              title: Text('${w['label']}'),
+              subtitle: Text('대상: ${w['region_name']}\n발표: ${_hhmm('${w['issued_at']}')} · 기상청'),
+              isThreeLine: true,
+            ),
+          ),
+      const Text('기상 예보', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+      Card(
+        child: ListTile(
+          leading: const Icon(Icons.cloudy_snowing, color: Colors.indigo),
+          title: Text(slots.isEmpty
+              ? '자료 없음 · ${forecast?['reason'] ?? '기상청 단기예보 자료가 없습니다'}'
+              : types.isEmpty
+                  ? '앞으로 12시간 비 소식 없음'
+                  : '앞으로 12시간 ${types.join('·')} 예보'),
+          subtitle: slots.isEmpty
+              ? null
+              : Text('대상: 포항시 남구 구룡포읍\n${_hhmm('${slots.first['t']}')}부터 12시간 · 강수확률 최고 ${mx('pop').round()}% · 예상 강수 ${rain.toStringAsFixed(1)}mm · 최고 풍속 ${mx('wsd').toStringAsFixed(1)}m/s'),
+          isThreeLine: slots.isNotEmpty,
+        ),
+      ),
+      const Padding(
+        padding: EdgeInsets.only(left: 8, bottom: 8),
+        child: Text('출처: 기상청 특보·단기예보 (실측)', style: TextStyle(fontSize: 11)),
+      ),
+    ]);
+  }
 
   @override
-  Widget build(BuildContext context) => Column(
+  Widget build(BuildContext context) => warnings != null || forecast != null ? _live(context) : Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 10),
@@ -2197,7 +2543,18 @@ class _WeatherBulletins extends StatelessWidget {
 }
 
 class AlertHubScreen extends StatefulWidget {
-  const AlertHubScreen({super.key});
+  const AlertHubScreen({
+    super.key,
+    this.demo = true,
+    this.dashboard,
+    this.alerts = const [],
+    this.areas = const [],
+  });
+  /// false = 실측: 서버 대시보드(특보·예보·재난문자·장소 위험), 내 경고(A5), 현재 위험 영역으로 채운다 (2026-10-05)
+  final bool demo;
+  final Map<String, dynamic>? dashboard;
+  final List<AlertItem> alerts;
+  final List<RiskArea> areas;
   @override
   State<AlertHubScreen> createState() => _AlertHubScreenState();
 }
@@ -2212,8 +2569,118 @@ class _AlertHubScreenState extends State<AlertHubScreen> {
     });
   }
 
+  Map<String, dynamic>? _widget(String type) {
+    final w = (widget.dashboard?['widgets'] as List? ?? const [])
+        .cast<Map>()
+        .where((w) => w['type'] == type)
+        .firstOrNull;
+    return w == null ? null : Map<String, dynamic>.from(w['data'] as Map);
+  }
+
+  Widget _liveBuild(BuildContext c) {
+    final places = [
+      for (final p in widget.dashboard?['places'] as List? ?? const [])
+        if (((p as Map)['max_level_num'] as num? ?? 0) >= 2) Map<String, dynamic>.from(p)
+    ];
+    final msgs = _widget('disaster_messages');
+    const lv = {'watch': '관심', 'advisory': '주의', 'warning': '경보', 'critical': '위험'};
+    const hz = {'flood': '침수', 'landslide': '산사태', 'heavy_rain': '호우', 'strong_wind': '강풍', 'typhoon': '태풍', 'high_seas': '풍랑'};
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        const Text('선제 경고·알림', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        const Text('사용자 맞춤형 선제 경고', style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold)),
+        _WeatherBulletins(warnings: _widget('warnings') ?? const {}, forecast: _widget('forecast') ?? const {}),
+        if (widget.alerts.isEmpty && places.isEmpty)
+          const Card(
+            child: ListTile(
+                leading: Icon(Icons.verified_outlined, color: Colors.green),
+                title: Text('지금 받은 맞춤 경고가 없습니다'),
+                subtitle: Text('현재 위치·등록한 집·직장 주변에 위험이 생기면 여기와 알림으로 알려 드립니다.')),
+          ),
+        ...widget.alerts.map((a) => Card(
+              child: ExpansionTile(
+                leading: const Icon(Icons.personal_injury, color: Colors.deepOrange),
+                title: Text(a.title),
+                subtitle: Text('${a.level} · ${a.time}${a.read ? '' : ' · 새 경고'} · 눌러 상세 정보 보기'),
+                children: [
+                  ListTile(title: const Text('경고 이유'), subtitle: Text(a.summary)),
+                  ListTile(title: const Text('권고 행동'), subtitle: Text(a.guide)),
+                  if (a.responseRequired)
+                    ListTile(title: const Text('대피 확인'), subtitle: Text(a.myStatus == null ? '아직 응답하지 않았습니다' : '응답: ${a.myStatus}')),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      onPressed: () => c.go('/alert/${Uri.encodeComponent(a.id)}'),
+                      icon: const Icon(Icons.open_in_new),
+                      label: Text(a.responseRequired ? '상세·대피 확인' : '상세 보기'),
+                    ),
+                  ),
+                ],
+              ),
+            )),
+        ...places.map((p) => Card(
+              child: ExpansionTile(
+                leading: const Icon(Icons.home_work_outlined, color: Colors.deepOrange),
+                title: Text('${p['label']} 주변 위험 · ${lv[p['max_level']] ?? p['max_level']}'),
+                subtitle: const Text('등록 장소 · 서버 위험 판정'),
+                children: [
+                  const ListTile(title: Text('권고 행동'), subtitle: Text('지도에서 위험 구역을 확인하고 그 장소로 이동하지 마세요.')),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                        onPressed: () => c.go('/'), icon: const Icon(Icons.map_outlined), label: const Text('종합 지도 열기')),
+                  ),
+                ],
+              ),
+            )),
+        const SizedBox(height: 10),
+        const Text('일반 알림 · 재난문자', style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold)),
+        if (msgs == null || msgs['available'] == false)
+          Card(child: ListTile(leading: const Icon(Icons.sms_outlined), title: Text('자료 없음 · ${msgs?['reason'] ?? '재난문자 자료가 없습니다'}')))
+        else if ((msgs['items'] as List? ?? const []).isEmpty)
+          const Card(child: ListTile(leading: Icon(Icons.sms_outlined), title: Text('최근 24시간 재난문자가 없습니다')))
+        else
+          for (final m in msgs['items'] as List)
+            Card(
+              child: ExpansionTile(
+                leading: const Icon(Icons.sms),
+                title: Text('${(m as Map)['sender'] ?? '재난문자'} · ${m['alert_class'] ?? ''}'),
+                subtitle: Text('발송 ${_hhmm('${m['sent_at']}')}'),
+                children: [Padding(padding: const EdgeInsets.all(14), child: Text('${m['message']}'))],
+              ),
+            ),
+        const SizedBox(height: 8),
+        const Text('위험 지역 경고', style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold)),
+        if (widget.areas.isEmpty)
+          const Card(
+              child: ListTile(
+                  leading: Icon(Icons.verified_outlined, color: Colors.green),
+                  title: Text('현재 구룡포에 주의 이상 위험 지역이 없습니다'),
+                  subtitle: Text('침수·산사태 판정 결과 · 10분마다 갱신'))),
+        for (final a in widget.areas)
+          Card(
+            child: ExpansionTile(
+              leading: Icon(Icons.warning, color: _riskColor(a.level)),
+              title: Text(a.label.isEmpty ? '${hz[a.hazard] ?? a.hazard} 위험 지역' : a.label),
+              subtitle: Text('${hz[a.hazard] ?? a.hazard} · ${a.level} · 서버 위험 판정'),
+              children: [
+                ListTile(
+                  title: const Text('위험 원인·행동 안내'),
+                  subtitle: const Text('이 구역에 들어가지 말고, 안에 있다면 가까운 안전한 대피소로 이동하세요.'),
+                  trailing: IconButton(icon: const Icon(Icons.map), onPressed: () => c.go('/')),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext c) {
+    if (!widget.demo) return _liveBuild(c);
     final jobs =
         (profile['jobs'] ?? '').split('|').where((e) => e.isNotEmpty).toList();
     final homeName =

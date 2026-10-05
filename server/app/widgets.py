@@ -75,7 +75,7 @@ WITH cur AS (
   SELECT typhoon_code FROM typhoon_tracks GROUP BY typhoon_code
   HAVING max(observed_at) > now() - interval '1 day' ORDER BY max(observed_at) DESC LIMIT 1)
 SELECT t.typhoon_code, t.name_ko, t.observed_at, t.is_forecast, ST_Y(t.geom) AS lat, ST_X(t.geom) AS lng,
-       t.max_wind_ms, t.central_pressure_hpa, t.radius_15ms_km, t.location_text
+       t.max_wind_ms, t.central_pressure_hpa, t.radius_15ms_km, t.radius_25ms_km, t.speed_kmh, t.direction, t.location_text
 FROM typhoon_tracks t JOIN cur USING (typhoon_code)
 WHERE NOT t.is_forecast OR t.issued_at = (SELECT max(issued_at) FROM typhoon_tracks x JOIN cur USING (typhoon_code) WHERE x.is_forecast)
 ORDER BY t.observed_at
@@ -183,7 +183,9 @@ def typhoon_widget(lat: float, lng: float) -> dict:
             "closest_km": round(_km(lat, lng, closest["lat"], closest["lng"])),
             "eta_closest": _iso(closest["observed_at"]), "current": {
                 "t": _iso(cur["observed_at"]), "lat": cur["lat"], "lng": cur["lng"], "max_wind_ms": cur["max_wind_ms"],
-                "central_pressure_hpa": cur["central_pressure_hpa"], "location_text": cur["location_text"]},
+                "central_pressure_hpa": cur["central_pressure_hpa"], "location_text": cur["location_text"],
+                "speed_kmh": cur.get("speed_kmh"), "direction": cur.get("direction"),
+                "radius_15ms_km": cur.get("radius_15ms_km"), "radius_25ms_km": cur.get("radius_25ms_km")},
             "track": track, "source": "기상청 태풍 정보"}
 
 
