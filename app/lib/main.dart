@@ -587,8 +587,18 @@ class GuryongpoApp extends StatelessWidget {
       );
 }
 
-final appRouter = GoRouter(initialLocation: '/boot', routes: [
-  GoRoute(path: '/boot', builder: (_, __) => const BootScreen()),
+/// 시작 화면(로그인·계정 정보 준비)을 거쳤는지. 웹에서 새로고침·주소 직접 입력으로 다른 화면부터 열리면
+/// 로그인 준비 없이 서버를 불러 '로그인 정보를 확인하지 못했습니다'가 나므로 먼저 /boot 를 거치게 한다 (2026-10-05)
+bool appBooted = false;
+
+final appRouter = GoRouter(
+    initialLocation: '/boot',
+    redirect: (_, state) {
+      if (appBooted || state.matchedLocation == '/boot') return null;
+      return Uri(path: '/boot', queryParameters: {'from': state.uri.toString()}).toString();
+    },
+    routes: [
+  GoRoute(path: '/boot', builder: (_, s) => BootScreen(from: s.uri.queryParameters['from'])),
   GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
   GoRoute(path: '/location', builder: (_, __) => const InitialSetupScreen()),
   ShellRoute(builder: (_, __, child) => Shell(child: child), routes: [
@@ -660,7 +670,9 @@ class EvacuationDemoRoute extends ConsumerWidget {
 }
 
 class BootScreen extends ConsumerStatefulWidget {
-  const BootScreen({super.key});
+  const BootScreen({super.key, this.from});
+  /// 시작 화면을 거친 뒤 돌아갈 주소 (새로고침·주소 직접 입력으로 들어온 화면)
+  final String? from;
   @override
   ConsumerState<BootScreen> createState() => _BootScreenState();
 }
@@ -683,7 +695,12 @@ class _BootScreenState extends ConsumerState<BootScreen> {
         () => text = a.isMock ? 'Firebase 미설정: 목업 모드로 시작합니다.' : '로그인 확인 완료');
     await Future<void>.delayed(const Duration(milliseconds: 700));
     final setupComplete = await AccountService().hasCompletedSetup();
-    if (mounted) context.go(setupComplete ? '/' : '/location');
+    appBooted = true;
+    final from = widget.from;
+    final next = !setupComplete
+        ? '/location'
+        : (from != null && from.startsWith('/') && !from.startsWith('/boot') ? from : '/');
+    if (mounted) context.go(next);
   }
 
   @override

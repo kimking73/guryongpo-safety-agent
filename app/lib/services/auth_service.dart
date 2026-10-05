@@ -67,7 +67,11 @@ class AuthService {
     try {
       if (!ready) await Firebase.initializeApp(options: firebaseOptions);
       final auth = FirebaseAuth.instance;
-      final user = auth.currentUser ?? (await auth.signInAnonymously()).user;
+      // 웹은 저장된 로그인을 되살리는 데 잠깐 걸린다 — currentUser 가 비어 있다고 바로 익명 로그인하면
+      // 새로고침할 때마다 새 익명 계정이 생기고 Google·이메일 로그인이 풀린다 (2026-10-05 수정)
+      final restored = auth.currentUser ??
+          await auth.authStateChanges().first.timeout(const Duration(seconds: 5), onTimeout: () => null);
+      final user = restored ?? (await auth.signInAnonymously()).user;
       await syncServerUser();
       await AccountSync.instance.pullOrPush(); // 계정에 저장된 앱 정보 내려받기 (없으면 기기 값 올리기)
       return AuthStateInfo(isMock: false, userId: user?.uid, token: await user?.getIdToken());
