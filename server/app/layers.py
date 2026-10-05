@@ -136,32 +136,49 @@ def landslide_layer(bbox: tuple[float, float, float, float]) -> dict:
 # Risk assessments are produced by the server from an observed station or
 # another explicit assessment. Tiling only discretizes those assessed areas;
 # it does not spread point observations into unassessed cells.
+# 침수 격자 (2026-10-05 변경): 경로 서버(GraphHopper)가 피하는 침수 지역과 똑같이.
+#   경로 서버는 GET /risk/areas?min_level=advisory 의 침수·산사태 영역을 피한다 (route/guardian_route/hazards.py
+#   RiskAreaHazardSource). 그래서 격자도 같은 영역(지금 유효한 침수 판정, 주의 이상)만 쓰고, 약 100m 칸(FLOOD_GRID_STEP)을
+#   영역 모양대로 잘라 보낸다 — 칸을 모두 합치면 경로가 피하는 침수 영역과 같다. 한 칸에 여러 영역이 걸치면 가장 높은 단계.
+#   (예전: 0.004° 큰 칸이 관심(watch) 이상 영역에 조금만 걸쳐도 칸 전체를 칠해 실제 회피 영역보다 넓었다)
+FLOOD_GRID_STEP = 0.001
+FLOOD_GRID_MIN_LEVEL = "advisory"     # route/guardian_route/hazards.py MIN_LEVEL 과 같아야 한다
 FLOOD_GRID_SQL = """
-WITH p AS (
-  SELECT %(a)s::float8 AS a, %(b)s::float8 AS b, %(c)s::float8 AS c, %(d)s::float8 AS d,
-         0.004::float8 AS step
-), grid AS (
-  SELECT x.i AS col, y.i AS row,
-         ST_MakeEnvelope(p.a + x.i*p.step, p.b + y.i*p.step,
-                         LEAST(p.c, p.a + (x.i+1)*p.step), LEAST(p.d, p.b + (y.i+1)*p.step), 4326) AS geom
-  FROM p,
-       generate_series(0, GREATEST(0, CEIL((p.c-p.a)/p.step)::int-1)) AS x(i),
-       generate_series(0, GREATEST(0, CEIL((p.d-p.b)/p.step)::int-1)) AS y(i)
-), assessed AS (
-  SELECT g.col, g.row, g.geom, ra.id, ra.level::text AS level, ra.label, ra.basis,
-         ROW_NUMBER() OVER (PARTITION BY g.col, g.row ORDER BY ra.level DESC, ra.computed_at DESC, ra.id DESC) AS rank
-  FROM grid g
-  JOIN risk_assessments ra ON ra.valid_to IS NULL AND ra.hazard = 'flood'
-       AND ra.level >= 'watch'::risk_level AND ST_Intersects(g.geom, ra.area)
+WITH env AS (
+  SELECT ST_MakeEnvelope(%(a)s, %(b)s, %(c)s, %(d)s, 4326) AS g, %(step)s::float8 AS step
+), z AS (
+  SELECT ra.id, ra.level, ra.label, ra.basis, ra.computed_at, ra.area
+  FROM risk_assessments ra, env
+  WHERE ra.valid_to IS NULL AND ra.hazard = 'flood' AND ra.level >= %(min_level)s::risk_level
+    AND ST_Intersects(ra.area, env.g)
+), cells AS (
+  SELECT DISTINCT ix, iy
+  FROM z, env,
+       generate_series(floor(ST_XMin(z.area) / env.step)::int, floor(ST_XMax(z.area) / env.step)::int) AS ix,
+       generate_series(floor(ST_YMin(z.area) / env.step)::int, floor(ST_YMax(z.area) / env.step)::int) AS iy
+), pieces AS (
+  SELECT c.ix, c.iy, z.id, z.level, z.label, z.basis, z.computed_at,
+         ST_CollectionExtract(ST_Intersection(
+           ST_MakeEnvelope(c.ix * env.step, c.iy * env.step, (c.ix + 1) * env.step, (c.iy + 1) * env.step, 4326), z.area), 3) AS geom
+  FROM cells c, env, z
+  WHERE ST_Intersects(ST_MakeEnvelope(c.ix * env.step, c.iy * env.step, (c.ix + 1) * env.step, (c.iy + 1) * env.step, 4326), z.area)
+    AND ST_Intersects(ST_MakeEnvelope(c.ix * env.step, c.iy * env.step, (c.ix + 1) * env.step, (c.iy + 1) * env.step, 4326), env.g)
+), shape AS (
+  SELECT ix, iy, ST_Union(geom) AS geom FROM pieces WHERE NOT ST_IsEmpty(geom) GROUP BY ix, iy
+), top AS (
+  SELECT DISTINCT ON (ix, iy) ix, iy, id, level::text AS level, label, basis
+  FROM pieces ORDER BY ix, iy, level DESC, computed_at DESC, id DESC
 )
-SELECT id, level, label, basis, ST_AsGeoJSON(geom) AS geojson FROM assessed WHERE rank = 1
-ORDER BY row, col
+SELECT top.ix || '_' || top.iy AS cell_id, top.id, top.level, top.label, top.basis, ST_AsGeoJSON(shape.geom, 6) AS geojson
+FROM top JOIN shape USING (ix, iy)
+ORDER BY top.iy, top.ix
 """
 
 
 def flood_grid_layer(bbox: tuple[float, float, float, float]) -> dict:
     features = []
-    for r in db.fetch_all(FLOOD_GRID_SQL, dict(zip("abcd", bbox))):
+    params = {**dict(zip("abcd", bbox)), "step": FLOOD_GRID_STEP, "min_level": FLOOD_GRID_MIN_LEVEL}
+    for r in db.fetch_all(FLOOD_GRID_SQL, params):
         basis = r["basis"] if isinstance(r["basis"], dict) else json.loads(r["basis"] or "{}")
         value = basis.get("value")
         depth_cm = None
@@ -171,9 +188,9 @@ def flood_grid_layer(bbox: tuple[float, float, float, float]) -> dict:
             except (TypeError, ValueError):
                 depth_cm = None
         features.append({
-            "type": "Feature", "id": r["id"], "geometry": json.loads(r["geojson"]),
+            "type": "Feature", "id": r.get("cell_id") or r["id"], "geometry": json.loads(r["geojson"]),
             "properties": {
-                "hazard": "flood", "level": r["level"], "label": r["label"],
+                "hazard": "flood", "level": r["level"], "label": r["label"], "area_id": r["id"],
                 "observed_depth_cm": depth_cm, "observed_at": basis.get("observed_at"),
                 "source": basis.get("station_name") or basis.get("source") or "위험 판정 자료",
                 "simulated": bool(basis.get("simulated")),

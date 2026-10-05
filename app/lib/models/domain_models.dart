@@ -124,9 +124,18 @@ class FloodGrid {
       this.depthCm,
       this.observedAt,
       this.source = '',
-      this.isExample = false});
+      this.isExample = false,
+      this.rings = const []});
   final String id, level, source;
   final double south, west, north, east;
+  /// 서버 격자 칸을 위험 영역 모양대로 자른 실제 모양 (2026-10-05). 비어 있으면 네모 칸(south·west·north·east)
+  final List<List<LatLng>> rings;
+  /// 지도에 그릴 모양: 잘린 모양이 있으면 그것, 없으면 네모
+  List<List<LatLng>> get shapes => rings.isNotEmpty
+      ? rings
+      : [
+          [LatLng(south, west), LatLng(south, east), LatLng(north, east), LatLng(north, west)]
+        ];
   final double? depthCm;
   final String? observedAt;
   final bool isExample;

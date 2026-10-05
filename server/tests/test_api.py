@@ -123,8 +123,8 @@ def test_layers(client, fake_db):
 
 
 def test_flood_grid_exposes_only_assessed_cells_with_source_and_depth(client, fake_db):
-    fake_db.rows["WITH p AS"] = [{
-        "id": 21, "level": "warning", "label": "침수 위험",
+    fake_db.rows["WITH env AS"] = [{
+        "cell_id": "129550_35980", "id": 21, "level": "warning", "label": "침수 위험",
         "basis": {"metric": "flood_depth", "value": 230, "unit": "mm", "observed_at": "2026-10-05T14:27:00+09:00", "station_name": "구룡포 수위계"},
         "geojson": '{"type":"Polygon","coordinates":[[[129.55,35.98],[129.554,35.98],[129.554,35.984],[129.55,35.984],[129.55,35.98]]]}',
     }]
@@ -135,6 +135,16 @@ def test_flood_grid_exposes_only_assessed_cells_with_source_and_depth(client, fa
     assert feature["properties"]["observed_depth_cm"] == 23
     assert feature["properties"]["source"] == "구룡포 수위계"
     assert feature["properties"]["data_status"] == "assessed"
+    assert feature["id"] == "129550_35980" and feature["properties"]["area_id"] == 21
+
+
+def test_flood_grid_uses_same_rule_as_route_server():
+    """침수 격자 = 경로 서버가 피하는 침수 영역 (주의 이상, 지금 유효한 판정만) — 두 기준이 어긋나면 지도와 경로가 달라진다"""
+    import pathlib, re
+    from app import layers
+    hz = (pathlib.Path(__file__).resolve().parents[2] / "route" / "guardian_route" / "hazards.py").read_text(encoding="utf-8")
+    assert re.search(r'MIN_LEVEL = "(\w+)"', hz).group(1) == layers.FLOOD_GRID_MIN_LEVEL
+    assert "valid_to IS NULL" in layers.FLOOD_GRID_SQL and "ra.hazard = 'flood'" in layers.FLOOD_GRID_SQL
 
 
 def test_flood_grid_is_empty_when_no_assessments(client):

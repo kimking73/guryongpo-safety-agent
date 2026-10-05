@@ -345,12 +345,18 @@ List<FloodGrid> floodGridFromGeoJson(Map<String, dynamic> fc) {
       in (fc['features'] as List? ?? const []).cast<Map<String, dynamic>>()) {
     final geometry = f['geometry'] as Map<String, dynamic>?;
     final properties = f['properties'] as Map<String, dynamic>? ?? const {};
-    if (geometry?['type'] != 'Polygon') continue;
-    final ring = (geometry!['coordinates'] as List).first as List;
-    final points = ring
-        .cast<List>()
-        .map((p) => [(p[0] as num).toDouble(), (p[1] as num).toDouble()])
-        .toList();
+    // 서버는 칸을 침수 영역 모양대로 잘라 보낸다 (Polygon 또는 MultiPolygon, 바깥 고리만 사용)
+    final polys = switch (geometry?['type']) {
+      'Polygon' => [geometry!['coordinates'] as List],
+      'MultiPolygon' => [for (final p in geometry!['coordinates'] as List) p as List],
+      _ => const <List>[],
+    };
+    if (polys.isEmpty) continue;
+    final rings = [
+      for (final poly in polys)
+        [for (final p in (poly.first as List).cast<List>()) LatLng((p[1] as num).toDouble(), (p[0] as num).toDouble())]
+    ];
+    final points = [for (final r in rings) for (final p in r) [p.longitude, p.latitude]];
     final lngs = points.map((p) => p[0]).toList(),
         lats = points.map((p) => p[1]).toList();
     result.add(FloodGrid(
@@ -369,6 +375,7 @@ List<FloodGrid> floodGridFromGeoJson(Map<String, dynamic> fc) {
       observedAt: properties['observed_at'] as String?,
       source: properties['source'] as String? ?? '위험 판정 자료',
       isExample: properties['simulated'] == true,
+      rings: rings,
     ));
   }
   return result;

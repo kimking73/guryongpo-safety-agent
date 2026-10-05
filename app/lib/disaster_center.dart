@@ -89,13 +89,9 @@ List<Polygon> _disasterFloodPolygons(List<FloodGrid> grids,
     [
       for (final g in grids)
         if (g.hasRisk && (!severeOnly || g.level == '심각') || !severeOnly)
+          for (final ring in g.shapes)
           Polygon(
-            points: [
-              LatLng(g.south, g.west),
-              LatLng(g.south, g.east),
-              LatLng(g.north, g.east),
-              LatLng(g.north, g.west)
-            ],
+            points: ring,
             color: g.hasRisk && (!severeOnly || g.level == '심각')
                 ? _floodColor(g.level).withValues(alpha: .24)
                 : Colors.transparent,
