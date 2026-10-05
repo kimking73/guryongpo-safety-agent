@@ -24,14 +24,14 @@
 - If code moved, fix file:line references here, in `architectural_patterns.md`, and in `../CLAUDE.md`.
 - Commit; if `git push` is blocked for Claude, ask the user to run `! git push`.
 
-## Current status (2026-10-03, Day 11)
+## Current status (2026-10-06, Day 14)
 - Timeline is 28 days (Day 1 = 2026-09-23; Day 21 = extra features integration). **Done: B1, B8, B2, B3, B6, B7.**
-  **B4**: all agents + decision-tree action advisor done; only the proactive alert message function for A5 is left (user: later).
-  **B5**: text part done (intent check, card/polish, number recheck, latency). **Voice conversation deferred by the user
-  (2026-10-03)** — code is in (`voice.py`, `/api/voice`, `/api/tts`, app mic) but no GCP key → 503; decide again before B12.
-  Neither B4 nor B5 is marked done in the live artifact — ask the user. **B10** in progress (VM up; static IP·Caddy·domain left).
-  Next: B10 finish, then B11 sea→port→land route (15–17), B12 voice evacuation check (17–18), B13 patrol priority (19–20),
-  B9 (22–23). See `.claude/docs/timeline.md` "다음 세션 시작점".
+  **B10** done criteria met (https://34-64-177-195.nip.io, Caddy + Firebase login + web). **B11** 1st pass + land/breakwater
+  crossing fixed; AI link (`request_sea_route`) not yet. **C8** (lane C, done by B on request) built and deployed.
+  **B4**: only the proactive alert message function for A5 is left. **B5**: voice deferred by the user (no GCP key → 503).
+  Marking B4/B5/B10/J1/B11 done (live artifact too) waits for the user. 2026-10-05 the user also had B fix lanes A and C
+  (real-data dashboard, demo mode `server/risk/demo.py` + app switch, login, routes UI) — sharing with 조하린·김다인 is pending.
+  Next: see `.claude/docs/timeline.md` "다음 세션 시작점" (candidates: web check of demo mode, team sharing, B11 rest, B4 alert fn, B13).
 - AI path: `POST /api/chat` → `ChatService.chat` (service.py) → graph. Real nodes: manager (`OpenAIClassifier`, keyword
   fallback), `rain_flood_agent` (`flood.py`: code collects DB data + builds Evidence incl. "기준 위치" and user memory,
   `OpenAIWriter` only phrases, template fallback), `hallucination_check` (`verify.py`: rule number check → `OpenAIFactChecker`).
