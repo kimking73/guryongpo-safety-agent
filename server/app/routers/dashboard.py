@@ -84,7 +84,7 @@ def get_demo_dashboard(lat: float = Query(ge=-90, le=90), lng: float = Query(ge=
 def get_demo_risk_areas(hazard: Optional[Hazard] = None, min_level: Optional[DemoLevel] = None,
                         bbox: Optional[str] = Query(None)):
     from risk import demo
-    return JSONResponse(demo.risk_areas(hazard, min_level), media_type="application/geo+json")
+    return JSONResponse(demo.risk_areas(hazard, min_level, layers.parse_bbox(bbox)), media_type="application/geo+json")
 
 
 @router.get("/demo/layers/{layer_id}", summary="시연 지도 레이어 (flood_grid · stations)")

@@ -116,18 +116,42 @@ def _features() -> list[dict]:
             basis.update(station_lat=r.lat, station_lng=r.lng)
         row = {"id": -(i + 1), "hazard": r.hazard, "level": r.level, "label": r.label, "rule_id": r.rule_id,
                "basis": {**basis, "reason": r.reason, "observed_at": basis.get("observed_at") or _now().isoformat()}}
-        feats.append({"type": "Feature", "id": row["id"], "geometry": json.loads(geoms[i]), "properties": queries.risk_item(row),
-                      "basis": row["basis"]})   # 침수 격자의 수심·출처용 (GeoJSON foreign member)
+        g = json.loads(geoms[i])
+        feats.append({"type": "Feature", "id": row["id"], "geometry": g, "properties": queries.risk_item(row),
+                      "basis": row["basis"], "_bbox": _bbox_of(g)})   # basis: 침수 격자의 수심·출처용 (GeoJSON foreign member)
     feats.sort(key=lambda f: -LEVELS.index(f["properties"]["level"]))
     return feats
 
 
-def risk_areas(hazard: Optional[str] = None, min_level: Optional[str] = None) -> dict:
-    """GET /demo/risk/areas — /risk/areas 와 같은 모양 (경로 서버가 그대로 읽는다)"""
+def _bbox_of(geom: dict) -> tuple[float, float, float, float]:
+    xs, ys = [], []
+
+    def walk(c):
+        if c and isinstance(c[0], (int, float)):
+            xs.append(c[0]), ys.append(c[1])
+        else:
+            for x in c:
+                walk(x)
+    walk(geom["coordinates"])
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def risk_areas(hazard: Optional[str] = None, min_level: Optional[str] = None,
+               bbox: Optional[tuple[float, float, float, float]] = None) -> dict:
+    """GET /demo/risk/areas — /risk/areas 와 같은 모양·같은 범위(bbox 생략 시 구룡포) (경로 서버가 그대로 읽는다)"""
+    from app import layers
+    a, b, c, d = bbox or layers.GURYONGPO_BBOX
     feats = _cached("areas", _features)
     lo = LEVELS.index(min_level or "watch")
-    return {"type": "FeatureCollection", "features": [
-        f for f in feats if LEVELS.index(f["properties"]["level"]) >= lo and (hazard is None or f["properties"]["hazard"] == hazard)]}
+    out = []
+    for f in feats:
+        if LEVELS.index(f["properties"]["level"]) < lo or (hazard is not None and f["properties"]["hazard"] != hazard):
+            continue
+        x0, y0, x1, y1 = f.get("_bbox") or _bbox_of(f["geometry"])
+        if x1 < a or x0 > c or y1 < b or y0 > d:
+            continue
+        out.append({k: v for k, v in f.items() if k != "_bbox"})
+    return {"type": "FeatureCollection", "features": out}
 
 
 def flood_grid(bbox: tuple[float, float, float, float]) -> dict:
@@ -135,7 +159,7 @@ def flood_grid(bbox: tuple[float, float, float, float]) -> dict:
     from app import layers
     zones = [{"id": f["id"], "level": f["properties"]["level"], "label": f["properties"]["label"],
               "basis": f.get("basis") or {}, "geometry": f["geometry"]}
-             for f in risk_areas("flood", layers.FLOOD_GRID_MIN_LEVEL)["features"]]
+             for f in risk_areas("flood", layers.FLOOD_GRID_MIN_LEVEL, bbox)["features"]]
     return layers.flood_grid_layer(bbox, zones=zones)
 
 
