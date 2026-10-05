@@ -1516,13 +1516,8 @@ class _MapCardState extends ConsumerState<MapCard> {
     mapOptions = MapOptions(
       initialCenter: const LatLng(35.9922, 129.5531),
       initialZoom: 14.5,
-      minZoom: 10,
-      cameraConstraint: CameraConstraint.containCenter(
-        bounds: LatLngBounds(
-          const LatLng(35.925, 129.495),
-          const LatLng(36.055, 129.605),
-        ),
-      ),
+      // 구룡포 일대로 한정: 화면 전체가 범위 안 (2026-10-05)
+      cameraConstraint: CameraConstraint.contain(bounds: guryongpoBounds),
       onTap: (_, point) {
         if (locationNote != null) {
           setPosition(ref, point, manual: true);

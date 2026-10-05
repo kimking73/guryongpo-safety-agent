@@ -309,10 +309,9 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
   }
   late final MapOptions mapOptions = MapOptions(
     initialCenter: guryongpo,
-    initialZoom: 13,
-    // 구룡포 일대로 한정 (2026-10-05)
-    minZoom: guryongpoMinZoom,
-    cameraConstraint: CameraConstraint.containCenter(bounds: guryongpoBounds),
+    // 구룡포 일대로 한정 (2026-10-05): 화면 전체가 범위 안에 있어야 하고(밖은 보이지 않음), 처음엔 범위를 꽉 채운다
+    initialCameraFit: CameraFit.insideBounds(bounds: guryongpoBounds),
+    cameraConstraint: CameraConstraint.contain(bounds: guryongpoBounds),
     onPositionChanged: (camera, _) {
       if ((camera.zoom - mapZoom).abs() > .2 &&
           mounted &&
@@ -379,7 +378,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
       activeLayers.clear();
       focus = guryongpo;
     });
-    mapController.move(guryongpo, 13);
+    mapController.fitCamera(CameraFit.insideBounds(bounds: guryongpoBounds));
   }
 
   void toggleLayer(HazardKind layer, bool on) => setState(() {
