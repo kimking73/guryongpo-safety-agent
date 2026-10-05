@@ -159,7 +159,8 @@ def test_health_fields_go_to_care(client, fake_db):
 
 def test_demo_households_scenario(client, fake_db):
     r = client.post("/api/v1/internal/simulate", json={"scenario": "demo_households"})
-    assert r.status_code == 202 and r.json()["accepted"] and r.json()["households"] == 4 + 1     # FakeDB: 4건 + 산사태 1
+    from risk.simulate import DEMO_HOUSEHOLDS
+    assert r.status_code == 202 and r.json()["accepted"] and r.json()["households"] == len(DEMO_HOUSEHOLDS) + 1   # FakeDB: 목록 + 산사태 1
     rows = next(rows for sql, rows in fake_db.executed if "시연용 가상 주소" in sql and isinstance(rows, list))
     assert all(x["label"].startswith("[시연] ") for x in rows)
     r = client.post("/api/v1/internal/simulate", json={"scenario": "demo_households_clear"})

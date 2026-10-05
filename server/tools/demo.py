@@ -1,7 +1,7 @@
 """시연 스크립트 (A11) — 대피 확인 흐름을 명령 몇 개로 재현하고 정리한다. 표준 라이브러리만 사용.
 
   python3 server/tools/demo.py status                # 서버 상태
-  python3 server/tools/demo.py prepare               # 시연용 가상 취약 가구 5곳 등록
+  python3 server/tools/demo.py prepare               # 시연용 가상 취약 가구 14곳 등록 (장애인·독거노인 포함)
   python3 server/tools/demo.py flood                 # 모의 호우·침수 → 판정 → 대피 확인 경고까지
   python3 server/tools/demo.py walkthrough [--step]  # 주민 응답 → 방재단 화면 → 방문 기록 (dev 모드 서버만)
   python3 server/tools/demo.py reset                 # 모의값·시연 가구·시연 사용자 정리

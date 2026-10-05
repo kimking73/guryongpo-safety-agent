@@ -207,6 +207,14 @@ SELECT u.role::text AS role, c.label, u.role_granted_at AS granted_at FROM u, c
 """
 
 
+DEMO_CLAIM_SQL = """
+INSERT INTO users (firebase_uid, is_anonymous, role, role_granted_at)
+VALUES (%(uid)s, %(anon)s, %(role)s::user_role, now())
+ON CONFLICT (firebase_uid) DO UPDATE SET role = EXCLUDED.role, role_granted_at = EXCLUDED.role_granted_at
+RETURNING role::text AS role, role_granted_at AS granted_at
+"""
+
+
 def code_hash(code: str) -> str:
     import hashlib
     return hashlib.sha256(code.strip().upper().encode("utf-8")).hexdigest()
@@ -216,8 +224,11 @@ def code_hash(code: str) -> str:
 def claim_role(body: RoleClaim, u: AuthUser = Depends(current_user)):
     code = body.invite_code.strip().upper()
     if settings.auth_mode == "dev" and code in DEMO_CODES:
+        # 시연 코드도 실제로 역할을 저장한다 — 응답만 주고 저장하지 않으면 GET /user 가 계속 resident 라
+        # 앱의 방재단 화면이 열리지 않는다 (2026-10-05 C8 로컬 확인 중 발견)
+        row = db.fetch_one(DEMO_CLAIM_SQL, {"uid": u.uid, "anon": u.is_anonymous, "role": DEMO_CODES[code]})
         d = mocks.load("role.json")
-        d.update(role=DEMO_CODES[code], granted_at=mocks.now_iso())
+        d.update(role=row["role"], granted_at=mocks.iso(row["granted_at"]))
         return mocks.respond(d)
     row = db.fetch_one(CLAIM_SQL, {"h": code_hash(code), "uid": u.uid, "anon": u.is_anonymous})
     if not row:

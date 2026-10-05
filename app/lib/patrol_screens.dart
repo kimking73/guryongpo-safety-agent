@@ -31,6 +31,37 @@ const needKo = {
   'hearing': '청각', 'vision': '시각', 'cognitive': '인지', 'medical_device': '의료기기', 'infant': '영유아', 'pet': '반려동물',
 };
 
+/// 취약 가구 분류 — 방재단 지도 아이콘·필터 (사용자 요청 2026-10-05: 장애인·독거노인은 대피 상황이 아니어도 지도에 표시)
+const disabilityNeeds = {'wheelchair', 'hearing', 'vision', 'cognitive', 'bedridden', 'mobility_limited'};
+Set<String> _needSet(Object? needs) => {for (final x in needs as List? ?? const []) '$x'};
+bool isDisabledHousehold(Object? needs) => _needSet(needs).any(disabilityNeeds.contains);
+bool isElderlyAlone(Object? needs) => _needSet(needs).containsAll(const {'elderly', 'living_alone'});
+
+enum VulnerableKind { disabled, elderlyAlone, other }
+
+/// 지도 아이콘 하나를 고른다: 장애가 있으면 장애인, 아니면 독거노인, 그 밖은 기타 (둘 다면 장애인 아이콘, 필터는 둘 다에 걸림)
+VulnerableKind vulnerableKind(Object? needs) => isDisabledHousehold(needs)
+    ? VulnerableKind.disabled
+    : isElderlyAlone(needs)
+        ? VulnerableKind.elderlyAlone
+        : VulnerableKind.other;
+const kindKo = {VulnerableKind.disabled: '장애인', VulnerableKind.elderlyAlone: '독거노인', VulnerableKind.other: '기타 취약'};
+const kindIcon = {VulnerableKind.disabled: Icons.accessible, VulnerableKind.elderlyAlone: Icons.elderly, VulnerableKind.other: Icons.home};
+const kindColor = {
+  VulnerableKind.disabled: Color(0xff6a1b9a),
+  VulnerableKind.elderlyAlone: Color(0xff00695c),
+  VulnerableKind.other: Color(0xff546e7a),
+};
+
+/// 지도·목록 필터
+enum HouseholdFilter { all, disabled, elderlyAlone }
+
+bool matchesFilter(HouseholdFilter f, Object? needs) => switch (f) {
+      HouseholdFilter.all => true,
+      HouseholdFilter.disabled => isDisabledHousehold(needs),
+      HouseholdFilter.elderlyAlone => isElderlyAlone(needs),
+    };
+
 /// 대피 상태 (A12) → 한글·색. 명단 정렬도 서버(priority_rank)를 따르고 앱은 표시만 한다
 const statusKo = {'need_help': '도움 필요', 'no_response': '미응답', 'evacuating': '대피 중', 'evacuated': '대피 완료'};
 Color statusColor(String? s) => switch (s) {
@@ -510,6 +541,7 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
   List<Map<String, dynamic>>? incidents, households;
   Map<String, dynamic>? detail;
   String? incidentId, selected, error;
+  HouseholdFilter filter = HouseholdFilter.all;
   Timer? poll;
 
   @override
@@ -529,7 +561,8 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
     try {
       final list = await api.adminIncidents();
       final id = list.any((i) => i['id'] == incidentId) ? incidentId : (list.isEmpty ? null : '${list.first['id']}');
-      final hh = id == null ? await api.adminHouseholds() : null;
+      // 등록 취약 가구는 대피 상황과 상관없이 늘 지도에 (장애인·독거노인 평시 확인)
+      final hh = await api.adminHouseholds();
       if (!mounted) return;
       setState(() {
         incidents = list;
@@ -611,22 +644,28 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
               });
               _loadDetail();
             }),
+      _FilterBar(households: households ?? const [], filter: filter, onChanged: (f) => setState(() => filter = f)),
       if (incidentId == null) ...[
         const Card(child: ListTile(leading: Icon(Icons.check_circle_outline), title: Text('진행 중인 대피 상황이 없습니다'),
-            subtitle: Text('대피 상황이 생기면 대상 가구 명단이 우선순위대로 나옵니다. 아래는 등록된 취약 가구입니다.'))),
-        _PatrolMap(points: [
-          for (final h in households ?? const <Map<String, dynamic>>[])
-            if (latLng(h['location']) != null) _MapPoint('${h['id']}', latLng(h['location'])!, null, null, '${h['label']}'),
-        ], rings: const [], selected: selected, onTap: (id) => setState(() => selected = id)),
-        for (final h in households ?? const <Map<String, dynamic>>[]) _HouseholdTile(h: h, selected: selected == '${h['id']}'),
-        if ((households ?? const []).isEmpty) const Card(child: ListTile(title: Text('등록된 취약 가구가 없습니다'))),
+            subtitle: Text('평시에도 장애인·독거노인 가구를 지도에서 확인할 수 있습니다. 대피 상황이 생기면 대상 가구가 번호(우선순위)로 바뀝니다.'))),
+        _PatrolMap(points: _householdPoints(const {}), rings: const [], selected: selected, onTap: (id) => setState(() => selected = id)),
+        const _MapLegend(withTargets: false),
+        for (final h in _shownHouseholds) _HouseholdTile(h: h, selected: selected == '${h['id']}'),
+        if (_shownHouseholds.isEmpty) const Card(child: ListTile(title: Text('조건에 맞는 등록 가구가 없습니다'))),
       ] else ...[
         if (incident != null) _IncidentHeader(incident: incident),
         _PatrolMap(points: [
+          ..._householdPoints({for (final t in targets) if (t['household_id'] != null) '${t['household_id']}'}),
           for (final t in targets)
             if (latLng(t['location']) != null)
               _MapPoint('${t['id']}', latLng(t['location'])!, (t['priority_rank'] as num?)?.toInt(), t['status'] as String?, '${t['label']}'),
-        ], rings: geoJsonRings(detail?['area']), selected: selected, onTap: (id) => setState(() => selected = id)),
+        ], rings: geoJsonRings(detail?['area']), selected: selected, onTap: (id) => setState(() => selected = id),
+            focus: [
+              for (final t in targets)
+                if (latLng(t['location']) != null) latLng(t['location'])!,
+              for (final r in geoJsonRings(detail?['area'])) ...r,
+            ]),
+        const _MapLegend(withTargets: true),
         const SizedBox(height: 6),
         const Text('방문 우선순위', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
         if (detail == null) const LinearProgressIndicator(),
@@ -634,7 +673,65 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
         for (final t in [...targets.where((t) => '${t['id']}' == selected), ...targets.where((t) => '${t['id']}' != selected)])
           _TargetCard(t: t, selected: '${t['id']}' == selected, closed: detail?['closed_at'] != null,
               onVisit: () => _visit(t), onAssign: () => _assign(t), onSelect: () => setState(() => selected = '${t['id']}')),
+        // 대피 대상이 아닌 등록 가구도 지도에서 눌러 볼 수 있게
+        for (final h in _shownHouseholds.where((h) => '${h['id']}' == selected)) _HouseholdTile(h: h, selected: true),
       ],
+    ]);
+  }
+
+  /// 필터에 맞는 등록 가구 (선택한 가구를 맨 앞으로)
+  List<Map<String, dynamic>> get _shownHouseholds {
+    final hs = [for (final h in households ?? const <Map<String, dynamic>>[]) if (matchesFilter(filter, h['needs'])) h];
+    return [...hs.where((h) => '${h['id']}' == selected), ...hs.where((h) => '${h['id']}' != selected)];
+  }
+
+  /// 등록 가구 지도 점 (대피 대상인 가구는 번호 점으로 따로 그리므로 뺀다)
+  List<_MapPoint> _householdPoints(Set<String> targetHouseholds) => [
+        for (final h in _shownHouseholds)
+          if (latLng(h['location']) != null && !targetHouseholds.contains('${h['id']}'))
+            _MapPoint('${h['id']}', latLng(h['location'])!, null, null, '${h['label']}', kind: vulnerableKind(h['needs']),
+                detail: needsText(h['needs'])),
+      ];
+}
+
+/// 전체 / 장애인 / 독거노인 필터 (개수 포함)
+class _FilterBar extends StatelessWidget {
+  const _FilterBar({required this.households, required this.filter, required this.onChanged});
+  final List<Map<String, dynamic>> households;
+  final HouseholdFilter filter;
+  final ValueChanged<HouseholdFilter> onChanged;
+  @override
+  Widget build(BuildContext c) {
+    int count(HouseholdFilter f) => households.where((h) => matchesFilter(f, h['needs'])).length;
+    Widget chip(HouseholdFilter f, String label, IconData icon, Color color) => ChoiceChip(
+        avatar: Icon(icon, size: 18, color: color),
+        label: Text('$label ${count(f)}'),
+        selected: filter == f,
+        onSelected: (_) => onChanged(f));
+    return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Wrap(spacing: 8, runSpacing: 6, children: [
+          chip(HouseholdFilter.all, '등록 취약 가구 전체', Icons.home_work_outlined, kindColor[VulnerableKind.other]!),
+          chip(HouseholdFilter.disabled, '장애인', kindIcon[VulnerableKind.disabled]!, kindColor[VulnerableKind.disabled]!),
+          chip(HouseholdFilter.elderlyAlone, '독거노인', kindIcon[VulnerableKind.elderlyAlone]!, kindColor[VulnerableKind.elderlyAlone]!),
+        ]));
+  }
+}
+
+class _MapLegend extends StatelessWidget {
+  const _MapLegend({required this.withTargets});
+  final bool withTargets;
+  @override
+  Widget build(BuildContext c) {
+    Widget item(Widget mark, String label) => Row(mainAxisSize: MainAxisSize.min, children: [mark, const SizedBox(width: 4), Text(label)]);
+    Widget icon(VulnerableKind k) => Icon(kindIcon[k], size: 18, color: kindColor[k]);
+    return Wrap(spacing: 14, runSpacing: 4, children: [
+      if (withTargets)
+        item(CircleAvatar(radius: 8, backgroundColor: statusColor('need_help'),
+            child: const Text('1', style: TextStyle(fontSize: 10, color: Colors.white))), '대피 대상 (번호 = 우선순위, 색 = 상태)'),
+      item(icon(VulnerableKind.disabled), '장애인 가구'),
+      item(icon(VulnerableKind.elderlyAlone), '독거노인 가구'),
+      item(icon(VulnerableKind.other), '기타 취약 가구'),
     ]);
   }
 }
@@ -671,37 +768,68 @@ class _IncidentHeader extends StatelessWidget {
 }
 
 class _MapPoint {
-  const _MapPoint(this.id, this.at, this.rank, this.status, this.label);
+  const _MapPoint(this.id, this.at, this.rank, this.status, this.label, {this.kind, this.detail});
   final String id;
   final LatLng at;
-  final int? rank;
-  final String? status;
+  final int? rank;              // 대피 대상이면 우선순위
+  final String? status;         // 대피 대상이면 대피 상태
   final String label;
+  final VulnerableKind? kind;   // 등록 가구(대피 대상 아님)면 장애인·독거노인·기타
+  final String? detail;
 }
 
-/// 대상 가구 지도: 번호 = 우선순위, 색 = 대피 상태. 대피 상황 영역은 붉은 다각형
-class _PatrolMap extends StatelessWidget {
-  const _PatrolMap({required this.points, required this.rings, required this.selected, required this.onTap});
+/// 방재단 지도: 대피 대상은 번호(우선순위)·색(대피 상태), 등록 취약 가구는 장애인·독거노인·기타 아이콘. 대피 영역은 붉은 다각형
+class _PatrolMap extends StatefulWidget {
+  const _PatrolMap({required this.points, required this.rings, required this.selected, required this.onTap, this.focus});
   final List<_MapPoint> points;
   final List<List<LatLng>> rings;
   final String? selected;
   final ValueChanged<String> onTap;
+  /// 처음 화면에 맞출 좌표 (대피 상황이면 대상 가구·영역, 없으면 전체 점)
+  final List<LatLng>? focus;
+
+  @override
+  State<_PatrolMap> createState() => _PatrolMapState();
+}
+
+class _PatrolMapState extends State<_PatrolMap> {
+  final controller = MapController();
+
+  List<LatLng> get _focus =>
+      widget.focus ?? [for (final p in widget.points) p.at, for (final r in widget.rings) ...r];
+
+  /// 지도가 준비된 뒤 화면을 맞춘다. initialCameraFit으로 맞추면 웹에서 처음 타일을 안 받아 회색으로 남았다 (2026-10-05)
+  void _fit() {
+    final f = _focus;
+    if (f.length >= 2) {
+      controller.fitCamera(CameraFit.coordinates(coordinates: f, padding: const EdgeInsets.all(36), maxZoom: 16.5));
+    } else if (f.length == 1) {
+      controller.move(f.first, 16);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _PatrolMap old) {
+    super.didUpdateWidget(old);
+    // 대피 상황이 바뀌거나 점 개수가 바뀌면 다시 맞춘다 (10초 갱신마다 움직이지 않게 개수로만 본다)
+    if (old.focus?.length != widget.focus?.length || old.points.length != widget.points.length) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => mounted ? _fit() : null);
+    }
+  }
 
   @override
   Widget build(BuildContext c) {
-    final all = [for (final p in points) p.at, for (final r in rings) ...r];
+    final points = widget.points, rings = widget.rings, selected = widget.selected, onTap = widget.onTap;
     return Card(
         clipBehavior: Clip.antiAlias,
         child: SizedBox(
-            height: 300,
+            height: 320,
             child: FlutterMap(
-                key: ValueKey(all.length),
+                mapController: controller,
                 options: MapOptions(
-                    initialCenter: all.isEmpty ? const LatLng(35.987, 129.552) : all.first,
+                    initialCenter: const LatLng(35.987, 129.552),
                     initialZoom: 14.5,
-                    initialCameraFit: all.length >= 2
-                        ? CameraFit.coordinates(coordinates: all, padding: const EdgeInsets.all(36), maxZoom: 17)
-                        : null),
+                    onMapReady: _fit),
                 children: [
                   _tiles(),
                   if (rings.isNotEmpty)
@@ -718,17 +846,19 @@ class _PatrolMap extends StatelessWidget {
                           child: GestureDetector(
                               onTap: () => onTap(p.id),
                               child: Tooltip(
-                                  message: '${p.rank != null ? '${p.rank}순위 ' : ''}${p.label} · ${statusKo[p.status] ?? '등록 가구'}',
+                                  message: p.kind != null
+                                      ? '${p.label} · ${kindKo[p.kind]}${p.detail?.isNotEmpty ?? false ? ' (${p.detail})' : ''}'
+                                      : '${p.rank != null ? '${p.rank}순위 ' : ''}${p.label} · ${statusKo[p.status] ?? '대피 대상'}',
                                   child: Container(
                                       alignment: Alignment.center,
                                       decoration: BoxDecoration(
-                                          color: p.status == null ? Colors.indigo : statusColor(p.status),
+                                          color: p.kind != null ? kindColor[p.kind] : statusColor(p.status),
                                           shape: BoxShape.circle,
                                           border: Border.all(color: Colors.white, width: p.id == selected ? 3 : 2),
                                           boxShadow: const [BoxShadow(blurRadius: 3, color: Colors.black38)]),
-                                      child: p.rank != null
-                                          ? Text('${p.rank}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
-                                          : const Icon(Icons.home, color: Colors.white, size: 16))))),
+                                      child: p.kind != null
+                                          ? Icon(kindIcon[p.kind], color: Colors.white, size: 18)
+                                          : Text('${p.rank ?? '-'}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)))))),
                   ]),
                   _osm,
                 ])));
@@ -804,7 +934,7 @@ class _HouseholdTile extends StatelessWidget {
   Widget build(BuildContext c) => Card(
       color: selected ? Theme.of(c).colorScheme.primaryContainer : null,
       child: ListTile(
-          leading: const Icon(Icons.home_outlined),
+          leading: Icon(kindIcon[vulnerableKind(h['needs'])], color: kindColor[vulnerableKind(h['needs'])]),
           title: Text('${h['label']}'),
           subtitle: Text([
             if (h['address'] != null) '${h['address']}',

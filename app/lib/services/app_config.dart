@@ -7,6 +7,10 @@ class AppConfig {
   static const apiBaseUrl = String.fromEnvironment('API_BASE_URL', defaultValue: 'http://localhost:8000');
   static const aiBaseUrl = String.fromEnvironment('AI_BASE_URL', defaultValue: 'http://localhost:8001');
   static const routeBaseUrl = String.fromEnvironment('ROUTE_BASE_URL', defaultValue: 'http://localhost:8002');
+  /// 로컬 개발 전용: 값을 주면 Firebase 토큰 대신 'Bearer dev:<값>'으로 서버를 부른다 (서버 API_AUTH_MODE=dev 일 때만 통함).
+  /// 로컬에 firebase-admin 키가 없어 로그인 화면을 못 볼 때 쓴다. 배포 빌드(deploy/push_web.sh)에는 넣지 않는다.
+  /// 예: --dart-define=DEV_UID=responder-demo (uid가 responder로 시작하면 서버가 방재단 역할로 본다)
+  static const devUid = String.fromEnvironment('DEV_UID');
   static const firebaseApiKey = String.fromEnvironment('FIREBASE_API_KEY');
   static const firebaseAppId = String.fromEnvironment('FIREBASE_APP_ID');
   static const firebaseProjectId = String.fromEnvironment('FIREBASE_PROJECT_ID');

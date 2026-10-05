@@ -199,6 +199,10 @@ AI = OpenAI gpt-6-luna. 실제 노드 전부 구현(관리자·전문 agent 5종
 - 2026-10-04 로그인(사용자 계획 승인 — Google+이메일, 웹·iOS·안드로이드, 앱 ID kr.guryong.guardian): Firebase에 안드로이드·iOS 앱 등록, 사용자가 콘솔에서 Google·이메일 켬, `firebase_options.dart`·`auth_service.dart`(익명 계정에 연결, 서버 등록)·`login_screen.dart`, AI user_id = Firebase uid, server ENSURE_SQL is_anonymous 갱신. 앱 테스트 30 통과·5 실패(이전부터), 웹·iOS 시뮬레이터 빌드 성공, VM deploy·웹 배포, REST로 익명→이메일 연결 uid 유지·is_anonymous false 확인. OSM guryongpo.osm.pbf 커밋(7085b8f).
 - 2026-10-05 앱 정보 계정 동기화(문제 정리 5번, 사용자 결정: 통째 저장 + 판단용 칸): server `user_profiles.app_state` + `GET·PUT /user/app-state`(A 레인 — 조하린 공유), 앱 `account_sync.dart`(PATCH /user·/user/places·app-state). 서버 195 통과, 앱 새 테스트 5, VM 배포·웹 배포, REST로 기기A 익명 저장 → 이메일 연결 → 기기B 로그인 시 프로필·장소·저장본 복원 확인.
 - 2026-10-05 C8(+B11 1차, 사용자 계획 승인): route `POST /api/route/sea`(sea.py — OSM 해안선 육지 다각형, 카카오·OSM으로 확인한 항·포구 12곳, 직선 거리·16방위, 목적지 생략 시 갈 만한 대피소, 경로 엔진 장애 시 해상 안내 유지), DB ports 시드, 명세 갱신 — route 54 통과(새 10). 사용자: B11 로직은 나중에 다시 바뀜 → AI 연결 보류. 앱 `patrol_screens.dart`: 가구 등록 + 별도 민감정보 동의 화면, 방재단 대시보드(responder·admin만, 우선순위 명단·지도·10초 갱신·방문 결과·맡기), 대리 등록, 바다 위 대피 경로. 메모 대화상자 컨트롤러 조기 해제 버그 수정. 앱 테스트 71 통과(새 10, 크롬 통과) · 기존 실패 8개 변화 없음. 로컬 API로 명단→맡기→방문 기록→대피 완료, 등록·동의·철회, 대리 등록 확인. 웹에서 해상 경로 화면 확인.
+- 2026-10-05 방재단 대시보드 시연(사용자 요청): 시연 취약 가구 5 → 14곳(장애인·독거노인, 도로 위 육지 확인, 바다 위였던 2곳 좌표 수정 — server/risk/simulate.py, A 레인 공유),
+  방재단 지도에 등록 가구를 대피 상황과 상관없이 장애인·독거노인·기타 아이콘으로 + 필터, 대피 상황이면 대상·영역에 맞춤, 지도 처음 회색(타일 안 받음) 수정(onMapReady fitCamera).
+  서버 버그 수정: dev 모드 시연 초대 코드가 역할을 저장하지 않아 앱 방재단 화면이 안 열림(routers/user.py). 앱 DEV_UID(로컬 전용 dev 토큰).
+  로컬 확인: 평시 지도 14곳 → 모의 침수 → 대상 4곳 번호·영역 → 방문 기록 → 대피 완료·순위 변경. 서버 198·앱 C8 13(크롬 포함) 통과.
 - 2026-10-05 B11 방파제 회피(사용자 요청 — 해상 직선이 구룡포 북방파제를 가로지름): land.geojson에 OSM man_made=breakwater·pier·groyne 추가,
   해상 구간을 육지·방파제에서 15m 떨어진 격자(25m) 최단 경로 → 직선으로 펴서 꺾는 점만(`sea.py` `sea_paths`), 항구는 바닷길 길이 순.
   응답 `sea_leg.path`(인코딩 꺾은선)·`straight_m`·`path_found` 추가, 앱이 그 꺾은선을 점선으로 그림. 요청당 약 0.05초. route 55·앱 C8 11(크롬 포함) 통과, 웹에서 방파제 끝을 돌아 항구 입구로 들어가는 것 확인.

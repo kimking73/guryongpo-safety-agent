@@ -81,7 +81,10 @@ class AuthService {
     }
   }
 
-  Future<String?> token() async => ready ? FirebaseAuth.instance.currentUser?.getIdToken() : null;
+  Future<String?> token() async {
+    if (AppConfig.devUid.isNotEmpty) return 'dev:${AppConfig.devUid}'; // 로컬 개발 전용 (AppConfig.devUid)
+    return ready ? FirebaseAuth.instance.currentUser?.getIdToken() : null;
+  }
 
   /// 로그인한 Firebase uid (없으면 null — 목업·초기화 전)
   String? get uid => ready ? FirebaseAuth.instance.currentUser?.uid : null;

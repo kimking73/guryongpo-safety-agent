@@ -30,11 +30,18 @@ class FakeServer {
   }
 }
 
-/// 긴 목록 화면(ListView는 보이는 만큼만 만든다)을 한 번에 보도록 화면을 길게
+/// 긴 목록 화면(ListView는 보이는 만큼만 만든다)을 한 번에 보도록 화면을 길게.
+/// 테스트에서는 지도 타일을 인터넷에서 못 받는다(HTTP 400) — 그 이미지 오류만 무시한다
 void _tall(WidgetTester t) {
   t.view.physicalSize = const Size(900, 3200);
   t.view.devicePixelRatio = 1;
   addTearDown(t.view.reset);
+  final original = FlutterError.onError;
+  FlutterError.onError = (d) {
+    if (d.library == 'image resource service' && '${d.exception}'.contains('tile.openstreetmap.org')) return;
+    original?.call(d);
+  };
+  addTearDown(() => FlutterError.onError = original);
 }
 
 Future<void> _settle(WidgetTester t) async {
@@ -73,7 +80,49 @@ Map<String, dynamic> _detail() => {
       ],
     };
 
+const _households = [
+  {'id': 'h-1', 'label': '[시연] 김○○ 댁', 'location': {'lat': 35.986, 'lng': 129.556}, 'needs': ['living_alone', 'mobility_limited']},
+  {'id': 'h-2', 'label': '[시연] 호미로 독거 어르신 댁', 'location': {'lat': 35.9896, 'lng': 129.5541}, 'needs': ['elderly', 'living_alone']},
+  {'id': 'h-3', 'label': '[시연] 시장 옆 청각장애 주민 댁', 'location': {'lat': 35.9882, 'lng': 129.5525}, 'needs': ['hearing']},
+  {'id': 'h-4', 'label': '[시연] 영유아 가구', 'location': {'lat': 35.9850, 'lng': 129.5500}, 'needs': ['infant']},
+];
+
 void main() {
+  test('취약 가구 분류: 장애인·독거노인·기타 (둘 다면 아이콘은 장애인, 필터는 둘 다)', () {
+    expect(vulnerableKind(['hearing']), VulnerableKind.disabled);
+    expect(vulnerableKind(['elderly', 'living_alone']), VulnerableKind.elderlyAlone);
+    expect(vulnerableKind(['elderly', 'living_alone', 'wheelchair']), VulnerableKind.disabled);
+    expect(vulnerableKind(['infant']), VulnerableKind.other);
+    expect(vulnerableKind(['living_alone']), VulnerableKind.other); // 고령 아닌 독거는 독거노인 아님
+    final both = ['elderly', 'living_alone', 'wheelchair'];
+    expect(matchesFilter(HouseholdFilter.disabled, both) && matchesFilter(HouseholdFilter.elderlyAlone, both), isTrue);
+    expect(matchesFilter(HouseholdFilter.elderlyAlone, ['hearing']), isFalse);
+  });
+
+  testWidgets('대피 상황이 없어도 장애인·독거노인 가구가 지도·목록에 나오고 필터로 고른다', (t) async {
+    _tall(t);
+    final s = FakeServer({
+      'GET /api/v1/admin/incidents': (_) => <Object>[],
+      'GET /api/v1/admin/households': (_) => _households,
+    });
+    await t.pumpWidget(_app(const LiveResponderScreen(), [
+      liveApiProvider.overrideWithValue(s.api()),
+      meProvider.overrideWith((_) async => {'role': 'responder'}),
+    ]));
+    await _settle(t);
+    expect(find.text('진행 중인 대피 상황이 없습니다'), findsOneWidget);
+    expect(find.text('장애인 2'), findsOneWidget);       // 거동 불편 김○○ + 청각장애
+    expect(find.text('독거노인 1'), findsOneWidget);
+    // 지도 마커: 장애인 아이콘 2 + 독거노인 1 + 기타 1 (목록 아이콘과 범례도 같은 아이콘을 쓴다)
+    expect(find.byIcon(Icons.accessible), findsWidgets);
+    expect(find.text('[시연] 영유아 가구'), findsOneWidget);
+    await t.tap(find.text('독거노인 1'));
+    await _settle(t);
+    expect(find.text('[시연] 호미로 독거 어르신 댁'), findsOneWidget);
+    expect(find.text('[시연] 시장 옆 청각장애 주민 댁'), findsNothing);
+    expect(find.text('[시연] 영유아 가구'), findsNothing);
+  });
+
   test('역할: 방재단·관리자만 (돌봄 담당·주민 제외)', () {
     expect(isPatrolRole('responder'), isTrue);
     expect(isPatrolRole('admin'), isTrue);
@@ -167,6 +216,7 @@ void main() {
   testWidgets('방재단 대시보드: 우선순위 명단 → 방문 결과 입력 → 다시 불러오기', (t) async {
     var visited = false;
     final s = FakeServer({
+      'GET /api/v1/admin/households': (_) => _households,
       'GET /api/v1/admin/incidents': (_) => [_incident],
       'GET /api/v1/admin/incidents/inc-1': (_) {
         final d = _detail();

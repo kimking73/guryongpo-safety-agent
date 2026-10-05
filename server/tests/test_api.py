@@ -234,6 +234,8 @@ def test_hotlines(client, fake_db):
 
 
 def test_role_claim_demo_and_invalid(client, fake_db):
+    # 시연 코드도 users.role 에 저장한다 (저장 안 하면 GET /user 가 resident 라 앱 방재단 화면이 안 열림)
+    fake_db.rows["::user_role, now())"] = [{"role": "responder", "granted_at": datetime.now(KST)}]
     r = client.post("/api/v1/user/role", headers=AUTH, json={"invite_code": "demo-responder"})
     assert r.status_code == 200 and r.json()["role"] == "responder"
     r = client.post("/api/v1/user/role", headers=AUTH, json={"invite_code": "GRY-XXXX-YYYY"})   # DB 에 없음
