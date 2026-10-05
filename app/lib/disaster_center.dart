@@ -2090,6 +2090,10 @@ class _TyphoonScreenState extends State<TyphoonScreen> {
   LatLng get _localCenter => _hasLive
       ? LatLng((guryongpo.latitude * 2 + _livePos.latitude) / 3, (guryongpo.longitude * 2 + _livePos.longitude) / 3)
       : localMapCenter;
+  static const _dirKo = {
+    'N': '북', 'NNE': '북북동', 'NE': '북동', 'ENE': '동북동', 'E': '동', 'ESE': '동남동', 'SE': '남동', 'SSE': '남남동',
+    'S': '남', 'SSW': '남남서', 'SW': '남서', 'WSW': '서남서', 'W': '서', 'WNW': '서북서', 'NW': '북서', 'NNW': '북북서',
+  };
   static String _t(Object? iso) {
     final t = DateTime.tryParse('${iso ?? ''}')?.toLocal();
     return t == null ? '-' : '${t.month}/${t.day} ${t.hour}시';
@@ -2184,7 +2188,7 @@ class _TyphoonScreenState extends State<TyphoonScreen> {
                               _typhoonStat(Icons.air, '최대 풍속',
                                   _cur['max_wind_ms'] is num ? '${(_cur['max_wind_ms'] as num).round()} m/s' : '-', Colors.deepOrange),
                               _typhoonStat(Icons.speed, '이동 속도',
-                                  _cur['speed_kmh'] is num ? '${(_cur['speed_kmh'] as num).round()} km/h${_cur['direction'] != null ? ' ${_cur['direction']}' : ''}' : '-',
+                                  _cur['speed_kmh'] is num ? '${(_cur['speed_kmh'] as num).round()} km/h${_cur['direction'] != null ? ' ${_dirKo['${_cur['direction']}'] ?? _cur['direction']}' : ''}' : '-',
                                   Colors.indigo),
                               _typhoonStat(Icons.radar, '강풍 반경',
                                   _cur['radius_15ms_km'] is num ? '${(_cur['radius_15ms_km'] as num).round()} km' : '-', Colors.orange),
