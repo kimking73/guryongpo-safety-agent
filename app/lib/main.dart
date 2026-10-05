@@ -866,8 +866,11 @@ class _ShellState extends ConsumerState<Shell> {
 }
 
 class EvacuationAlertDialog extends ConsumerStatefulWidget {
-  const EvacuationAlertDialog({super.key, required this.alert});
+  const EvacuationAlertDialog({super.key, required this.alert, this.onRespond});
   final AlertItem alert;
+
+  /// 시연용: 주면 서버로 보내지 않고 이 함수로 응답을 처리한다 (showEvacuationAlertDemo)
+  final Future<void> Function(String status)? onRespond;
 
   @override
   ConsumerState<EvacuationAlertDialog> createState() =>
@@ -880,6 +883,12 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
   Future<void> _respond(String status) async {
     if (_busy) return;
     setState(() => _busy = true);
+    final demo = widget.onRespond;
+    if (demo != null) {
+      Navigator.of(context).pop();
+      await demo(status);
+      return;
+    }
     final result = await _submitEvacuationResponse(ref, widget.alert, status);
     if (!mounted) return;
     if (result == _ResponseSubmitResult.sent ||
@@ -944,6 +953,34 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
         ),
       );
 }
+
+/// 시연: 실제 대피 확인 경보와 같은 팝업을 띄운다 (2026-10-05 사용자 요청). 응답은 서버로 보내지 않고 기기의
+/// 시연 기록(prototypeSafetyProvider)에만 남는다 — '대피 중'이면 실제처럼 가까운 대피소 경로 안내를 시작한다
+const _demoEvacuationAlert = AlertItem(
+  id: prototypeEvacuationAlertId,
+  title: '[대피 확인] 호우 경보 · 현재 위치 (시연)',
+  level: 'warning',
+  time: '',
+  summary: '구룡포읍행정복지센터 강우량계 시간당 38.5mm · 포항 DT 4단계(경보) (시연 — 실제 경보가 아닙니다). '
+      '지금 계신 곳이 위험 영역 안입니다. 하천·해안가·비탈면 가까이 가지 말고 안전한 실내에 머무르세요. '
+      '대피를 시작하셨으면 \'대피 중\', 대피소에 도착하셨으면 \'대피 완료\', 혼자 움직이기 어려우면 \'도움 필요\'를 눌러 주세요.',
+  guide: '즉시 안전한 실내나 지정 대피소로 이동하고, 물이 고인 도로·해안가·맨홀 주변에 접근하지 마세요.',
+  responseRequired: true,
+);
+
+Future<void> showEvacuationAlertDemo(BuildContext context, WidgetRef ref) => showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => EvacuationAlertDialog(
+        alert: _demoEvacuationAlert,
+        onRespond: (status) async {
+          final s = EvacuationResponseStatusLabel.fromWireValue(status);
+          if (s == null) return;
+          await _recordPrototypeEvacuationResponse(ref, s);
+          _showResponseMessage('시연 응답: ${s.label} (기기에만 기록, 서버로 보내지 않음)');
+        },
+      ),
+    );
 
 class StatusLine extends ConsumerWidget {
   const StatusLine({super.key});
@@ -2115,11 +2152,18 @@ class AlertsScreen extends ConsumerWidget {
           onResponse: (status) =>
               _recordPrototypeEvacuationResponse(ref, status),
         ),
-        OutlinedButton.icon(
-          onPressed: () => c.push('/evacuation'),
-          icon: const Icon(Icons.notifications_active_outlined),
-          label: const Text('3버튼 기기 알림 시연'),
-        ),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          FilledButton.icon(
+            onPressed: () => showEvacuationAlertDemo(c, ref),
+            icon: const Icon(Icons.warning_amber_rounded),
+            label: const Text('대피 경보 팝업 시연'),
+          ),
+          OutlinedButton.icon(
+            onPressed: () => c.push('/evacuation'),
+            icon: const Icon(Icons.notifications_active_outlined),
+            label: const Text('3버튼 기기 알림 시연'),
+          ),
+        ]),
       ],
       if ((!AppConfig.isRemote && s.isLoading) ||
           (AppConfig.isRemote && !feedLoaded && pollError == null))

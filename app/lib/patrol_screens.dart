@@ -1018,6 +1018,8 @@ class SeaRoutePlan {
   /// 해상 구간: 출발 → 접안점. 서버가 준 바닷길(육지·방파제를 돌아가는 꺾은선)이 있으면 그것, 없으면 직선
   List<LatLng> get seaPoints {
     if (berth == null) return const [];
+    // 바닷길을 못 찾았으면 선을 그리지 않는다 — 직선은 육지를 뚫을 수 있다 (방위·거리 글만)
+    if (seaLeg?['path_found'] == false) return const [];
     final p = seaLeg?['path'];
     final path = p is String && p.isNotEmpty ? decodePolyline(p) : <LatLng>[];
     return path.length >= 2 ? path : [origin, berth!];
@@ -1182,7 +1184,7 @@ class _SeaRouteSummary extends StatelessWidget {
                 subtitle: Text([
                   '방위 ${(leg['bearing_deg'] as num?)?.round() ?? '-'}° (진북 기준) · 직선 ${km(leg['straight_m'] ?? leg['distance_m'])}',
                   if (leg['direct'] == false && leg['path_found'] != false) '곶·방파제를 피해 지도의 파란 점선을 따라 돌아 들어가세요',
-                  if (leg['path_found'] == false) '바닷길을 찾지 못해 직선으로 표시했습니다. 해안·방파제에 주의하세요',
+                  if (leg['path_found'] == false) '바닷길을 찾지 못해 지도에 선을 그리지 않았습니다. 방위만 참고하고 해안·방파제에 주의하세요',
                   if ((leg['alternatives'] as List?)?.isNotEmpty ?? false)
                     '다른 항구: ${[for (final a in leg['alternatives'] as List) '${(a as Map)['name']} ${a['bearing_label']} ${km(a['distance_m'])}'].join(', ')}',
                 ].join('\n')))),

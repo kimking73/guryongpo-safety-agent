@@ -83,7 +83,9 @@ flutter run -d chrome --dart-define=APP_MODE=remote
 - `/household/delegate` 대리 등록(방재단만): 동의한 사람·서면/구두 → `POST /api/v1/admin/households`.
 - `/sea-route` 바다 위 대피 경로: 지도에서 바다를 누르면 route 서버 `POST /api/route/sea`(B11) → 해상 구간(파란 점선, 직선 방향)·항구 접안점·
   육상 경로(초록). 풍랑 특보는 대시보드 특보에서 붙인다. B11 판정 세부는 나중에 바뀔 수 있다(응답 형식은 고정).
-- 테스트 `test/c8_test.dart` (10개, 크롬 포함).
+- 시연 모드 → 프로필 "3주차 안전 기능 시연"의 **대피 경보 팝업**(경고 화면 시연 카드에도): 실제 대피 확인 경보와 같은 팝업
+  (`showEvacuationAlertDemo`, main.dart). 응답은 기기의 시연 기록에만 남고 서버로 보내지 않는다. '대피 중'이면 가까운 대피소 경로 안내 시작.
+- 테스트 `test/c8_test.dart` (14개, 크롬 포함).
 
 ## Firebase와 원격 API 설정
 

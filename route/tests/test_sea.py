@@ -171,3 +171,25 @@ def test_real_data_paths_never_cross_land():
         assert best.reachable
         leg = transform(to_m, LineString([(lo, la) for la, lo in best.path]))
         assert leg.intersection(chart._land_m).length < 1.0
+
+
+def test_unreachable_ports_draw_no_line():
+    """영일만 쪽까지 넓은 범위 표본: 가장 좋은 항구는 늘 바닷길이 있고, 바닷길을 못 찾은 항구는 직선(육지를 뚫는 선)
+    대신 선 없이(출발점 하나) 돌려준다 (2026-10-05: 못 찾으면 직선으로 그리던 54구간)"""
+    import random
+    chart = SeaChart.from_files()
+    rng = random.Random(7)
+    checked = 0
+    while checked < 60:
+        lat, lon = rng.uniform(35.92, 36.04), rng.uniform(129.48, 129.60)
+        if not chart.is_at_sea(lat, lon):
+            continue
+        checked += 1
+        ranked = chart.rank_ports(lat, lon)
+        assert ranked[0].reachable, (lat, lon)
+        for c in ranked[:3]:
+            if not c.reachable:
+                assert len(c.path) == 1                              # 못 찾으면 선을 그리지 않는다
+                continue
+            line = LineString([chart._xy(a, b) for a, b in c.path])
+            assert line.intersection(chart._land_m).length < 1, (lat, lon, c.port.name)

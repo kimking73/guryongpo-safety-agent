@@ -80,8 +80,8 @@ class PortChoice:
     distance_m: float                # 바닷길 길이 (육지·방파제를 돌아가는 길), 못 찾으면 직선 거리
     bearing_deg: float               # 출발점 → 접안점 직선 방위
     straight_m: float                # 직선 거리
-    path: tuple[tuple[float, float], ...]  # (lat, lon) 출발점 → 꺾는 점들 → 접안점
-    reachable: bool = True           # False면 바닷길을 못 찾음 (path는 직선)
+    path: tuple[tuple[float, float], ...]  # (lat, lon) 출발점 → 꺾는 점들 → 접안점 (못 찾으면 출발점 하나)
+    reachable: bool = True           # False면 바닷길을 못 찾음
 
     @property
     def direct(self) -> bool:
@@ -168,7 +168,8 @@ class SeaChart:
         for p, path in zip(cands, paths):
             straight = distance_m(here, p.berth)
             if path is None:
-                out.append(PortChoice(p, straight, bearing_deg(here, p.berth), straight, (here, p.berth), reachable=False))
+                # 바닷길을 못 찾으면 직선을 그리지 않는다 (육지를 뚫는 선이 된다) — path는 출발점 하나, 방위만 참고
+                out.append(PortChoice(p, straight, bearing_deg(here, p.berth), straight, (here,), reachable=False))
             else:
                 length = sum(distance_m(a, b) for a, b in zip(path, path[1:]))
                 out.append(PortChoice(p, length, bearing_deg(here, p.berth), straight, tuple(path)))

@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 
+import 'main.dart';
 import 'services/demo_speech.dart';
 import 'services/prototype_safety_store.dart';
 
@@ -45,6 +46,12 @@ class PrototypeFeatureLinks extends ConsumerWidget {
             const Text('대피 확인·접근성·방재단 흐름을 확인합니다.'),
             const SizedBox(height: 10),
             Wrap(spacing: 8, runSpacing: 8, children: [
+              // 실제 대피 확인 경보와 같은 팝업 (응답은 기기에만, 서버로 보내지 않음)
+              FilledButton.icon(
+                onPressed: () => showEvacuationAlertDemo(context, ref),
+                icon: const Icon(Icons.warning_amber_rounded),
+                label: const Text('대피 경보 팝업'),
+              ),
               FilledButton.tonalIcon(
                 onPressed: () => context.push('/evacuation'),
                 icon: const Icon(Icons.campaign_outlined),

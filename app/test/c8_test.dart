@@ -3,7 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:guryongpo_safety/live_screens.dart';
+import 'package:guryongpo_safety/main.dart';
+import 'package:guryongpo_safety/services/prototype_safety_store.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:guryongpo_safety/patrol_screens.dart';
+import 'package:guryongpo_safety/prototype_safety_screens.dart' show prototypeEvacuationAlertId;
 import 'package:guryongpo_safety/services/live_api.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -187,6 +191,9 @@ void main() {
     }, const LatLng(38.5, -120.2));
     expect(plan.seaPoints, hasLength(3)); // 출발 → 꺾는 점 → 접안점
     expect(plan.seaPoints[1], const LatLng(40.7, -120.95));
+    // 바닷길을 못 찾으면 직선(육지를 뚫을 수 있음)을 그리지 않는다
+    final none = SeaRoutePlan({...plan.raw, 'sea_leg': {'path': '_p~iF~ps|U', 'path_found': false}}, const LatLng(38.5, -120.2));
+    expect(none.seaPoints, isEmpty);
   });
 
   test('점선은 짧은 선분 여러 개', () {
@@ -260,6 +267,29 @@ void main() {
     expect(find.textContaining('마지막 방문'), findsOneWidget);
     expect(find.text('대피 완료'), findsWidgets);
     await t.pumpWidget(const SizedBox.shrink()); // 10초 갱신 타이머 정리
+  });
+
+  testWidgets('대피 경보 팝업 시연: 실제와 같은 팝업, 응답은 기기 시연 기록에만 (서버 호출 없음)', (t) async {
+    SharedPreferences.setMockInitialValues({});
+    final store = PrototypeSafetyController();
+    await store.load();
+    final s = FakeServer({});
+    await t.pumpWidget(ProviderScope(
+        overrides: [prototypeSafetyProvider.overrideWith((_) => store), liveApiProvider.overrideWithValue(s.api())],
+        child: MaterialApp(
+            home: Scaffold(
+                body: Consumer(
+                    builder: (c, ref, _) =>
+                        TextButton(onPressed: () => showEvacuationAlertDemo(c, ref), child: const Text('시연')))))));
+    await t.tap(find.text('시연'));
+    await t.pumpAndSettle();
+    expect(find.text('지금 당장 대피해야 합니다'), findsOneWidget);
+    expect(find.textContaining('실제 경보가 아닙니다'), findsOneWidget);
+    await t.tap(find.text('대피 완료'));
+    await t.pumpAndSettle();
+    expect(find.text('지금 당장 대피해야 합니다'), findsNothing);
+    expect(store.responseFor(prototypeEvacuationAlertId), EvacuationResponseStatus.evacuated);
+    expect(s.seen, isEmpty);
   });
 
   testWidgets('민감정보 동의: 두 항목 모두 체크해야 등록 버튼이 켜진다', (t) async {

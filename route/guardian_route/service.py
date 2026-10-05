@@ -113,7 +113,7 @@ class SeaLeg(BaseModel):
     bearing_label: str                                      # 16방위 한글 (예: 북서쪽)
     direct: bool = True                                     # False면 곶·방파제를 돌아 들어가야 함 (path가 꺾임)
     path: str                                               # 바닷길 꺾은선 (인코딩 polyline, geometry와 같은 형식) 출발 → 접안점
-    path_found: bool = True                                 # False면 바닷길을 못 찾아 path가 직선
+    path_found: bool = True                                 # False면 바닷길을 못 찾음 — path는 출발점 하나(선 없음), 방위만 참고
     alternatives: list[SeaAlternative] = Field(default_factory=list)  # 다음으로 가까운 항구 (직선 항로가 열린 곳 우선)
 
 
