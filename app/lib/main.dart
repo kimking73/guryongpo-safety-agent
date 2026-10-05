@@ -641,12 +641,13 @@ final appRouter = GoRouter(
     GoRoute(
         path: '/household/delegate',
         builder: (_, __) => const DemoSwitch(
-            demo: HouseholdRegistrationScreen(delegated: true),
+            demo: DemoPatrolScope(child: LiveDelegatedHouseholdScreen()),
             live: LiveDelegatedHouseholdScreen())),
     GoRoute(
         path: '/responder',
+        // 시연 모드: 실제 방재단 화면 + 앱 안 시연 가구 12곳 (DemoLiveApi)
         builder: (_, __) => const DemoSwitch(
-            demo: ResponderDashboardScreen(), live: LiveResponderScreen())),
+            demo: DemoPatrolScope(child: LiveResponderScreen()), live: LiveResponderScreen())),
     GoRoute(
         path: '/sea-route',
         builder: (_, __) => const DemoSwitch(

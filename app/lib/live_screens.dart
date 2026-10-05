@@ -11,6 +11,7 @@ import 'main.dart';
 import 'origin_picker.dart';
 import 'patrol_screens.dart';
 import 'services/demo_mode.dart';
+import 'services/demo_live_api.dart';
 import 'services/live_api.dart';
 
 /// 실측 데이터 화면 (2026-10-05). 시연 모드를 끄면(기본) 이 화면들이, 켜면 disaster_center.dart·prototype_safety_screens.dart의
@@ -503,6 +504,18 @@ class LiveRecoveryScreen extends ConsumerWidget {
 
 // ------------------------------------------------------------------ 방재단 (실측, 역할 필요) — 화면은 patrol_screens.dart (C8)
 final meProvider = FutureProvider<Map<String, dynamic>>((ref) => ref.watch(liveApiProvider).me());
+
+/// 시연 모드의 방재단 화면: 같은 화면(patrol_screens.dart)을 서버 대신 앱 안 시연 데이터(DemoLiveApi, 가구 12곳)로 (2026-10-05)
+class DemoPatrolScope extends StatelessWidget {
+  const DemoPatrolScope({super.key, required this.child});
+  final Widget child;
+  static final _api = DemoLiveApi();
+  @override
+  Widget build(BuildContext c) => ProviderScope(overrides: [
+        liveApiProvider.overrideWithValue(_api),
+        meProvider.overrideWith((_) => _api.me()),
+      ], child: child);
+}
 
 /// 초대 코드로 방재단·돌봄 역할 받기 (POST /user/role)
 class RoleClaimCard extends ConsumerStatefulWidget {

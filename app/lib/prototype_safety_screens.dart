@@ -65,12 +65,12 @@ class PrototypeFeatureLinks extends ConsumerWidget {
                 icon: const Icon(Icons.sailing_outlined),
                 label: const Text('해상 경로'),
               ),
-              if (controller.hasResponderAccess)
-                FilledButton.icon(
-                  onPressed: () => context.push('/responder'),
-                  icon: const Icon(Icons.groups_outlined),
-                  label: Text('방재단 대시보드 · $role'),
-                ),
+              // 시연 모드의 방재단 대시보드는 시연 가구 12곳으로 바로 열린다 (역할 받기 없이)
+              FilledButton.icon(
+                onPressed: () => context.push('/responder'),
+                icon: const Icon(Icons.groups_outlined),
+                label: Text(controller.hasResponderAccess ? '방재단 대시보드 · $role' : '방재단 대시보드 (시연)'),
+              ),
             ]),
           ],
         ),
