@@ -220,8 +220,8 @@ class PrototypeSafetyController extends ChangeNotifier {
   bool get loaded => _loaded;
   AccessibilitySettings get accessibility => _accessibility;
   String? get demoRole => _demoRole;
-  bool get hasResponderAccess =>
-      const {'responder', 'caregiver', 'admin'}.contains(_demoRole);
+  // 방재단 화면은 방재단·관리자만 (C8, 2026-10-05 — 돌봄 담당 caregiver 제외, 실측 모드 patrolRoles와 같게)
+  bool get hasResponderAccess => const {'responder', 'admin'}.contains(_demoRole);
   Map<String, EvacuationResponseStatus> get responses =>
       Map.unmodifiable(_responses);
   List<DemoHousehold> get households => List.unmodifiable(_households);

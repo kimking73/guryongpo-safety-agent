@@ -26,10 +26,12 @@ Day 1 = 2026-09-23 (Day 10 = 10-02, Day 11 = 10-03).
 | B5 | 11–13 | 의도 검증·다듬기·음성 (STT/TTS, /voice, 지연 측정 → 필요 시 OpenAI Realtime) | B4 | 음성 왕복 동작, 지연 기록 | **진행 중** (2026-10-03: 의도 검증·카드형 다듬기·숫자 재검증·지연 측정·/api/voice·/api/tts·앱 마이크/재생 완료. 음성 대화(실제 Google 왕복·음성 지연 기록)는 사용자 결정으로 나중에 — 코드는 준비됨, 키 없으면 503) |
 | B7 | 11–13 | 경로 가중치·DEM·재계산 (프로필별 가중치, /route/check) | B6, B4 | 프로필별 다른 경로 | **완료** (원본에서 완료 처리, 2026-10-03 확인. 공개DEM 90m, 노약자 경사 기준선 1/18·1/12) |
 | B10 | 11–12 | GCP VM·도메인·HTTPS (Caddy, / → 웹, /api → FastAPI) | B8, B6 | 외부에서 /api/health 접속 | **완료 기준 달성** (2026-10-04: https://34-64-177-195.nip.io/api/health 200, 웹앱 `/` 배포. 남은 것: Firebase 웹 설정·브라우저 확인) |
-| B11 | 15–17 | **추가 2** 해상 → 최근접 항 → 육상 경로 (항구·접안 지점 좌표, 해상 판정(해안선, PostGIS), 최근접 항 거리·방위, 항 → 대피소는 /route, 응답에 해상·육상 구간 구분, 위치·경로 agent 연결) | B7 | 해상 좌표 → 최근접 항 + 항 → 대피소 경로 | 미착수 |
+| B11 | 15–17 | **추가 2** 해상 → 최근접 항 → 육상 경로 (항구·접안 지점 좌표, 해상 판정(해안선, PostGIS), 최근접 항 거리·방위, 항 → 대피소는 /route, 응답에 해상·육상 구간 구분, 위치·경로 agent 연결) | B7 | 해상 좌표 → 최근접 항 + 항 → 대피소 경로 | **1차 구현** (2026-10-05: `POST /api/route/sea`, 항·포구 12곳, OSM 해안선 육지 판정. 사용자: B11 로직은 나중에 다시 수정 — 응답 형식만 고정. 남은 것: 판정 세부 확정, AI 위치·경로 agent 연결) |
 | B12 | 17–18 | **추가 7** 음성 대피 확인 (경고 시 TTS 질문, STT 결과 → A12 상태 3종 분류(핵심 문구 규칙 우선), 불명확하면 재질문, POST /alerts/{id}/response(응답 수단: 음성), 소음 인식률 측정) | B5, A12 | 음성 질문 → "대피 완료" 발화 → 상태 기록이 화면 조작 없이 동작 | 미착수 |
 | B13 | 19–20 | **추가 4** 방문 우선순위 판단 (가구 위험 판정(A4)·주민 상태(A13)·대피 응답(A12) → 규칙 점수식, 가중치 표, 응답 순서 도움 필요 > 미응답 > 이동 중 > 대피 완료, 바뀌면 재계산, 순위 근거 항목별 표시) | A4, A12, A13 | 같은 입력에 같은 순서 + 근거 반환 | 미착수 |
 | B9 | 22–23 | 배포 안정화 (재시작 정책, 헬스체크, API 한도, OpenAI 사용 한도, Uptime check) | A9 | 강제 종료 후 자동 복구 | 미착수 (원본에서 15–16 → 22–23으로 이동) |
+
+| C8 | 19–20 | (C 레인, 사용자 요청으로 B가 진행) 가구 등록·민감정보 동의(별도 화면)·방재단 대시보드(우선순위 명단·지도)·방문 결과 입력·방재단 역할만 진입·해상/육상 구간 표시 | A13, A14, B11, C6 | 방재단 계정에서 명단 확인과 방문 기록 입력이 화면에서 동작 | **구현** (2026-10-05, `app/lib/patrol_screens.dart`, 테스트 10. 로그인 화면 실제 확인은 VM 배포 후 — 로컬에 Firebase admin 키 없음. 완료 처리는 사용자 확인) |
 
 A 작업 중 B와 맞물리는 것: **A7**(Day 3–6, 정적 데이터 적재)에 행동요령 원문 수집 포함 → `action_guides` 테이블, B4의 `get_action_guides`가 사용.
 
@@ -85,6 +87,12 @@ AI = OpenAI gpt-6-luna. 실제 노드 전부 구현(관리자·전문 agent 5종
   (Let's Encrypt). VM `.env`에 `DEPLOY_DOMAIN`·`COMPOSE_PROFILES=deploy`·`CORS_ORIGINS`·`API_INTERNAL_TOKEN`·`KAKAO_REST_KEY`·`DATA_GO_KR_KEY` 추가.
 
 ## 이월 항목 (끝나면 지운다)
+- [ ] **C8 공유·확인 (2026-10-05)**: 김다인에게 `app/lib/patrol_screens.dart`(LiveHouseholdScreen·LiveResponderScreen을 live_screens.dart에서 옮김, 방재단 화면은 responder·admin만 — 시연 store도 caregiver 제외), 조하린에게 `db/init/10_seed_ports.sql`(ports 표, data_sources `ports_b11`)·명세 SeaRoute* 확정.
+      VM 배포 후 실제 로그인으로 방재단 대시보드·방문 기록·가구 등록 화면 확인 (로컬은 secrets/firebase-admin.json 없어 로그인 화면 401).
+      앱 기존 테스트 8개 실패는 C8 전과 같음(disaster_center 2·location 3·remote_mapping 1·route_and_places 2 — 1개는 10분 멈춤) → C 확인 필요.
+      이 맥에 Flutter SDK 설치함(`~/development/flutter`, 3.47.6, PATH 미등록).
+- [ ] **B11 마무리**: 판정 로직은 나중에 다시 수정(사용자 2026-10-05). 후보: 방파제를 육지로 그린 OSM 해안선 때문에 항구가 "막힘"으로 보이는 문제(지금은 거리 + 가로지른 육지×2로 순위),
+      어항 종류 확인(구룡포항만 국가어항 확인), 이름 없는 포구 2곳(석병리 북쪽·흥환리) 이름 확인, 풍랑 특보는 호출 쪽(앱·AI)이 붙임, AI 위치·경로 agent 연결(`request_sea_route`).
 - [ ] **A 레인에 공유**: AI가 risk_assessments·v_latest_observations·weather_warnings·disaster_messages·hazard_zones·shelters·
       medical_facilities·manholes·action_guides·ingest_runs를 읽기 전용으로 직접 읽음 → 컬럼 이름·의미 바꿀 때 B에게 알려 달라.
       `db/init/07_ai_readonly.sh`(B 소유) 추가 사실과 팀원 로컬 DB에 한 번 실행하는 명령도 함께 (README에 적음)
@@ -188,4 +196,5 @@ AI = OpenAI gpt-6-luna. 실제 노드 전부 구현(관리자·전문 agent 5종
 - 2026-10-04 B10(사용자 계획 승인 — nip.io, 웹앱 포함): VM 최신화(35커밋 뒤 → 5295361, DB 백업·loader·재빌드), 카카오·응급실 병상 키 VM 반영(nmc ok), 고정 IP 예약, Caddy·`deploy/deploy.sh`·`push_web.sh` 추가, VM DB 비밀번호 교체·내부 토큰 생성, https://34-64-177-195.nip.io 외부 확인(health 3종 200, 차단 3종 404, http→https, AI 질문 1회), 앱 컴파일 오류 2곳 최소 수정 후 웹 배포(Firebase 웹 설정 없이).
 - 2026-10-04 로그인(사용자 계획 승인 — Google+이메일, 웹·iOS·안드로이드, 앱 ID kr.guryong.guardian): Firebase에 안드로이드·iOS 앱 등록, 사용자가 콘솔에서 Google·이메일 켬, `firebase_options.dart`·`auth_service.dart`(익명 계정에 연결, 서버 등록)·`login_screen.dart`, AI user_id = Firebase uid, server ENSURE_SQL is_anonymous 갱신. 앱 테스트 30 통과·5 실패(이전부터), 웹·iOS 시뮬레이터 빌드 성공, VM deploy·웹 배포, REST로 익명→이메일 연결 uid 유지·is_anonymous false 확인. OSM guryongpo.osm.pbf 커밋(7085b8f).
 - 2026-10-05 앱 정보 계정 동기화(문제 정리 5번, 사용자 결정: 통째 저장 + 판단용 칸): server `user_profiles.app_state` + `GET·PUT /user/app-state`(A 레인 — 조하린 공유), 앱 `account_sync.dart`(PATCH /user·/user/places·app-state). 서버 195 통과, 앱 새 테스트 5, VM 배포·웹 배포, REST로 기기A 익명 저장 → 이메일 연결 → 기기B 로그인 시 프로필·장소·저장본 복원 확인.
+- 2026-10-05 C8(+B11 1차, 사용자 계획 승인): route `POST /api/route/sea`(sea.py — OSM 해안선 육지 다각형, 카카오·OSM으로 확인한 항·포구 12곳, 직선 거리·16방위, 목적지 생략 시 갈 만한 대피소, 경로 엔진 장애 시 해상 안내 유지), DB ports 시드, 명세 갱신 — route 54 통과(새 10). 사용자: B11 로직은 나중에 다시 바뀜 → AI 연결 보류. 앱 `patrol_screens.dart`: 가구 등록 + 별도 민감정보 동의 화면, 방재단 대시보드(responder·admin만, 우선순위 명단·지도·10초 갱신·방문 결과·맡기), 대리 등록, 바다 위 대피 경로. 메모 대화상자 컨트롤러 조기 해제 버그 수정. 앱 테스트 71 통과(새 10, 크롬 통과) · 기존 실패 8개 변화 없음. 로컬 API로 명단→맡기→방문 기록→대피 완료, 등록·동의·철회, 대리 등록 확인. 웹에서 해상 경로 화면 확인.
 - 2026-10-05 실측 데이터화(사용자 계획 승인 — 자료 없음 표시, 시연 모드 스위치, 서버·앱 모두 내가): ① A 버그 hazards AWS id `816`→`aws_816`(호우·강풍 실측 판정이 처음부터 안 돌던 것, 850fadd) ② server `/dashboard` 실데이터(`app/widgets.py`)·`/support-programs`(817d89f) ③ 앱 `live_screens.dart`(실측 상황판·태풍·복구·방재단·가구 등록)·`demo_mode.dart`(ca54a5a). VM 배포·웹 배포. 실제 태풍 초이완(2627) 경로·예측 표시 확인. **조하린·김다인 공유 필요**.

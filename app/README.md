@@ -67,6 +67,19 @@ flutter run -d chrome --dart-define=APP_MODE=remote
   기기마다 저장(`demo_mode`), `lib/services/demo_mode.dart`의 `showDemoProvider`. `APP_MODE=mock`이면 늘 가상 화면.
 - 실제 재난 흐름을 시연할 때는 가상 화면 대신 서버 `/api/v1/internal/simulate`(시연용 모의 관측값 → 실제 판정·경고·화면)를 권장.
 
+## C8 가구 등록·방재단·해상 경로 (실측, 2026-10-05, `lib/patrol_screens.dart`)
+
+- `/household` 내 가구 등록: 입력 → **별도 화면 민감정보 동의**(`SensitiveConsentScreen`, 수집 항목·목적·받는 사람·보관·거부 권리, 동의서 v1,
+  필수 2항목) → `PUT /api/v1/user/household`(`consent: true`). 저장할 때마다 동의를 다시 받는다. 철회 = `DELETE`(바로 삭제).
+- `/responder` 방재단 대시보드: **방재단·관리자만**(`patrolRoles` = responder·admin, 돌봄 담당 caregiver 제외 — 서버는 caregiver도 허용).
+  역할이 없으면 초대 코드 입력. 진행 중 대피 상황의 대상 가구를 서버 `priority_rank` 순서로(근거 `priority_reasons`, B13 전에는 비어 있어
+  "상태 우선 · 도움 필요한 점 n개"로 표시), 지도에 번호(순위)·색(상태)·대피 영역, `next_poll_sec`(10초)마다 새로고침.
+  "방문 결과" → 6종 + 메모 → `POST .../targets/{id}/visits`, "내가 맡기" → `PATCH`. 대피 상황이 없으면 등록 가구 지도·목록.
+- `/household/delegate` 대리 등록(방재단만): 동의한 사람·서면/구두 → `POST /api/v1/admin/households`.
+- `/sea-route` 바다 위 대피 경로: 지도에서 바다를 누르면 route 서버 `POST /api/route/sea`(B11) → 해상 구간(파란 점선, 직선 방향)·항구 접안점·
+  육상 경로(초록). 풍랑 특보는 대시보드 특보에서 붙인다. B11 판정 세부는 나중에 바뀔 수 있다(응답 형식은 고정).
+- 테스트 `test/c8_test.dart` (10개, 크롬 포함).
+
 ## Firebase와 원격 API 설정
 
 ### 로그인 (Google · 이메일/비밀번호, 2026-10-04)

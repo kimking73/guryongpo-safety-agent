@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'disaster_center.dart';
 import 'main.dart';
 import 'origin_picker.dart';
+import 'patrol_screens.dart';
 import 'services/demo_mode.dart';
 import 'services/live_api.dart';
 
@@ -39,7 +40,7 @@ class DemoOnlyNotice extends ConsumerWidget {
   @override
   Widget build(BuildContext c, WidgetRef ref) => ref.watch(showDemoProvider)
       ? demo
-      : _Page(title: title, children: [
+      : LivePage(title: title, children: [
           const Card(
               child: ListTile(
                   leading: Icon(Icons.science_outlined),
@@ -83,8 +84,8 @@ String windFrom(Object? deg) => deg is num ? '${_dirs[((deg % 360) / 22.5).round
 
 bool _available(Map<String, dynamic>? d) => d != null && d['available'] != false;
 
-class _Page extends StatelessWidget {
-  const _Page({required this.title, required this.children, this.onRefresh});
+class LivePage extends StatelessWidget {
+  const LivePage({super.key, required this.title, required this.children, this.onRefresh});
   final String title;
   final List<Widget> children;
   final Future<void> Function()? onRefresh;
@@ -449,7 +450,7 @@ class LiveRecoveryScreen extends ConsumerWidget {
       ref.invalidate(hotlinesProvider);
     }
 
-    return _Page(title: '복구 지원', onRefresh: refresh, children: [
+    return LivePage(title: '복구 지원', onRefresh: refresh, children: [
       const Text('재난 뒤 신청할 수 있는 지원 제도와 연락처입니다. 실제 대상·기간은 담당 기관에 확인하세요.'),
       const SizedBox(height: 8),
       ...programs.when(
@@ -500,97 +501,8 @@ class LiveRecoveryScreen extends ConsumerWidget {
   }
 }
 
-// ------------------------------------------------------------------ 방재단 (실측, 역할 필요)
+// ------------------------------------------------------------------ 방재단 (실측, 역할 필요) — 화면은 patrol_screens.dart (C8)
 final meProvider = FutureProvider<Map<String, dynamic>>((ref) => ref.watch(liveApiProvider).me());
-
-class LiveResponderScreen extends ConsumerStatefulWidget {
-  const LiveResponderScreen({super.key});
-  @override
-  ConsumerState<LiveResponderScreen> createState() => _LiveResponderScreenState();
-}
-
-class _LiveResponderScreenState extends ConsumerState<LiveResponderScreen> {
-  Future<(Map<String, dynamic>, List<Map<String, dynamic>>, List<Map<String, dynamic>>)>? data;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<(Map<String, dynamic>, List<Map<String, dynamic>>, List<Map<String, dynamic>>)> _fetch() async {
-    final api = ref.read(liveApiProvider);
-    return (await api.adminOverview(), await api.adminIncidents(), await api.adminHouseholds());
-  }
-
-  void _load() => setState(() => data = _fetch());
-
-  @override
-  Widget build(BuildContext c) {
-    final role = '${ref.watch(meProvider).valueOrNull?['role'] ?? 'resident'}';
-    final staff = const {'responder', 'caregiver', 'admin'}.contains(role);
-    if (!staff) {
-      return _Page(title: '방재단 대시보드', children: const [
-        Card(
-            child: ListTile(
-                leading: Icon(Icons.lock_outline),
-                title: Text('방재단 역할이 필요합니다'),
-                subtitle: Text('방재단·돌봄 담당자는 받은 초대 코드로 역할을 등록하세요.'))),
-        RoleClaimCard(),
-      ]);
-    }
-    return FutureBuilder(
-        future: data,
-        builder: (c, snap) {
-          if (snap.hasError) return LoadError(message: liveError(snap.error!), onRetry: _load);
-          if (!snap.hasData) return const DashboardLoading();
-          final (ov, incidents, households) = snap.data!;
-          final needs = Map<String, dynamic>.from(ov['needs_counts'] as Map? ?? const {});
-          return _Page(title: '방재단 대시보드', onRefresh: () async => _load(), children: [
-            Text('역할: $role · 실시간 대피 현황'),
-            const SizedBox(height: 8),
-            Wrap(spacing: 8, runSpacing: 8, children: [
-              Chip(label: Text('취약 가구 ${ov['households_total'] ?? households.length}')),
-              Chip(label: Text('앱 사용 ${ov['with_app'] ?? '-'}')),
-              for (final e in needs.entries) Chip(label: Text('${_need[e.key] ?? e.key} ${e.value}')),
-            ]),
-            const SizedBox(height: 10),
-            const Text('진행 중인 대피 상황', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            if (incidents.isEmpty) const Card(child: ListTile(title: Text('진행 중인 대피 상황이 없습니다'))),
-            for (final i in incidents)
-              Card(
-                  child: ListTile(
-                      leading: CircleAvatar(backgroundColor: levelColor(i['level'] as String?), child: const Icon(Icons.campaign, color: Colors.white)),
-                      title: Text('${i['title']}'),
-                      subtitle: Text(_summary(Map<String, dynamic>.from(i['summary'] as Map? ?? const {})) + ' · ${hhmm(i['started_at'])} 시작'))),
-            const SizedBox(height: 10),
-            const Text('취약 가구', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            if (households.isEmpty) const Card(child: ListTile(title: Text('등록된 취약 가구가 없습니다'))),
-            for (final h in households)
-              Card(
-                  child: ListTile(
-                      leading: const Icon(Icons.home_outlined),
-                      title: Text('${h['label']}'),
-                      subtitle: Text([
-                        if (h['address'] != null) '${h['address']}',
-                        [for (final n in h['needs'] as List? ?? const []) _need[n] ?? n].join(', '),
-                        if (h['landslide_zone'] != null) '⚠ ${h['landslide_zone']}',
-                      ].where((x) => '$x'.isNotEmpty).join(' · ')),
-                      trailing: h['phone'] != null
-                          ? IconButton(icon: const Icon(Icons.phone), onPressed: () => launchUrl(Uri.parse('tel:${h['phone']}')))
-                          : null)),
-          ]);
-        });
-  }
-
-  static String _summary(Map<String, dynamic> s) =>
-      '대상 ${s['total'] ?? 0} · 대피 완료 ${s['evacuated'] ?? 0} · 대피 중 ${s['evacuating'] ?? 0} · 도움 필요 ${s['need_help'] ?? 0} · 무응답 ${s['no_response'] ?? 0}';
-}
-
-const _need = {
-  'elderly': '고령', 'living_alone': '독거', 'mobility_limited': '거동 불편', 'wheelchair': '휠체어', 'bedridden': '와상',
-  'hearing': '청각', 'vision': '시각', 'cognitive': '인지', 'medical_device': '의료기기', 'infant': '영유아', 'pet': '반려동물',
-};
 
 /// 초대 코드로 방재단·돌봄 역할 받기 (POST /user/role)
 class RoleClaimCard extends ConsumerStatefulWidget {
@@ -635,134 +547,6 @@ class _RoleClaimCardState extends ConsumerState<RoleClaimCard> {
           ])));
 }
 
-// ------------------------------------------------------------------ 내 취약 가구 등록 (실측)
-class LiveHouseholdScreen extends ConsumerStatefulWidget {
-  const LiveHouseholdScreen({super.key});
-  @override
-  ConsumerState<LiveHouseholdScreen> createState() => _LiveHouseholdScreenState();
-}
-
-class _LiveHouseholdScreenState extends ConsumerState<LiveHouseholdScreen> {
-  final label = TextEditingController(), phone = TextEditingController(), note = TextEditingController();
-  final needs = <String>{};
-  int members = 1;
-  bool consent = false, busy = false, loaded = false, registered = false;
-  String? message;
-
-  @override
-  void initState() {
-    super.initState();
-    ref.read(liveApiProvider).myHousehold().then((h) {
-      if (!mounted) return;
-      setState(() {
-        loaded = true;
-        if (h == null) return;
-        registered = true;
-        label.text = '${h['label'] ?? ''}';
-        phone.text = '${h['phone'] ?? ''}';
-        note.text = '${h['note'] ?? ''}';
-        members = (h['members'] as num?)?.toInt() ?? 1;
-        needs.addAll([for (final n in h['needs'] as List? ?? const []) '$n']);
-        consent = true;
-      });
-    }).catchError((Object e) {
-      if (mounted) {
-        setState(() {
-          loaded = true;
-          message = liveError(e);
-        });
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    label.dispose();
-    phone.dispose();
-    note.dispose();
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    final here = ref.read(userLocation);
-    setState(() => busy = true);
-    try {
-      await ref.read(liveApiProvider).saveHousehold({
-        if (label.text.trim().isNotEmpty) 'label': label.text.trim(),
-        'location': {'lat': here.position.latitude, 'lng': here.position.longitude},
-        if (phone.text.trim().isNotEmpty) 'phone': phone.text.trim(),
-        'members': members,
-        'needs': needs.toList(),
-        if (note.text.trim().isNotEmpty) 'note': note.text.trim(),
-        'consent': true,
-      });
-      setState(() {
-        registered = true;
-        message = '등록했습니다. 대피 상황 때 방재단이 이 정보로 먼저 확인합니다.';
-      });
-    } catch (e) {
-      setState(() => message = liveError(e));
-    } finally {
-      if (mounted) setState(() => busy = false);
-    }
-  }
-
-  Future<void> _withdraw() async {
-    setState(() => busy = true);
-    try {
-      await ref.read(liveApiProvider).deleteHousehold();
-      setState(() {
-        registered = false;
-        consent = false;
-        message = '동의를 철회하고 가구 정보를 지웠습니다.';
-      });
-    } catch (e) {
-      setState(() => message = liveError(e));
-    } finally {
-      if (mounted) setState(() => busy = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext c) {
-    final here = ref.watch(userLocation);
-    return _Page(title: '내 가구 등록 (취약 가구)', children: [
-      const Text('고령·거동 불편 등으로 대피에 도움이 필요하면 등록하세요. 대피 상황 때 구룡포 자율방재단이 먼저 확인합니다.'),
-      if (!loaded) const LinearProgressIndicator(),
-      const SizedBox(height: 8),
-      TextField(controller: label, decoration: const InputDecoration(labelText: '이름 또는 호칭 (예: 김○○ 댁)', border: OutlineInputBorder())),
-      const SizedBox(height: 8),
-      TextField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: '연락처', border: OutlineInputBorder())),
-      const SizedBox(height: 8),
-      Row(children: [
-        const Text('함께 사는 사람 수'),
-        IconButton(onPressed: members > 1 ? () => setState(() => members--) : null, icon: const Icon(Icons.remove)),
-        Text('$members명'),
-        IconButton(onPressed: () => setState(() => members++), icon: const Icon(Icons.add)),
-      ]),
-      Wrap(spacing: 6, runSpacing: 6, children: [
-        for (final e in _need.entries)
-          FilterChip(
-              label: Text(e.value),
-              selected: needs.contains(e.key),
-              onSelected: (on) => setState(() => on ? needs.add(e.key) : needs.remove(e.key))),
-      ]),
-      const SizedBox(height: 8),
-      TextField(controller: note, maxLength: 300, decoration: const InputDecoration(labelText: '방재단이 알아야 할 점 (선택)', border: OutlineInputBorder())),
-      Text('위치: ${here.fromGps ? '현재 위치' : '구룡포 기본 위치'} (${here.position.latitude.toStringAsFixed(4)}, ${here.position.longitude.toStringAsFixed(4)})',
-          style: Theme.of(c).textTheme.bodySmall),
-      CheckboxListTile(
-          value: consent,
-          onChanged: (v) => setState(() => consent = v ?? false),
-          title: const Text('민감정보(건강·거동) 수집과 방재단 제공에 동의합니다'),
-          subtitle: const Text('언제든 철회할 수 있고, 철회하면 바로 지웁니다.')),
-      FilledButton(onPressed: busy || !consent ? null : _save, child: Text(registered ? '수정 저장' : '등록')),
-      if (registered) TextButton(onPressed: busy ? null : _withdraw, child: const Text('동의 철회·삭제')),
-      if (message != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(message!)),
-    ]);
-  }
-}
-
 /// 프로필의 기능 바로가기 (실측 모드): 실제 서버 기능만
 class LiveFeatureLinks extends ConsumerWidget {
   const LiveFeatureLinks({super.key});
@@ -783,9 +567,12 @@ class LiveFeatureLinks extends ConsumerWidget {
                 FilledButton.tonalIcon(
                     onPressed: () => c.push('/household'), icon: const Icon(Icons.home_work_outlined), label: const Text('내 가구 등록')),
                 FilledButton.tonalIcon(
+                    onPressed: () => c.push('/sea-route'), icon: const Icon(Icons.sailing_outlined), label: const Text('바다 위 대피 경로')),
+                // 방재단 화면은 방재단·관리자만 (C8, 2026-10-05). 그 외에는 초대 코드 입력으로
+                FilledButton.tonalIcon(
                     onPressed: () => c.push('/responder'),
-                    icon: const Icon(Icons.groups_outlined),
-                    label: Text(const {'responder', 'caregiver', 'admin'}.contains(role) ? '방재단 대시보드 · $role' : '방재단 (초대 코드)')),
+                    icon: Icon(isPatrolRole(role) ? Icons.groups_outlined : Icons.key_outlined),
+                    label: Text(isPatrolRole(role) ? '방재단 대시보드 · ${roleKo[role] ?? role}' : '방재단 (초대 코드)')),
               ]),
             ])));
   }

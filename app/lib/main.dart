@@ -18,6 +18,7 @@ import 'services/demo_speech.dart';
 import 'dashboard_parts.dart';
 import 'disaster_center.dart';
 import 'live_screens.dart';
+import 'patrol_screens.dart';
 import 'origin_picker.dart';
 import 'custom_route.dart';
 import 'login_screen.dart';
@@ -631,15 +632,15 @@ final appRouter = GoRouter(initialLocation: '/boot', routes: [
         path: '/household/delegate',
         builder: (_, __) => const DemoSwitch(
             demo: HouseholdRegistrationScreen(delegated: true),
-            live: LiveResponderScreen())),
+            live: LiveDelegatedHouseholdScreen())),
     GoRoute(
         path: '/responder',
         builder: (_, __) => const DemoSwitch(
             demo: ResponderDashboardScreen(), live: LiveResponderScreen())),
     GoRoute(
         path: '/sea-route',
-        builder: (_, __) => const DemoOnlyNotice(
-            title: '해상 경로 데모', demo: SeaRouteDemoScreen())),
+        builder: (_, __) => const DemoSwitch(
+            demo: SeaRouteDemoScreen(), live: LiveSeaRouteScreen())),
   ]),
   GoRoute(
       path: '/facility/:id',

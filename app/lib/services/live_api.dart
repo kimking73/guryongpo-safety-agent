@@ -4,8 +4,15 @@ import 'auth_service.dart';
 
 /// 실측 화면용 서버 호출 (2026-10-05). 응답은 명세(server/spec/openapi.yaml) 그대로 Map으로 쓴다.
 class LiveApi {
-  LiveApi({Dio? api}) : _api = api ?? ApiClient(AuthService()).api;
-  final Dio _api;
+  LiveApi({Dio? api, Dio? route}) {
+    final client = api == null || route == null ? ApiClient(AuthService()) : null;
+    _api = api ?? client!.api;
+    _route = route ?? client!.route;
+  }
+  late final Dio _api, _route;
+
+  Future<Map<String, dynamic>> _send(Future<Response<Map<String, dynamic>>> call) async =>
+      Map<String, dynamic>.from((await call).data ?? const {});
 
   Future<Map<String, dynamic>> _get(String path, [Map<String, dynamic>? q]) async =>
       Map<String, dynamic>.from((await _api.get<Map<String, dynamic>>(path, queryParameters: q)).data ?? const {});
@@ -34,6 +41,28 @@ class LiveApi {
   Future<List<Map<String, dynamic>>> adminHouseholds() => _list('/api/v1/admin/households');
   Future<List<Map<String, dynamic>>> adminIncidents() => _list('/api/v1/admin/incidents');
 
+  /// 대피 상황 상세: 대상 가구(targets: priority_rank·priority_reasons·status·last_visit), 영역(area), next_poll_sec
+  Future<Map<String, dynamic>> incident(String id) => _get('/api/v1/admin/incidents/$id');
+
+  /// 대상 상태·담당 바꾸기 (assigned_to: "me" | null, status: evacuated|evacuating|need_help)
+  Future<Map<String, dynamic>> patchTarget(String incidentId, String targetId, Map<String, dynamic> body) =>
+      _send(_api.patch<Map<String, dynamic>>('/api/v1/admin/incidents/$incidentId/targets/$targetId', data: body));
+
+  /// 방문 결과 기록 (result: evacuated_with_help|already_evacuated|transported|refused|not_home|other, note?)
+  Future<Map<String, dynamic>> recordVisit(String incidentId, String targetId, Map<String, dynamic> body) =>
+      _send(_api.post<Map<String, dynamic>>('/api/v1/admin/incidents/$incidentId/targets/$targetId/visits', data: body));
+
+  /// 방재단 대리 등록 (consent_method: written|verbal, consent_by 필수)
+  Future<Map<String, dynamic>> createHousehold(Map<String, dynamic> body) =>
+      _send(_api.post<Map<String, dynamic>>('/api/v1/admin/households', data: body));
+
+  // ---- 해상 → 최근접 항 → 육상 경로 (B11, route 서버, 좌표 키 lat·lon) ----
+  Future<Map<String, dynamic>> seaRoute(double lat, double lon, {String profile = 'adult'}) =>
+      _send(_route.post<Map<String, dynamic>>('/api/route/sea', data: {
+        'origin': {'lat': lat, 'lon': lon},
+        'profile': profile,
+      }));
+
   // ---- 내 취약 가구 등록 (동의 필수) ----
   Future<Map<String, dynamic>?> myHousehold() async {
     try {
@@ -44,8 +73,8 @@ class LiveApi {
     }
   }
 
-  Future<Map<String, dynamic>> saveHousehold(Map<String, dynamic> body) async => Map<String, dynamic>.from(
-      (await _api.put<Map<String, dynamic>>('/api/v1/user/household', data: body)).data ?? const {});
+  Future<Map<String, dynamic>> saveHousehold(Map<String, dynamic> body) =>
+      _send(_api.put<Map<String, dynamic>>('/api/v1/user/household', data: body));
   Future<void> deleteHousehold() => _api.delete<Object?>('/api/v1/user/household');
 }
 
@@ -54,7 +83,8 @@ String liveError(Object e) {
   if (e is DioException) {
     final code = e.response?.statusCode;
     final data = e.response?.data;
-    final msg = data is Map ? data['message'] as String? : null;
+    // api 서버: {code, message, detail} / route 서버(FastAPI): {detail: "문장"}
+    final msg = data is Map ? (data['message'] ?? (data['detail'] is String ? data['detail'] : null)) as String? : null;
     if (msg != null && msg.isNotEmpty) return msg;
     if (code == 401) return '로그인 정보를 확인하지 못했습니다. 앱을 다시 열어 주세요.';
     if (code == 403) return '권한이 없습니다.';
