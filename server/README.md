@@ -39,6 +39,7 @@ server/
   spec/openapi.yaml    API 명세 v0.3 — api·ai·route 3개 서비스 규약 (https://editor.swagger.io 에 붙여넣으면 문서)
   mock/                목업 응답 JSON · mock/external = 원천 API 저장 원문 (replay·테스트용)
   docs/spec-v0.3.md    v0.3 데이터 구조·통신 규약 (역할·취약 가구·대피 확인·방재단, 2026-10-03 확정 사항)
+  docs/a11-deploy-demo.md  배포 체크리스트(A 레인 키·외부 등록)·실기기 푸시 확인·시연 순서·로컬 대체 실행·VM 정리 (A11)
   docs/spec.md         1주차 DB 스키마·API 명세·데이터 연동 상세 (ERD: ../db/erd.png)
   tools/               개발 스크립트 (API 일괄 호출, 시드 SQL 생성, 목업 검증) — tools/README.md
   data/                산사태 취약지역 CSV 원본 (공공데이터포털)
@@ -209,6 +210,8 @@ DATABASE_URL=postgresql://guardian:guardian-local-only@localhost:5433/guardian .
 - 시연용 가상 가구: `/internal/simulate` `demo_households` (5곳, "[시연] …", 침수 경보 영역 2곳·산사태 1등급 비탈 1곳) / `demo_households_clear`. `clear` 는 가구를 지우지 않음
 
 ### 시연 시나리오
+
+시연 전체 순서는 `server/tools/demo.py` (status · prepare · flood · walkthrough · reset) — 사용법은 `docs/a11-deploy-demo.md`.
 
 ```bash
 T=$(grep '^API_INTERNAL_TOKEN=' .env | cut -d= -f2)      # dev 모드에서 비워 두면 헤더 없이도 됨
