@@ -157,6 +157,18 @@ def test_health_fields_go_to_care(client, fake_db):
     assert "blood_type" not in profile and "medical_note" not in profile and "birth_year" in profile
 
 
+def test_demo_households_list_public(client, fake_db):
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone(timedelta(hours=9)))
+    fake_db.rows["FROM care.households h"] = [{
+        "id": "e7f8a9b0-c1d2-4e3f-9a4b-5c6d7e8f9a0b", "label": "[시연] 수협 뒤 독거 어르신 댁", "address": "구룡포읍 (시연용 가상 주소)",
+        "lat": 35.989, "lng": 129.556, "phone": None, "members": 1, "needs": ["elderly", "living_alone"], "linked_user_id": None,
+        "caregiver_user_id": None, "source": "responder", "consent_at": now, "consent_method": "written",
+        "consent_by": "시연용 가상 데이터", "consent_version": "v1", "note": None, "active": True, "updated_at": now}]
+    r = client.get("/api/v1/demo/households")                       # 역할·로그인 없이
+    assert r.status_code == 200 and r.json()[0]["label"].startswith("[시연] ")
+
+
 def test_demo_households_scenario(client, fake_db):
     r = client.post("/api/v1/internal/simulate", json={"scenario": "demo_households"})
     from risk.simulate import DEMO_HOUSEHOLDS

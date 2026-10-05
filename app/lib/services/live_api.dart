@@ -40,6 +40,8 @@ class LiveApi {
   Future<Map<String, dynamic>> adminOverview() => _get('/api/v1/admin/overview');
   Future<List<Map<String, dynamic>>> adminHouseholds() => _list('/api/v1/admin/households');
   Future<List<Map<String, dynamic>>> adminIncidents() => _list('/api/v1/admin/incidents');
+  /// 시연용 가상 가구 (서버 DB의 '[시연] …', 역할 없이 조회) — 시연 모드 방재단 화면
+  Future<List<Map<String, dynamic>>> demoHouseholds() => _list('/api/v1/demo/households');
 
   /// 대피 상황 상세: 대상 가구(targets: priority_rank·priority_reasons·status·last_visit), 영역(area), next_poll_sec
   Future<Map<String, dynamic>> incident(String id) => _get('/api/v1/admin/incidents/$id');

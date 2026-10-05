@@ -85,6 +85,13 @@ def list_households(caregiver: Optional[str], q: Optional[str] = None, needs: Op
     return [household_out(r) for r in db.fetch_all(HOUSEHOLD_SQL.format(where=" AND ".join(where)), p)]
 
 
+def list_demo() -> list[dict]:
+    """시연용 가상 가구만 (표시명이 DEMO_PREFIX 로 시작, /internal/simulate demo_households) — 앱 시연 모드의 방재단 화면용.
+    실제 개인정보가 아니라서 방재단 역할 없이도 본다 (2026-10-05)"""
+    return [household_out(r) for r in db.fetch_all(
+        HOUSEHOLD_SQL.format(where="h.active AND h.label LIKE %(p)s"), {"p": DEMO_PREFIX + "%"})]
+
+
 def get(household_id: str, caregiver: Optional[str] = None) -> dict:
     r = db.fetch_one(HOUSEHOLD_SQL.format(where=f"h.id = %(hid)s AND {VISIBLE}"), {"hid": household_id, "cg": caregiver})
     if not r:

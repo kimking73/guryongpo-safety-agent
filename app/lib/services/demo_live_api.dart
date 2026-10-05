@@ -1,9 +1,8 @@
 import 'live_api.dart';
 
-/// 시연 모드용 방재단 데이터 (2026-10-05). 서버·DB에는 넣지 않고 앱 안에서만 쓴다.
-/// 시연 모드에서 방재단 화면(patrol_screens.dart, C8)이 [LiveApi] 대신 이 클래스를 써서
-/// 구룡포 취약 가구 12곳을 보여 준다. 대피 상황은 없다(우선순위 명단은 실측 모드에서 실제 대피 상황으로).
-/// 이름·주소·전화는 모두 가상이다 (실존 인물·주소 아님).
+/// 시연 모드용 방재단 데이터 (2026-10-05). 시연 모드에서 방재단 화면(patrol_screens.dart, C8)이 [LiveApi] 대신 이 클래스를 쓴다.
+/// 가구 목록: 서버 DB의 시연 가구(GET /api/v1/demo/households — '/internal/simulate demo_households'가 넣은 '[시연] …' 14곳)를
+/// 먼저 쓰고, 서버에 없거나 연결이 안 되면 아래 앱 안 12곳. 대피 상황은 없다. 이름·주소·전화는 모두 가상이다.
 class DemoLiveApi extends LiveApi {
   DemoLiveApi();
 
@@ -63,22 +62,32 @@ class DemoLiveApi extends LiveApi {
   @override
   Future<List<Map<String, dynamic>>> adminIncidents() async => const [];
 
+  /// 시연 모드에서 대리 등록한 가구 (앱을 끄면 사라짐)
+  static final _added = <Map<String, dynamic>>[];
+
   @override
-  Future<List<Map<String, dynamic>>> adminHouseholds() async => [for (final h in _households) Map<String, dynamic>.from(h)];
+  Future<List<Map<String, dynamic>>> adminHouseholds() async {
+    try {
+      final server = await demoHouseholds();
+      if (server.isNotEmpty) return [...server, for (final h in _added) Map<String, dynamic>.from(h)];
+    } catch (_) {}
+    return [for (final h in [..._households, ..._added]) Map<String, dynamic>.from(h)];
+  }
 
   @override
   Future<Map<String, dynamic>> adminOverview() async {
+    final all = await adminHouseholds();
     final counts = <String, int>{};
-    for (final h in _households) {
+    for (final h in all) {
       for (final n in h['needs'] as List) {
         counts['$n'] = (counts['$n'] ?? 0) + 1;
       }
     }
     return {
       'role': 'responder',
-      'households_total': _households.length,
+      'households_total': all.length,
       'needs_counts': counts,
-      'with_app': _households.where((h) => h['has_app'] == true).length,
+      'with_app': all.where((h) => h['has_app'] == true).length,
       'active_incidents': const [],
       'server_time': DateTime.now().toIso8601String(),
     };
@@ -94,7 +103,7 @@ class DemoLiveApi extends LiveApi {
           note: body['note'] as String?),
       if (body['phone'] != null) 'phone': body['phone'],
     };
-    _households.add(h);
+    _added.add(h);
     return Map<String, dynamic>.from(h);
   }
 

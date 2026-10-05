@@ -69,6 +69,12 @@ def get_support_programs(hazard: Optional[Hazard] = None):
             for r in db.fetch_all(SUPPORT_SQL, {"h": hazard})]
 
 
+@router.get("/demo/households", summary="시연용 가상 취약 가구 (앱 시연 모드 방재단 화면, 실제 개인정보 아님)")
+def get_demo_households():
+    from .. import households
+    return households.list_demo()
+
+
 @router.get("/hotlines", summary="긴급 전화 목록 (실데이터)")
 def get_hotlines(hazard: Optional[Hazard] = None):
     return [{**r, "hazards": list(r["hazards"] or []), "targets": list(r["targets"] or [])}
