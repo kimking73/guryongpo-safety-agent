@@ -42,7 +42,14 @@ SHORE_TOLERANCE_M = 30.0
 # 해상 구간 길찾기 (사용자 요청 2026-10-05: 방파제를 가로지르지 않게). 육지·방파제(land.geojson)에서 CLEARANCE_M 떨어진
 # 바다 칸만 지나는 격자 최단 경로를 구한 뒤, 직선으로 이어도 육지를 안 지나는 점들은 하나로 펴서 꺾는 점만 남긴다.
 CELL_M = 25.0                # 격자 칸 크기
-CLEARANCE_M = 15.0           # 배가 육지·방파제와 떨어지는 거리 (격자 칸 기준)
+CLEARANCE_M = 15.0           # 배가 육지·방파제와 떨어지는 거리 (격자 칸 기준) — 이보다 가까운 칸은 비싸게(NEAR_COST)
+# 2026-10-05 수정: 해안선 가까운 칸을 아예 막으면 방파제 안쪽 접안점 근처에 칸이 없어, 가장 가까운 칸이 방파제 바깥이 되고
+# 그 칸과 접안점을 잇는 끝 구간이 육지를 가로질렀다(무작위 400곳 중 127곳). 그래서
+#   - 육지만 아니면 칸으로 쓰되, 해안 가까운 칸으로의 이동은 실제 선분이 육지와 안 겹칠 때만 허용하고 비용을 높인다
+#   - 출발점·접안점은 '육지를 안 지나고 바로 닿는' 가장 가까운 칸에 붙인다
+SAFE_M = CELL_M * math.sqrt(2) / 2 + 1.0  # 두 끝 칸이 모두 이보다 멀면 그 사이 선분은 육지를 지날 수 없다 (검사 생략)
+NEAR_COST = 3.0              # 해안 CLEARANCE_M 안 칸으로 가는 비용 배수 (먼바다를 우선)
+SNAP_CANDIDATES = 400        # 출발점·접안점에 붙일 칸을 찾을 때 가까운 순으로 볼 칸 수
 LOS_CLEARANCE_M = 8.0        # 펴기(직선 연결)할 때 지켜야 할 거리. 출발점·접안점과 잇는 선분은 육지만 안 지나면 된다
 SEARCH_MARGIN_M = 1500.0     # 출발점·항구를 둘러싼 이 여백 안에서만 찾는다 (곶을 돌아가는 길까지 들어가게)
 CANDIDATE_PORTS = 5          # 직선 거리로 가까운 이 수의 항구만 실제 길이를 잰다
@@ -121,9 +128,10 @@ class SeaChart:
         self._kx = 111_320 * math.cos(math.radians((self.bounds[1] + self.bounds[3]) / 2))
         land_m = transform(lambda x, y, z=None: (x * self._kx, y * 111_320), land)
         self._land_m = land_m
-        self._blocked = land_m.buffer(CLEARANCE_M)
+        self._blocked = land_m.buffer(CLEARANCE_M)   # 이 안 칸은 비싸게
+        self._safe = land_m.buffer(SAFE_M)           # 이 밖 칸끼리 이동은 검사 없이 안전
         self._los = land_m.buffer(LOS_CLEARANCE_M)
-        for g in (self._land_m, self._blocked, self._los):
+        for g in (self._land_m, self._blocked, self._safe, self._los):
             shapely.prepare(g)
 
     def _xy(self, lat: float, lon: float) -> tuple[float, float]:
@@ -177,18 +185,34 @@ class SeaChart:
         y1 = min(by1, max(p[1] for p in pts) + SEARCH_MARGIN_M)
         nx, ny = int((x1 - x0) / CELL_M) + 1, int((y1 - y0) / CELL_M) + 1
         gx, gy = np.meshgrid(x0 + np.arange(nx) * CELL_M, y0 + np.arange(ny) * CELL_M)  # [row=y, col=x]
-        free = ~shapely.contains_xy(self._blocked, gx, gy)
+        free = ~shapely.contains_xy(self._land_m, gx, gy)          # 육지만 아니면 칸
+        near = shapely.contains_xy(self._blocked, gx, gy).ravel()   # 해안 CLEARANCE_M 안 → 비용 NEAR_COST
+        unsafe = shapely.contains_xy(self._safe, gx, gy).ravel()    # 이동할 때 선분 검사 필요
         free_idx = np.flatnonzero(free)
         if free_idx.size == 0:
             return [None] * len(ends)
+        flat_x, flat_y = gx.ravel(), gy.ravel()
 
-        def cell_of(x: float, y: float) -> int:
-            """가장 가까운 바다 칸 (접안점은 육지에 붙어 있어 여유 거리 안이다)"""
-            d = (gx.flat[free_idx] - x) ** 2 + (gy.flat[free_idx] - y) ** 2
-            return int(free_idx[int(np.argmin(d))])
+        def crosses(x0_: float, y0_: float, x1_: float, y1_: float) -> bool:
+            return self._land_m.intersects(LineString([(x0_, y0_), (x1_, y1_)]))
+
+        def cell_of(x: float, y: float) -> int | None:
+            """육지를 지나지 않고 바로 닿는 가장 가까운 칸 (없으면 None)"""
+            d = (flat_x[free_idx] - x) ** 2 + (flat_y[free_idx] - y) ** 2
+            for k in np.argsort(d)[:SNAP_CANDIDATES]:
+                cell = int(free_idx[int(k)])
+                if not crosses(x, y, float(flat_x[cell]), float(flat_y[cell])):
+                    return cell
+            return None
 
         src = cell_of(*pts[0])
-        goals = {cell_of(*p): i for i, p in enumerate(pts[1:])}
+        if src is None:
+            return [None] * len(ends)
+        goals: dict[int, list[int]] = {}
+        for i, p in enumerate(pts[1:]):
+            g = cell_of(*p)
+            if g is not None:
+                goals.setdefault(g, []).append(i)
         dist = {src: 0.0}
         prev: dict[int, int] = {}
         heap = [(0.0, src)]
@@ -208,25 +232,29 @@ class SeaChart:
                 nxt = rr * nx + cc
                 if not flat_free[nxt]:
                     continue
-                nd = d + cost
+                if (unsafe[cur] or unsafe[nxt]) and crosses(flat_x[cur], flat_y[cur], flat_x[nxt], flat_y[nxt]):
+                    continue          # 얇은 방파제·곶을 가로지르는 이동
+                nd = d + cost * (NEAR_COST if near[nxt] else 1.0)
                 if nd < dist.get(nxt, math.inf):
                     dist[nxt], prev[nxt] = nd, cur
                     heapq.heappush(heap, (nd, nxt))
 
         out: list[list[tuple[float, float]] | None] = [None] * len(ends)
-        for goal, i in goals.items():
+        for goal, idxs in goals.items():
             if goal not in dist:
                 continue
             cells = [goal]
             while cells[-1] != src:
                 cells.append(prev[cells[-1]])
-            line = [pts[0]] + [(float(gx.flat[k]), float(gy.flat[k])) for k in reversed(cells)] + [pts[i + 1]]
-            out[i] = [self._latlon(x, y) for x, y in self._straighten(line)]
+            for i in idxs:
+                line = [pts[0]] + [(float(flat_x[k]), float(flat_y[k])) for k in reversed(cells)] + [pts[i + 1]]
+                out[i] = [self._latlon(x, y) for x, y in self._straighten(line)]
         return out
 
     def _straighten(self, line: list[tuple[float, float]]) -> list[tuple[float, float]]:
         """격자 경로를 펴서 꺾는 점만 남긴다. 처음·끝 점(출발점·접안점)과 잇는 선분은 육지만 안 지나면 되고,
-        중간 선분은 육지·방파제에서 LOS_CLEARANCE_M 떨어져야 한다."""
+        중간 선분은 육지·방파제에서 LOS_CLEARANCE_M 떨어져야 한다. 펴지 못하면 원래 이웃 점으로 잇는데,
+        이웃 점끼리는 탐색·붙이기 때 이미 육지를 안 지나는 것을 확인했다."""
         last = len(line) - 1
 
         def clear(i: int, j: int) -> bool:

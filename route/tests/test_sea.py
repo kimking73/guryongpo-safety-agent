@@ -144,3 +144,30 @@ def test_real_data_files_load():
     # 실제 방파제(OSM man_made=breakwater)를 가로지르지 않는다
     leg = LineString([(lon, lat) for lat, lon in best.path])
     assert leg.intersection(chart.land).length * 111_000 < 1
+
+
+def test_real_data_paths_never_cross_land():
+    """방파제 안쪽 접안점·해안 가까운 출발점에서도 바닷길이 육지를 지나지 않는다 (2026-10-05: 무작위 400곳 중 127곳이
+    끝 구간에서 방파제·곶을 20m 남짓 가로질렀다 — 하정1리·병포리 포구 등). 고정 시드 표본으로 다시 확인"""
+    import random
+    from shapely.ops import transform
+    chart = SeaChart.from_files()
+    to_m = lambda x, y, z=None: (x * chart._kx, y * 111_320)
+    rnd = random.Random(1)
+    checked = 0
+    while checked < 40:
+        lat, lon = rnd.uniform(35.93, 36.04), rnd.uniform(129.53, 129.60)
+        if not chart.is_at_sea(lat, lon):
+            continue
+        checked += 1
+        for choice in chart.rank_ports(lat, lon):
+            if not choice.reachable:
+                continue
+            leg = transform(to_m, LineString([(lo, la) for la, lo in choice.path]))
+            assert leg.intersection(chart._land_m).length < 1.0, (lat, lon, choice.port.name)
+    # 예전에 끝 구간이 방파제를 가로지르던 곳
+    for lat, lon in [(35.95231, 129.56836), (35.97945, 129.56146)]:
+        best = chart.rank_ports(lat, lon)[0]
+        assert best.reachable
+        leg = transform(to_m, LineString([(lo, la) for la, lo in best.path]))
+        assert leg.intersection(chart._land_m).length < 1.0
