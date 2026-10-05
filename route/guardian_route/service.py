@@ -17,7 +17,7 @@ from shapely.ops import substring, transform
 
 from . import polyline
 from .gh import GraphHopperClient, GraphHopperUnavailable, RouteNotFound
-from .hazards import Hazard, HazardSource, default_source
+from .hazards import DEMO_AREAS_PATH, Hazard, HazardSource, RiskAreaHazardSource, default_source
 from .profiles import PROFILE_RULES
 from .sea import ALTERNATIVES, ApiShelterSource, SeaChart, ShelterSource, bearing_label, pick_shelter
 
@@ -49,6 +49,7 @@ class RouteRequest(BaseModel):
     destination: LatLon
     strategy: Literal["fastest", "safest"] | None = None  # omitted keeps the pre-strategy profile behavior
     profile: Profile = "adult"      # adult(최단 시간, 경사 무시), elderly(급경사 회피·같은 경사면 계단 선호, 느린 속도)
+    demo: bool = False              # 앱 시연 모드: 실제 위험 영역 대신 시연 위험 영역(api /demo/risk/areas)을 피한다
 
 
 class RouteResponse(BaseModel):
@@ -72,6 +73,7 @@ class RouteCheckRequest(BaseModel):
     destination: LatLon
     geometry: str                   # 지금 안내 중인 경로 (직전 /api/route 응답의 geometry)
     profile: Profile = "adult"
+    demo: bool = False
 
 
 class RouteCheckResponse(BaseModel):
@@ -88,6 +90,7 @@ class SeaRouteRequest(BaseModel):
     origin: LatLon
     destination: LatLon | None = None
     profile: Profile = "adult"
+    demo: bool = False
 
 
 class SeaPort(BaseModel):
@@ -135,9 +138,11 @@ class SeaRouteResponse(BaseModel):
 
 class RouteService:
     def __init__(self, client: GraphHopperClient | None = None, hazards: HazardSource | None = None,
-                 chart: SeaChart | None = None, shelters: ShelterSource | None = None):
+                 chart: SeaChart | None = None, shelters: ShelterSource | None = None,
+                 demo_hazards: HazardSource | None = None):
         self.gh = client or GraphHopperClient()
         self.hazards = hazards or default_source()
+        self._demo_hazards = demo_hazards
         self._chart = chart
         self.shelters = shelters or ApiShelterSource()
 
@@ -174,14 +179,14 @@ class RouteService:
         if req.destination is not None:
             dest = SeaDestination(lat=req.destination.lat, lon=req.destination.lon)
         else:
-            shelter, note = pick_shelter(start, self.shelters.shelters(), self._zones())
+            shelter, note = pick_shelter(start, self.shelters.shelters(), self._zones(req.demo))
             if shelter is None:
                 return SeaRouteResponse(at_sea=at_sea, port=port, sea_leg=sea_leg, land_route_error=note)
             dest = SeaDestination(name=shelter.name, lat=shelter.lat, lon=shelter.lon, note=note)
 
         try:
             land = self.route(RouteRequest(origin=LatLon(lat=start[0], lon=start[1]),
-                                           destination=LatLon(lat=dest.lat, lon=dest.lon), profile=req.profile))
+                                           destination=LatLon(lat=dest.lat, lon=dest.lon), profile=req.profile, demo=req.demo))
         except (GraphHopperUnavailable, RouteNotFound) as e:
             if not at_sea:
                 raise   # 육지 출발이면 일반 경로와 같은 오류 (503/404)
@@ -196,7 +201,7 @@ class RouteService:
         위험 구역만 뺀 기본 경로(avoided 계산용).
         """
         points = [(req.origin.lat, req.origin.lon), (req.destination.lat, req.destination.lon)]
-        zones = self._zones()
+        zones = self._zones(req.demo)
         # Active hazard polygons remain avoided for both strategies. Fastest
         # prioritizes travel time; safest applies the established slope and
         # accessibility weighting. Requests without a strategy preserve their
@@ -229,7 +234,7 @@ class RouteService:
             avoided=avoided,
             still_inside=still_inside,
             geometry=safe["points"],
-            hazards_ok=getattr(self.hazards, "ok", True),
+            hazards_ok=getattr(self.source(req.demo), "ok", True),
         )
 
     def _widen_until_clear(self, points, rules, zones: list[Hazard], path: dict[str, Any]) -> dict[str, Any]:
@@ -270,7 +275,7 @@ class RouteService:
         off_m = pos.distance(line)
         # 남은 경로: 현재 위치에서 가장 가까운 경로 지점부터 끝까지
         ahead = substring(line, line.project(pos), line.length) if line.length > 0 else line
-        hazards_ahead = [z.id for z in self._zones()
+        hazards_ahead = [z.id for z in self._zones(req.demo)
                          if ahead.intersects(transform(to_m, z.geometry))]
 
         reasons: list[CheckReason] = []
@@ -278,7 +283,8 @@ class RouteService:
             reasons.append("off_route")
         new_route = None
         if reasons or hazards_ahead:
-            new_route = self.route(RouteRequest(origin=req.current, destination=req.destination, profile=req.profile))
+            new_route = self.route(RouteRequest(origin=req.current, destination=req.destination, profile=req.profile,
+                                                demo=req.demo))
             # 새 경로가 피할 수 있는 구역이 있을 때만 위험 사유로 재계산한다 (없으면 같은 경로를 계속 주게 된다)
             if set(hazards_ahead) - set(new_route.still_inside):
                 reasons.append("hazard_on_route")
@@ -290,8 +296,16 @@ class RouteService:
     def health(self) -> dict:
         return {"status": "ok", "graphhopper": "ok" if self.gh.ping() else "error"}
 
-    def _zones(self) -> list[Hazard]:
-        return self.hazards.hazards()
+    def source(self, demo: bool = False) -> HazardSource:
+        """피할 위험 영역 출처: 실측(판정 엔진) 또는 시연(실제 센서 위치 + 시연 측정값, api /demo/risk/areas)"""
+        if not demo:
+            return self.hazards
+        if self._demo_hazards is None:
+            self._demo_hazards = RiskAreaHazardSource(path=DEMO_AREAS_PATH)
+        return self._demo_hazards
+
+    def _zones(self, demo: bool = False) -> list[Hazard]:
+        return self.source(demo).hazards()
 
 
 def build_model(rules: dict[str, list[dict[str, Any]]], zones: list[Hazard]) -> dict[str, Any] | None:

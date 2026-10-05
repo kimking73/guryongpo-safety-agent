@@ -278,3 +278,27 @@ def test_admin_requires_staff_role(client, fake_db):
     fake_db.rows.clear()
     fake_db.fail = True                                                # DB 장애 → 권한 없음 (안전 쪽)
     assert client.get("/api/v1/admin/overview", headers=AUTH).status_code == 403
+
+
+def test_demo_endpoints_shape_and_no_writes(client, fake_db):
+    """시연 모드 API: 실측 /dashboard 와 같은 모양, 판정·관측 테이블에는 쓰지 않는다"""
+    from test_alerts import assert_spec
+    from risk import demo
+    demo._cache.clear()
+    fake_db.rows["FROM stations WHERE is_active"] = [
+        {"id": 10, "source_code": "pohang_dt", "external_id": "10", "name": "구룡포환승센터_지표면 수위계", "kind": "road_flood",
+         "is_mountain": False, "lng": 129.5559, "lat": 35.9906},
+        {"id": 44, "source_code": "kma", "external_id": "aws_816", "name": "구룡포 AWS", "kind": "weather",
+         "is_mountain": False, "lng": 129.556, "lat": 35.99}]
+    d = client.get("/api/v1/demo/dashboard?lat=35.99&lng=129.55").json()
+    assert_spec(d, "/demo/dashboard")
+    assert d["mode"] == "emergency" and d["demo"]["scenario"]
+    w = {x["type"]: x["data"] for x in d["widgets"]}
+    assert w["rain"]["value"] == demo.AWS["rain_1h"] and w["wind"]["wind_gust"] == demo.AWS["wind_gust"]
+    assert any("[시연]" in i["label"] for i in w["warnings"]["items"])
+    assert client.get("/api/v1/demo/risk/areas?min_level=advisory").status_code == 200
+    assert client.get("/api/v1/demo/layers/stations").status_code == 200
+    assert client.get("/api/v1/demo/layers/flood_grid").status_code == 200
+    assert client.get("/api/v1/demo/layers/manholes").status_code == 422
+    assert not any(("risk_assessments" in sql or "observations" in sql) and sql.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE"))
+                   for sql, _ in fake_db.executed)

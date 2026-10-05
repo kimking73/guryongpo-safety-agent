@@ -175,10 +175,27 @@ ORDER BY top.iy, top.ix
 """
 
 
-def flood_grid_layer(bbox: tuple[float, float, float, float]) -> dict:
+# 시연 모드(risk/demo.py): 같은 격자 계산을 risk_assessments 대신 넘겨받은 영역(GeoJSON)으로
+FLOOD_GRID_ZONES_CTE = """z AS (
+  SELECT (e->>'id')::bigint AS id, (e->>'level')::risk_level AS level, e->>'label' AS label, (e->'basis')::jsonb AS basis,
+         now() AS computed_at, ST_SetSRID(ST_GeomFromGeoJSON(e->>'geometry'), 4326) AS area
+  FROM json_array_elements(%(zones)s::json) AS e, env
+  WHERE (e->>'level')::risk_level >= %(min_level)s::risk_level
+    AND ST_Intersects(ST_SetSRID(ST_GeomFromGeoJSON(e->>'geometry'), 4326), env.g)
+), cells AS ("""
+
+
+def flood_grid_layer(bbox: tuple[float, float, float, float], zones: list[dict] | None = None) -> dict:
     features = []
     params = {**dict(zip("abcd", bbox)), "step": FLOOD_GRID_STEP, "min_level": FLOOD_GRID_MIN_LEVEL}
-    for r in db.fetch_all(FLOOD_GRID_SQL, params):
+    sql = FLOOD_GRID_SQL
+    if zones is not None:
+        if not zones:
+            return {"type": "FeatureCollection", "features": []}
+        start, end = sql.index("z AS ("), sql.index("cells AS (")
+        sql = sql[:start] + FLOOD_GRID_ZONES_CTE + sql[end + len("cells AS ("):]
+        params["zones"] = json.dumps([{**z, "geometry": json.dumps(z["geometry"])} for z in zones], ensure_ascii=False, default=str)
+    for r in db.fetch_all(sql, params):
         basis = r["basis"] if isinstance(r["basis"], dict) else json.loads(r["basis"] or "{}")
         value = basis.get("value")
         depth_cm = None

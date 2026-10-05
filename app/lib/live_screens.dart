@@ -10,6 +10,7 @@ import 'disaster_center.dart';
 import 'main.dart';
 import 'origin_picker.dart';
 import 'patrol_screens.dart';
+import 'services/app_config.dart';
 import 'services/demo_mode.dart';
 import 'services/demo_live_api.dart';
 import 'services/live_api.dart';
@@ -21,16 +22,20 @@ final liveApiProvider = Provider<LiveApi>((_) => LiveApi());
 
 /// 서버 맞춤 대시보드 (GET /api/v1/dashboard). 위치가 30m 넘게 바뀌면 다시 받는다. 새로고침은 ref.invalidate
 final liveDashboardProvider = FutureProvider<Map<String, dynamic>>((ref) {
+  ref.watch(serverDemoProvider);   // 시연 모드 ↔ 실측 전환 때 다시 받기
   final p = ref.watch(userLocation).position;
   return ref.watch(liveApiProvider).dashboard(p.latitude, p.longitude);
 });
 
 /// 시연 모드면 [demo], 아니면 [live]
 class DemoSwitch extends ConsumerWidget {
-  const DemoSwitch({super.key, required this.demo, required this.live});
+  const DemoSwitch({super.key, required this.demo, required this.live, this.remoteAlwaysLive = false});
   final Widget demo, live;
+  /// 서버 연결이면 시연 모드에서도 실측 화면(데이터만 서버 시연 데이터) — 대시보드·태풍·선제 경고
+  final bool remoteAlwaysLive;
   @override
-  Widget build(BuildContext c, WidgetRef ref) => ref.watch(showDemoProvider) ? demo : live;
+  Widget build(BuildContext c, WidgetRef ref) =>
+      (remoteAlwaysLive ? !AppConfig.isRemote : ref.watch(showDemoProvider)) ? demo : live;
 }
 
 /// 시연 모드에서만 쓰는 화면 (대피 확인 시연·음성 시연·해상 경로 데모)
@@ -162,6 +167,7 @@ class WindPoint {
 }
 
 final windPointsProvider = FutureProvider<List<WindPoint>>((ref) async {
+  ref.watch(serverDemoProvider);
   final fc = await ref.watch(liveApiProvider).stationsLayer();
   return [
     for (final f in fc['features'] as List? ?? const [])
@@ -185,11 +191,22 @@ class LiveDashboardTop extends ConsumerWidget {
     final d = ref.watch(liveDashboardProvider).valueOrNull;
     final point = Map<String, dynamic>.from(d?['point_risk'] as Map? ?? const {});
     final headline = d?['headline'] as Map?;
+    final demo = d?['demo'] as Map?;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      if (ref.watch(serverDemoProvider))
+        Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(color: Colors.amber.shade100, borderRadius: BorderRadius.circular(9)),
+          child: Text(
+              '시연 모드 · ${demo?['scenario'] ?? '시연 시나리오'} — 센서 위치는 실제, 측정값은 시연용 가상값입니다. '
+              '위험 판정·경로 회피는 실측과 같은 규칙으로 계산하며 실제 경고는 보내지 않습니다.',
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+        ),
       Text(
           d == null
               ? '실시간 정보를 불러오는 중…'
-              : '실시간 데이터 · 위험 판정 ${hhmm(point['computed_at'])} 기준'
+              : '${demo != null ? '시연 데이터' : '실시간 데이터'} · 위험 판정 ${hhmm(point['computed_at'])} 기준'
                   '${point['data_stale'] == true ? ' · 판정이 30분 넘게 갱신되지 않았습니다' : ''}',
           style: Theme.of(c).textTheme.bodySmall),
       if (ref.watch(liveDashboardProvider).hasError)
@@ -228,6 +245,7 @@ class LiveRealtimeSection extends ConsumerWidget {
         loading: () => const LinearProgressIndicator(),
         error: (e, _) => Card(child: Padding(padding: const EdgeInsets.all(12), child: _NoData(liveError(e)))),
         data: (d) => LiveRealtimeCards(
+            simulated: d['demo'] != null,
             widgets: [for (final w in d['widgets'] as List? ?? const []) Map<String, dynamic>.from(w as Map)]),
       );
 }

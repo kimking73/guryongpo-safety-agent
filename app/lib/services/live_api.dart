@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'api_client.dart';
 import 'auth_service.dart';
+import 'demo_mode.dart';
 
 /// 실측 화면용 서버 호출 (2026-10-05). 응답은 명세(server/spec/openapi.yaml) 그대로 Map으로 쓴다.
 class LiveApi {
@@ -21,10 +22,12 @@ class LiveApi {
       [for (final x in (await _api.get<List<dynamic>>(path, queryParameters: q)).data ?? const []) Map<String, dynamic>.from(x as Map)];
 
   /// 맞춤 대시보드: 위험도·특보·강수·바람·수위·파고·태풍·예보·재난문자·자외선/미세먼지·장소별 위험·가까운 대피소
-  Future<Map<String, dynamic>> dashboard(double lat, double lng) => _get('/api/v1/dashboard', {'lat': lat, 'lng': lng});
+  Future<Map<String, dynamic>> dashboard(double lat, double lng) =>
+      _get(DemoData.path('/api/v1/dashboard', '/api/v1/demo/dashboard'), {'lat': lat, 'lng': lng});
 
   /// 관측소 + 최신값 GeoJSON (바람 화살표·센서 표시)
-  Future<Map<String, dynamic>> stationsLayer() => _get('/api/v1/dashboard/layers/stations');
+  Future<Map<String, dynamic>> stationsLayer() =>
+      _get(DemoData.path('/api/v1/dashboard/layers/stations', '/api/v1/demo/layers/stations'));
 
   Future<List<Map<String, dynamic>>> supportPrograms({String? hazard}) =>
       _list('/api/v1/support-programs', {if (hazard != null) 'hazard': hazard});
@@ -63,6 +66,7 @@ class LiveApi {
       _send(_route.post<Map<String, dynamic>>('/api/route/sea', data: {
         'origin': {'lat': lat, 'lon': lon},
         'profile': profile,
+        if (DemoData.on) 'demo': true,
       }));
 
   // ---- 내 취약 가구 등록 (동의 필수) ----

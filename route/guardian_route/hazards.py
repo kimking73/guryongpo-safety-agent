@@ -85,10 +85,12 @@ class RiskAreaHazardSource:
     빈 목록 + `ok=False` → 경로 응답의 hazards_ok=False (앱·AI가 "위험 정보를 확인하지 못했다"고 알린다).
     """
 
-    def __init__(self, base_url: str | None = None, client: httpx.Client | None = None, cache_s: float = CACHE_S):
+    def __init__(self, base_url: str | None = None, client: httpx.Client | None = None, cache_s: float = CACHE_S,
+                 path: str = "/api/v1/risk/areas"):
         self.http = client or httpx.Client(base_url=base_url or os.environ.get("ROUTE_RISK_API_URL") or DEFAULT_RISK_API_URL,
                                            timeout=3.0)
         self.cache_s = cache_s
+        self.path = path        # 시연 모드: DEMO_AREAS_PATH (실제 센서 위치 + 시연 측정값으로 같은 규칙 판정, api risk/demo.py)
         self._cached: list[Hazard] | None = None
         self._at = 0.0
         self.ok = True
@@ -97,7 +99,7 @@ class RiskAreaHazardSource:
         if self._cached is not None and time.monotonic() - self._at < self.cache_s:
             return self._cached
         try:
-            res = self.http.get("/api/v1/risk/areas", params={"min_level": MIN_LEVEL})
+            res = self.http.get(self.path, params={"min_level": MIN_LEVEL})
             res.raise_for_status()
             features = res.json()["features"]
         except (httpx.HTTPError, ValueError, KeyError) as e:
@@ -115,6 +117,9 @@ class RiskAreaHazardSource:
 
     def raw(self) -> dict[str, Any]:
         return to_geojson(self.hazards())
+
+
+DEMO_AREAS_PATH = "/api/v1/demo/risk/areas"
 
 
 def default_source() -> HazardSource:

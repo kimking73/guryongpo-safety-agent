@@ -152,3 +152,41 @@ def test_cors_preflight_allows_browser_app():
     r = TestClient(app).options("/api/route", headers={"Origin": "http://localhost:5000", "Access-Control-Request-Method": "POST"})
     assert r.status_code == 200
     assert r.headers["access-control-allow-origin"] in ("*", "http://localhost:5000")
+
+
+def test_demo_flag_avoids_demo_zones_only():
+    """앱 시연 모드(demo=true): 실제 위험 영역 대신 시연 위험 영역(api /demo/risk/areas)을 피한다"""
+    from guardian_route.hazards import Hazard, circle
+    from guardian_route.service import LatLon, RouteRequest, RouteService
+
+    class Src:
+        def __init__(self, zones):
+            self.zones, self.ok = zones, True
+
+        def hazards(self):
+            return self.zones
+
+        def raw(self):
+            return {}
+
+    class GH:
+        def __init__(self):
+            self.models = []
+
+        def route(self, points, custom_model=None):
+            self.models.append(custom_model)
+            return {"distance": 100, "time": 60000, "points": "_p~iF~ps|U_ulLnnqC", "ascend": 0, "descend": 0}
+
+        def ping(self):
+            return True
+
+    real = Src([Hazard("flood-1", "flood", circle(35.99, 129.55, 100), "advisory", "risk_engine", "실측")])
+    demo = Src([Hazard("flood--2", "flood", circle(35.98, 129.54, 300), "warning", "risk_engine", "시연")])
+    gh = GH()
+    svc = RouteService(client=gh, hazards=real, demo_hazards=demo)
+    req = dict(origin=LatLon(lat=35.991, lon=129.551), destination=LatLon(lat=35.995, lon=129.556))
+    svc.route(RouteRequest(**req))
+    svc.route(RouteRequest(**req, demo=True))
+    areas = [list(m["areas"]["features"][0]["id"] for _ in [0]) for m in gh.models if m and "areas" in m]
+    assert ["flood_1"] in areas and ["flood__2"] in areas
+    assert svc.source(True) is demo and svc.source(False) is real

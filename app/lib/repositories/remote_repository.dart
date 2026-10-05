@@ -6,6 +6,7 @@ import '../models/domain_models.dart';
 import '../services/account_service.dart';
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
+import '../services/demo_mode.dart';
 import '../services/polyline.dart';
 import 'mock_repository.dart';
 
@@ -29,6 +30,12 @@ class RemoteSafetyRepository implements SafetyRepository {
   static const riskRadiusM = 300;
 
   Future<Map<String, dynamic>> _risk(LatLng o) async {
+    if (DemoData.on) {
+      // 시연 모드: 시연 대시보드의 위치 위험(point_risk)이 /risk 와 같은 모양
+      final d = await _guard(() => _client.api.get<Map<String, dynamic>>('/api/v1/demo/dashboard',
+          queryParameters: {'lat': o.latitude, 'lng': o.longitude}));
+      return Map<String, dynamic>.from(d.data!['point_risk'] as Map);
+    }
     final r = await _guard(() => _client.api
             .get<Map<String, dynamic>>('/api/v1/risk', queryParameters: {
           'lat': o.latitude,
@@ -83,6 +90,7 @@ class RemoteSafetyRepository implements SafetyRepository {
             },
             'geometry': geometry,
             'profile': profile,
+            if (DemoData.on) 'demo': true,
           },
         ));
     return routeCheckResultFromJson(
@@ -136,14 +144,14 @@ class RemoteSafetyRepository implements SafetyRepository {
   @override
   Future<List<RiskArea>> riskAreas() async {
     final r = await _guard(
-        () => _client.api.get<Map<String, dynamic>>('/api/v1/risk/areas'));
+        () => _client.api.get<Map<String, dynamic>>(DemoData.path('/api/v1/risk/areas', '/api/v1/demo/risk/areas')));
     return riskAreasFromGeoJson(r.data!);
   }
 
   @override
   Future<List<FloodGrid>> floodGrid({int timeIndex = 0}) async {
     final r = await _guard(() => _client.api
-        .get<Map<String, dynamic>>('/api/v1/dashboard/layers/flood_grid'));
+        .get<Map<String, dynamic>>(DemoData.path('/api/v1/dashboard/layers/flood_grid', '/api/v1/demo/layers/flood_grid')));
     return floodGridFromGeoJson(r.data!);
   }
 
@@ -175,6 +183,8 @@ class RemoteSafetyRepository implements SafetyRepository {
               // 안전 경로는 사용자 이동 조건(고령·휠체어·보행 불편)을 반영한다.
               'strategy': routeType == RouteType.nearest ? 'fastest' : 'safest',
               'profile': routeProfileFor(age, transport, walkingImpaired: walking),
+              // 시연 모드: 경로 서버가 시연 위험 영역을 피한다
+              if (DemoData.on) 'demo': true,
             }),
         notFound: '이 시설까지 걸어서 갈 수 있는 길을 찾지 못했습니다.');
     return routeFromJson(r.data!, facility.id, routeType,

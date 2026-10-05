@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
 from .. import db, layers
-from ..auth import AuthUser, current_user
+from ..auth import AuthUser, current_user, optional_user
 from ..errors import ApiError
 
 router = APIRouter(tags=["dashboard"])
@@ -67,6 +67,32 @@ def get_support_programs(hazard: Optional[Hazard] = None):
     from ..mocks import iso
     return [{**r, "hazards": list(r["hazards"] or []), "targets": list(r["targets"] or []), "updated_at": iso(r["updated_at"])}
             for r in db.fetch_all(SUPPORT_SQL, {"h": hazard})]
+
+
+DemoLevel = Literal["normal", "watch", "advisory", "warning", "critical"]
+
+
+@router.get("/demo/dashboard", summary="시연 모드 대시보드 (실제 센서 위치 + 시연 측정값, 실측과 같은 판정 규칙, 저장 안 함)")
+def get_demo_dashboard(lat: float = Query(ge=-90, le=90), lng: float = Query(ge=-180, le=180),
+                       u: Optional[AuthUser] = Depends(optional_user)):
+    from risk import demo
+    from .. import users
+    return demo.dashboard(lat, lng, users.find_user_id(u) if u else None)
+
+
+@router.get("/demo/risk/areas", summary="시연 위험 영역 (/risk/areas 와 같은 모양 — 경로 서버 demo=true 가 피한다)")
+def get_demo_risk_areas(hazard: Optional[Hazard] = None, min_level: Optional[DemoLevel] = None,
+                        bbox: Optional[str] = Query(None)):
+    from risk import demo
+    return JSONResponse(demo.risk_areas(hazard, min_level), media_type="application/geo+json")
+
+
+@router.get("/demo/layers/{layer_id}", summary="시연 지도 레이어 (flood_grid · stations)")
+def get_demo_layer(layer_id: Literal["flood_grid", "stations"], bbox: Optional[str] = Query(None)):
+    from risk import demo
+    box = layers.parse_bbox(bbox)
+    fc = demo.flood_grid(box) if layer_id == "flood_grid" else demo.stations_layer(box)
+    return JSONResponse(fc, media_type="application/geo+json")
 
 
 @router.get("/demo/households", summary="시연용 가상 취약 가구 (앱 시연 모드 방재단 화면, 실제 개인정보 아님)")

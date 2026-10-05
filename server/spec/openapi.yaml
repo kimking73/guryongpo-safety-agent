@@ -446,6 +446,53 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/Hotline' }
+  /demo/dashboard:
+    get:
+      tags: [dashboard]
+      summary: 시연 모드 대시보드 — 실제 센서 위치에 시연 측정값(호우·침수 + 강풍)을 넣어 실측과 같은 판정 규칙으로 계산 (2026-10-05)
+      description: DB 관측값·판정·경고에는 쓰지 않는다 (실측 모드·실제 사용자 영향 없음). 모양은 /dashboard 와 같고 demo 필드가 붙는다
+      operationId: getDemoDashboard
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Lat'
+        - $ref: '#/components/parameters/Lng'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Dashboard' }
+  /demo/risk/areas:
+    get:
+      tags: [dashboard]
+      summary: 시연 위험 영역 — /risk/areas 와 같은 모양. 경로 서버는 요청에 demo=true 일 때 이 영역을 피한다
+      operationId: getDemoRiskAreas
+      security: []
+      parameters:
+        - { name: hazard, in: query, schema: { $ref: '#/components/schemas/Hazard' } }
+        - { name: min_level, in: query, schema: { $ref: '#/components/schemas/RiskLevel' } }
+        - $ref: '#/components/parameters/Bbox'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/geo+json:
+              schema: { $ref: '#/components/schemas/FeatureCollection' }
+  /demo/layers/{layer_id}:
+    get:
+      tags: [dashboard]
+      summary: 시연 지도 레이어 — flood_grid(시연 침수 영역 격자) · stations(실제 관측소 위치 + 시연 측정값)
+      operationId: getDemoLayer
+      security: []
+      parameters:
+        - { name: layer_id, in: path, required: true, schema: { type: string, enum: [flood_grid, stations] } }
+        - $ref: '#/components/parameters/Bbox'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/geo+json:
+              schema: { $ref: '#/components/schemas/FeatureCollection' }
   /demo/households:
     get:
       tags: [dashboard]

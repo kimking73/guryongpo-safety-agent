@@ -141,12 +141,19 @@ final gpsTracker = Provider<void>((ref) {
 });
 
 // 서버 데이터. 사용자 위치가 바뀌면(30m 넘게) 다시 불러온다. 새로고침은 ref.invalidate.
-final riskProvider = FutureProvider<RiskStatus>(
-    (ref) => ref.watch(repo).risk(ref.watch(userLocation).position));
-final riskAreasProvider =
-    FutureProvider<List<RiskArea>>((ref) => ref.watch(repo).riskAreas());
-final floodGridProvider = FutureProvider<List<FloodGrid>>(
-    (ref) => ref.watch(repo).floodGrid(timeIndex: ref.watch(floodTime)));
+// 시연 모드를 켜고 끄면(serverDemoProvider) 서버 시연 데이터 ↔ 실측으로 다시 받는다
+final riskProvider = FutureProvider<RiskStatus>((ref) {
+  ref.watch(serverDemoProvider);
+  return ref.watch(repo).risk(ref.watch(userLocation).position);
+});
+final riskAreasProvider = FutureProvider<List<RiskArea>>((ref) {
+  ref.watch(serverDemoProvider);
+  return ref.watch(repo).riskAreas();
+});
+final floodGridProvider = FutureProvider<List<FloodGrid>>((ref) {
+  ref.watch(serverDemoProvider);
+  return ref.watch(repo).floodGrid(timeIndex: ref.watch(floodTime));
+});
 final facilitiesProvider = FutureProvider<List<Facility>>(
     (ref) => ref.watch(repo).getFacilities(ref.watch(userLocation).position));
 final alertsProvider = FutureProvider<List<AlertItem>>(
@@ -611,7 +618,8 @@ final appRouter = GoRouter(
         path: '/typhoon',
         builder: (_, s) => DemoSwitch(
             demo: TyphoonScreen(initialLocal: s.extra == 'local'),
-            live: LiveTyphoonRoute(initialLocal: s.extra == 'local'))),
+            live: LiveTyphoonRoute(initialLocal: s.extra == 'local'),
+            remoteAlwaysLive: true)),
     GoRoute(
         path: '/route-search', builder: (_, __) => const CustomRouteScreen()),
     GoRoute(path: '/route-follow', builder: (_, __) => const RouteFollowScreen()),
@@ -622,7 +630,7 @@ final appRouter = GoRouter(
     GoRoute(
         path: '/alerts-hub',
         builder: (_, __) =>
-            const DemoSwitch(demo: AlertHubScreen(), live: LiveAlertHubRoute())),
+            const DemoSwitch(demo: AlertHubScreen(), live: LiveAlertHubRoute(), remoteAlwaysLive: true)),
     GoRoute(
         path: '/evacuation',
         builder: (_, __) => const DemoOnlyNotice(
@@ -1043,7 +1051,9 @@ class Dashboard extends ConsumerWidget {
   Widget build(BuildContext c, WidgetRef ref) {
     final route = ref.watch(routeFacilityId);
     // 화면은 김다인 대시보드 UI 하나. 시연 모드면 가상 시나리오, 아니면 서버 실측 데이터로 채운다 (2026-10-05)
-    final demo = ref.watch(showDemoProvider);
+    // 앱 안 가상 화면은 서버 없이 실행(APP_MODE=mock)할 때만. 서버 연결이면 시연 모드도 실측 화면 + 서버 시연 데이터
+    final demo = !AppConfig.isRemote;
+    final serverDemo = ref.watch(serverDemoProvider);
     final routeAsync = route == null ? null : ref.watch(routeProvider(route));
     final routeType = ref.watch(routeKind);
     final facilities =
@@ -1060,6 +1070,7 @@ class Dashboard extends ConsumerWidget {
               for (final w in ref.watch(windPointsProvider).valueOrNull ?? const <WindPoint>[])
                 (w.position, w.speed, w.dirDeg, w.name, w.observedAt)
             ],
+      simulated: serverDemo,
       liveTop: demo ? null : const LiveDashboardTop(),
       liveBottom: demo ? null : const LiveRealtimeSection(),
       routeExtras: Wrap(spacing: 8, runSpacing: 4, children: [

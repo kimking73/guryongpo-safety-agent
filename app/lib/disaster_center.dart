@@ -241,6 +241,7 @@ class DisasterDashboard extends StatefulWidget {
     this.onEndRoute,
     this.onRetryRoute,
     this.demo = true,
+    this.simulated = false,
     this.floodGrids,
     this.riskItems = const [],
     this.windPoints = const [],
@@ -265,6 +266,8 @@ class DisasterDashboard extends StatefulWidget {
 
   /// 시연 모드(가상 시나리오). false = 실측: 아래 값으로 위험 카드·침수 격자·바람·장소 위험·실시간 정보를 채운다 (2026-10-05)
   final bool demo;
+  /// 서버 시연 데이터 (실제 센서 위치 + 시연 측정값) — 범례 문구만 다르다
+  final bool simulated;
   final List<FloodGrid>? floodGrids;
   /// 서버 위험 판정 항목 (/dashboard point_risk.items)
   final List<Map<String, dynamic>> riskItems;
@@ -931,7 +934,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                                 visible.contains(HazardKind.slide))
                               Text(widget.demo ? '산사태 표식은 목업 알림 위치입니다.' : '산사태는 판정된 위험 영역으로 표시',
                                   style: const TextStyle(fontSize: 11)),
-                            Text(widget.demo ? '가상 시연 데이터' : '실측 · 서버 위험 판정',
+                            Text(widget.demo ? '가상 시연 데이터' : widget.simulated ? '시연 측정값 · 실측과 같은 판정 규칙' : '실측 · 서버 위험 판정',
                                 style: const TextStyle(fontSize: 10)),
                           ],
                         ),
@@ -1813,8 +1816,11 @@ Widget _badge(String text) => Container(
 
 /// 실측 '실시간 정보' (2026-10-05): 김다인 디자인(_rainfallMetric·_metric) 그대로, 값은 서버 /dashboard 위젯
 class LiveRealtimeCards extends StatelessWidget {
-  const LiveRealtimeCards({super.key, required this.widgets});
+  const LiveRealtimeCards({super.key, required this.widgets, this.simulated = false});
   final List<Map<String, dynamic>> widgets;
+  /// 서버 시연 데이터면 배지 '실측' → '시연'
+  final bool simulated;
+  String get _obs => simulated ? '시연' : '실측';
 
   Map<String, dynamic> _w(String type) => Map<String, dynamic>.from(
       widgets.where((w) => w['type'] == type).firstOrNull?['data'] as Map? ?? const {'available': false, 'reason': '서버 자료 없음'});
@@ -1828,14 +1834,14 @@ class LiveRealtimeCards extends StatelessWidget {
     final life = _w('life_safety'), fc = _w('forecast');
     return Column(children: [
       _ok(rain)
-          ? _liveRainfall(rain)
+          ? _liveRainfall(rain, simulated: simulated)
           : _metric(Icons.water_drop_outlined, '강수', '자료 없음', '${rain['reason']}', '구룡포 AWS', Colors.indigo,
               badge: '자료 없음', suffix: ''),
       _ok(wind)
           ? _metric(Icons.navigation, '바람', '평균 ${_n(wind['value'])} · 순간 ${_n(wind['wind_gust'])}m/s',
               '${_windFromKo(wind['wind_dir'])} · 화살표는 바람이 불어가는 방향', '${wind['station_name']} · ${_hhmm('${wind['observed_at']}')}',
               Colors.deepOrange,
-              rotation: wind['wind_dir'] is num ? ((wind['wind_dir'] as num) + 180) * math.pi / 180 : 0, badge: '실측', suffix: ' · 기상청 관측')
+              rotation: wind['wind_dir'] is num ? ((wind['wind_dir'] as num) + 180) * math.pi / 180 : 0, badge: _obs, suffix: simulated ? ' · 시연값' : ' · 기상청 관측')
           : _metric(Icons.navigation, '바람', '자료 없음', '${wind['reason']}', '구룡포 AWS', Colors.deepOrange, badge: '자료 없음', suffix: ''),
       _ok(wave)
           ? _metric(
@@ -1846,7 +1852,7 @@ class LiveRealtimeCards extends StatelessWidget {
               '구룡포항 앞바다 · ${_hhmm('${wave['observed_at']}')}부터',
               Colors.blue,
               badge: '예보',
-              suffix: ' · 기상청 단기예보')
+              suffix: simulated ? ' · 시연 예보' : ' · 기상청 단기예보')
           : _metric(Icons.waves, '파고', '자료 없음', '${wave['reason']}', '구룡포항 앞바다', Colors.blue, badge: '자료 없음', suffix: ''),
       _liveWater(water),
       if (_ok(fc)) _liveForecast(fc),
@@ -1859,7 +1865,7 @@ class LiveRealtimeCards extends StatelessWidget {
               '판정 ${const {'watch': '관심', 'advisory': '주의', 'warning': '경보', 'critical': '위험'}[i['level']] ?? '정상'}',
               '${i['station_name']} · ${_hhmm('${i['observed_at']}')}',
               Colors.amber.shade800,
-              badge: '실측',
+              badge: _obs,
               suffix: ''),
     ]);
   }
@@ -1881,7 +1887,7 @@ class LiveRealtimeCards extends StatelessWidget {
           '${maxFlood == null ? '' : ' · 지표면 침수심 최고 ${maxFlood.toStringAsFixed(0)}mm'}',
       '포항 디지털 트윈 · ${_hhmm('${d['observed_at']}')} 수집',
       Colors.teal,
-      badge: '실측',
+      badge: _obs,
       suffix: '',
     );
   }
@@ -1901,13 +1907,13 @@ class LiveRealtimeCards extends StatelessWidget {
       '구룡포읍 · ${_hhmm('${slots.first['t']}')}부터',
       Colors.blueGrey,
       badge: '예보',
-      suffix: ' · 기상청 단기예보',
+      suffix: simulated ? ' · 시연 예보' : ' · 기상청 단기예보',
     );
   }
 }
 
 /// 김다인 _rainfallMetric 디자인 + 실측: 1시간 강수·오늘 누적·최근 6시간 시간별 막대
-Widget _liveRainfall(Map<String, dynamic> d) {
+Widget _liveRainfall(Map<String, dynamic> d, {bool simulated = false}) {
   const color = Colors.indigo;
   final now = (d['value'] as num?)?.toDouble() ?? 0;
   // 10분 간격 '1시간 강수' 값에서 시각별 마지막 값 → 최근 6시간 막대
@@ -1929,7 +1935,7 @@ Widget _liveRainfall(Map<String, dynamic> d) {
           const Icon(Icons.water_drop_outlined, color: color),
           const SizedBox(width: 8),
           const Expanded(child: Text('강수', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold))),
-          _badge('실측'),
+          _badge(simulated ? '시연' : '실측'),
         ]),
         const SizedBox(height: 8),
         Wrap(spacing: 10, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
@@ -1979,7 +1985,7 @@ Widget _liveRainfall(Map<String, dynamic> d) {
           ]),
         ),
         const Divider(height: 18),
-        Text('${d['station_name']} · ${_hhmm('${d['observed_at']}')} · 기상청 관측',
+        Text('${d['station_name']} · ${_hhmm('${d['observed_at']}')} · ${simulated ? '시연값' : '기상청 관측'}',
             style: const TextStyle(fontSize: 12, color: Colors.black54)),
       ]),
     ),
