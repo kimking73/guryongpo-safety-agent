@@ -1,9 +1,14 @@
 import 'dart:async';
 import 'package:geolocator/geolocator.dart';
+import 'package:flutter_map/flutter_map.dart' show LatLngBounds;
 import 'package:latlong2/latlong.dart';
 
 /// 경로 서버 도로망 범위 (graphhopper/fetch_osm.sh BBOX = AI tools.ROUTE_BOUNDS). 이 밖의 GPS는 쓰지 않는다
 const serviceSouth = 35.92, serviceWest = 129.48, serviceNorth = 36.04, serviceEast = 129.60;
+/// 대시보드 지도가 보여 주는 범위 = 경로 안내 범위 (구룡포 일대). 이보다 멀리 축소·이동하지 못하게 한다 (태풍 지도는 제외)
+final guryongpoBounds = LatLngBounds(const LatLng(serviceSouth, serviceWest), const LatLng(serviceNorth, serviceEast));
+const guryongpoMinZoom = 12.0;
+
 bool inServiceArea(LatLng p) =>
     p.latitude >= serviceSouth && p.latitude <= serviceNorth && p.longitude >= serviceWest && p.longitude <= serviceEast;
 

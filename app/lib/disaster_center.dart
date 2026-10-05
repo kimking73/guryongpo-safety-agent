@@ -7,6 +7,7 @@ import 'package:latlong2/latlong.dart' hide Path;
 import 'package:url_launcher/url_launcher.dart';
 
 import 'services/account_service.dart';
+import 'services/location_service.dart';
 import 'services/app_config.dart';
 import 'services/geocoding_service.dart';
 import 'models/domain_models.dart';
@@ -288,7 +289,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
   final activeLayers = <HazardKind>{};
   DemoHazard? selected;
   LatLng focus = guryongpo;
-  double mapZoom = 11.5;
+  double mapZoom = 13;
   bool zoomUpdateScheduled = false;
   final MapController mapController = MapController();
   Map<String, String> savedProfile = {};
@@ -308,7 +309,10 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
   }
   late final MapOptions mapOptions = MapOptions(
     initialCenter: guryongpo,
-    initialZoom: 11.5,
+    initialZoom: 13,
+    // 구룡포 일대로 한정 (2026-10-05)
+    minZoom: guryongpoMinZoom,
+    cameraConstraint: CameraConstraint.containCenter(bounds: guryongpoBounds),
     onPositionChanged: (camera, _) {
       if ((camera.zoom - mapZoom).abs() > .2 &&
           mounted &&
@@ -375,7 +379,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
       activeLayers.clear();
       focus = guryongpo;
     });
-    mapController.move(guryongpo, 11.5);
+    mapController.move(guryongpo, 13);
   }
 
   void toggleLayer(HazardKind layer, bool on) => setState(() {

@@ -186,7 +186,8 @@ class RouteMap extends ConsumerStatefulWidget {
 
 class _RouteMapState extends ConsumerState<RouteMap> with WidgetsBindingObserver {
   final mapController = MapController();
-  final mapOptions = const MapOptions();
+  // 경로 지도도 구룡포 일대로 한정 (2026-10-05)
+  final mapOptions = MapOptions(minZoom: guryongpoMinZoom, cameraConstraint: CameraConstraint.containCenter(bounds: guryongpoBounds));
   String? fittedBounds;
   Timer? _checkTimer;
   SafetyRoute? _updatedRoute;
