@@ -13,6 +13,7 @@
 | `validate.py` | 명세(`server/spec/openapi.yaml`) ↔ 목업 검증 (대응표 `tests/spec_mocks.py`, pytest 판은 `tests/test_spec.py`) | – |
 | `make_mocks.py` | v0.2 목업 재생성 — **v0.3 목업(role·household·alert-response·admin.*)은 직접 편집**, 다시 돌리면 v0.3 필드가 지워지니 주의 | `server/mock/*` |
 | `pohang_dt_*.py` · `kma_*.py` | 원천 응답 변환기 원본 (수집기 사본은 `server/collector/converters/`) | – |
+| `demo.py <status·prepare·flood·walkthrough·reset>` | 시연 순서 재현·정리 (A11) — 서버 API 호출, 컨테이너 안에서도 실행 가능 (`docker compose exec -T api python - <명령> < server/tools/demo.py`). 사용법 `../docs/a11-deploy-demo.md` | 화면 출력 |
 
 `db/init/*.sql` 시드를 다시 만들면 `docker compose run --rm loader` 로 기존 DB 에 적용한다 (볼륨 초기화 불필요, 스키마 01 변경만 `down -v`).
 생성하는 SQL 은 여러 번 적용해도 같은 결과여야 한다 (ON CONFLICT upsert 또는 TRUNCATE 후 삽입) — `server/tests/test_loader.py` 가 검사.
