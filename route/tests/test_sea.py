@@ -5,11 +5,12 @@
 
 import httpx
 from fastapi.testclient import TestClient
-from shapely.geometry import box
+from shapely.geometry import LineString, box
 
 from guardian_route.api import app, get_service
 from guardian_route.gh import GraphHopperClient
 from guardian_route.hazards import Hazard, circle
+from guardian_route.polyline import decode
 from guardian_route.sea import Port, SeaChart, Shelter, bearing_deg, bearing_label, distance_m, pick_shelter
 from guardian_route.service import RouteService
 
@@ -59,7 +60,11 @@ def test_at_sea_returns_port_sea_leg_and_land_route():
     assert set(body["port"]) == {"id", "name", "kind", "berth", "land_point"}
     assert body["port"]["land_point"] == {"lat": 35.990, "lon": 129.5495}
     leg = body["sea_leg"]
-    assert 1700 < leg["distance_m"] < 1900 and leg["bearing_label"] == "서쪽" and leg["direct"] is True
+    assert 1700 < leg["straight_m"] < 1900 and leg["bearing_label"] == "서쪽"
+    assert leg["direct"] is True and leg["path_found"] is True
+    assert abs(leg["distance_m"] - leg["straight_m"]) < 5
+    path = decode(leg["path"])                                   # 출발 → 접안점 꺾은선 (lat, lon)
+    assert path[0] == (35.991, 129.57) and path[-1] == (35.99, 129.5505)
     assert [a["name"] for a in leg["alternatives"]] == ["다항", "나항"]
     assert body["destination"]["name"] == "언덕 대피소"            # 목적지 생략 → 대피소 자동 선택
     assert body["land_route"]["distance_m"] == 500 and body["land_route_error"] is None
@@ -109,6 +114,19 @@ def test_pick_shelter_skips_hazard_and_underground_during_flood():
     assert chosen.name == "가까운 곳" and "위험 영역 안" in note
 
 
+def test_sea_leg_goes_around_breakwater():
+    """방파제(얇은 육지)가 가로막으면 끝을 돌아간다 — 직선으로 가로지르지 않는다 (사용자 요청 2026-10-05)"""
+    wall = box(129.558, 35.975, 129.5585, 36.005)                 # 남북으로 긴 방파제 (폭 약 45m)
+    chart = SeaChart(LAND.union(wall), PORTS, BOUNDS)
+    ranked = chart.rank_ports(35.990, 129.57)
+    for c in ranked:                                              # 모든 항구가 방파제 안쪽 — 끝을 돌아서만 간다
+        assert c.reachable and not c.direct
+        assert not LineString([(lon, lat) for lat, lon in c.path]).intersects(wall)
+    assert ranked[0].port.name == "다항"                          # 북쪽 끝으로 돌면 다항이 가장 가깝다
+    behind = next(c for c in ranked if c.port.name == "가항")      # 방파제 바로 뒤 항구: 직선 1.75km → 끝까지 돌아 약 3.9km
+    assert behind.distance_m > behind.straight_m + 1500
+
+
 def test_bearing_and_distance():
     assert bearing_label(bearing_deg((35.99, 129.57), (35.99, 129.55))) == "서쪽"
     assert bearing_label(bearing_deg((35.99, 129.55), (36.00, 129.55))) == "북쪽"
@@ -121,4 +139,8 @@ def test_real_data_files_load():
     assert len(chart.ports) >= 10 and any(p.name == "구룡포항" for p in chart.ports)
     assert chart.is_at_sea(35.9870, 129.5450) is False    # 구룡포읍 시가지
     assert chart.is_at_sea(35.9900, 129.5800) is True     # 구룡포항 앞바다
-    assert chart.rank_ports(35.9871, 129.5700)[0].port.name == "구룡포항"
+    best = chart.rank_ports(35.9871, 129.5700)[0]
+    assert best.port.name == "구룡포항" and best.reachable
+    # 실제 방파제(OSM man_made=breakwater)를 가로지르지 않는다
+    leg = LineString([(lon, lat) for lat, lon in best.path])
+    assert leg.intersection(chart.land).length * 111_000 < 1

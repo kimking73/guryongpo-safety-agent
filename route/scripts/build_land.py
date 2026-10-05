@@ -1,6 +1,8 @@
 """구룡포 일대 육지 영역(route/data/land.geojson)을 OSM 해안선으로 만든다 (B11 해상 판정용).
 
-경로 서버는 출발 좌표가 이 다각형 밖이면 해상으로 본다 (guardian_route/sea.py).
+경로 서버는 출발 좌표가 이 다각형 밖이면 해상으로 보고, 해상 구간 길찾기에서 이 다각형을 피한다 (guardian_route/sea.py).
+방파제·부두(man_made=breakwater·pier)는 OSM에서 해안선과 따로 그려지므로 함께 더한다 — 배가 방파제를 가로지르는 경로가
+나오지 않게 (사용자 요청 2026-10-05).
 OSM 해안선(natural=coastline)은 "진행 방향 왼쪽이 육지" 규칙으로 그려진다. 경로 범위(bbox)를 해안선으로 잘라
 조각마다 왼쪽·오른쪽을 따져 육지 조각만 남기고, 닫힌 해안선(섬·바위)은 그대로 육지로 더한다.
 
@@ -35,7 +37,8 @@ def extract_coastline(pbf: Path) -> dict:
     with tempfile.TemporaryDirectory() as tmp:
         shutil.copy(pbf, Path(tmp) / "in.osm.pbf")
         cmd = ("apt-get update -qq >/dev/null && apt-get install -y -qq osmium-tool >/dev/null && "
-               "osmium tags-filter --overwrite -o /data/coast.osm.pbf /data/in.osm.pbf w/natural=coastline && "
+               "osmium tags-filter --overwrite -o /data/coast.osm.pbf /data/in.osm.pbf "
+               "w/natural=coastline nwr/man_made=breakwater,pier,groyne && "
                "osmium export --overwrite -f geojson -o /data/coast.geojson /data/coast.osm.pbf")
         subprocess.run(["docker", "run", "--rm", "-v", f"{tmp}:/data", "debian:bookworm-slim", "sh", "-c", cmd], check=True)
         return json.loads((Path(tmp) / "coast.geojson").read_text(encoding="utf-8"))
@@ -52,6 +55,22 @@ def left_of(line: LineString, pt: Point) -> bool:
             return (b[0] - a[0]) * (pt.y - a[1]) - (b[1] - a[1]) * (pt.x - a[0]) > 0
         acc += seg
     return False
+
+
+# 선으로만 그려진 방파제·부두는 이 폭(m)의 띠로 본다
+STRUCTURE_WIDTH_M = 6.0
+
+
+def structures(coast: dict) -> list:
+    """방파제·부두·돌제 → 다각형 (선이면 폭 STRUCTURE_WIDTH_M 띠)"""
+    half = STRUCTURE_WIDTH_M / 2 / 111_320
+    out = []
+    for f in coast["features"]:
+        if (f.get("properties") or {}).get("man_made") not in ("breakwater", "pier", "groyne"):
+            continue
+        g = shape(f["geometry"])
+        out.append(g if g.geom_type in ("Polygon", "MultiPolygon") else g.buffer(half, cap_style="flat"))
+    return out
 
 
 def build_land(coast: dict, bbox=BBOX):
@@ -79,7 +98,8 @@ def build_land(coast: dict, bbox=BBOX):
             nearest = min(lines, key=lambda l: l.distance(probe))
             if left_of(nearest, probe):
                 land_parts.append(piece)
-    land = unary_union(land_parts + [c.intersection(area) for c in closed])
+    land = unary_union(land_parts + [c.intersection(area) for c in closed]
+                       + [g.intersection(area) for g in structures(coast)])
     return land
 
 
@@ -95,7 +115,7 @@ def main() -> None:
         "type": "FeatureCollection",
         "features": [{"type": "Feature", "geometry": mapping(land),
                       "properties": {"name": "구룡포 일대 육지", "bbox": list(BBOX),
-                                     "source": "OpenStreetMap natural=coastline (© OpenStreetMap contributors, ODbL)"}}],
+                                     "source": "OpenStreetMap natural=coastline + man_made=breakwater·pier·groyne (© OpenStreetMap contributors, ODbL)"}}],
     }, ensure_ascii=False), encoding="utf-8")
     print(f"저장: {OUT} ({OUT.stat().st_size // 1024}KB, 조각 {len(getattr(land, 'geoms', [land]))}개)")
 

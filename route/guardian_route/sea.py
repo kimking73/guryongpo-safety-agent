@@ -1,7 +1,7 @@
 """B11 해상 → 최근접 항 → 육상 경로: 해상 판정, 항구 고르기, 거리·방위, 자동 대피소.
 
-바다에는 도로가 없어 GraphHopper가 못 쓴다. 그래서 해상 구간은 출발 좌표 → 항구 접안점(berth)의 직선 거리·방위로
-안내하고, 항구의 육상 연결 지점(land_point)부터는 기존 /api/route 계산(위험 구역 회피·사용자 유형 규칙)을 그대로 쓴다.
+바다에는 도로가 없어 GraphHopper가 못 쓴다. 그래서 해상 구간은 출발 좌표 → 항구 접안점(berth)까지 육지·방파제를
+돌아가는 바닷길(격자 최단 경로를 편 꺾은선)과 직선 방위로 안내하고, 항구의 육상 연결 지점(land_point)부터는 기존 /api/route 계산(위험 구역 회피·사용자 유형 규칙)을 그대로 쓴다.
 
 데이터 (둘 다 route/data, 이미지에 포함 — route 서버는 DB를 읽지 않는다):
   land.geojson   OSM 해안선으로 만든 육지 다각형 (scripts/build_land.py). 이 밖이면 해상.
@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import heapq
 import json
 import logging
 import math
@@ -22,9 +23,11 @@ from pathlib import Path
 from typing import Any, Protocol
 
 import httpx
+import numpy as np
+import shapely
 from shapely.geometry import LineString, Point, shape
 from shapely.geometry.base import BaseGeometry
-from shapely.ops import substring, transform, unary_union
+from shapely.ops import transform
 
 from .hazards import Hazard
 
@@ -36,14 +39,13 @@ PORTS_FILE = DATA / "ports.geojson"
 
 # 해안선에서 이 거리 안은 육지로 본다 (GPS 오차·방파제 위·물가에 선 사람을 바다로 보지 않게)
 SHORE_TOLERANCE_M = 30.0
-# 직선 해상 구간이 육지를 이만큼 넘게 지나면 "막힌 항로"로 본다 (곶을 가로지르는 직선).
-LAND_CROSSING_TOLERANCE_M = 30.0
-# 단, 접안점 앞 이 거리는 검사하지 않는다 — 항구 안쪽 접안점은 방파제 뒤에 있어 직선이 방파제를 지나기 마련이다
-HARBOUR_APPROACH_M = 300.0
-# 막힌 직선 항로는 가로지른 육지 길이의 이 배수만큼 돌아간다고 보고 순위를 매긴다
-DETOUR_FACTOR = 2.0
-# 이보다 작은 육지 조각(바위섬)은 항로를 막지 않는다 (m²)
-MIN_BLOCKING_AREA_M2 = 5_000.0
+# 해상 구간 길찾기 (사용자 요청 2026-10-05: 방파제를 가로지르지 않게). 육지·방파제(land.geojson)에서 CLEARANCE_M 떨어진
+# 바다 칸만 지나는 격자 최단 경로를 구한 뒤, 직선으로 이어도 육지를 안 지나는 점들은 하나로 펴서 꺾는 점만 남긴다.
+CELL_M = 25.0                # 격자 칸 크기
+CLEARANCE_M = 15.0           # 배가 육지·방파제와 떨어지는 거리 (격자 칸 기준)
+LOS_CLEARANCE_M = 8.0        # 펴기(직선 연결)할 때 지켜야 할 거리. 출발점·접안점과 잇는 선분은 육지만 안 지나면 된다
+SEARCH_MARGIN_M = 1500.0     # 출발점·항구를 둘러싼 이 여백 안에서만 찾는다 (곶을 돌아가는 길까지 들어가게)
+CANDIDATE_PORTS = 5          # 직선 거리로 가까운 이 수의 항구만 실제 길이를 잰다
 ALTERNATIVES = 2
 CACHE_S = 60.0
 DEFAULT_API_URL = "http://api:8000"
@@ -68,9 +70,16 @@ class Port:
 @dataclass(frozen=True)
 class PortChoice:
     port: Port
-    distance_m: float
-    bearing_deg: float
-    clear: bool                      # 직선 항로가 육지를 가로지르지 않음 (False면 해안을 돌아가야 함)
+    distance_m: float                # 바닷길 길이 (육지·방파제를 돌아가는 길), 못 찾으면 직선 거리
+    bearing_deg: float               # 출발점 → 접안점 직선 방위
+    straight_m: float                # 직선 거리
+    path: tuple[tuple[float, float], ...]  # (lat, lon) 출발점 → 꺾는 점들 → 접안점
+    reachable: bool = True           # False면 바닷길을 못 찾음 (path는 직선)
+
+    @property
+    def direct(self) -> bool:
+        """꺾지 않고 바로 갈 수 있음"""
+        return self.reachable and len(self.path) == 2
 
 
 def distance_m(a: tuple[float, float], b: tuple[float, float]) -> float:
@@ -108,6 +117,20 @@ class SeaChart:
         self.land = land
         self.ports = ports
         self.bounds = bounds or land.envelope.bounds  # (min lon, min lat, max lon, max lat)
+        # 길찾기용 m 평면 (범위 가운데 위도 기준 하나로 고정)
+        self._kx = 111_320 * math.cos(math.radians((self.bounds[1] + self.bounds[3]) / 2))
+        land_m = transform(lambda x, y, z=None: (x * self._kx, y * 111_320), land)
+        self._land_m = land_m
+        self._blocked = land_m.buffer(CLEARANCE_M)
+        self._los = land_m.buffer(LOS_CLEARANCE_M)
+        for g in (self._land_m, self._blocked, self._los):
+            shapely.prepare(g)
+
+    def _xy(self, lat: float, lon: float) -> tuple[float, float]:
+        return lon * self._kx, lat * 111_320
+
+    def _latlon(self, x: float, y: float) -> tuple[float, float]:
+        return y / 111_320, x / self._kx
 
     @classmethod
     def from_files(cls, land_file: Path = LAND_FILE, ports_file: Path = PORTS_FILE) -> SeaChart:
@@ -128,21 +151,98 @@ class SeaChart:
         return transform(to_m, self.land).distance(transform(to_m, pt)) > SHORE_TOLERANCE_M
 
     def rank_ports(self, lat: float, lon: float) -> list[PortChoice]:
-        """바다로 가는 거리가 짧은 순. 직선 항로가 육지(곶·방파제)를 가로지르면 그 길이의 2배를 돌아가는 거리로 더한다
-        (OSM 해안선은 방파제도 육지로 그린다). 작은 바위섬은 항로를 막지 않는 것으로 본다."""
+        """바닷길(육지·방파제를 돌아가는 길)이 짧은 순. 직선으로 가까운 CANDIDATE_PORTS곳만 잰다.
+        바닷길을 못 찾은 항구(다른 바다 쪽 등)는 직선으로 두고 맨 뒤로."""
         here = (lat, lon)
-        to_m = _to_m(lat)
-        land_m = transform(to_m, self.land)
-        land_m = unary_union([g for g in getattr(land_m, "geoms", [land_m]) if g.area >= MIN_BLOCKING_AREA_M2])
+        cands = sorted(self.ports, key=lambda p: distance_m(here, p.berth))[:CANDIDATE_PORTS]
+        paths = self.sea_paths(here, [p.berth for p in cands])
         out = []
-        for p in self.ports:
-            leg = transform(to_m, LineString([(lon, lat), (p.berth[1], p.berth[0])]))
-            open_sea = substring(leg, 0, max(0.0, leg.length - HARBOUR_APPROACH_M))
-            crossing = open_sea.intersection(land_m).length if open_sea.length > 0 else 0.0
-            out.append((distance_m(here, p.berth) + DETOUR_FACTOR * crossing,
-                        PortChoice(p, distance_m(here, p.berth), bearing_deg(here, p.berth),
-                                   crossing <= LAND_CROSSING_TOLERANCE_M)))
-        return [c for _, c in sorted(out, key=lambda t: t[0])]
+        for p, path in zip(cands, paths):
+            straight = distance_m(here, p.berth)
+            if path is None:
+                out.append(PortChoice(p, straight, bearing_deg(here, p.berth), straight, (here, p.berth), reachable=False))
+            else:
+                length = sum(distance_m(a, b) for a, b in zip(path, path[1:]))
+                out.append(PortChoice(p, length, bearing_deg(here, p.berth), straight, tuple(path)))
+        return sorted(out, key=lambda c: (not c.reachable, c.distance_m))
+
+    def sea_paths(self, start: tuple[float, float], ends: list[tuple[float, float]]) -> list[list[tuple[float, float]] | None]:
+        """start에서 각 end까지 바다로만 가는 경로 [(lat, lon), …] (못 가면 None). 격자 다익스트라 한 번으로 모두 구한다."""
+        pts = [self._xy(*start)] + [self._xy(*e) for e in ends]
+        bx0, by0 = self._xy(self.bounds[1], self.bounds[0])
+        bx1, by1 = self._xy(self.bounds[3], self.bounds[2])
+        x0 = max(bx0, min(p[0] for p in pts) - SEARCH_MARGIN_M)
+        x1 = min(bx1, max(p[0] for p in pts) + SEARCH_MARGIN_M)
+        y0 = max(by0, min(p[1] for p in pts) - SEARCH_MARGIN_M)
+        y1 = min(by1, max(p[1] for p in pts) + SEARCH_MARGIN_M)
+        nx, ny = int((x1 - x0) / CELL_M) + 1, int((y1 - y0) / CELL_M) + 1
+        gx, gy = np.meshgrid(x0 + np.arange(nx) * CELL_M, y0 + np.arange(ny) * CELL_M)  # [row=y, col=x]
+        free = ~shapely.contains_xy(self._blocked, gx, gy)
+        free_idx = np.flatnonzero(free)
+        if free_idx.size == 0:
+            return [None] * len(ends)
+
+        def cell_of(x: float, y: float) -> int:
+            """가장 가까운 바다 칸 (접안점은 육지에 붙어 있어 여유 거리 안이다)"""
+            d = (gx.flat[free_idx] - x) ** 2 + (gy.flat[free_idx] - y) ** 2
+            return int(free_idx[int(np.argmin(d))])
+
+        src = cell_of(*pts[0])
+        goals = {cell_of(*p): i for i, p in enumerate(pts[1:])}
+        dist = {src: 0.0}
+        prev: dict[int, int] = {}
+        heap = [(0.0, src)]
+        left = set(goals)
+        flat_free = free.ravel()
+        steps = [(dr, dc, CELL_M * math.hypot(dr, dc)) for dr in (-1, 0, 1) for dc in (-1, 0, 1) if dr or dc]
+        while heap and left:
+            d, cur = heapq.heappop(heap)
+            if d > dist.get(cur, math.inf):
+                continue
+            left.discard(cur)
+            r, c = divmod(cur, nx)
+            for dr, dc, cost in steps:
+                rr, cc = r + dr, c + dc
+                if not (0 <= rr < ny and 0 <= cc < nx):
+                    continue
+                nxt = rr * nx + cc
+                if not flat_free[nxt]:
+                    continue
+                nd = d + cost
+                if nd < dist.get(nxt, math.inf):
+                    dist[nxt], prev[nxt] = nd, cur
+                    heapq.heappush(heap, (nd, nxt))
+
+        out: list[list[tuple[float, float]] | None] = [None] * len(ends)
+        for goal, i in goals.items():
+            if goal not in dist:
+                continue
+            cells = [goal]
+            while cells[-1] != src:
+                cells.append(prev[cells[-1]])
+            line = [pts[0]] + [(float(gx.flat[k]), float(gy.flat[k])) for k in reversed(cells)] + [pts[i + 1]]
+            out[i] = [self._latlon(x, y) for x, y in self._straighten(line)]
+        return out
+
+    def _straighten(self, line: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        """격자 경로를 펴서 꺾는 점만 남긴다. 처음·끝 점(출발점·접안점)과 잇는 선분은 육지만 안 지나면 되고,
+        중간 선분은 육지·방파제에서 LOS_CLEARANCE_M 떨어져야 한다."""
+        last = len(line) - 1
+
+        def clear(i: int, j: int) -> bool:
+            seg = LineString([line[i], line[j]])
+            if seg.length == 0:
+                return True
+            return not (self._land_m if i == 0 or j == last else self._los).intersects(seg)
+
+        out, i = [line[0]], 0
+        while i < last:
+            j = i + 1
+            while j < last and clear(i, j + 1):
+                j += 1
+            out.append(line[j])
+            i = j
+        return out
 
 
 def _port(p: dict[str, Any]) -> Port:

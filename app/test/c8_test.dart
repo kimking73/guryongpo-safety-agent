@@ -112,7 +112,8 @@ void main() {
       'at_sea': true,
       'port': {'id': 'guryongpo', 'name': '구룡포항', 'kind': 'national_fishing',
                'berth': {'lat': 35.98896, 'lon': 129.55547}, 'land_point': {'lat': 35.98931, 'lon': 129.55575}},
-      'sea_leg': {'distance_m': 1324, 'bearing_deg': 279.0, 'bearing_label': '서쪽', 'direct': true, 'alternatives': []},
+      'sea_leg': {'distance_m': 1324, 'straight_m': 1324, 'bearing_deg': 279.0, 'bearing_label': '서쪽', 'direct': true,
+                  'path': '', 'path_found': true, 'alternatives': []},
       'destination': {'name': '여의주타워', 'lat': 35.99038, 'lon': 129.55503, 'note': null},
       'land_route': {'distance_m': 131, 'duration_s': 94, 'geometry': '_p~iF~ps|U_ulLnnqC'},
       'land_route_error': null,
@@ -127,6 +128,16 @@ void main() {
         const LatLng(35.98, 129.54));
     expect(onLand.seaPoints, isEmpty);
     expect(onLand.landPoints, hasLength(2));
+  });
+
+  test('해상 구간: 서버 바닷길(방파제를 돌아가는 꺾은선)이 있으면 그대로 그린다', () {
+    final plan = SeaRoutePlan({
+      'at_sea': true,
+      'port': {'berth': {'lat': 43.252, 'lon': -126.453}, 'land_point': {'lat': 43.252, 'lon': -126.453}},
+      'sea_leg': {'path': '_p~iF~ps|U_ulLnnqC_mqNvxq`@', 'direct': false},
+    }, const LatLng(38.5, -120.2));
+    expect(plan.seaPoints, hasLength(3)); // 출발 → 꺾는 점 → 접안점
+    expect(plan.seaPoints[1], const LatLng(40.7, -120.95));
   });
 
   test('점선은 짧은 선분 여러 개', () {

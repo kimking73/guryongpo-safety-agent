@@ -107,10 +107,13 @@ class SeaAlternative(BaseModel):
 
 
 class SeaLeg(BaseModel):
-    distance_m: int                                         # 출발 좌표 → 접안점 직선 거리
-    bearing_deg: float                                      # 진북 기준 방위 (0~360)
+    distance_m: int                                         # 바닷길 길이 (육지·방파제를 돌아감)
+    straight_m: int                                         # 출발 좌표 → 접안점 직선 거리
+    bearing_deg: float                                      # 접안점의 진북 기준 방위 (0~360, 직선)
     bearing_label: str                                      # 16방위 한글 (예: 북서쪽)
-    direct: bool = True                                     # False면 직선 항로가 곶(육지)을 가로지른다 — 해안을 돌아가야 함
+    direct: bool = True                                     # False면 곶·방파제를 돌아 들어가야 함 (path가 꺾임)
+    path: str                                               # 바닷길 꺾은선 (인코딩 polyline, geometry와 같은 형식) 출발 → 접안점
+    path_found: bool = True                                 # False면 바닷길을 못 찾아 path가 직선
     alternatives: list[SeaAlternative] = Field(default_factory=list)  # 다음으로 가까운 항구 (직선 항로가 열린 곳 우선)
 
 
@@ -159,9 +162,10 @@ class RouteService:
             p = best.port
             port = SeaPort(id=p.id, name=p.name, kind=p.kind, berth=LatLon(lat=p.berth[0], lon=p.berth[1]),
                            land_point=LatLon(lat=p.land_point[0], lon=p.land_point[1]))
-            alts = [c for c in ranked[1:] if c.clear][:ALTERNATIVES]
-            sea_leg = SeaLeg(distance_m=round(best.distance_m), bearing_deg=round(best.bearing_deg, 1),
-                             bearing_label=bearing_label(best.bearing_deg), direct=best.clear,
+            alts = [c for c in ranked[1:] if c.reachable][:ALTERNATIVES]
+            sea_leg = SeaLeg(distance_m=round(best.distance_m), straight_m=round(best.straight_m),
+                             bearing_deg=round(best.bearing_deg, 1), bearing_label=bearing_label(best.bearing_deg),
+                             direct=best.direct, path=polyline.encode(list(best.path)), path_found=best.reachable,
                              alternatives=[SeaAlternative(id=c.port.id, name=c.port.name, distance_m=round(c.distance_m),
                                                           bearing_deg=round(c.bearing_deg, 1),
                                                           bearing_label=bearing_label(c.bearing_deg)) for c in alts])

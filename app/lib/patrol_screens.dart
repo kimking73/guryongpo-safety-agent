@@ -885,8 +885,13 @@ class SeaRoutePlan {
   LatLng? get berth => latLng(port?['berth']);
   LatLng? get landPoint => latLng(port?['land_point']);
 
-  /// 해상 구간: 출발 → 접안점 (직선)
-  List<LatLng> get seaPoints => berth == null ? const [] : [origin, berth!];
+  /// 해상 구간: 출발 → 접안점. 서버가 준 바닷길(육지·방파제를 돌아가는 꺾은선)이 있으면 그것, 없으면 직선
+  List<LatLng> get seaPoints {
+    if (berth == null) return const [];
+    final p = seaLeg?['path'];
+    final path = p is String && p.isNotEmpty ? decodePolyline(p) : <LatLng>[];
+    return path.length >= 2 ? path : [origin, berth!];
+  }
 
   /// 육상 구간: 접안점 → 도로 시작점 + 경로 (해상일 때), 육지면 경로만
   List<LatLng> get landPoints {
@@ -896,7 +901,7 @@ class SeaRoutePlan {
   }
 }
 
-/// 점선 (짧은 선분들) — 해상 구간은 "길이 아니라 방향"이라 점선으로 그린다
+/// 점선 (짧은 선분들) — 해상 구간은 도로가 아니라 대략의 바닷길이라 점선으로 그린다
 List<Polyline> dashedLine(List<LatLng> pts, Color color, {double width = 5, int dashes = 24}) => [
       for (var i = 0; i < pts.length - 1; i++)
         for (var j = 0; j < dashes; j += 2)
@@ -1001,7 +1006,7 @@ class _LiveSeaRouteScreenState extends ConsumerState<LiveSeaRouteScreen> {
                     _osm,
                   ]))),
       const Wrap(spacing: 14, runSpacing: 6, children: [
-        _Legend(color: seaColor, label: '해상 구간 (직선 방향)', dashed: true),
+        _Legend(color: seaColor, label: '해상 구간 (방파제·곶을 피한 바닷길)', dashed: true),
         _Legend(color: portColor, label: '항구 접안점'),
         _Legend(color: landColor, label: '육상 경로 (위험 구역 회피)'),
       ]),
@@ -1043,10 +1048,11 @@ class _SeaRouteSummary extends StatelessWidget {
         Card(
             child: ListTile(
                 leading: const Icon(Icons.anchor, color: portColor),
-                title: Text('1. ${leg['bearing_label']}으로 ${km(leg['distance_m'])} → ${port['name']}'),
+                title: Text('1. ${leg['bearing_label']} ${port['name']}까지 바닷길 ${km(leg['distance_m'])}'),
                 subtitle: Text([
-                  '방위 ${(leg['bearing_deg'] as num?)?.round() ?? '-'}° (진북 기준, 직선 거리)',
-                  if (leg['direct'] == false) '직선 항로가 곶·방파제에 막혀 있어 해안을 따라 돌아 들어가야 합니다',
+                  '방위 ${(leg['bearing_deg'] as num?)?.round() ?? '-'}° (진북 기준) · 직선 ${km(leg['straight_m'] ?? leg['distance_m'])}',
+                  if (leg['direct'] == false && leg['path_found'] != false) '곶·방파제를 피해 지도의 파란 점선을 따라 돌아 들어가세요',
+                  if (leg['path_found'] == false) '바닷길을 찾지 못해 직선으로 표시했습니다. 해안·방파제에 주의하세요',
                   if ((leg['alternatives'] as List?)?.isNotEmpty ?? false)
                     '다른 항구: ${[for (final a in leg['alternatives'] as List) '${(a as Map)['name']} ${a['bearing_label']} ${km(a['distance_m'])}'].join(', ')}',
                 ].join('\n')))),
@@ -1063,7 +1069,7 @@ class _SeaRouteSummary extends StatelessWidget {
                 ].join('\n')))),
       if (plan.raw['land_route_error'] != null)
         Card(child: ListTile(leading: const Icon(Icons.error_outline), title: Text('${plan.raw['land_route_error']}'))),
-      Text('해상 구간은 바닷길이 아니라 직선 방향·거리입니다. 실제 항해는 선장 판단과 해경 안내를 따르세요.',
+      Text('해상 구간은 육지·방파제만 피한 대략의 바닷길입니다(수심·암초 미반영). 실제 항해는 선장 판단과 해경 안내를 따르세요.',
           style: Theme.of(c).textTheme.bodySmall),
     ]);
   }

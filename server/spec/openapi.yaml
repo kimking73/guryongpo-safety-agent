@@ -1093,7 +1093,8 @@ paths:
       summary: '[B11 1차] 해상 → 최근접 항 → 대피소 경로'
       description: |
         **B11 1차 구현 (2026-10-05, route/guardian_route/sea.py)** — 응답 형식은 고정, 판정 세부(항로 막힘 기준 등)는 B11 마무리 때 바뀔 수 있다.
-        해상 구간은 도로가 없으므로 직선 거리·방위로 안내하고, 항구의 육상 연결 지점(`land_point`)부터는 `/api/route` 와 같은 계산을 한다.
+        해상 구간은 도로가 없으므로 육지·방파제(OSM 해안선 + man_made=breakwater·pier)에서 15m 떨어진 바닷길(격자 최단 경로를 편 꺾은선)과
+        직선 방위로 안내하고, 항구의 육상 연결 지점(`land_point`)부터는 `/api/route` 와 같은 계산을 한다. 항구는 바닷길이 짧은 순.
         출발 좌표가 육지(OSM 해안선 기준, 물가 30m 포함)면 `at_sea=false` 와 함께 일반 경로만 돌려준다. 구룡포 일대 밖이면 422.
         항구: `route/data/ports.geojson` 12곳 (같은 내용이 DB `ports`, `db/init/10_seed_ports.sql`). 풍랑 특보는 이 응답에 없다 —
         앱은 대시보드 warnings(hazard=high_seas), AI 는 get_weather_warnings 로 붙인다.
@@ -1972,15 +1973,18 @@ components:
           oneOf:
             - type: 'null'
             - type: object
-              required: [distance_m, bearing_deg, bearing_label, direct]
+              required: [distance_m, straight_m, bearing_deg, bearing_label, direct, path]
               properties:
-                distance_m: { type: integer, description: '직선 거리' }
-                bearing_deg: { type: number, description: '진북 기준 방위 (0~360)' }
+                distance_m: { type: integer, description: '바닷길 길이 (육지·방파제를 돌아감)' }
+                straight_m: { type: integer, description: '직선 거리' }
+                bearing_deg: { type: number, description: '접안점의 진북 기준 방위 (0~360, 직선)' }
                 bearing_label: { type: string, examples: ['북서쪽'] }
-                direct: { type: boolean, description: 'false 면 직선 항로가 곶·방파제를 가로지른다 (해안을 돌아가야 함)' }
+                direct: { type: boolean, description: 'false 면 곶·방파제를 돌아 들어간다 (path 가 꺾임)' }
+                path: { type: string, description: '바닷길 꺾은선 출발 → 접안점 (인코딩 polyline, RouteResponse.geometry 와 같은 형식)' }
+                path_found: { type: boolean, description: 'false 면 바닷길을 못 찾아 path 가 직선' }
                 alternatives:
                   type: array
-                  description: '다음 항구 최대 2곳 (직선 항로가 열린 곳)'
+                  description: '다음 항구 최대 2곳 (바닷길이 있는 곳, distance_m 은 바닷길 길이)'
                   items: { type: object, properties: { id: { type: string }, name: { type: string }, distance_m: { type: integer }, bearing_deg: { type: number }, bearing_label: { type: string } } }
         destination:
           oneOf:
