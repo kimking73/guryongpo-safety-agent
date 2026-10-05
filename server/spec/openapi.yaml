@@ -1090,12 +1090,14 @@ paths:
       - { url: 'http://localhost:8002' }
     post:
       tags: [route]
-      summary: '[B11 제안] 해상 → 최근접 항 → 대피소 경로'
+      summary: '[B11 1차] 해상 → 최근접 항 → 대피소 경로'
       description: |
-        **제안 (B11 Day 15–17 에서 확정)**. 해상 구간은 도로가 없으므로 직선 거리·방위로 안내하고,
-        항구의 육상 연결 지점(`ports.land_point`)부터는 `/api/route` 와 같은 계산을 한다.
-        출발 좌표가 육지면 `at_sea=false` 와 함께 일반 경로만 돌려준다.
-        항구 데이터: DB `ports` (berth = 배 댈 곳, land_point = 도로와 이어지는 곳) — B11 이 출처 확인 후 적재.
+        **B11 1차 구현 (2026-10-05, route/guardian_route/sea.py)** — 응답 형식은 고정, 판정 세부(항로 막힘 기준 등)는 B11 마무리 때 바뀔 수 있다.
+        해상 구간은 도로가 없으므로 직선 거리·방위로 안내하고, 항구의 육상 연결 지점(`land_point`)부터는 `/api/route` 와 같은 계산을 한다.
+        출발 좌표가 육지(OSM 해안선 기준, 물가 30m 포함)면 `at_sea=false` 와 함께 일반 경로만 돌려준다. 구룡포 일대 밖이면 422.
+        항구: `route/data/ports.geojson` 12곳 (같은 내용이 DB `ports`, `db/init/10_seed_ports.sql`). 풍랑 특보는 이 응답에 없다 —
+        앱은 대시보드 warnings(hazard=high_seas), AI 는 get_weather_warnings 로 붙인다.
+        GraphHopper 장애·경로 없음이면 해상 안내는 그대로 주고 `land_route=null`, `land_route_error` 에 이유.
       operationId: routeSea
       security: []
       requestBody:
@@ -1944,36 +1946,50 @@ components:
         route: { oneOf: [ { $ref: '#/components/schemas/RouteResponse' }, { type: 'null' } ] }
     SeaRouteRequest:
       type: object
-      description: '[B11 제안]'
+      description: '[B11 1차] 좌표 키는 route 서버 규칙(lat, lon)'
       required: [origin]
       properties:
         origin: { $ref: '#/components/schemas/LatLon' }
-        destination: { oneOf: [ { $ref: '#/components/schemas/LatLon' }, { type: 'null' } ], description: '생략 시 항구에서 가장 안전한 대피소' }
+        destination: { oneOf: [ { $ref: '#/components/schemas/LatLon' }, { type: 'null' } ], description: '생략 시 항구(육지면 출발지)에서 가장 가까운 갈 만한 대피소' }
         profile: { $ref: '#/components/schemas/RouteProfile' }
     SeaRouteResponse:
       type: object
-      description: '[B11 제안] 해상 구간과 육상 구간을 나눠서 준다'
+      description: '[B11 1차] 해상 구간과 육상 구간을 나눠서 준다'
       required: [at_sea]
       properties:
-        at_sea: { type: boolean, description: '출발 좌표가 해상인지 (해안선 기준, PostGIS)' }
+        at_sea: { type: boolean, description: '출발 좌표가 해상인지 (OSM 해안선, 물가 30m 는 육지)' }
         port:
           oneOf:
             - type: 'null'
             - type: object
               properties:
-                id: { type: integer }
+                id: { type: string, examples: ['guryongpo'] }
                 name: { type: string }
+                kind: { type: string, enum: [national_fishing, local_fishing, village_fishing, small_port, other] }
                 berth: { $ref: '#/components/schemas/LatLon' }
                 land_point: { $ref: '#/components/schemas/LatLon' }
         sea_leg:
           oneOf:
             - type: 'null'
             - type: object
-              required: [distance_m, bearing_deg]
+              required: [distance_m, bearing_deg, bearing_label, direct]
               properties:
                 distance_m: { type: integer, description: '직선 거리' }
                 bearing_deg: { type: number, description: '진북 기준 방위 (0~360)' }
                 bearing_label: { type: string, examples: ['북서쪽'] }
-                alternatives: { type: array, description: '다음으로 가까운 항구 2곳 (이름·거리·방위)', items: { type: object } }
-                high_seas_warning: { type: boolean, description: '풍랑 특보 발효 중' }
+                direct: { type: boolean, description: 'false 면 직선 항로가 곶·방파제를 가로지른다 (해안을 돌아가야 함)' }
+                alternatives:
+                  type: array
+                  description: '다음 항구 최대 2곳 (직선 항로가 열린 곳)'
+                  items: { type: object, properties: { id: { type: string }, name: { type: string }, distance_m: { type: integer }, bearing_deg: { type: number }, bearing_label: { type: string } } }
+        destination:
+          oneOf:
+            - type: 'null'
+            - type: object
+              properties:
+                name: { type: [string, 'null'], description: '자동 선택한 대피소 이름 (직접 준 목적지면 null)' }
+                lat: { type: number }
+                lon: { type: number }
+                note: { type: [string, 'null'], description: '갈 만한 대피소가 없을 때 경고' }
         land_route: { oneOf: [ { $ref: '#/components/schemas/RouteResponse' }, { type: 'null' } ] }
+        land_route_error: { type: [string, 'null'] }

@@ -16,9 +16,10 @@ from shapely.geometry.base import BaseGeometry
 from shapely.ops import substring, transform
 
 from . import polyline
-from .gh import GraphHopperClient
+from .gh import GraphHopperClient, GraphHopperUnavailable, RouteNotFound
 from .hazards import Hazard, HazardSource, default_source
 from .profiles import PROFILE_RULES
+from .sea import ALTERNATIVES, ApiShelterSource, SeaChart, ShelterSource, bearing_label, pick_shelter
 
 Profile = Literal["adult", "elderly"]
 CheckReason = Literal["off_route", "hazard_on_route"]
@@ -82,10 +83,107 @@ class RouteCheckResponse(BaseModel):
     route: RouteResponse | None = None                      # reroute일 때 현재 위치에서 다시 계산한 경로
 
 
+class SeaRouteRequest(BaseModel):
+    """B11: 바다 위(배)에서 대피. destination을 생략하면 항구에서 가장 가까운 갈 만한 대피소로 간다."""
+    origin: LatLon
+    destination: LatLon | None = None
+    profile: Profile = "adult"
+
+
+class SeaPort(BaseModel):
+    id: str
+    name: str
+    kind: str
+    berth: LatLon                   # 배를 댈 곳 (해상 구간 도착점)
+    land_point: LatLon              # 도로와 이어지는 곳 (육상 경로 출발점)
+
+
+class SeaAlternative(BaseModel):
+    id: str
+    name: str
+    distance_m: int
+    bearing_deg: float
+    bearing_label: str
+
+
+class SeaLeg(BaseModel):
+    distance_m: int                                         # 출발 좌표 → 접안점 직선 거리
+    bearing_deg: float                                      # 진북 기준 방위 (0~360)
+    bearing_label: str                                      # 16방위 한글 (예: 북서쪽)
+    direct: bool = True                                     # False면 직선 항로가 곶(육지)을 가로지른다 — 해안을 돌아가야 함
+    alternatives: list[SeaAlternative] = Field(default_factory=list)  # 다음으로 가까운 항구 (직선 항로가 열린 곳 우선)
+
+
+class SeaDestination(BaseModel):
+    name: str | None = None                                 # 자동 선택한 대피소 이름 (목적지를 직접 주면 None)
+    lat: float
+    lon: float
+    note: str | None = None                                 # 갈 만한 대피소가 없을 때 경고
+
+
+class SeaRouteResponse(BaseModel):
+    at_sea: bool                                            # 출발 좌표가 해상인지 (OSM 해안선, 물가 30m는 육지로 봄)
+    port: SeaPort | None = None
+    sea_leg: SeaLeg | None = None
+    destination: SeaDestination | None = None
+    land_route: RouteResponse | None = None                 # 육지 출발이면 출발지부터, 해상이면 land_point부터
+    land_route_error: str | None = None                     # 육상 경로를 못 구한 이유 (해상 안내는 그대로 준다)
+
+
 class RouteService:
-    def __init__(self, client: GraphHopperClient | None = None, hazards: HazardSource | None = None):
+    def __init__(self, client: GraphHopperClient | None = None, hazards: HazardSource | None = None,
+                 chart: SeaChart | None = None, shelters: ShelterSource | None = None):
         self.gh = client or GraphHopperClient()
         self.hazards = hazards or default_source()
+        self._chart = chart
+        self.shelters = shelters or ApiShelterSource()
+
+    @property
+    def chart(self) -> SeaChart:
+        """육지·항구 파일은 해상 경로를 처음 부를 때 읽는다 (일반 경로만 쓰는 테스트는 파일이 필요 없게)."""
+        if self._chart is None:
+            self._chart = SeaChart.from_files()
+        return self._chart
+
+    def sea(self, req: SeaRouteRequest) -> SeaRouteResponse:
+        """해상이면 최근접 항(직선 항로가 열린 곳 우선)까지 거리·방위 + 항구 육상 지점부터 경로.
+        육지면 at_sea=False + 일반 경로. OutsideArea(범위 밖)는 api.py가 422로 바꾼다.
+        GraphHopper 장애·경로 없음은 해상 안내를 살리고 land_route_error로 알린다."""
+        o = (req.origin.lat, req.origin.lon)
+        at_sea = self.chart.is_at_sea(*o)
+        port = sea_leg = None
+        start = o
+        if at_sea:
+            ranked = self.chart.rank_ports(*o)
+            best = ranked[0]
+            p = best.port
+            port = SeaPort(id=p.id, name=p.name, kind=p.kind, berth=LatLon(lat=p.berth[0], lon=p.berth[1]),
+                           land_point=LatLon(lat=p.land_point[0], lon=p.land_point[1]))
+            alts = [c for c in ranked[1:] if c.clear][:ALTERNATIVES]
+            sea_leg = SeaLeg(distance_m=round(best.distance_m), bearing_deg=round(best.bearing_deg, 1),
+                             bearing_label=bearing_label(best.bearing_deg), direct=best.clear,
+                             alternatives=[SeaAlternative(id=c.port.id, name=c.port.name, distance_m=round(c.distance_m),
+                                                          bearing_deg=round(c.bearing_deg, 1),
+                                                          bearing_label=bearing_label(c.bearing_deg)) for c in alts])
+            start = p.land_point
+
+        if req.destination is not None:
+            dest = SeaDestination(lat=req.destination.lat, lon=req.destination.lon)
+        else:
+            shelter, note = pick_shelter(start, self.shelters.shelters(), self._zones())
+            if shelter is None:
+                return SeaRouteResponse(at_sea=at_sea, port=port, sea_leg=sea_leg, land_route_error=note)
+            dest = SeaDestination(name=shelter.name, lat=shelter.lat, lon=shelter.lon, note=note)
+
+        try:
+            land = self.route(RouteRequest(origin=LatLon(lat=start[0], lon=start[1]),
+                                           destination=LatLon(lat=dest.lat, lon=dest.lon), profile=req.profile))
+        except (GraphHopperUnavailable, RouteNotFound) as e:
+            if not at_sea:
+                raise   # 육지 출발이면 일반 경로와 같은 오류 (503/404)
+            return SeaRouteResponse(at_sea=True, port=port, sea_leg=sea_leg, destination=dest,
+                                    land_route_error=f"항구에서 대피소까지 경로를 구하지 못했습니다 ({e})")
+        return SeaRouteResponse(at_sea=at_sea, port=port, sea_leg=sea_leg, destination=dest, land_route=land)
 
     def route(self, req: RouteRequest) -> RouteResponse:
         """사용자 유형 규칙 + 위험 구역 회피 경로. GraphHopperUnavailable, RouteNotFound는 api.py가 HTTP 오류로 바꾼다.
