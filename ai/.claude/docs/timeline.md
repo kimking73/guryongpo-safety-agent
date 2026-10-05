@@ -88,7 +88,9 @@ AI = OpenAI gpt-6-luna. 실제 노드 전부 구현(관리자·전문 agent 5종
 
 ## 이월 항목 (끝나면 지운다)
 - [ ] **C8 공유·확인 (2026-10-05)**: 김다인에게 `app/lib/patrol_screens.dart`(LiveHouseholdScreen·LiveResponderScreen을 live_screens.dart에서 옮김, 방재단 화면은 responder·admin만 — 시연 store도 caregiver 제외), 조하린에게 `db/init/10_seed_ports.sql`(ports 표, data_sources `ports_b11`)·명세 SeaRoute* 확정.
-      VM 배포 후 실제 로그인으로 방재단 대시보드·방문 기록·가구 등록 화면 확인 (로컬은 secrets/firebase-admin.json 없어 로그인 화면 401).
+      **VM 배포 안 됨** (커밋 5258af2·9610d72는 푸시함, 이 맥은 VM ssh 키 없음): VM 접속되는 맥에서 VM `./deploy/deploy.sh`(loader가 10_seed_ports 적용, route 재빌드)
+      → 맥에서 `./deploy/push_web.sh` → 초대 코드(`/internal/invites`, role responder)로 방재단 역할 → 방재단 대시보드·방문 기록·가구 등록 화면 실제 로그인으로 확인
+      (로컬은 secrets/firebase-admin.json 없어 로그인 필요한 화면이 401).
       앱 기존 테스트 8개 실패는 C8 전과 같음(disaster_center 2·location 3·remote_mapping 1·route_and_places 2 — 1개는 10분 멈춤) → C 확인 필요.
       이 맥에 Flutter SDK 설치함(`~/development/flutter`, 3.47.6, PATH 미등록).
 - [ ] **B11 마무리**: 판정 로직은 나중에 다시 수정(사용자 2026-10-05). 후보: 방파제를 육지로 그린 OSM 해안선 때문에 항구가 "막힘"으로 보이는 문제(지금은 거리 + 가로지른 육지×2로 순위),
