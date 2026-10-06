@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>
+body{margin:0;background:#DDE1EC;font-family:Pretendard,-apple-system,"Apple SD Gothic Neo",sans-serif;color:#111A3A;-webkit-font-smoothing:antialiased}
+a{color:#14225B}a:hover{color:#0B1440}
+input{font-family:inherit}
+input::placeholder{color:#8A93AE}
+*{box-sizing:border-box}
+::-webkit-scrollbar{width:0;height:0}
+</style>
+</helmet>
+<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:32px 16px">
+<div style="width:410px;height:864px;padding:10px;border-radius:56px;background:#0B1233;box-shadow:0 30px 60px rgba(11,18,51,.25);flex:none">
+<div data-screen-label="Phone" style="position:relative;width:390px;height:844px;border-radius:46px;overflow:hidden;background:{{ screenBg }};display:flex;flex-direction:column">
+
+<div style="height:48px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:6px 30px 0 34px;font-size:16px;font-weight:700;color:{{ statusFg }}">
+<span>9:41</span>
+<div style="display:flex;gap:6px;font-size:14px"><i class="fa-solid fa-signal"></i><i class="fa-solid fa-wifi"></i><i class="fa-solid fa-battery-full"></i></div>
+</div>
+
+<sc-if value="{{ isOb1 }}" hint-placeholder-val="{{ true }}">
+<div data-screen-label="온보딩 1" style="flex:1;min-height:0;margin:8px 0 0;background:#fff;border-radius:32px 32px 0 0;overflow-y:auto;padding:28px 20px 32px;display:flex;flex-direction:column">
+<div style="display:flex;align-items:center;justify-content:space-between">
+<div style="width:56px;height:56px;border-radius:50%;background:#14225B;display:flex;align-items:center;justify-content:center;color:#fff;font-size:24px"><i class="fa-solid fa-shield"></i></div>
+<span style="font-size:15px;font-weight:700;color:#4A5578">1 / 2</span>
+</div>
+<h1 style="margin:18px 0 6px;font-size:32px;font-weight:800;letter-spacing:-0.02em">구룡포 안전 비서</h1>
+<p style="margin:0 0 22px;font-size:17px;line-height:1.5;color:#4A5578;text-wrap:pretty">나에게 맞는 대피 안내를 위해 몇 가지만 알려주세요.</p>
+<div style="display:flex;flex-direction:column;gap:10px">
+<button onClick="{{ toggleLoc }}" style="min-height:64px;border-radius:20px;border:{{ locBorder }};background:{{ locBg }};display:flex;align-items:center;gap:12px;padding:12px 14px;text-align:left;cursor:pointer;font-family:inherit;color:#111A3A">
+<i class="fa-solid fa-location-crosshairs" style="font-size:22px;color:#14225B;width:26px;text-align:center"></i>
+<span style="flex:1;font-size:17px;font-weight:700;line-height:1.35"><sc-if value="{{ cLoc }}"><i class="fa-solid fa-check" style="margin-right:6px"></i></sc-if>위치 정보 수집 동의</span>
+<span style="font-size:13px;font-weight:700;color:#14225B;background:#fff;padding:5px 10px;border-radius:999px">필수</span>
+</button>
+<button onClick="{{ toggleDisC }}" style="min-height:64px;border-radius:20px;border:{{ disBorder }};background:{{ disBg }};display:flex;align-items:center;gap:12px;padding:12px 14px;text-align:left;cursor:pointer;font-family:inherit;color:#111A3A">
+<i class="fa-solid fa-wheelchair-move" style="font-size:22px;color:#14225B;width:26px;text-align:center"></i>
+<span style="flex:1;font-size:17px;font-weight:700;line-height:1.35"><sc-if value="{{ cDis }}"><i class="fa-solid fa-check" style="margin-right:6px"></i></sc-if>장애 정보(시각·청각·지체) 민감정보 수집 동의</span>
+<span style="font-size:13px;font-weight:700;color:#14225B;background:#E8EBF5;padding:5px 10px;border-radius:999px">필수</span>
+</button>
+</div>
+<label style="margin:24px 0 8px;font-size:17px;font-weight:800">나이 <span style="font-weight:500;color:#4A5578">(선택)</span></label>
+<input value="{{ age }}" onChange="{{ onAge }}" inputmode="numeric" placeholder="예: 72" style="height:56px;width:60%;border-radius:999px;border:2px solid #D5DAE8;padding:0 20px;font-size:18px;color:#111A3A;outline:none">
+<label style="margin:22px 0 8px;font-size:17px;font-weight:800">장애 유형 <span style="font-weight:500;color:#4A5578">(선택 · 중복 가능)</span></label>
+<div style="display:flex;flex-wrap:wrap;gap:8px">
+<sc-for list="{{ disOpts }}" as="o" hint-placeholder-count="4">
+<button onClick="{{ o.onClick }}" style="height:52px;padding:0 18px;border-radius:999px;border:2px solid #14225B;background:{{ o.bg }};color:{{ o.fg }};font-size:17px;font-weight:700;display:flex;align-items:center;gap:8px;cursor:pointer;font-family:inherit"><i class="fa-solid {{ o.i }}"></i>{{ o.l }}</button>
+</sc-for>
+</div>
+<label style="margin:22px 0 8px;font-size:17px;font-weight:800">이동 수단 <span style="font-weight:500;color:#4A5578">(선택 · 중복 가능)</span></label>
+<div style="display:flex;flex-wrap:wrap;gap:8px">
+<sc-for list="{{ moveOpts }}" as="o" hint-placeholder-count="2">
+<button onClick="{{ o.onClick }}" style="height:52px;padding:0 20px;border-radius:999px;border:2px solid #14225B;background:{{ o.bg }};color:{{ o.fg }};font-size:17px;font-weight:700;display:flex;align-items:center;gap:8px;cursor:pointer;font-family:inherit"><i class="fa-solid {{ o.i }}"></i>{{ o.l }}</button>
+</sc-for>
+</div>
+<div style="flex:1;min-height:28px"></div>
+<button onClick="{{ next1 }}" style="height:60px;border-radius:999px;border:none;background:{{ nextBg }};color:#fff;font-size:20px;font-weight:800;cursor:pointer;font-family:inherit">다음</button>
+</div>
+</sc-if>
+
+<sc-if value="{{ isOb2 }}">
+<div data-screen-label="온보딩 2" style="flex:1;min-height:0;margin:8px 0 0;background:#fff;border-radius:32px 32px 0 0;overflow-y:auto;padding:28px 20px 32px;display:flex;flex-direction:column">
+<div style="display:flex;align-items:center;justify-content:space-between">
+<button onClick="{{ back1 }}" style="width:48px;height:48px;border-radius:50%;border:none;background:#F3F4F9;color:#14225B;font-size:18px;cursor:pointer"><i class="fa-solid fa-arrow-left"></i></button>
+<span style="font-size:15px;font-weight:700;color:#4A5578">2 / 2</span>
+</div>
+<h1 style="margin:18px 0 6px;font-size:30px;font-weight:800;letter-spacing:-0.02em">자주 있는 곳</h1>
+<p style="margin:0 0 22px;font-size:17px;line-height:1.5;color:#4A5578">집과 내 장소 기준으로 가까운 대피소를 알려드려요.</p>
+<label style="margin:0 0 8px;font-size:17px;font-weight:800;display:flex;align-items:center;gap:8px"><i class="fa-solid fa-house" style="color:#14225B"></i>집</label>
+<input value="{{ home }}" onChange="{{ onHome }}" placeholder="예: 구룡포읍 호미로" style="height:56px;border-radius:999px;border:2px solid #D5DAE8;padding:0 20px;font-size:18px;color:#111A3A;outline:none">
+<label style="margin:20px 0 8px;font-size:17px;font-weight:800;display:flex;align-items:center;gap:8px"><i class="fa-solid fa-bookmark" style="color:#14225B"></i>내 장소 <span style="font-weight:500;color:#4A5578">(선택)</span></label>
+<input value="{{ place0 }}" onChange="{{ onPlace0 }}" placeholder="예: 구룡포 시장" style="height:56px;border-radius:999px;border:2px solid #D5DAE8;padding:0 20px;font-size:18px;color:#111A3A;outline:none">
+<label style="margin:20px 0 8px;font-size:17px;font-weight:800;display:flex;align-items:center;gap:8px"><i class="fa-solid fa-briefcase" style="color:#14225B"></i>직업 <span style="font-weight:500;color:#4A5578">(선택)</span></label>
+<input value="{{ job }}" onChange="{{ onJob }}" placeholder="예: 어업" style="height:56px;border-radius:999px;border:2px solid #D5DAE8;padding:0 20px;font-size:18px;color:#111A3A;outline:none">
+<div style="flex:1;min-height:28px"></div>
+<button onClick="{{ finishOb }}" style="height:60px;border-radius:999px;border:none;background:#14225B;color:#fff;font-size:20px;font-weight:800;cursor:pointer;font-family:inherit">{{ finishLabel }}</button>
+</div>
+</sc-if>
+
+<sc-if value="{{ isApp }}">
+<div style="flex:1;min-height:0;display:flex;flex-direction:column">
+<div style="flex:none;display:flex;align-items:center;gap:8px;padding:6px 16px 4px">
+<sc-if value="{{ online }}" hint-placeholder-val="{{ true }}"><div style="height:40px;padding:0 12px;border-radius:999px;background:#fff;display:flex;align-items:center;gap:6px;font-size:15px;font-weight:700;color:#14225B;flex:none"><i class="fa-solid fa-cloud"></i>온라인</div></sc-if>
+<sc-if value="{{ offline }}"><div role="status" style="height:40px;padding:0 12px;border-radius:999px;background:#C25A0C;display:flex;align-items:center;gap:6px;font-size:15px;font-weight:800;color:#fff;flex:none;box-shadow:0 0 0 3px #FCE3CC"><i class="fa-solid fa-plug-circle-xmark"></i>오프라인</div></sc-if>
+<sc-if value="{{ isTeam }}">
+<div style="height:40px;padding:0 12px;border-radius:999px;background:#fff;display:flex;align-items:center;gap:6px;font-size:14px;font-weight:800;color:#14225B;white-space:nowrap;min-width:0"><i class="fa-solid fa-id-badge"></i>방재단원(나)</div>
+<div style="flex:1"></div>
+<span style="height:36px;padding:0 12px;border-radius:999px;background:#D9342B;color:#fff;font-size:14px;font-weight:800;display:flex;align-items:center;gap:6px;flex:none"><span style="width:8px;height:8px;border-radius:50%;background:#fff;opacity:{{ liveDot }}"></span>실시간</span>
+</sc-if>
+<sc-if value="{{ notTeam }}" hint-placeholder-val="{{ true }}">
+<button onClick="{{ evacStatusClick }}" role="status" aria-label="대피 현황" style="height:40px;padding:0 12px 0 4px;border-radius:999px;border:none;background:{{ es.bg }};display:flex;align-items:center;gap:6px;font-size:15px;font-weight:800;color:{{ es.fg }};min-width:0;white-space:nowrap;cursor:pointer;font-family:inherit">
+<span style="width:32px;height:32px;border-radius:50%;background:{{ es.iconBg }};color:{{ es.iconFg }};display:flex;align-items:center;justify-content:center;font-size:13px;flex:none"><i class="fa-solid {{ es.i }}"></i></span>
+<span style="font-size:13px;font-weight:600;opacity:.9">대피 현황</span>{{ es.l }}</button>
+<div style="flex:1"></div>
+<button onClick="{{ openNotifs }}" style="position:relative;width:44px;height:44px;border-radius:50%;border:none;background:#fff;color:#14225B;font-size:19px;cursor:pointer;flex:none"><i class="fa-solid fa-bell"></i>
+<sc-if value="{{ hasUnread }}"><span style="position:absolute;top:-2px;right:-2px;min-width:20px;height:20px;border-radius:10px;background:#14225B;color:#fff;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2px solid #F3F4F9">2</span></sc-if>
+</button>
+</sc-if>
+</div>
+<div ref="{{ scrollRef }}" data-app-scroll="1" style="flex:1;min-height:0;overflow-y:auto;padding:8px 16px {{ scrollPadB }}px">
+<h1 style="margin:6px 0 16px;font-size:30px;font-weight:800;letter-spacing:-0.02em">{{ title }}</h1>
+
+<sc-if value="{{ isDash }}">
+<div data-screen-label="대시보드" style="display:flex;flex-direction:column;gap:14px">
+<div style="background:#D9342B;border-radius:22px;padding:12px 14px 14px;color:#fff;box-shadow:0 8px 18px rgba(217,52,43,.22)">
+<div style="display:flex;align-items:center;gap:8px">
+<div style="width:30px;height:30px;border-radius:50%;background:#fff;color:#D9342B;display:flex;align-items:center;justify-content:center;font-size:13px;flex:none"><i class="fa-solid fa-comment-dots"></i></div>
+<span style="font-size:16px;font-weight:800;flex:1">최근 재난문자</span>
+<span style="font-size:13px;font-weight:700">포항시 · 14:20</span>
+<button onClick="{{ toggleRaw }}" aria-label="원문 보기" style="width:44px;height:44px;margin:-7px -8px -7px 0;border:none;background:transparent;color:#fff;font-size:14px;cursor:pointer;flex:none"><i class="fa-solid {{ rawIcon }}"></i></button>
+</div>
+<p style="margin:8px 0 10px;font-size:19px;line-height:1.35;font-weight:800;letter-spacing:-0.01em;text-wrap:pretty">태풍이 오고 있어요. 바닷가에 가지 마세요.</p>
+<div onPointerDown="{{ dragStart }}" onPointerMove="{{ dragMove }}" onPointerUp="{{ dragEnd }}" onPointerLeave="{{ dragEnd }}" style="display:flex;gap:6px;overflow-x:auto;margin:0 -14px;padding:0 14px;scroll-padding:0 14px;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;touch-action:pan-x;cursor:grab;user-select:none;-webkit-mask-image:linear-gradient(90deg,transparent 0,#000 14px,#000 calc(100% - 28px),transparent 100%);mask-image:linear-gradient(90deg,transparent 0,#000 14px,#000 calc(100% - 28px),transparent 100%)">
+<div style="height:40px;border-radius:999px;background:#fff;color:#D9342B;display:flex;align-items:center;gap:6px;padding:0 12px 0 4px;font-size:14px;font-weight:800;white-space:nowrap;flex:none"><span style="width:32px;height:32px;border-radius:50%;background:#FBE3E1;display:flex;align-items:center;justify-content:center;font-size:13px"><i class="fa-solid fa-umbrella-beach"></i></span>바닷가·방파제 가지 않기</div>
+<div style="height:40px;border-radius:999px;background:#fff;color:#D9342B;display:flex;align-items:center;gap:6px;padding:0 12px 0 4px;font-size:14px;font-weight:800;white-space:nowrap;flex:none"><span style="width:32px;height:32px;border-radius:50%;background:#FBE3E1;display:flex;align-items:center;justify-content:center;font-size:13px"><i class="fa-solid fa-house-medical"></i></span>저지대 주민 대피 준비</div>
+<div style="flex:none;width:8px"></div>
+</div>
+<sc-if value="{{ raw }}"><p style="margin:10px 2px 0;font-size:15px;line-height:1.5">원문: [포항시] 태풍 북상, 해안가·방파제 접근 금지. 저지대 주민은 대피 준비 바랍니다.</p></sc-if>
+</div>
+
+<div style="background:#fff;border-radius:26px;padding:18px">
+<div style="display:flex;align-items:center;gap:10px">
+<div style="width:40px;height:40px;border-radius:50%;background:#E8EBF5;color:#14225B;display:flex;align-items:center;justify-content:center;font-size:17px"><i class="fa-solid fa-triangle-exclamation"></i></div>
+<span style="font-size:20px;font-weight:800;flex:1">경보 · 주의보</span>
+<span style="font-size:14px;color:#4A5578">기상청</span>
+</div>
+<div style="display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 12px">
+<span style="height:44px;padding:0 14px;border-radius:999px;background:#14225B;color:#fff;font-size:16px;font-weight:800;display:flex;align-items:center;gap:8px"><i class="fa-solid fa-hurricane"></i>태풍 경보</span>
+<span style="height:44px;padding:0 14px;border-radius:999px;background:#14225B;color:#fff;font-size:16px;font-weight:800;display:flex;align-items:center;gap:8px"><i class="fa-solid fa-water"></i>풍랑 경보</span>
+<span style="height:44px;padding:0 14px;border-radius:999px;background:#E8EBF5;color:#14225B;font-size:16px;font-weight:800;display:flex;align-items:center;gap:8px"><i class="fa-solid fa-wind"></i>강풍 주의보</span>
+<span style="height:44px;padding:0 14px;border-radius:999px;background:#E8EBF5;color:#14225B;font-size:16px;font-weight:800;display:flex;align-items:center;gap:8px"><i class="fa-solid fa-cloud-showers-heavy"></i>호우 주의보</span>
+</div>
+<p style="margin:0;font-size:16px;line-height:1.5;color:#4A5578;text-wrap:pretty">해안가와 방파제 접근을 피하고 가까운 대피소 위치를 확인하세요.</p>
+</div>
+
+<div style="background:#fff;border-radius:26px;padding:12px">
+<div style="position:relative;height:210px;border-radius:20px;background:repeating-linear-gradient(135deg,#E8EBF5 0 14px,#F6F7FB 14px 28px);display:flex;align-items:center;justify-content:center">
+<span style="font-size:14px;color:#4A5578;background:#fff;padding:6px 14px;border-radius:999px">지도 · 경로 표시 영역</span>
+<button onClick="{{ openMapFull }}" aria-label="지도 전체화면" style="position:absolute;top:10px;right:10px;height:44px;padding:0 14px;border-radius:999px;border:none;background:#fff;color:#14225B;font-size:15px;font-weight:800;display:flex;align-items:center;gap:8px;cursor:pointer;font-family:inherit;box-shadow:0 2px 8px rgba(20,34,91,.15)"><i class="fa-solid fa-expand"></i>전체화면</button>
+</div>
+<div style="display:flex;align-items:center;gap:6px;margin-top:10px">
+<div role="radiogroup" aria-label="출발지 선택" style="flex:1;min-width:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));background:#F3F4F9;border-radius:999px;padding:3px;gap:2px">
+<sc-for list="{{ origins }}" as="o" hint-placeholder-count="3">
+<button onClick="{{ o.onClick }}" role="radio" style="height:38px;border-radius:999px;border:none;background:{{ o.segBg }};color:{{ o.segFg }};font-size:14px;font-weight:800;display:flex;align-items:center;justify-content:center;gap:4px;cursor:pointer;font-family:inherit;white-space:nowrap;min-width:0"><i class="fa-solid {{ o.i }}" style="font-size:11px"></i>{{ o.l }}</button>
+</sc-for>
+</div>
+<div style="display:flex;background:#F3F4F9;border-radius:999px;padding:3px;gap:2px;flex:none">
+<button onClick="{{ setWalk }}" aria-label="도보" style="width:38px;height:38px;border-radius:999px;border:none;background:{{ walkBg }};color:{{ walkFg }};font-size:15px;cursor:pointer"><i class="fa-solid fa-person-walking"></i></button>
+<button onClick="{{ setCar }}" aria-label="자동차" style="width:38px;height:38px;border-radius:999px;border:none;background:{{ carBg }};color:{{ carFg }};font-size:15px;cursor:pointer"><i class="fa-solid fa-car"></i></button>
+</div>
+</div>
+<div style="display:flex;align-items:center;gap:8px;margin-top:8px;padding:0 2px 0 4px">
+<span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:1px">
+<span style="font-size:12px;color:#4A5578;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ fromAddr }}에서</span>
+<span style="font-size:15px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><i class="fa-solid fa-house-flag" style="color:#14225B;margin-right:5px;font-size:13px"></i>{{ toLabel }}</span>
+</span>
+<button onClick="{{ swap }}" aria-label="출발지 도착지 바꾸기" style="width:40px;height:40px;border-radius:50%;border:none;background:#F3F4F9;color:#14225B;font-size:13px;cursor:pointer;flex:none"><i class="fa-solid fa-arrow-right-arrow-left"></i></button>
+<div style="height:40px;padding:0 12px;border-radius:999px;background:#14225B;color:#fff;display:flex;align-items:baseline;gap:4px;flex:none;line-height:40px"><span style="font-size:17px;font-weight:800">{{ routeTime }}</span><span style="font-size:12px;font-weight:600">{{ routeKm }}</span></div>
+</div>
+</div>
+
+<div style="margin-top:10px">
+<h2 style="margin:0 0 10px;font-size:21px;font-weight:800">지금 구룡포 날씨 <span style="font-weight:700;color:#4A5578;font-size:17px">· 10분 전 갱신</span></h2>
+<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
+<span style="height:34px;padding:0 12px 0 8px;border-radius:999px;background:#fff;display:flex;align-items:center;gap:6px;font-size:15px;font-weight:700"><span style="width:16px;height:16px;border-radius:50%;background:#1FA05A"></span>좋음</span>
+<span style="height:34px;padding:0 12px 0 8px;border-radius:999px;background:#fff;display:flex;align-items:center;gap:6px;font-size:15px;font-weight:700"><span style="width:16px;height:16px;border-radius:50%;background:#F2C230"></span>관심</span>
+<span style="height:34px;padding:0 12px 0 8px;border-radius:999px;background:#fff;display:flex;align-items:center;gap:6px;font-size:15px;font-weight:700"><span style="width:16px;height:16px;border-radius:50%;background:#EF7F1A"></span>주의</span>
+<span style="height:34px;padding:0 12px 0 8px;border-radius:999px;background:#fff;display:flex;align-items:center;gap:6px;font-size:15px;font-weight:700"><span style="width:16px;height:16px;border-radius:50%;background:#D9342B"></span>경보</span>
+</div>
+<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px">
+<sc-for list="{{ weather }}" as="w" hint-placeholder-count="6">
+<button onClick="{{ w.onClick }}" style="background:#fff;border:none;border-radius:16px;padding:10px;display:flex;align-items:center;gap:9px;text-align:left;cursor:pointer;font-family:inherit;color:#111A3A;min-width:0;min-height:64px">
+<span style="position:relative;width:38px;height:38px;border-radius:50%;background:{{ w.c }};color:{{ w.ic }};display:flex;align-items:center;justify-content:center;font-size:16px;flex:none"><i class="fa-solid {{ w.i }}"></i>
+<span style="position:absolute;right:-4px;bottom:-3px;width:17px;height:17px;border-radius:50%;background:#fff;border:1.5px solid {{ w.c }};color:#14225B;font-size:8px;display:flex;align-items:center;justify-content:center"><i class="fa-solid {{ w.b }}"></i></span></span>
+<span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px">
+<span style="font-size:13px;font-weight:800;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ w.t }}</span>
+<span style="display:flex;align-items:center;gap:4px">
+<span style="display:flex;align-items:baseline;gap:2px;color:#14225B;white-space:nowrap"><span style="font-size:19px;font-weight:800;letter-spacing:-0.02em;line-height:1.1">{{ w.v }}</span><span style="font-size:11px;font-weight:700">{{ w.u }}</span></span>
+<span style="margin-left:auto;padding:2px 6px;border-radius:999px;background:{{ w.c }};color:{{ w.lc }};font-size:11px;font-weight:800;flex:none">{{ w.lv }}</span>
+</span>
+</span>
+</button>
+</sc-for>
+</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isChat }}">
+<div data-screen-label="AI 대화창" style="display:flex;flex-direction:column;gap:14px">
+<sc-for list="{{ msgs }}" as="m" hint-placeholder-count="1">
+<sc-if value="{{ m.isBot }}">
+<div data-msg="bot" style="display:flex;gap:10px;align-items:flex-start;scroll-margin-top:8px">
+<img src="mascot.png" alt="AI 캐릭터" style="width:31px;height:31px;border-radius:50%;object-fit:cover;flex:none">
+<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:10px">
+<div style="background:#fff;border-radius:4px 15px 15px 15px;padding:9px 11px;font-size:15px;line-height:1.55;text-wrap:pretty"><sc-for list="{{ m.parts }}" as="p"><span style="font-weight:{{ p.w }}">{{ p.t }}</span></sc-for></div>
+<sc-if value="{{ m.map }}">
+<div style="background:#fff;border-radius:22px;padding:10px">
+<div style="height:150px;border-radius:16px;background:repeating-linear-gradient(135deg,#E8EBF5 0 14px,#F6F7FB 14px 28px);display:flex;align-items:center;justify-content:center;font-size:14px;color:#4A5578">지도 · 현위치 → 대피소</div>
+<button onClick="{{ openDashMapFull }}" style="margin-top:10px;width:100%;height:54px;border-radius:999px;border:none;background:#14225B;color:#fff;font-size:17px;font-weight:800;display:flex;align-items:center;justify-content:center;gap:10px;cursor:pointer;font-family:inherit"><i class="fa-solid fa-diamond-turn-right"></i>경로 안내 화면 보기</button>
+</div>
+</sc-if>
+<sc-if value="{{ m.checklist }}">
+<div style="background:#fff;border-radius:15px;padding:10px">
+<div style="display:flex;align-items:baseline;justify-content:space-between;margin:0 2px 6px"><span style="font-size:13px;font-weight:800">지금 할 일</span><span style="font-size:12px;font-weight:700;color:#4A5578">{{ doneText }}</span></div>
+<div style="display:flex;flex-direction:column;gap:4px">
+<sc-for list="{{ todos }}" as="t" hint-placeholder-count="6">
+<button onClick="{{ t.onClick }}" role="checkbox" style="min-height:44px;border-radius:12px;border:none;background:#F3F4F9;display:flex;align-items:center;gap:10px;padding:6px 10px;text-align:left;cursor:pointer;font-family:inherit">
+<span style="width:26px;height:26px;border-radius:50%;border:2px solid #14225B;background:{{ t.bg }};color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;flex:none"><i class="fa-solid fa-check" style="opacity:{{ t.op }}"></i></span>
+<span style="font-size:13px;font-weight:700;line-height:1.4;color:{{ t.fg }};text-decoration:{{ t.td }};text-wrap:pretty">{{ t.t }}</span>
+</button>
+</sc-for>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ m.typhoon }}">
+<div style="background:#14225B;border-radius:15px;padding:12px;color:#fff">
+<div style="display:flex;align-items:center;gap:8px">
+<div style="width:34px;height:34px;border-radius:50%;background:#fff;color:#14225B;display:flex;align-items:center;justify-content:center;font-size:16px"><i class="fa-solid fa-hurricane"></i></div>
+<div style="display:flex;flex-direction:column"><span style="font-size:11px;opacity:.85">제14호 태풍</span><span style="font-size:17px;font-weight:800;line-height:1.15">힌남노</span></div>
+</div>
+<p style="margin:10px 0 0;font-size:12px;font-weight:800">구룡포 최근접 예상</p>
+<p style="margin:0 0 8px;font-size:22px;font-weight:800;letter-spacing:-0.02em">내일 오전 7시</p>
+<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px">
+<div style="background:rgba(255,255,255,.12);border-radius:10px;padding:6px 8px"><div style="font-size:11px;opacity:.85">중심기압</div><div style="font-size:14px;font-weight:800">950hPa</div></div>
+<div style="background:rgba(255,255,255,.12);border-radius:10px;padding:6px 8px"><div style="font-size:11px;opacity:.85">최대풍속</div><div style="font-size:14px;font-weight:800">43m/s</div></div>
+<div style="background:rgba(255,255,255,.12);border-radius:10px;padding:6px 8px"><div style="font-size:11px;opacity:.85">진행</div><div style="font-size:14px;font-weight:800">북북동</div></div>
+</div>
+<div style="margin-top:8px;height:110px;border-radius:10px;background:repeating-linear-gradient(135deg,#E8EBF5 0 12px,#fff 12px 24px);display:flex;align-items:center;justify-content:center;font-size:12px;color:#4A5578">태풍 예상 경로 지도</div>
+</div>
+</sc-if>
+<sc-if value="{{ m.rain }}">
+<div style="background:#fff;border-radius:22px;padding:16px">
+<p style="margin:0 0 12px;font-size:16px;font-weight:800">시간별 강수량</p>
+<div style="display:flex;align-items:flex-end;justify-content:space-between;height:96px;padding:0 4px">
+<sc-for list="{{ rainBars }}" as="r" hint-placeholder-count="6">
+<div style="display:flex;flex-direction:column;align-items:center;gap:6px"><div style="width:24px;height:{{ r.h }}px;border-radius:12px;background:{{ r.c }}"></div><span style="font-size:13px;color:#4A5578">{{ r.t }}</span></div>
+</sc-for>
+</div>
+<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:14px;padding-top:12px;border-top:1px solid #EDEFF5">
+<div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:13px;color:#4A5578">기온</span><span style="font-size:17px;font-weight:800">18.5°C</span></div>
+<div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:13px;color:#4A5578">미세먼지</span><span style="font-size:17px;font-weight:800">좋음</span></div>
+<div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:13px;color:#4A5578">바람</span><span style="font-size:17px;font-weight:800">22m/s</span></div>
+</div>
+</div>
+</sc-if>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ m.isUser }}">
+<div style="display:flex;justify-content:flex-end"><div style="max-width:80%;background:#14225B;color:#fff;border-radius:15px 4px 15px 15px;padding:8px 11px;font-size:15px;line-height:1.5">{{ m.text }}</div></div>
+</sc-if>
+</sc-for>
+<sc-if value="{{ typing }}">
+<div style="display:flex;gap:10px;align-items:center"><img src="mascot.png" alt="" style="width:31px;height:31px;border-radius:50%;object-fit:cover"><div style="background:#fff;border-radius:4px 15px 15px 15px;padding:8px 11px;font-size:15px;color:#4A5578">답변을 준비하고 있어요…</div></div>
+</sc-if>
+</div>
+</sc-if>
+
+
+<sc-if value="{{ isTeam }}">
+<div data-screen-label="방재단 현황" style="display:flex;flex-direction:column;gap:12px">
+<p style="margin:-10px 2px 0;font-size:14px;color:#4A5578">구룡포읍 자율방재단 · 방금 갱신 {{ nowTime }}</p>
+<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
+<sc-for list="{{ teamStats }}" as="t" hint-placeholder-count="4">
+<div style="background:#fff;border-radius:18px;padding:10px 12px 10px 10px;display:flex;align-items:center;gap:8px;min-width:0">
+<span style="width:36px;height:36px;border-radius:50%;background:{{ t.c }};color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:900;flex:none"><i class="fa-solid {{ t.i }}"></i></span>
+<span style="flex:1;min-width:0;font-size:14px;font-weight:800;white-space:nowrap">{{ t.l }}</span>
+<span style="font-size:26px;font-weight:800;color:{{ t.c }};line-height:1">{{ t.n }}</span>
+</div>
+</sc-for>
+</div>
+
+<div style="background:#fff;border-radius:22px;padding:12px">
+<div style="display:flex;align-items:baseline;gap:8px;margin:2px 4px 10px"><h2 style="margin:0;font-size:19px;font-weight:800">지도</h2><span style="font-size:13px;color:#4A5578">우선 확인 가구 · 대피소</span></div>
+<div onClick="{{ openTeamMap }}" role="button" aria-label="지도 전체화면으로 보기" style="position:relative;height:240px;border-radius:16px;overflow:hidden;cursor:zoom-in;background:repeating-linear-gradient(135deg,#E8EBF5 0 12px,#F6F7FB 12px 24px)">
+<span style="position:absolute;right:8px;top:8px;width:32px;height:32px;border-radius:50%;background:#fff;color:#14225B;font-size:13px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(20,34,91,.15);z-index:2"><i class="fa-solid fa-expand"></i></span>
+<div style="position:absolute;left:-10%;top:16%;width:62%;height:76%;border-radius:50%;background:rgba(217,52,43,.10);border:1.5px dashed #D9342B"></div>
+<span style="position:absolute;left:8px;top:8px;height:28px;padding:0 10px;border-radius:999px;background:#fff;color:#B42318;font-size:12px;font-weight:800;display:flex;align-items:center">위험지역 · 해안 저지대</span>
+<sc-for list="{{ shelters }}" as="p" hint-placeholder-count="4">
+<span style="position:absolute;left:{{ p.x }}%;top:{{ p.y }}%;height:28px;padding:0 9px 0 5px;border-radius:999px;background:#fff;border:2px solid #14225B;color:#14225B;font-size:11px;font-weight:800;display:flex;align-items:center;gap:4px;white-space:nowrap"><i class="fa-solid fa-house-flag" style="font-size:11px"></i>{{ p.n }}</span>
+</sc-for>
+<sc-for list="{{ priorityPins }}" as="p" hint-placeholder-count="0">
+<span style="position:absolute;left:{{ p.x }}%;top:{{ p.y }}%;width:26px;height:26px;border-radius:50%;background:{{ p.c }};border:2px solid #fff;color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.25)"><i class="fa-solid fa-house"></i></span>
+</sc-for>
+<span style="position:absolute;right:8px;bottom:8px;height:24px;padding:0 10px;border-radius:999px;background:#fff;color:#4A5578;font-size:11px;display:flex;align-items:center">예시 위치 · 실제 지도 연결 전</span>
+</div>
+</div>
+
+<div style="background:#fff;border-radius:22px;padding:14px 16px">
+<h2 style="margin:0 0 4px;font-size:19px;font-weight:800">우선 확인 가구</h2>
+<p style="margin:0 0 10px;font-size:12px;line-height:1.5;color:#4A5578"><span style="color:#B42318;font-weight:800">위험지역 안</span> · 도움 필요+장애 › 도움 필요 › 응답 없음+장애 › 응답 없음</p>
+<sc-if value="{{ noPriority }}"><div style="min-height:52px;border-radius:14px;background:#F3F4F9;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;color:#4A5578">위험지역 안에 급한 가구가 없어요</div></sc-if>
+<div style="display:flex;flex-direction:column;gap:6px">
+<sc-for list="{{ priority }}" as="h" hint-placeholder-count="0">
+<div style="min-height:56px;border-radius:14px;background:{{ h.bg }};display:flex;align-items:center;gap:10px;padding:8px 10px">
+<span style="height:26px;padding:0 9px;border-radius:999px;background:{{ h.c }};color:#fff;font-size:12px;font-weight:800;display:flex;align-items:center;flex:none">{{ h.st }}</span>
+<span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:1px"><span style="font-size:15px;font-weight:800">{{ h.n }}</span><span style="font-size:12px;color:#4A5578;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ h.a }}{{ h.tag }}</span></span>
+<span style="font-size:12px;font-weight:700;color:#4A5578;flex:none">{{ h.who }}</span>
+</div>
+</sc-for>
+</div>
+</div>
+
+<div style="background:#fff;border-radius:22px;padding:14px 12px 12px">
+<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin:0 4px 8px"><h2 style="margin:0;font-size:19px;font-weight:800">방재단 배정 현황</h2><span style="font-size:12px;font-weight:700;color:#4A5578;white-space:nowrap">{{ assignSummary }}</span></div>
+<div onPointerDown="{{ dragStart }}" onPointerMove="{{ dragMove }}" onPointerUp="{{ dragEnd }}" onPointerLeave="{{ dragEnd }}" style="display:flex;gap:6px;overflow-x:auto;margin:0 -12px 10px;padding:0 12px;touch-action:pan-x;cursor:grab;user-select:none">
+<sc-for list="{{ stageLegend }}" as="l" hint-placeholder-count="5">
+<span style="height:32px;padding:0 10px;border-radius:999px;background:#F3F4F9;display:flex;align-items:center;gap:6px;font-size:13px;font-weight:800;white-space:nowrap;flex:none"><span style="width:10px;height:10px;border-radius:50%;background:{{ l.c }}"></span>{{ l.l }} {{ l.n }}</span>
+</sc-for>
+</div>
+<div style="display:flex;flex-direction:column;gap:8px">
+<sc-for list="{{ households }}" as="h" hint-placeholder-count="8">
+<div style="border-radius:16px;background:#F3F4F9;padding:10px 12px">
+<div style="display:flex;align-items:center;gap:8px">
+<span style="flex:1;min-width:0;display:flex;align-items:baseline;gap:6px;overflow:hidden"><span style="font-size:16px;font-weight:800;white-space:nowrap">{{ h.n }}</span><span style="font-size:12px;color:#4A5578;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ h.a }}</span></span>
+<sc-if value="{{ h.hasWho }}"><span style="font-size:13px;font-weight:800;color:#14225B;display:flex;align-items:center;gap:4px;flex:none;white-space:nowrap"><i class="fa-solid fa-id-badge" style="font-size:11px"></i>{{ h.who }}</span></sc-if>
+<span style="height:26px;padding:0 9px;border-radius:999px;background:{{ h.c }};color:#fff;font-size:12px;font-weight:800;display:flex;align-items:center;flex:none;white-space:nowrap">{{ h.sl }}</span>
+</div>
+<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;margin-top:8px">
+<sc-for list="{{ h.steps }}" as="p" hint-placeholder-count="4">
+<div style="display:flex;flex-direction:column;align-items:center;gap:4px"><div style="width:100%;height:6px;border-radius:3px;background:{{ p.c }}"></div><span style="font-size:11px;font-weight:{{ p.w }};color:{{ p.fc }}">{{ p.l }}</span></div>
+</sc-for>
+</div>
+<sc-if value="{{ h.canAct }}"><button onClick="{{ h.act }}" style="margin-top:8px;width:100%;height:40px;border-radius:999px;border:none;background:#14225B;color:#fff;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px">{{ h.actL }}<i class="fa-solid fa-chevron-right" style="font-size:11px"></i></button></sc-if>
+</div>
+</sc-for>
+</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isUser }}">
+<div data-screen-label="사용자" style="display:flex;flex-direction:column;gap:14px">
+<div style="background:#fff;border-radius:22px;padding:14px 16px">
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+<h2 style="margin:0;font-size:19px;font-weight:800">내 정보</h2>
+<button onClick="{{ editInfo }}" style="height:36px;padding:0 12px;border-radius:999px;border:none;background:#E8EBF5;color:#14225B;font-size:14px;font-weight:800;display:flex;align-items:center;gap:6px;cursor:pointer;font-family:inherit"><i class="fa-solid fa-pen" style="font-size:12px"></i>수정</button>
+</div>
+<div style="display:flex;flex-direction:column">
+<sc-for list="{{ infoRows }}" as="r" hint-placeholder-count="6">
+<div style="display:flex;align-items:center;gap:10px;min-height:44px;padding:6px 0;border-top:{{ r.bt }}">
+<i class="fa-solid {{ r.i }}" style="width:18px;text-align:center;font-size:14px;color:#14225B;flex:none"></i>
+<span style="width:64px;font-size:14px;color:#4A5578;flex:none">{{ r.l }}</span>
+<span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:1px"><span style="font-size:15px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.v }}</span><sc-if value="{{ r.sub }}"><span style="font-size:12px;color:#4A5578;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.sub }}</span></sc-if></span>
+</div>
+</sc-for>
+</div>
+<sc-if value="{{ addingPlace }}">
+<div style="display:flex;flex-direction:column;gap:8px;margin-top:12px;padding:12px;border-radius:20px;background:#F3F4F9">
+<label style="display:flex;flex-direction:column;gap:4px;font-size:14px;font-weight:800;color:#2A3354">장소 이름
+<input value="{{ newPlace }}" onChange="{{ onNewPlace }}" placeholder="예: 구룡포 시장" style="height:50px;border-radius:999px;border:2px solid #D5DAE8;background:#fff;padding:0 18px;font-size:17px;font-weight:500;color:#111A3A;outline:none"></label>
+<label style="display:flex;flex-direction:column;gap:4px;font-size:14px;font-weight:800;color:#2A3354">주소
+<input value="{{ newAddr }}" onChange="{{ onNewAddr }}" placeholder="예: 구룡포읍 구룡포길 1" style="height:50px;border-radius:999px;border:2px solid #D5DAE8;background:#fff;padding:0 18px;font-size:17px;font-weight:500;color:#111A3A;outline:none"></label>
+<div style="display:flex;gap:8px;margin-top:4px">
+<button onClick="{{ cancelAdd }}" style="flex:1;height:50px;border-radius:999px;border:none;background:#fff;color:#14225B;font-size:16px;font-weight:800;cursor:pointer;font-family:inherit">취소</button>
+<button onClick="{{ addPlace }}" style="flex:2;height:50px;border-radius:999px;border:none;background:{{ addBg }};color:#fff;font-size:16px;font-weight:800;cursor:pointer;font-family:inherit">추가</button>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ notAdding }}">
+<button onClick="{{ startAdd }}" style="margin-top:8px;width:100%;height:44px;padding:0 16px;border-radius:999px;border:1.5px dashed #14225B;background:#fff;color:#14225B;font-size:15px;font-weight:800;display:flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;font-family:inherit"><i class="fa-solid fa-plus"></i>내 장소 추가하기</button>
+</sc-if>
+</div>
+
+<div style="background:#fff;border-radius:22px;padding:14px 16px">
+<h2 style="margin:0 0 4px;font-size:19px;font-weight:800">알림</h2>
+<div style="display:flex;flex-direction:column">
+<sc-for list="{{ notifRows }}" as="r" hint-placeholder-count="3">
+<div style="display:flex;align-items:center;gap:10px;min-height:56px;padding:6px 0;border-top:{{ r.bt }}">
+<i class="fa-solid {{ r.i }}" style="width:18px;text-align:center;font-size:15px;color:#14225B;flex:none"></i>
+<span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:1px"><span style="font-size:15px;font-weight:800">{{ r.t }}</span><span style="font-size:12px;color:#4A5578;line-height:1.35">{{ r.s }}</span></span>
+<button onClick="{{ r.onClick }}" role="switch" aria-label="{{ r.t }}" style="position:relative;width:46px;height:28px;border-radius:14px;border:none;background:{{ r.track }};cursor:pointer;flex:none;padding:0"><span style="position:absolute;top:3px;left:{{ r.knob }}px;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:left .15s"></span></button>
+</div>
+</sc-for>
+</div>
+</div>
+
+<div style="background:#fff;border-radius:22px;padding:14px 16px">
+<h2 style="margin:0 0 4px;font-size:19px;font-weight:800">시연 모드</h2>
+<div style="display:flex;flex-direction:column;gap:2px">
+<sc-for list="{{ simRows }}" as="r" hint-placeholder-count="2">
+<div style="display:flex;align-items:center;gap:10px;min-height:56px;padding:6px 10px;margin:0 -10px;border-radius:14px;background:{{ r.hlBg }};box-shadow:{{ r.hlRing }}">
+<i class="fa-solid {{ r.i }}" style="width:18px;text-align:center;font-size:15px;color:#14225B;flex:none"></i>
+<span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:1px"><span style="font-size:15px;font-weight:800">{{ r.t }}</span><span style="font-size:12px;color:{{ r.subC }};line-height:1.35;font-weight:{{ r.subW }}">{{ r.s }}</span></span>
+<button onClick="{{ r.onClick }}" role="switch" aria-label="{{ r.t }}" style="position:relative;width:46px;height:28px;border-radius:14px;border:none;background:{{ r.track }};cursor:pointer;flex:none;padding:0"><span style="position:absolute;top:3px;left:{{ r.knob }}px;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:left .15s"></span></button>
+</div>
+</sc-for>
+</div>
+</div>
+
+<div style="background:#fff;border-radius:26px;padding:16px 18px;display:flex;align-items:center;gap:12px">
+<span style="width:48px;height:48px;border-radius:50%;background:#E8EBF5;color:#14225B;display:flex;align-items:center;justify-content:center;font-size:19px;flex:none"><i class="fa-solid fa-envelope"></i></span>
+<span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"><span style="font-size:17px;font-weight:800">이메일로 로그인 · 가입</span><span style="font-size:14px;color:#4A5578;line-height:1.4">선택 사항 · 다른 기기에서도 내 정보 사용</span></span>
+<button onClick="{{ loginEmail }}" style="height:48px;padding:0 18px;border-radius:999px;border:none;background:#14225B;color:#fff;font-size:16px;font-weight:800;cursor:pointer;font-family:inherit;flex:none">로그인</button>
+</div>
+<div style="background:#fff;border-radius:26px;padding:16px 18px;display:flex;flex-direction:column;gap:12px">
+<div style="display:flex;align-items:center;gap:12px">
+<span style="width:48px;height:48px;border-radius:50%;background:#14225B;color:#fff;display:flex;align-items:center;justify-content:center;font-size:19px;flex:none"><i class="fa-solid fa-id-badge"></i></span>
+<span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"><span style="font-size:17px;font-weight:800">방재단 로그인</span><span style="font-size:14px;color:#4A5578;line-height:1.4">{{ codeSub }}</span></span>
+<sc-if value="{{ codeOk }}"><span style="height:32px;padding:0 12px;border-radius:999px;background:#E3F3EA;color:#178A4C;font-size:13px;font-weight:800;display:flex;align-items:center;gap:5px;flex:none"><i class="fa-solid fa-check"></i>로그인됨</span></sc-if>
+</div>
+<sc-if value="{{ codeNotOk }}" hint-placeholder-val="{{ true }}">
+<label style="display:flex;flex-direction:column;gap:6px;font-size:14px;font-weight:800;color:#2A3354">방재단 전용 코드
+<div style="display:flex;gap:8px">
+<input value="{{ code }}" onChange="{{ onCode }}" onKeyDown="{{ onCodeKey }}" type="text" autoComplete="off" autoCapitalize="characters" spellCheck="false" maxLength="12" placeholder="예: GRP-1234" style="flex:1;min-width:0;height:52px;border-radius:999px;border:{{ codeBorder }};background:#fff;padding:0 18px;font-size:18px;font-weight:700;letter-spacing:0.08em;color:#111A3A;outline:none;text-transform:uppercase">
+<button onClick="{{ loginCode }}" style="height:52px;padding:0 18px;border-radius:999px;border:none;background:{{ codeBtnBg }};color:#fff;font-size:16px;font-weight:800;cursor:pointer;font-family:inherit;flex:none">로그인</button>
+</div>
+</label>
+<sc-if value="{{ codeErr }}"><p role="alert" style="margin:-4px 4px 0;font-size:14px;font-weight:700;color:#D9342B;display:flex;align-items:center;gap:6px"><i class="fa-solid fa-circle-exclamation"></i>{{ codeErr }}</p></sc-if>
+</sc-if>
+<sc-if value="{{ codeOk }}"><button onClick="{{ logoutCode }}" style="height:46px;border-radius:999px;border:none;background:#F3F4F9;color:#14225B;font-size:15px;font-weight:800;cursor:pointer;font-family:inherit">로그아웃</button></sc-if>
+</div>
+</div>
+</sc-if>
+</div>
+
+<sc-if value="{{ isChat }}">
+<div style="flex:none;padding:8px 0 10px;background:#F3F4F9">
+<div style="display:flex;align-items:center;gap:6px;padding:0 16px 8px;font-size:14px;font-weight:700;color:#14225B"><i class="fa-solid fa-wand-magic-sparkles"></i>내 정보에 맞춘 추천 질문</div>
+<div onPointerDown="{{ dragStart }}" onPointerMove="{{ dragMove }}" onPointerUp="{{ dragEnd }}" onPointerLeave="{{ dragEnd }}" style="display:flex;gap:8px;overflow-x:auto;padding:0 16px;scroll-padding:0 16px;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;touch-action:pan-x;cursor:grab;user-select:none;-webkit-mask-image:linear-gradient(90deg,transparent 0,#000 16px,#000 calc(100% - 32px),transparent 100%);mask-image:linear-gradient(90deg,transparent 0,#000 16px,#000 calc(100% - 32px),transparent 100%)">
+<sc-for list="{{ suggestions }}" as="s" hint-placeholder-count="3">
+<button onClick="{{ s.onClick }}" style="height:46px;padding:0 16px;border-radius:999px;border:2px solid #14225B;background:#fff;color:#14225B;font-size:16px;font-weight:700;white-space:nowrap;cursor:pointer;font-family:inherit;flex:none">{{ s.t }}</button>
+</sc-for>
+</div>
+<sc-if value="{{ rec }}">
+<div role="status" aria-label="음성 녹음 중" style="margin:10px 16px 0;height:60px;border-radius:999px;background:#fff;display:flex;align-items:center;gap:10px;padding:0 6px 0 16px;box-shadow:0 0 0 2px #D9342B inset">
+<span style="width:10px;height:10px;border-radius:50%;background:#D9342B;flex:none;opacity:{{ recDot }}"></span>
+<span style="font-size:15px;font-weight:800;color:#D9342B;flex:none;font-variant-numeric:tabular-nums">{{ recTime }}</span>
+<div style="flex:1;min-width:0;height:36px;display:flex;align-items:center;justify-content:space-between;gap:2px;overflow:hidden">
+<sc-for list="{{ wave }}" as="b" hint-placeholder-count="22"><span style="width:3px;height:{{ b.h }}px;border-radius:2px;background:#14225B;flex:none;transition:height .12s"></span></sc-for>
+</div>
+<button onClick="{{ stopRec }}" aria-label="녹음 끝내기" style="width:46px;height:46px;border-radius:50%;border:none;background:#D9342B;cursor:pointer;flex:none;display:flex;align-items:center;justify-content:center"><span style="width:16px;height:16px;border-radius:3px;background:#fff"></span></button>
+</div>
+</sc-if>
+<sc-if value="{{ notRec }}" hint-placeholder-val="{{ true }}">
+<div style="margin:10px 16px 0;height:60px;border-radius:999px;background:#fff;display:flex;align-items:center;gap:6px;padding:0 6px 0 18px">
+<input value="{{ input }}" onChange="{{ onInput }}" onKeyDown="{{ onKey }}" placeholder="무엇이든 물어보세요" style="flex:1;min-width:0;border:none;outline:none;font-size:17px;color:#111A3A;background:transparent">
+<button onClick="{{ onMic }}" aria-label="음성 입력" style="width:46px;height:46px;border-radius:50%;border:none;background:#E8EBF5;color:#14225B;font-size:17px;cursor:pointer;flex:none"><i class="fa-solid fa-microphone"></i></button>
+<button onClick="{{ send }}" aria-label="보내기" style="width:46px;height:46px;border-radius:50%;border:none;background:#14225B;color:#fff;font-size:18px;cursor:pointer;flex:none"><i class="fa-solid fa-arrow-up"></i></button>
+</div>
+</sc-if>
+</div>
+</sc-if>
+
+<div style="flex:none;background:#14225B;padding:8px 10px 26px;display:grid;grid-template-columns:repeat({{ tabCols }},minmax(0,1fr));gap:6px">
+<sc-for list="{{ tabs }}" as="t" hint-placeholder-count="4">
+<button onClick="{{ t.onClick }}" style="height:62px;border-radius:18px;border:none;background:{{ t.bg }};color:{{ t.fg }};display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;cursor:pointer;font-family:inherit"><i class="fa-solid {{ t.i }}" style="font-size:20px"></i><span style="font-size:14px;font-weight:800">{{ t.l }}</span></button>
+</sc-for>
+</div>
+
+</div>
+</sc-if>
+
+<sc-if value="{{ isRoute }}">
+<div data-screen-label="경로 안내" style="flex:1;min-height:0;display:flex;flex-direction:column;position:relative">
+<div style="position:absolute;inset:0;background:repeating-linear-gradient(135deg,#E8EBF5 0 14px,#F6F7FB 14px 28px);display:flex;align-items:center;justify-content:center;padding-bottom:300px"><span style="font-size:15px;color:#4A5578;background:#fff;padding:6px 14px;border-radius:999px">지도 · 현위치 → 대피소</span></div>
+<div style="position:relative;display:flex;align-items:center;gap:10px;padding:8px 16px">
+<button onClick="{{ backApp }}" aria-label="뒤로" style="width:48px;height:48px;border-radius:50%;border:none;background:#fff;color:#14225B;font-size:18px;cursor:pointer;box-shadow:0 2px 8px rgba(20,34,91,.12)"><i class="fa-solid fa-arrow-left"></i></button>
+<span style="font-size:22px;font-weight:800;background:#fff;padding:8px 16px;border-radius:999px;box-shadow:0 2px 8px rgba(20,34,91,.12)">경로 안내</span>
+</div>
+<div style="flex:1"></div>
+<div style="position:relative;background:#fff;border-radius:30px 30px 0 0;padding:20px 16px 30px;box-shadow:0 -8px 24px rgba(20,34,91,.1)">
+<div style="display:flex;align-items:center;gap:6px">
+<span style="font-size:16px;font-weight:800;color:#4A5578">{{ fromLabel }}</span><i class="fa-solid fa-arrow-right" style="color:#14225B"></i><span style="font-size:16px;font-weight:800;color:#4A5578;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ toLabel }}</span>
+</div>
+<div style="display:flex;align-items:baseline;gap:8px;margin:6px 0 14px"><span style="font-size:40px;font-weight:800;color:#14225B;letter-spacing:-0.02em">{{ routeTime }}</span><span style="font-size:18px;font-weight:700;color:#4A5578">{{ routeKm }}</span></div>
+<div style="display:flex;gap:8px;margin-bottom:14px">
+<button onClick="{{ setWalk }}" style="flex:1;height:52px;border-radius:999px;border:2px solid #14225B;background:{{ walkBg }};color:{{ walkFg }};font-size:17px;font-weight:800;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;font-family:inherit"><i class="fa-solid fa-person-walking"></i>도보</button>
+<button onClick="{{ setCar }}" style="flex:1;height:52px;border-radius:999px;border:2px solid #14225B;background:{{ carBg }};color:{{ carFg }};font-size:17px;font-weight:800;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;font-family:inherit"><i class="fa-solid fa-car"></i>자동차</button>
+</div>
+<p style="margin:0 4px 8px;font-size:16px;font-weight:800;color:#4A5578">출발지 선택</p>
+<div style="display:flex;flex-direction:column;gap:8px">
+<sc-for list="{{ origins }}" as="o" hint-placeholder-count="3">
+<button onClick="{{ o.onClick }}" style="min-height:62px;border-radius:20px;border:none;background:{{ o.bg }};display:flex;align-items:center;gap:12px;padding:8px 12px;text-align:left;cursor:pointer;font-family:inherit">
+<span style="width:42px;height:42px;border-radius:50%;background:{{ o.iconBg }};color:{{ o.iconFg }};display:flex;align-items:center;justify-content:center;font-size:16px;flex:none"><i class="fa-solid {{ o.i }}"></i></span>
+<span style="display:flex;flex-direction:column;gap:2px"><span style="font-size:17px;font-weight:800;color:{{ o.fg }}">{{ o.l }}</span><span style="font-size:14px;color:{{ o.sub }}">{{ o.addr }}</span></span>
+</button>
+</sc-for>
+</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isNotifs }}">
+<div data-screen-label="알림" style="flex:1;min-height:0;overflow-y:auto;padding:8px 16px 30px">
+<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+<button onClick="{{ backApp }}" aria-label="뒤로" style="width:48px;height:48px;border-radius:50%;border:none;background:#fff;color:#14225B;font-size:18px;cursor:pointer"><i class="fa-solid fa-arrow-left"></i></button>
+<h1 style="margin:0;font-size:28px;font-weight:800">알림</h1>
+</div>
+<div style="display:flex;flex-direction:column;gap:10px">
+<sc-for list="{{ notifs }}" as="n" hint-placeholder-count="2">
+<button onClick="{{ backApp }}" style="background:#fff;border:none;border-radius:22px;padding:16px;display:flex;gap:12px;text-align:left;cursor:pointer;font-family:inherit;color:#111A3A">
+<span style="width:44px;height:44px;border-radius:50%;background:{{ n.c }};color:#fff;display:flex;align-items:center;justify-content:center;font-size:17px;flex:none"><i class="fa-solid {{ n.i }}"></i></span>
+<span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">
+<span style="display:flex;justify-content:space-between;gap:8px"><span style="font-size:17px;font-weight:800">{{ n.t }}</span><span style="font-size:14px;color:#4A5578;white-space:nowrap">{{ n.m }}</span></span>
+<span style="font-size:16px;line-height:1.5;color:#2A3354;text-wrap:pretty">{{ n.b }}</span>
+</span>
+</button>
+</sc-for>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isSos }}">
+<div data-screen-label="도움 요청" style="flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;padding:40px 24px 36px;color:#fff;text-align:center">
+<div style="width:120px;height:120px;border-radius:50%;background:#fff;color:#D9342B;display:flex;align-items:center;justify-content:center;font-size:40px;font-weight:900;box-shadow:0 0 0 18px rgba(255,255,255,.18)">SOS</div>
+<h1 style="margin:40px 0 10px;font-size:30px;font-weight:800;line-height:1.3">{{ sosTitle }}</h1>
+<p style="margin:0;font-size:18px;line-height:1.55;text-wrap:pretty">{{ sosSub }}</p>
+<div style="margin-top:24px;width:100%;background:rgba(255,255,255,.14);border-radius:20px;padding:14px 16px;display:flex;align-items:center;gap:12px;text-align:left">
+<i class="fa-solid fa-location-crosshairs" style="font-size:20px"></i>
+<span style="display:flex;flex-direction:column"><span style="font-size:14px;opacity:.9">현재 위치</span><span style="font-size:18px;font-weight:800">구룡포항 근처</span></span>
+</div>
+<div style="flex:1"></div>
+<a href="tel:119" style="width:100%;height:64px;border-radius:999px;background:#fff;color:#D9342B;font-size:21px;font-weight:800;display:flex;align-items:center;justify-content:center;gap:10px;text-decoration:none"><i class="fa-solid fa-phone"></i>119 바로 전화하기</a>
+<button onClick="{{ backApp }}" style="margin-top:10px;width:100%;height:56px;border-radius:999px;border:2px solid #fff;background:transparent;color:#fff;font-size:18px;font-weight:800;cursor:pointer;font-family:inherit">처음 화면으로</button>
+</div>
+</sc-if>
+
+<sc-if value="{{ teamMapFull }}">
+<div data-screen-label="방재단 지도 전체화면" style="position:absolute;inset:0;z-index:18;background:repeating-linear-gradient(135deg,#E8EBF5 0 14px,#F6F7FB 14px 28px);overflow:hidden">
+<div style="position:absolute;left:-30%;top:24%;width:110%;height:52%;border-radius:50%;background:rgba(217,52,43,.10);border:1.5px dashed #D9342B"></div>
+<sc-for list="{{ shelters }}" as="p" hint-placeholder-count="4">
+<span style="position:absolute;left:{{ p.x }}%;top:{{ p.fy }}%;height:34px;padding:0 12px 0 7px;border-radius:999px;background:#fff;border:2px solid #14225B;color:#14225B;font-size:13px;font-weight:800;display:flex;align-items:center;gap:5px;white-space:nowrap"><i class="fa-solid fa-house-flag"></i>{{ p.n }}</span>
+</sc-for>
+<sc-for list="{{ priorityPins }}" as="p" hint-placeholder-count="0">
+<span style="position:absolute;left:{{ p.x }}%;top:{{ p.fy }}%;width:34px;height:34px;border-radius:50%;background:{{ p.c }};border:3px solid #fff;color:#fff;font-size:13px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.25)"><i class="fa-solid fa-house"></i></span>
+</sc-for>
+<div style="position:absolute;left:16px;right:16px;top:56px;display:flex;align-items:center;gap:8px">
+<span style="height:44px;padding:0 16px;border-radius:999px;background:#fff;font-size:17px;font-weight:800;display:flex;align-items:center;box-shadow:0 4px 14px rgba(20,34,91,.15)">지도</span>
+<span style="height:32px;padding:0 12px;border-radius:999px;background:#fff;color:#B42318;font-size:13px;font-weight:800;display:flex;align-items:center;box-shadow:0 4px 14px rgba(20,34,91,.12)">위험지역 · 해안 저지대</span>
+<div style="flex:1"></div>
+<button onClick="{{ closeTeamMap }}" aria-label="전체화면 닫기" style="width:44px;height:44px;border-radius:50%;border:none;background:#14225B;color:#fff;font-size:16px;cursor:pointer;flex:none;box-shadow:0 4px 14px rgba(20,34,91,.2)"><i class="fa-solid fa-compress"></i></button>
+</div>
+<span style="position:absolute;right:16px;bottom:34px;height:28px;padding:0 12px;border-radius:999px;background:#fff;color:#4A5578;font-size:12px;display:flex;align-items:center">예시 위치 · 실제 지도 연결 전</span>
+</div>
+</sc-if>
+<sc-if value="{{ mapFull }}">
+<div data-screen-label="지도 전체화면" style="position:absolute;inset:0;z-index:18;background:repeating-linear-gradient(135deg,#E8EBF5 0 14px,#F6F7FB 14px 28px);display:flex;flex-direction:column;padding:56px 16px 34px">
+<div style="display:flex;align-items:center;gap:6px;background:#fff;border-radius:999px;padding:6px 6px 6px 16px;box-shadow:0 4px 14px rgba(20,34,91,.15)">
+<span style="font-size:16px;font-weight:800;flex:none">{{ fromLabel }}</span><i class="fa-solid fa-arrow-right" style="color:#14225B;flex:none"></i><span style="font-size:16px;font-weight:800;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ toLabel }}</span>
+<button onClick="{{ closeMapFull }}" aria-label="전체화면 닫기" style="width:44px;height:44px;border-radius:50%;border:none;background:#14225B;color:#fff;font-size:16px;cursor:pointer;flex:none"><i class="fa-solid fa-compress"></i></button>
+</div>
+<div style="flex:1;display:flex;align-items:center;justify-content:center"><span style="font-size:15px;color:#4A5578;background:#fff;padding:6px 14px;border-radius:999px">지도 · 경로 표시 영역</span></div>
+<div style="display:flex;align-items:center;gap:8px">
+<div style="display:flex;background:#fff;border-radius:999px;padding:4px;gap:2px;box-shadow:0 4px 14px rgba(20,34,91,.15)">
+<button onClick="{{ setWalk }}" aria-label="도보" style="width:48px;height:44px;border-radius:999px;border:none;background:{{ walkBg }};color:{{ walkFg }};font-size:17px;cursor:pointer"><i class="fa-solid fa-person-walking"></i></button>
+<button onClick="{{ setCar }}" aria-label="자동차" style="width:48px;height:44px;border-radius:999px;border:none;background:{{ carBg }};color:{{ carFg }};font-size:17px;cursor:pointer"><i class="fa-solid fa-car"></i></button>
+</div>
+<div style="flex:1"></div>
+<div style="height:52px;padding:0 18px;border-radius:999px;background:#14225B;color:#fff;display:flex;align-items:center;gap:6px;box-shadow:0 4px 14px rgba(20,34,91,.2)"><span style="font-size:20px;font-weight:800">{{ routeTime }}</span><span style="font-size:15px;font-weight:600">{{ routeKm }}</span></div>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ evac }}">
+<div data-screen-label="대피 상태 확인" style="position:absolute;inset:0;background:rgba(20,34,91,.6);display:flex;align-items:center;justify-content:center;padding:16px;z-index:20">
+<div style="background:#fff;border-radius:30px;padding:24px 16px 16px;width:100%;text-align:center;display:flex;flex-direction:column;align-items:center">
+<div style="width:68px;height:68px;border-radius:50%;background:#D9342B;color:#fff;display:flex;align-items:center;justify-content:center;font-size:30px"><i class="fa-solid fa-person-running"></i></div>
+<p style="margin:14px 0 6px;font-size:14px;font-weight:800;color:#D9342B">대피 필요 · 힌남노 시연 · 해안 저지대</p>
+<h2 style="margin:0;font-size:25px;line-height:1.3;font-weight:800;letter-spacing:-0.02em">지금 계신 곳은 위험해요.<br>대피소로 이동하세요.</h2>
+<p style="margin:10px 0 0;font-size:16px;font-weight:600;color:#2A3354;display:flex;align-items:center;gap:6px"><i class="fa-solid fa-house-flag" style="color:#14225B"></i>구룡포초등학교 대피소 · 0.8km</p>
+<p style="margin:14px 0 4px;font-size:18px;font-weight:800">지금 상태를 알려주세요</p>
+<p style="margin:0 0 14px;font-size:14px;color:#2A3354;display:flex;align-items:center;gap:6px"><i class="fa-solid fa-stopwatch" style="color:#D9342B"></i>응답이 없으면 {{ cdText }} 뒤 방재단에 연락해요</p>
+<div style="width:100%;display:flex;flex-direction:column;gap:8px">
+<button onClick="{{ evacDone }}" style="height:76px;border-radius:38px;border:none;background:#F3F4F9;display:flex;align-items:center;gap:12px;padding:0 10px;text-align:left;cursor:pointer;font-family:inherit;color:#111A3A">
+<span style="width:56px;height:56px;border-radius:50%;background:#1FA05A;color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;flex:none"><i class="fa-solid fa-check"></i></span>
+<span style="display:flex;flex-direction:column;gap:2px"><span style="font-size:20px;font-weight:800">대피 완료</span><span style="font-size:15px;color:#2A3354">대피소에 도착했어요</span></span></button>
+<button onClick="{{ evacMoving }}" style="height:76px;border-radius:38px;border:none;background:#F3F4F9;display:flex;align-items:center;gap:12px;padding:0 10px;text-align:left;cursor:pointer;font-family:inherit;color:#111A3A">
+<span style="width:56px;height:56px;border-radius:50%;background:#EF7F1A;color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;flex:none"><i class="fa-solid fa-person-walking"></i></span>
+<span style="display:flex;flex-direction:column;gap:2px"><span style="font-size:20px;font-weight:800">대피 중</span><span style="font-size:15px;color:#2A3354">지금 대피소로 가고 있어요</span></span></button>
+<button onClick="{{ evacHelp }}" style="height:76px;border-radius:38px;border:none;background:#D9342B;display:flex;align-items:center;gap:12px;padding:0 10px;text-align:left;cursor:pointer;font-family:inherit;color:#fff">
+<span style="width:56px;height:56px;border-radius:50%;background:#fff;color:#D9342B;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:900;flex:none">SOS</span>
+<span style="display:flex;flex-direction:column;gap:2px"><span style="font-size:20px;font-weight:800">도움 필요</span><span style="font-size:15px">혼자 이동하기 어려워요</span></span></button>
+</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ hasWd }}">
+<div style="position:absolute;inset:0;background:rgba(20,34,91,.5);display:flex;align-items:flex-end;z-index:15" onClick="{{ closeWd }}">
+<div data-screen-label="날씨 상세" onClick="{{ stop }}" style="width:100%;background:#fff;border-radius:30px 30px 0 0;padding:12px 20px 34px">
+<div style="width:44px;height:5px;border-radius:3px;background:#D5DAE8;margin:0 auto 18px"></div>
+<div style="display:flex;align-items:center;gap:14px">
+<span style="position:relative;width:72px;height:72px;border-radius:50%;background:{{ wd.c }};color:{{ wd.ic }};display:flex;align-items:center;justify-content:center;font-size:30px;flex:none"><i class="fa-solid {{ wd.i }}"></i><span style="position:absolute;right:-6px;bottom:-4px;width:30px;height:30px;border-radius:50%;background:#fff;border:2px solid {{ wd.c }};color:#14225B;font-size:13px;display:flex;align-items:center;justify-content:center"><i class="fa-solid {{ wd.b }}"></i></span></span>
+<span style="display:flex;flex-direction:column;gap:4px"><span style="font-size:24px;font-weight:800">{{ wd.t }}</span><span style="font-size:17px;line-height:1.45;color:#2A3354">{{ wd.d }}</span></span>
+</div>
+<div style="display:flex;align-items:baseline;gap:6px;margin:22px 0 10px;color:#14225B"><span style="font-size:56px;font-weight:800;letter-spacing:-0.03em;line-height:1">{{ wd.v }}</span><span style="font-size:20px;font-weight:700">{{ wd.u }}</span></div>
+<div style="display:flex;align-items:center;gap:8px"><span style="padding:5px 14px;border-radius:999px;background:{{ wd.c }};color:{{ wd.lc }};font-size:16px;font-weight:800">{{ wd.lv }}</span><span style="font-size:17px;color:#4A5578">{{ wd.n }}</span></div>
+<button onClick="{{ closeWd }}" style="margin-top:24px;width:100%;height:58px;border-radius:999px;border:none;background:#14225B;color:#fff;font-size:18px;font-weight:800;cursor:pointer;font-family:inherit">닫기</button>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ call }}">
+<div style="position:absolute;inset:0;background:rgba(20,34,91,.5);display:flex;align-items:flex-end;z-index:25" onClick="{{ close119 }}">
+<div data-screen-label="119 긴급전화" onClick="{{ stop }}" style="width:100%;background:#fff;border-radius:30px 30px 0 0;padding:28px 20px 34px;text-align:center;display:flex;flex-direction:column;align-items:center">
+<div style="width:72px;height:72px;border-radius:50%;background:#D9342B;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px"><i class="fa-solid fa-phone"></i></div>
+<h2 style="margin:16px 0 6px;font-size:26px;font-weight:800">119 긴급전화</h2>
+<p style="margin:0 0 22px;font-size:17px;color:#4A5578">현재 위치 구룡포항 근처</p>
+<a href="tel:119" style="width:100%;height:64px;border-radius:999px;background:#D9342B;color:#fff;font-size:21px;font-weight:800;display:flex;align-items:center;justify-content:center;gap:10px;text-decoration:none"><i class="fa-solid fa-phone"></i>119 전화 걸기</a>
+<button onClick="{{ close119 }}" style="margin-top:10px;width:100%;height:56px;border-radius:999px;border:none;background:#F3F4F9;color:#14225B;font-size:18px;font-weight:800;cursor:pointer;font-family:inherit">취소</button>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ hasToast }}">
+<div style="position:absolute;left:16px;right:16px;bottom:120px;background:#111A3A;color:#fff;border-radius:18px;padding:16px 18px;font-size:16px;font-weight:700;text-align:center;z-index:30;box-shadow:0 8px 20px rgba(0,0,0,.2)">{{ toast }}</div>
+</sc-if>
+
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;forceOffline&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;시연&quot;}}">
+class Component extends DCLogic {
+  NAVY = '#14225B';
+  WEATHER = [
+    {k:'wind',t:'강풍',d:'우산이 뒤집힐 만큼 센 바람이에요',v:'22',u:'m/s',lv:'경보',n:'북동풍',i:'fa-wind',b:'fa-hurricane',c:'#D9342B'},
+    {k:'rain',t:'강우량',d:'길에 물이 찰 만큼 비가 많이 와요',v:'48',u:'mm/h',lv:'주의',n:'밤사이 증가',i:'fa-house-flood-water',b:'fa-cloud-showers-heavy',c:'#EF7F1A'},
+    {k:'wave',t:'파고',d:'파도가 집 2층 높이만큼 높아요',v:'5.2',u:'m',lv:'경보',n:'해안 접근 금지',i:'fa-house-tsunami',b:'fa-water',c:'#D9342B'},
+    {k:'river',t:'수위',d:'아직 괜찮지만 물이 불어나고 있어요',v:'2.1',u:'m',lv:'관심',n:'경계 2.8m',i:'fa-house-chimney',b:'fa-water',c:'#F2C230',dark:true},
+    {k:'dust',t:'미세 / 초미세먼지',d:'공기가 깨끗해요. 마스크 없어도 돼요',v:'18 / 9',u:'㎍',lv:'좋음',n:'환기 가능',i:'fa-face-smile',b:'fa-mask-face',c:'#1FA05A'},
+    {k:'uv',t:'자외선 지수',d:'햇볕이 약해요. 모자 없어도 돼요',v:'1',u:'',lv:'좋음',n:'흐림',i:'fa-cloud',b:'fa-sun',c:'#1FA05A'}
+  ];
+  TODOS = ['창문을 테이프로 고정하고 베란다 물건 치우기','물·상비약·충전기·신분증 챙기기','해안가·방파제·지하 공간 가지 않기','가까운 대피소 위치와 이동 경로 확인하기','어선은 미리 단단히 묶고 항구에 가지 않기','정전에 대비해 손전등·보조배터리 준비하기'];
+  ROUTES = {cur:{walk:'12분',car:'3분',km:'0.8km'},home:{walk:'15분',car:'4분',km:'1.1km'},place:{walk:'9분',car:'3분',km:'0.6km'}};
+  SUGG = ['태풍 대비 체크리스트 알려줘','지금 태풍 정보 알려줘','내 위치에서 가장 가까운 대피소 알려줘','재난 후 내가 받을 수 있는 보험이 있는지 알려줘','대피할 때 뭘 해야 해?'];
+  scrollRef = React.createRef();
+  state = {
+    screen:'ob1', edit:false, tab:'dash', cLoc:true, cDis:false, age:'', dis:[], move:['walk'],
+    home:'구룡포읍 호미로', places:['구룡포 시장'], job:'', addingPlace:false, newPlace:'',
+    checks:[true,false,false,false,false,false], tg:{voice:false,vib:false,flash:false,sim:false,hin:false},
+    evac:false, cd:600, wd:null, call:false, input:'', typing:false, read:false, origin:'cur', mode:'walk', rev:false, raw:false, toast:'', sosAck:false,
+    msgs:[{id:0,from:'bot',parts:[{t:'태풍이 구룡포에 가까워지고 있어요. 지금 계신 곳에서 가장 가까운 대피소는 '},{t:'구룡포초등학교',b:true},{t:'예요. 걸어서 약 12분 걸려요.'}],map:true,rain:true}]
+  };
+  componentDidMount(){
+    this.onNet = ()=>this.setState({net:navigator.onLine});
+    this.onNet(); window.addEventListener('online',this.onNet); window.addEventListener('offline',this.onNet);
+    this.timer = setInterval(()=>{
+      if(!this.state.evac) return;
+      if(this.state.cd<=1){ this.setEs('help'); this.setState({evac:false,cd:600}); this.goSos(); }
+      else this.setState(s=>({cd:s.cd-1}));
+    },1000);
+  }
+  componentWillUnmount(){ window.removeEventListener('online',this.onNet); window.removeEventListener('offline',this.onNet); clearInterval(this.timer); clearTimeout(this.tt); clearTimeout(this.st); clearInterval(this.ri); }
+  componentDidUpdate(pp,ps){
+    const el=this.scrollRef.current || document.querySelector('[data-app-scroll]'); if(!el) return;
+    const go=(top)=>{ const start=el.scrollTop; const end=Math.max(0,Math.min(top,el.scrollHeight-el.clientHeight)); const t0=performance.now(); const step=(now)=>{ const p=Math.min(1,(now-t0)/380); const e=1-Math.pow(1-p,3); el.scrollTop=start+(end-start)*e; if(p<1) requestAnimationFrame(step); }; requestAnimationFrame(step); };
+    if(ps.tab!==this.state.tab || ps.screen!==this.state.screen){ el.scrollTop = this.state.tab==='chat'? el.scrollHeight : 0; }
+    else if(this.state.tab==='chat' && (ps.msgs.length!==this.state.msgs.length || ps.typing!==this.state.typing)){
+      const last=this.state.msgs[this.state.msgs.length-1];
+      const botArrived = ps.msgs.length!==this.state.msgs.length && last && last.from==='bot';
+      requestAnimationFrame(()=>requestAnimationFrame(()=>{
+        if(botArrived){
+          const nodes=el.querySelectorAll('[data-msg="bot"]'); const n=nodes[nodes.length-1];
+          if(n){ go(n.getBoundingClientRect().top-el.getBoundingClientRect().top+el.scrollTop-12); return; }
+        }
+        go(el.scrollHeight);
+      }));
+    }
+  }
+  mkWave(t){ return Array.from({length:22},(_,i)=>{ const env=0.55+0.45*Math.sin(t/260+i*0.55); return Math.max(4,Math.round((6+Math.random()*28)*env)); }); }
+  startRec(){
+    clearInterval(this.ri); const t0=Date.now();
+    this.setState({rec:true,recMs:0,wave:this.mkWave(0)});
+    this.ri=setInterval(()=>{ const ms=Date.now()-t0; this.setState({recMs:ms,wave:this.mkWave(ms)}); if(ms>30000) this.stopRec(); },120);
+  }
+  stopRec(){ clearInterval(this.ri); this.setState({rec:false,input:'대피할 때 뭘 해야 해?'}); }
+  setEs(k){ const d=new Date(); this.setState({es:k,esTime:`${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`}); }
+  HH = [
+    {id:'kim',n:'김O순',a:'호미로 해안가',who:'김방재',stage:4},
+    {id:'park',n:'박O호',a:'구룡포항 앞',who:'김방재',stage:4},
+    {id:'lee',n:'이O자',a:'하천변 주택',who:'이현장',stage:4},
+    {id:'choi',n:'최O식',a:'구룡포시장 뒤',who:'박안전',stage:4},
+    {id:'han',n:'한O수',a:'삼정리 해안',who:'최구조',stage:4},
+    {id:'jung',n:'정O례',a:'병포리 언덕길',who:'이현장',stage:4},
+    {id:'yoon',n:'윤O길',a:'석병리 해안',who:'박안전',stage:3}
+  ];
+  STAGES = [{l:'미배정',c:'#D9342B'},{l:'가는 중',c:'#EF7F1A'},{l:'방문 중',c:'#14225B'},{l:'대피 중',c:'#5B6690'},{l:'대피 완료',c:'#1FA05A'}];
+  teamVals(s,N){
+    const ms=s.myStage||0, who=s.myWho||'';
+    const me={id:'me',n:'내 가구 (시연)',a:s.home||'주소 미등록',who,stage:ms};
+    const resOf=h=> h.id==='me' ? (ms>=4?'done':(s.es||'noresp')) : (h.stage>=4?'done':'moving');
+    const all=[...this.HH,me];
+    const cnt=k=>all.filter(h=>resOf(h)===k).length;
+    const actL=['내가 맡기','방문 도착','대피 동행 시작','대피 완료 처리'];
+    const advance=()=>{ if(ms===0) this.setState({myWho:'나',myStage:1}); else this.setState({myStage:Math.min(4,ms+1)}); if(ms===3) this.showToast('내 가구 대피 완료로 기록했어요'); };
+    const households=[...all].sort((a,b)=>a.stage-b.stage).map(h=>{ const st=this.STAGES[h.stage]; return {
+      n:h.n,a:h.a,who:h.who,hasWho:!!h.who,sl:st.l,c:st.c,
+      steps:['출발','방문','대피 동행','완료'].map((l,i)=>({l,c:i<h.stage?st.c:'#DDE1EC',w:i<h.stage?800:600,fc:i<h.stage?'#111A3A':'#8A93AE'})),
+      canAct:h.id==='me'&&h.stage<4, actL:h.id==='me'?actL[h.stage]:'', act:advance }; });
+    const rank={help:0,noresp:1};
+    const hasDis=s.dis.length&&!s.dis.includes('none');
+    const priority=all.filter(h=>rank[resOf(h)]!==undefined).sort((a,b)=>rank[resOf(a)]-rank[resOf(b)]).map(h=>{ const r=resOf(h); return {
+      n:h.n,a:h.a,tag:(h.id==='me'&&hasDis)?' · 장애':'',st:r==='help'?'도움 필요':'응답 없음',c:r==='help'?'#D9342B':'#8E2A1E',bg:r==='help'?'#FDECEA':'#F8EDEB',who:h.who?`${h.who} 배정`:'미배정'}; });
+    const assigned=all.filter(h=>h.stage>0).length;
+    const d=new Date();
+    return {
+      isTeam:s.tab==='team', notTeam:s.tab!=='team', liveDot:1,
+      nowTime:`${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`,
+      teamStats:[{l:'도움 필요',n:cnt('help'),c:'#D9342B',i:'fa-life-ring'},{l:'응답 없음',n:cnt('noresp'),c:'#8E2A1E',i:'fa-headset'},{l:'대피 중',n:cnt('moving'),c:'#C25A0C',i:'fa-person-walking'},{l:'대피 완료',n:cnt('done'),c:'#178A4C',i:'fa-check'}],
+      shelters:[{n:'구룡포읍 행정복지센터',x:44,y:22,fy:28},{n:'구룡포초등학교',x:52,y:42,fy:42},{n:'구룡포종합사회복지관',x:50,y:62,fy:58},{n:'구룡포중학교',x:36,y:82,fy:72}],
+      priorityPins:priority.map((p,i)=>({x:14+i*8,y:50+i*6,fy:46+i*5,c:p.c})),
+      teamMapFull:!!s.teamMapFull, openTeamMap:()=>this.setState({teamMapFull:true}), closeTeamMap:()=>this.setState({teamMapFull:false}),
+      priority, noPriority:!priority.length,
+      assignSummary:`배정 ${assigned}가구 · 미배정 ${all.length-assigned}가구`,
+      stageLegend:this.STAGES.map((st,i)=>({l:st.l,c:st.c,n:all.filter(h=>h.stage===i).length})),
+      households
+    };
+  }
+  loginCodeFn(){
+    const c=(this.state.code||'').trim();
+    if(c.length<4){ this.setState({codeErr:'코드를 4자리 이상 입력해 주세요'}); return; }
+    this.setState({codeOk:true,codeErr:'',tab:'team'}); this.showToast('방재단원으로 로그인했어요'); this.scrollChat('top');
+  }
+  showToast(t){ clearTimeout(this.tt); this.setState({toast:t}); this.tt=setTimeout(()=>this.setState({toast:''}),2400); }
+  goSos(){ clearTimeout(this.st); this.setState({screen:'sos',sosAck:false}); this.st=setTimeout(()=>this.setState({sosAck:true}),3000); }
+  toggleDis(k){
+    this.setState(s=>{
+      let d = k==='none' ? (s.dis.includes('none')?[]:['none']) : s.dis.filter(x=>x!=='none');
+      if(k!=='none') d = d.includes(k)? d.filter(x=>x!==k) : [...d,k];
+      const tg={...s.tg, voice:d.includes('see'), vib:d.includes('hear'), flash:d.includes('hear')};
+      return {dis:d,tg};
+    });
+  }
+  toggleMove(k){ this.setState(s=>({move: s.move.includes(k)? s.move.filter(x=>x!==k) : [...s.move,k]})); }
+  toggleTg(k){
+    const on=!this.state.tg[k];
+    this.setState(s=>({tg:{...s.tg,[k]:on}}));
+    if(k==='hin' && on) this.setState({evac:true,cd:600});
+    if(k==='sim' && on) this.showToast('가상 태풍 상황으로 시연하고 있어요');
+  }
+  reply(q){
+    if(q.includes('체크') || q.includes('할 일') || q.includes('준비')) return {parts:[{t:'태풍이 오기 전에 '},{t:'지금 할 일',b:true},{t:'을 정리했어요. 마친 항목을 눌러 체크하세요.'}],checklist:true};
+    if(q.includes('태풍')) return {parts:[{t:'제14호 태풍 '},{t:'힌남노',b:true},{t:'가 북북동쪽으로 오고 있어요. 구룡포에는 '},{t:'내일 오전 7시',b:true},{t:'에 가장 가까워질 것으로 예상돼요.'}],typhoon:true};
+    if(q.includes('대피소')) return {parts:[{t:'가장 가까운 대피소는 '},{t:'구룡포초등학교',b:true},{t:'예요. 현위치에서 0.8km, 걸어서 약 12분 걸려요.'}],map:true};
+    if(q.includes('보험')) return {parts:[{t:'태풍·호우 피해는 '},{t:'풍수해보험',b:true},{t:'으로 보상받을 수 있어요. 어업에 종사하시면 어선·양식 재해보험도 확인해 보세요. 가까운 읍사무소에서 신청을 도와드려요.'}]};
+    if(q.includes('대피할') || q.includes('뭘 해야')) return {parts:[{t:'물·상비약·충전기·신분증을 챙기고, '},{t:'해안가·방파제·지하 공간은 피해서',b:true},{t:' 이동하세요. 집을 나서기 전 가스와 전기를 꺼 주세요.'}]};
+    if(q.includes('비') || q.includes('날씨')) return {parts:[{t:'오늘 저녁 19시에 비가 가장 많이 와요. 바람은 초속 22m로 강해요.'}],rain:true};
+    return {parts:[{t:'지금 구룡포에는 '},{t:'태풍 경보와 풍랑 경보',b:true},{t:'가 내려져 있어요. 바닷가에 가지 마시고, 궁금한 점을 더 물어보세요.'}]};
+  }
+  scrollChat(mode){
+    setTimeout(()=>{
+      const el=document.querySelector('[data-app-scroll]'); if(!el) return;
+      let target=0;
+      if(mode==='bot'){ const nodes=el.querySelectorAll('[data-msg="bot"]'); const n=nodes[nodes.length-1]; target = n ? n.getBoundingClientRect().top-el.getBoundingClientRect().top+el.scrollTop-12 : el.scrollHeight; }
+      else if(mode==='bottom') target=el.scrollHeight;
+      if(mode==='instant-bottom'){ el.scrollTop=el.scrollHeight; return; }
+      if(mode==='top'){ el.scrollTop=0; return; }
+      const start=el.scrollTop, end=Math.max(0,Math.min(target,el.scrollHeight-el.clientHeight)), t0=performance.now();
+      const step=(now)=>{ const p=Math.min(1,(now-t0)/380), e=1-Math.pow(1-p,3); el.scrollTop=start+(end-start)*e; if(p<1) requestAnimationFrame(step); };
+      requestAnimationFrame(step);
+    },60);
+  }
+  ask(q){
+    q=(q||'').trim(); if(!q||this.state.typing) return;
+    this.setState(s=>({msgs:[...s.msgs,{id:s.msgs.length,from:'user',text:q}],input:'',typing:true}));
+    this.scrollChat('bottom');
+    setTimeout(()=>{ const r=this.reply(q); this.setState(s=>({typing:false,msgs:[...s.msgs,{id:s.msgs.length,from:'bot',...r}]})); this.scrollChat('bot'); },900);
+  }
+  renderVals(){
+    const s=this.state, N=this.NAVY;
+    const isOb = s.screen==='ob1'||s.screen==='ob2';
+    const disL={see:'시각',hear:'청각',body:'지체',none:'해당 없음'};
+    const pill=(on)=>({bg:on?N:'#fff',fg:on?'#fff':N});
+    const wc=(w)=>({...w,ic:w.dark?'#2A1F00':'#fff',lc:w.dark?'#2A1F00':'#fff'});
+    const originData=[{k:'home',l:'집',addr:s.home||'입력 안 함',i:'fa-house'},{k:'cur',l:'현위치',addr:'구룡포항 근처',i:'fa-location-crosshairs'},{k:'place',l:'내 장소',addr:s.places[0]||'입력 안 함',i:'fa-bookmark'}];
+    const oLabel={cur:'현위치',home:'집',place:'내 장소'}[s.origin];
+    const r=this.ROUTES[s.origin];
+    const toggleRow=(x)=>{const on=s.tg[x.k];return {...x,track:on?N:'#C9CFE3',knob:on?21:3,onClick:()=>this.toggleTg(x.k)};};
+    const done=s.checks.filter(Boolean).length;
+    const mm=Math.floor(s.cd/60), ss=String(s.cd%60).padStart(2,'0');
+    const wd=s.wd?wc(this.WEATHER.find(w=>w.k===s.wd)):null;
+    const isOnline = s.net!==false && !this.props.forceOffline;
+    return {
+      online:isOnline, offline:!isOnline,
+      dragStart:e=>{ if(e.pointerType!=='mouse') return; this.drag={el:e.currentTarget,x:e.clientX,sl:e.currentTarget.scrollLeft}; e.currentTarget.style.cursor='grabbing'; },
+      dragMove:e=>{ const d=this.drag; if(!d) return; const dx=e.clientX-d.x; if(Math.abs(dx)>4) d.moved=true; d.el.scrollLeft=d.sl-dx; },
+      dragEnd:e=>{ if(this.drag){ this.dragMoved=!!this.drag.moved; this.drag.el.style.cursor='grab'; this.drag=null; setTimeout(()=>{this.dragMoved=false;},0); } },
+      openDashMapFull:()=>this.setState({screen:'app',tab:'dash',origin:'cur',rev:false,mapFull:true}),
+      mapFull:!!s.mapFull, openMapFull:()=>this.setState({mapFull:true}), closeMapFull:()=>this.setState({mapFull:false}),
+      screenBg: isOb? N : s.screen==='sos' ? '#D9342B' : '#F3F4F9',
+      statusFg: (isOb||s.screen==='sos')? '#fff' : '#111A3A',
+      isOb1:s.screen==='ob1', isOb2:s.screen==='ob2', isApp:s.screen==='app', isRoute:s.screen==='route', isNotifs:s.screen==='notifs', isSos:s.screen==='sos',
+      cLoc:s.cLoc, cDis:s.cDis,
+      locBorder: s.cLoc?`2px solid ${N}`:'2px solid #D5DAE8', locBg: s.cLoc?'#E8EBF5':'#fff',
+      disBorder: s.cDis?`2px solid ${N}`:'2px solid #D5DAE8', disBg: s.cDis?'#E8EBF5':'#fff',
+      toggleLoc:()=>this.setState({cLoc:!s.cLoc}), toggleDisC:()=>this.setState({cDis:!s.cDis}),
+      age:s.age, onAge:e=>this.setState({age:e.target.value.replace(/[^0-9]/g,'').slice(0,3)}),
+      disOpts:[{k:'see',l:'시각',i:'fa-eye'},{k:'hear',l:'청각',i:'fa-ear-listen'},{k:'body',l:'지체',i:'fa-wheelchair-move'},{k:'none',l:'해당 없음',i:'fa-ban'}].map(o=>({...o,...pill(s.dis.includes(o.k)),onClick:()=>this.toggleDis(o.k)})),
+      moveOpts:[{k:'walk',l:'도보',i:'fa-person-walking'},{k:'car',l:'자동차',i:'fa-car'}].map(o=>({...o,...pill(s.move.includes(o.k)),onClick:()=>this.toggleMove(o.k)})),
+      nextBg:(s.cLoc&&s.cDis)?N:'#9CA5C2',
+      next1:()=>{ if(s.cLoc&&s.cDis) this.setState({screen:'ob2'}); else this.showToast('필수 동의 항목을 모두 선택해 주세요'); },
+      back1:()=>this.setState({screen:'ob1'}),
+      home:s.home, onHome:e=>this.setState({home:e.target.value}),
+      place0:s.places[0]||'', onPlace0:e=>{const v=e.target.value;this.setState(st=>({places:[v,...st.places.slice(1)]}));},
+      job:s.job, onJob:e=>this.setState({job:e.target.value}),
+      finishLabel:s.edit?'저장':'시작하기',
+      finishOb:()=>{ this.setState({screen:'app',tab:s.edit?'user':'dash',edit:false}); if(s.edit) this.showToast('내 정보를 저장했어요'); },
+      openNotifs:()=>this.setState({screen:'notifs',read:true}), hasUnread:!s.read,
+      scrollRef:this.scrollRef, scrollPadB: s.tab==='chat'?24:120,
+      title:{dash:'대시보드',chat:'AI 대화창',team:'주민 대피 현황',user:'사용자'}[s.tab],
+      tabCols:s.codeOk?4:3,
+      isDash:s.tab==='dash', isChat:s.tab==='chat', isTy:s.tab==='ty', isUser:s.tab==='user',
+      raw:s.raw, rawIcon:s.raw?'fa-chevron-up':'fa-chevron-down', toggleRaw:()=>this.setState({raw:!s.raw}),
+      fromLabel: s.rev?'구룡포초등학교 대피소':oLabel, toLabel: s.rev?oLabel:'구룡포초등학교 대피소',
+      fromAddr: s.rev ? '구룡포초등학교 대피소' : `${oLabel} · ${originData.find(o=>o.k===s.origin).addr}`,
+      cycleOrigin:()=>{const o=['cur','home','place'];this.setState({origin:o[(o.indexOf(s.origin)+1)%3]});},
+      swap:()=>this.setState({rev:!s.rev}),
+      setWalk:()=>this.setState({mode:'walk'}), setCar:()=>this.setState({mode:'car'}),
+      walkBg:s.mode==='walk'?N:'transparent', walkFg:s.mode==='walk'?'#fff':N,
+      carBg:s.mode==='car'?N:'transparent', carFg:s.mode==='car'?'#fff':N,
+      routeTime:r[s.mode], routeKm:r.km,
+      origins:originData.map(o=>{const on=o.k===s.origin;return {...o,bg:on?N:'#F3F4F9',fg:on?'#fff':'#111A3A',sub:on?'#C9D0EA':'#4A5578',iconBg:on?'rgba(255,255,255,.15)':'#fff',segBg:on?N:'transparent',segFg:on?'#fff':'#2A3354',iconFg:on?'#fff':N,onClick:()=>this.setState({origin:o.k})};}),
+      openRoute:()=>this.setState({screen:'route'}),
+      weather:this.WEATHER.map(w=>({...wc(w),onClick:()=>this.setState({wd:w.k})})),
+      hasWd:!!wd, wd:wd||{}, closeWd:()=>this.setState({wd:null}), stop:e=>e.stopPropagation(),
+      msgs:s.msgs.map(m=>({...m,isBot:m.from==='bot',isUser:m.from==='user',parts:(m.parts||[]).map(p=>({t:p.t,w:p.b?800:400}))})),
+      typing:s.typing,
+      rainBars:[[6,'15시',0],[12,'16시',0],[24,'17시',0],[40,'18시',1],[62,'19시',1],[50,'20시',1]].map(([h,t,d])=>({h,t,c:d?N:'#B8C2E0'})),
+      suggestions:this.SUGG.map(t=>({t,onClick:()=>{ if(this.dragMoved){ this.dragMoved=false; return; } this.ask(t); }})),
+      input:s.input, onInput:e=>this.setState({input:e.target.value}),
+      onKey:e=>{ if(e.key==='Enter' && !e.nativeEvent.isComposing) this.ask(s.input); },
+      send:()=>this.ask(s.input),
+      rec:!!s.rec, notRec:!s.rec,
+      recTime:`0:${String(Math.floor((s.recMs||0)/1000)).padStart(2,'0')}`,
+      recDot: Math.floor((s.recMs||0)/500)%2?0.3:1,
+      wave:(s.wave||[]).map(h=>({h})),
+      onMic:()=>this.startRec(), stopRec:()=>this.stopRec(),
+      onVoice:()=>this.showToast('마지막 답변을 소리로 읽어드려요'),
+      todos:this.TODOS.map((t,i)=>({t,bg:s.checks[i]?N:'#fff',op:s.checks[i]?1:0,fg:s.checks[i]?'#4A5578':'#111A3A',td:s.checks[i]?'line-through':'none',onClick:()=>this.setState(st=>{const c=[...st.checks];c[i]=!c[i];return {checks:c};})})),
+      doneText:`${done} / ${this.TODOS.length} 완료`,
+      editInfo:()=>this.setState({screen:'ob1',edit:true}),
+      infoRows:[
+        {i:'fa-cake-candles',l:'나이',v:s.age?`${s.age}세`:'입력 안 함'},
+        {i:'fa-wheelchair-move',l:'장애',v:s.dis.length&&!s.dis.includes('none')?s.dis.map(d=>disL[d]).join(' · '):'선택 안 함'},
+        {i:'fa-person-walking',l:'이동 수단',v:s.move.length?s.move.map(m=>m==='walk'?'도보':'자동차').join(' · '):'선택 안 함'},
+        {i:'fa-briefcase',l:'직업',v:s.job||'입력 안 함'},
+        {i:'fa-house',l:'집',v:s.home||'입력 안 함'},
+        ...s.places.filter(Boolean).map(p=>({i:'fa-bookmark',l:'내 장소',v:p,sub:''})),
+        ...(s.extraPlaces||[]).map(p=>({i:'fa-bookmark',l:'내 장소',v:p.n,sub:p.a}))
+      ].map((x,i)=>({...x,bt:i?'1px solid #EDEFF5':'none'})),
+      addingPlace:s.addingPlace, notAdding:!s.addingPlace,
+      startAdd:()=>this.setState({addingPlace:true,newPlace:'',newAddr:''}),
+      cancelAdd:()=>this.setState({addingPlace:false}),
+      newPlace:s.newPlace, onNewPlace:e=>this.setState({newPlace:e.target.value}),
+      newAddr:s.newAddr||'', onNewAddr:e=>this.setState({newAddr:e.target.value}),
+      addBg:(s.newPlace||'').trim()&&(s.newAddr||'').trim()?N:'#9CA5C2',
+      addPlace:()=>{ const n=(s.newPlace||'').trim(), a=(s.newAddr||'').trim(); if(!n||!a){ this.showToast('장소 이름과 주소를 모두 입력해 주세요'); return; } this.setState(st=>({addingPlace:false,extraPlaces:[...(st.extraPlaces||[]),{n,a}]})); this.showToast('내 장소를 추가했어요'); },
+      notifRows:[
+        {k:'voice',t:'음성 안내 자동 재생',s:'시각 장애 선택 시 자동으로 켜져요',i:'fa-volume-high'},
+        {k:'vib',t:'진동 알림',s:'청각 장애 선택 시 자동으로 켜져요',i:'fa-mobile-screen-button'},
+        {k:'flash',t:'화면 점멸',s:'청각 장애 선택 시 자동으로 켜져요',i:'fa-bolt'}
+      ].map(toggleRow).map((x,i)=>({...x,bt:i?'1px solid #EDEFF5':'none'})),
+      simRows:[
+        {k:'sim',t:'태풍 발생',s:'가상 태풍 상황으로 화면을 시연해요',i:'fa-hurricane'},
+        {k:'hin',t:'과거 힌남노 태풍 시연',s:s.tg.hin?'현위치(구룡포항 근처)는 위험 지역이에요':'2022년 태풍 힌남노 기록을 바탕으로 재현해요',i:'fa-clock-rotate-left'}
+      ].map(toggleRow).map(x=>{ const hl=s.tg[x.k]&&x.k==='hin'; return {...x,hlBg:hl?'#FFF4EA':'transparent',hlRing:hl?'inset 0 0 0 1.5px #EF7F1A':'none',subC:hl?'#B4500A':'#4A5578',subW:hl?700:400}; }),
+      loginEmail:()=>this.showToast('이메일 로그인 화면으로 이동해요'),
+      code:s.code||'', codeErr:s.codeErr||'', codeOk:!!s.codeOk, codeNotOk:!s.codeOk,
+      codeSub: s.codeOk?'방재단원으로 로그인했어요':'방재단원은 전용 코드로 로그인하세요',
+      codeBorder: s.codeErr?'2px solid #D9342B':'2px solid #D5DAE8',
+      codeBtnBg: (s.code||'').length>=4?N:'#9CA5C2',
+      onCode:e=>this.setState({code:e.target.value.slice(0,12),codeErr:''}),
+      onCodeKey:e=>{ if(e.key==='Enter') this.loginCodeFn(); },
+      loginCode:()=>this.loginCodeFn(),
+      logoutCode:()=>this.setState({codeOk:false,code:'',tab:'user'}),
+      ...this.teamVals(s,N),
+      tabs:[{k:'dash',l:'대시보드',i:'fa-table-cells-large'},{k:'chat',l:'AI 대화창',i:'fa-comment'},...(s.codeOk?[{k:'team',l:'방재단 현황',i:'fa-user-shield'}]:[]),{k:'user',l:'사용자',i:'fa-user'}].map(t=>({...t,bg:t.k===s.tab?'#fff':'transparent',fg:t.k===s.tab?N:'#fff',onClick:()=>{ this.setState({tab:t.k}); this.scrollChat(t.k==='chat'?'instant-bottom':'top'); }})),
+      fabBottom: s.tab==='chat'?232:110,
+      open119:()=>this.setState({call:true}), close119:()=>this.setState({call:false}), call:s.call,
+      backApp:()=>this.setState({screen:'app'}),
+      notifs:[
+        {i:'fa-comment-dots',c:'#D9342B',t:'최근 재난문자',m:'포항시 · 14:20',b:'[포항시] 태풍 북상, 해안가·방파제 접근 금지. 저지대 주민은 대피 준비 바랍니다.'},
+        {i:'fa-triangle-exclamation',c:N,t:'경보 · 주의보',m:'기상청',b:'태풍 경보 · 풍랑 경보 · 강풍 주의보 · 호우 주의보'}
+      ],
+      evac:s.evac, cdText:`${mm}분 ${ss}초`,
+      evacDone:()=>{ this.setEs('done'); this.setState({evac:false}); this.showToast('대피 완료를 방재단에 알렸어요'); },
+      evacMoving:()=>{ this.setEs('moving'); this.setState({evac:false,screen:'route',origin:'cur'}); },
+      evacHelp:()=>{ this.setEs('help'); this.setState({evac:false}); this.goSos(); },
+      hasEvacStatus:!!s.es,
+      es: {...({done:{l:'대피 완료',bg:'#178A4C',i:'fa-check'},moving:{l:'대피 중',bg:'#C25A0C',i:'fa-person-walking'},help:{l:'도움 필요',bg:'#D9342B',i:'fa-life-ring'}}[s.es] || {l:'응답 전',bg:'#fff',fg:'#14225B',iconBg:'#E8EBF5',iconFg:'#14225B',i:'fa-person-running'}), ...(s.es?{fg:'#fff',iconBg:'#fff',iconFg:{done:'#178A4C',moving:'#C25A0C',help:'#D9342B'}[s.es]}:{})},
+      evacStatusClick:()=>this.setState({evac:true,cd:600}),
+      sosTitle: s.sosAck?'방재단이 확인했어요':'방재단에 연락하고 있어요',
+      sosSub: s.sosAck?'곧 연락드릴게요. 안전한 곳에서 기다려 주세요.':'현재 위치를 함께 보냈어요. 위급하면 119에 바로 전화하세요.',
+      hasToast:!!s.toast, toast:s.toast
+    };
+  }
+}
+</script>
+</body>
+</html>
