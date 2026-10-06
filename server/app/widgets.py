@@ -6,7 +6,8 @@
 - water_level     포항 디지털 트윈 하천 수위·맨홀·지표면 수위계 (layers.stations_layer 와 같은 값)
 - wave            단기예보 파고(WAV, 구룡포항 격자) — 실측 파고는 수집하지 않음
 - forecast        단기예보 다음 12시간 (구룡포읍 격자)
-- typhoon         typhoon_tracks 에서 최근 하루 안에 분석·예측이 있는 태풍
+- typhoon         typhoon_tracks 에서 최근 하루 안에 분석·예측이 있고, 예측 경로가 구룡포 1000km 안으로 오는 태풍
+                  (없으면 위젯 자체를 목록에서 뺀다)
 - disaster_messages  재난문자 24시간 (수집 키가 없으면 available=false)
 - life_safety     자외선지수·미세먼지 (가장 가까운 대기 센서)
 """
@@ -25,6 +26,8 @@ AWS = ("kma", "aws_816")
 GRID_TOWN, GRID_PORT = (105, 94), (106, 94)     # 구룡포읍 중심 · 구룡포항 (단기예보 격자)
 PTY = {"0": "없음", "1": "비", "2": "비/눈", "3": "눈", "4": "소나기", "5": "빗방울", "6": "빗방울눈날림", "7": "눈날림"}
 DT_KINDS = ("river_level", "manhole", "road_flood")
+# 예측 경로상 최근접 거리가 이보다 멀면 구룡포와 무관한 태풍으로 보고 대시보드에서 뺀다
+TYPHOON_RELEVANT_KM = 1000
 WIDGET_ORDER = ["warnings", "rain", "water_level", "wind", "typhoon", "wave", "disaster_messages", "forecast", "life_safety"]
 # 재난 → 앞으로 올릴 위젯 (emergency 일 때)
 HAZARD_WIDGETS = {"flood": ["water_level", "rain"], "heavy_rain": ["rain", "water_level"], "strong_wind": ["wind"],
@@ -72,13 +75,13 @@ ORDER BY fcst_time, category, base_time DESC
 """
 TYPHOON_SQL = """
 WITH cur AS (
-  SELECT typhoon_code FROM typhoon_tracks GROUP BY typhoon_code
-  HAVING max(observed_at) > now() - interval '1 day' ORDER BY max(observed_at) DESC LIMIT 1)
+  SELECT typhoon_code, max(issued_at) FILTER (WHERE is_forecast) AS fc_issued FROM typhoon_tracks GROUP BY typhoon_code
+  HAVING max(observed_at) > now() - interval '1 day')
 SELECT t.typhoon_code, t.name_ko, t.observed_at, t.is_forecast, ST_Y(t.geom) AS lat, ST_X(t.geom) AS lng,
        t.max_wind_ms, t.central_pressure_hpa, t.radius_15ms_km, t.radius_25ms_km, t.speed_kmh, t.direction, t.location_text
 FROM typhoon_tracks t JOIN cur USING (typhoon_code)
-WHERE NOT t.is_forecast OR t.issued_at = (SELECT max(issued_at) FROM typhoon_tracks x JOIN cur USING (typhoon_code) WHERE x.is_forecast)
-ORDER BY t.observed_at
+WHERE NOT t.is_forecast OR t.issued_at = cur.fc_issued
+ORDER BY t.typhoon_code, t.observed_at
 """
 MESSAGES_SQL = """
 SELECT sent_at, sender, message, alert_class FROM disaster_messages WHERE sent_at > now() - interval '24 hours'
@@ -170,17 +173,26 @@ def wave_widget(level: str) -> dict:
 
 
 def typhoon_widget(lat: float, lng: float) -> dict:
-    rows = db.fetch_all(TYPHOON_SQL)
-    if not rows:
-        return _none("현재 진행 중인 태풍이 없습니다")
+    """진행 중인 태풍 중 예측 경로가 구룡포에 TYPHOON_RELEVANT_KM 안으로 들어오는 것만 (가장 가까운 하나)"""
+    by_code: dict[str, list] = {}
+    for r in db.fetch_all(TYPHOON_SQL):
+        by_code.setdefault(r["typhoon_code"], []).append(r)
+    near = []
+    for rows in by_code.values():
+        closest = min(rows, key=lambda r: _km(lat, lng, r["lat"], r["lng"]))
+        closest_km = _km(lat, lng, closest["lat"], closest["lng"])
+        if closest_km <= TYPHOON_RELEVANT_KM:
+            near.append((closest_km, rows, closest))
+    if not near:
+        return _none("구룡포에 영향을 줄 태풍이 없습니다")
+    closest_km, rows, closest = min(near, key=lambda x: x[0])
     track = [{"t": _iso(r["observed_at"]), "lat": r["lat"], "lng": r["lng"], "is_forecast": bool(r["is_forecast"]),
               "max_wind_ms": r["max_wind_ms"], "radius_15ms_km": r["radius_15ms_km"]} for r in rows]
-    closest = min(rows, key=lambda r: _km(lat, lng, r["lat"], r["lng"]))
     now_rows = [r for r in rows if not r["is_forecast"]]
     cur = now_rows[-1] if now_rows else rows[0]
     return {"code": rows[0]["typhoon_code"], "name_ko": rows[0]["name_ko"],
             "distance_km": round(_km(lat, lng, cur["lat"], cur["lng"])),
-            "closest_km": round(_km(lat, lng, closest["lat"], closest["lng"])),
+            "closest_km": round(closest_km),
             "eta_closest": _iso(closest["observed_at"]), "current": {
                 "t": _iso(cur["observed_at"]), "lat": cur["lat"], "lng": cur["lng"], "max_wind_ms": cur["max_wind_ms"],
                 "central_pressure_hpa": cur["central_pressure_hpa"], "location_text": cur["location_text"],
@@ -266,6 +278,8 @@ def build(lat: float, lng: float, user_id: Optional[str], my_evacuation: Optiona
     if data["warnings"].get("items"):
         hot.insert(0, "warnings")
     order = list(dict.fromkeys([*hot, *WIDGET_ORDER])) if emergency else WIDGET_ORDER
+    if data["typhoon"].get("available") is False:   # 구룡포와 무관하거나 진행 중인 태풍이 없으면 카드 자체를 숨김
+        order = [t for t in order if t != "typhoon"]
     widgets = [{"type": t, "emphasized": t in hot, "data": data[t]} for t in order]
 
     hl = ["risk_areas", "shelters"]

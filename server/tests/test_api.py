@@ -60,8 +60,35 @@ def test_dashboard_empty_db_is_normal_and_says_no_data(client):
     assert d["mode"] == "normal" and d["headline"] is None
     w = {x["type"]: x["data"] for x in d["widgets"]}
     assert w["warnings"] == {"items": []}
-    for t in ("rain", "wind", "water_level", "wave", "typhoon", "forecast", "disaster_messages", "life_safety"):
+    for t in ("rain", "wind", "water_level", "wave", "forecast", "disaster_messages", "life_safety"):
         assert w[t]["available"] is False and w[t]["reason"], t
+    assert "typhoon" not in w                      # 진행 중인 태풍이 없으면 카드 자체를 숨김
+
+
+def _typhoon_row(code, lat, lng, t, is_forecast=False):
+    return {"typhoon_code": code, "name_ko": code, "observed_at": t, "is_forecast": is_forecast, "lat": lat, "lng": lng,
+            "max_wind_ms": 30, "central_pressure_hpa": 970, "radius_15ms_km": 300, "radius_25ms_km": 100,
+            "speed_kmh": 20, "direction": "N", "location_text": None}
+
+
+def test_dashboard_hides_typhoon_far_from_guryongpo(client, fake_db):
+    """예측 최근접도 1000km 밖인 태풍(예: 4735km · 최근접 1778km)은 구룡포와 무관 → 카드 숨김"""
+    from datetime import timedelta
+    now = datetime.now(KST)
+    fake_db.rows["FROM typhoon_tracks t JOIN cur"] = [
+        _typhoon_row("FAR", 0.0, 160.0, now), _typhoon_row("FAR", 15.0, 140.0, now + timedelta(days=3), True)]
+    w = {x["type"]: x["data"] for x in client.get("/api/v1/dashboard?lat=35.98&lng=129.55", headers=AUTH).json()["widgets"]}
+    assert "typhoon" not in w
+
+
+def test_dashboard_shows_nearest_relevant_typhoon(client, fake_db):
+    from datetime import timedelta
+    now = datetime.now(KST)
+    fake_db.rows["FROM typhoon_tracks t JOIN cur"] = [
+        _typhoon_row("FAR", 0.0, 160.0, now),
+        _typhoon_row("NEAR", 28.0, 127.0, now), _typhoon_row("NEAR", 35.0, 129.0, now + timedelta(days=1), True)]
+    w = {x["type"]: x["data"] for x in client.get("/api/v1/dashboard?lat=35.98&lng=129.55", headers=AUTH).json()["widgets"]}
+    assert w["typhoon"]["code"] == "NEAR" and w["typhoon"]["closest_km"] < 150
 
 
 def test_dashboard_real_values_and_emergency_order(client, fake_db):
