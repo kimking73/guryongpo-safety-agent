@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
+import 'disaster_center.dart';
 import 'main.dart';
 import 'models/domain_models.dart';
 import 'repositories/remote_repository.dart' show RemoteError;
@@ -387,8 +388,9 @@ class _RouteMapState extends ConsumerState<RouteMap> with WidgetsBindingObserver
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _ensureRouteMonitoring(route);
     });
-    final warn = shelterExclusion(
-        facility, ref.watch(riskAreasProvider).valueOrNull ?? const []);
+    final areas = ref.watch(riskAreasProvider).valueOrNull ?? const <RiskArea>[];
+    final floods = ref.watch(floodGridProvider).valueOrNull ?? const <FloodGrid>[];
+    final warn = shelterExclusion(facility, areas);
     return Card(
         clipBehavior: Clip.antiAlias,
         child: SizedBox(
@@ -399,17 +401,15 @@ class _RouteMapState extends ConsumerState<RouteMap> with WidgetsBindingObserver
                 mapController: mapController,
                 options: mapOptions,
                 children: [
+                  // 대시보드 지도와 같은 타일·위험 층 (2026-10-07): 침수 격자·위험 영역(테두리 = 재난 종류)·수위계·범례
                   TileLayer(
-                      urlTemplate:
-                          'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-                      subdomains: const ['a', 'b', 'c'],
-                      userAgentPackageName: 'com.example.guryongpo_safety'),
-                  if (AppConfig.isRemote)
-                    PolygonLayer(
-                        polygons: riskAreaPolygons(
-                            ref.watch(riskAreasProvider).valueOrNull ??
-                                const []))
-                  else
+                    urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    userAgentPackageName: 'guryongpo.safety.demo',
+                  ),
+                  if (AppConfig.isRemote) ...[
+                    PolygonLayer(polygons: floodGridAreaPolygons(floods)),
+                    PolygonLayer(polygons: hazardAreaPolygons(areas)),
+                  ] else
                     PolygonLayer(polygons: floodGridPolygons(demoFloodGrid(0))),
                   PolylineLayer(polylines: [
                     Polyline(
@@ -433,6 +433,10 @@ class _RouteMapState extends ConsumerState<RouteMap> with WidgetsBindingObserver
                       ], color: Colors.red.shade200, strokeWidth: 8)
                   ]),
                   MarkerLayer(markers: [
+                    if (AppConfig.isRemote) ...[
+                      ...floodGridDotMarkers(context, floods),
+                      ...floodSensorMarkers(context, areas),
+                    ],
                     Marker(
                         point: current,
                         width: 44,
@@ -444,8 +448,8 @@ class _RouteMapState extends ConsumerState<RouteMap> with WidgetsBindingObserver
                         width: 150,
                         height: 64,
                         child: Column(children: [
-                          const Icon(Icons.location_on,
-                              color: Colors.teal, size: 40),
+                          Icon(Icons.location_on,
+                              color: Colors.blue.shade800, size: 40),   // 대시보드 지도의 목적지와 같은 색
                           Container(
                               color: Colors.white,
                               padding:
@@ -458,6 +462,13 @@ class _RouteMapState extends ConsumerState<RouteMap> with WidgetsBindingObserver
                         ]))
                   ]),
                   if (!AppConfig.isRemote) const FloodGridLegend(),
+                  if (AppConfig.isRemote)
+                    mapLegendButton(context,
+                        routeMode: false,
+                        visible: const {HazardKind.flood, HazardKind.slide},
+                        hasRoute: true,
+                        hasSea: route.seaPoints.length > 1,
+                        showPlaces: false),
                   if (loading)
                     const Positioned.fill(
                         child: ColoredBox(

@@ -660,25 +660,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                       polygons: _disasterFloodPolygons(floodGrids,
                           severeOnly: compositeView)),
                 if (!routeMode && widget.riskAreas.isNotEmpty)
-                  PolygonLayer(
-                    polygons: [
-                      for (final area in DemoData.mapAreas(widget.riskAreas))
-                        for (final ring in area.polygons)
-                          if (ring.length >= 3)
-                            Polygon(
-                              points: ring,
-                              color: _floodColor(area.level)
-                                  .withValues(alpha: .22),
-                              borderColor:
-                                  _hazardColor(area.hazard == 'landslide'
-                                      ? HazardKind.slide
-                                      : area.hazard == 'wind'
-                                          ? HazardKind.wind
-                                          : HazardKind.flood),
-                              borderStrokeWidth: 2,
-                            ),
-                    ],
-                  ),
+                  PolygonLayer(polygons: hazardAreaPolygons(widget.riskAreas)),
                 if (route != null && route.polylinePoints.length > 1)
                   PolylineLayer(polylines: [
                     Polyline(
@@ -701,51 +683,10 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                 MarkerLayer(
                   markers: [
                     if (visible.contains(HazardKind.flood))
-                      for (final g in floodGrids.where((g) =>
-                          g.hasRisk && (!compositeView || g.level == '심각')))
-                        Marker(
-                          point: g.center,
-                          width: 22,
-                          height: 22,
-                          child: GestureDetector(
-                            onTap: () => _showGrid(context, g),
-                            child: DecoratedBox(
-                                decoration: BoxDecoration(
-                                    color: _floodColor(g.level),
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                        color: Colors.white, width: 2))),
-                          ),
-                        ),
+                      ...floodGridDotMarkers(context, floodGrids, severeOnly: compositeView),
                     // 수위계 위치 (2026-10-07): 침수 영역 원의 중심 = 판정 원인 센서의 실제 좌표 (포항 DT 수위계·맨홀)
                     if (!routeMode && visible.contains(HazardKind.flood))
-                      for (final a in _floodSensors(DemoData.mapAreas(widget.riskAreas)))
-                        Marker(
-                          point: a.sensor!,
-                          width: 30,
-                          height: 30,
-                          child: Tooltip(
-                            message: a.reason ?? a.label,
-                            child: GestureDetector(
-                              onTap: () => _showSensor(context, a),
-                              child: DecoratedBox(
-                                decoration: BoxDecoration(
-                                    color: Colors.white,
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                        color: _hazardColor(HazardKind.flood), width: 2),
-                                    boxShadow: const [
-                                      BoxShadow(color: Colors.black26, blurRadius: 3)
-                                    ]),
-                                child: Icon(Icons.water_drop,
-                                    size: 18,
-                                    color: a.level == '정상' || a.level == '관심'
-                                        ? _hazardColor(HazardKind.flood)
-                                        : _floodColor(a.level)),
-                              ),
-                            ),
-                          ),
-                        ),
+                      ...floodSensorMarkers(context, widget.riskAreas),
                     if (visible.contains(HazardKind.wind) && !widget.demo)
                       for (final w in widget.windPoints)
                         Marker(
@@ -933,23 +874,11 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                     ),
                   ],
                 ),
-                Positioned(
-                  right: 8,
-                  top: 8,
-                  child: FilledButton.tonalIcon(
-                    style: FilledButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        backgroundColor: Colors.white.withValues(alpha: .94)),
-                    onPressed: () => _showMapLegend(context,
-                        routeMode: routeMode,
-                        visible: visible,
-                        hasRoute: route != null,
-                        hasSea: (route?.seaPoints.length ?? 0) > 1,
-                        hidesTownWide: DemoData.on),
-                    icon: const Icon(Icons.info_outline, size: 18),
-                    label: const Text('범례'),
-                  ),
-                ),
+                mapLegendButton(context,
+                    routeMode: routeMode,
+                    visible: visible,
+                    hasRoute: route != null,
+                    hasSea: (route?.seaPoints.length ?? 0) > 1),
                 if (!routeMode)
                   Positioned(
                     left: 8,
@@ -1377,6 +1306,103 @@ void _showHazard(BuildContext c, DemoHazard h) => showModalBottomSheet<void>(
       builder: (_) => _detailSheet(
           c, h.name, h.summary, h.time, h.guide, '위험 안내 목업 데이터 · 실제 발생 정보 아님'),
     );
+// ── 대시보드·경로 지도 공통 위험 층 (2026-10-07: 경로 안내 지도를 대시보드 지도와 같게) ──────────────
+
+/// 위험 영역 면: 채움색 = 위험 단계, 테두리색 = 재난 종류 (파랑 침수·갈색 산사태). 시연 모드면 읍 전체 특보는 뺀다
+List<Polygon> hazardAreaPolygons(List<RiskArea> areas) => [
+      for (final area in DemoData.mapAreas(areas))
+        for (final ring in area.polygons)
+          if (ring.length >= 3)
+            Polygon(
+              points: ring,
+              color: _floodColor(area.level).withValues(alpha: .22),
+              borderColor: _hazardColor(area.hazard == 'landslide'
+                  ? HazardKind.slide
+                  : area.hazard == 'wind'
+                      ? HazardKind.wind
+                      : HazardKind.flood),
+              borderStrokeWidth: 2,
+            ),
+    ];
+
+/// 침수 격자 칸 면 (단계 색)
+List<Polygon> floodGridAreaPolygons(List<FloodGrid> grids, {bool severeOnly = false}) =>
+    _disasterFloodPolygons(grids, severeOnly: severeOnly);
+
+/// 침수 격자 칸 가운데 점 — 누르면 칸 상세
+List<Marker> floodGridDotMarkers(BuildContext context, List<FloodGrid> grids,
+        {bool severeOnly = false}) =>
+    [
+      for (final g in grids.where((g) => g.hasRisk && (!severeOnly || g.level == '심각')))
+        Marker(
+          point: g.center,
+          width: 22,
+          height: 22,
+          child: GestureDetector(
+            onTap: () => _showGrid(context, g),
+            child: DecoratedBox(
+                decoration: BoxDecoration(
+                    color: _floodColor(g.level),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2))),
+          ),
+        ),
+    ];
+
+/// 수위계 표식: 침수 영역 원의 중심(판정 원인 센서 실제 좌표). 누르면 센서 측정값
+List<Marker> floodSensorMarkers(BuildContext context, List<RiskArea> areas) => [
+      for (final a in _floodSensors(DemoData.mapAreas(areas)))
+        Marker(
+          point: a.sensor!,
+          width: 30,
+          height: 30,
+          child: Tooltip(
+            message: a.reason ?? a.label,
+            child: GestureDetector(
+              onTap: () => _showSensor(context, a),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: _hazardColor(HazardKind.flood), width: 2),
+                    boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 3)]),
+                child: Icon(Icons.water_drop,
+                    size: 18,
+                    color: a.level == '정상' || a.level == '관심'
+                        ? _hazardColor(HazardKind.flood)
+                        : _floodColor(a.level)),
+              ),
+            ),
+          ),
+        ),
+    ];
+
+/// 지도 오른쪽 위 '범례' 버튼 (FlutterMap children 안에 둔다)
+Widget mapLegendButton(BuildContext context,
+        {required bool routeMode,
+        required Set<HazardKind> visible,
+        required bool hasRoute,
+        required bool hasSea,
+        bool showPlaces = true}) =>
+    Positioned(
+      right: 8,
+      top: 8,
+      child: FilledButton.tonalIcon(
+        style: FilledButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+            backgroundColor: Colors.white.withValues(alpha: .94)),
+        onPressed: () => _showMapLegend(context,
+            routeMode: routeMode,
+            visible: visible,
+            hasRoute: hasRoute,
+            hasSea: hasSea,
+            hidesTownWide: DemoData.on,
+            showPlaces: showPlaces),
+        icon: const Icon(Icons.info_outline, size: 18),
+        label: const Text('범례'),
+      ),
+    );
+
 /// 센서마다 하나 (같은 수위계가 규칙 두 개로 영역 두 개를 내면 높은 단계만)
 List<RiskArea> _floodSensors(List<RiskArea> areas) {
   const order = ['정상', '관심', '주의', '경계', '심각'];
@@ -3324,7 +3350,8 @@ void _showMapLegend(BuildContext context,
     required Set<HazardKind> visible,
     required bool hasRoute,
     required bool hasSea,
-    required bool hidesTownWide}) {
+    required bool hidesTownWide,
+    bool showPlaces = true}) {
   Widget fill(Color c, {Color? border}) => Container(
       width: 22,
       height: 14,
@@ -3431,7 +3458,7 @@ void _showMapLegend(BuildContext context,
             section('표식'),
             row(icon(Icons.my_location, _riskColor('경계')), '현위치',
                 '색 = 지금 위치의 위험 단계 (초록 정상 → 노랑 → 주황 → 빨강)'),
-            if (!routeMode)
+            if (!routeMode && showPlaces)
               row(icon(Icons.home, _riskColor('정상')), '등록한 집·직장',
                   '색 = 그 장소의 위험 단계'),
             if (routeMode) ...[
