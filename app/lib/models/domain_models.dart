@@ -102,11 +102,20 @@ class RiskArea {
       {required this.level,
       required this.label,
       required this.polygons,
-      this.hazard = 'flood'});
+      this.hazard = 'flood',
+      this.sensor,
+      this.reason,
+      this.observedAt});
   final String level, label;
 
   /// flood, landslide, heavy_rain …
   final String hazard;
+
+  /// 판정 원인 센서 좌표 (침수 = 수위계·맨홀, 영역은 이 점 중심 원). 서버 properties.location, 없으면 null
+  final LatLng? sensor;
+
+  /// 판정 근거 문장 (예: "구룡포환승센터 지표면 수위계 침수심 230mm …"), 측정 시각
+  final String? reason, observedAt;
   final List<List<LatLng>> polygons;
   bool contains(LatLng p) => polygons.any((ring) => _inRing(p, ring));
 }

@@ -717,6 +717,35 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                                         color: Colors.white, width: 2))),
                           ),
                         ),
+                    // 수위계 위치 (2026-10-07): 침수 영역 원의 중심 = 판정 원인 센서의 실제 좌표 (포항 DT 수위계·맨홀)
+                    if (!routeMode && visible.contains(HazardKind.flood))
+                      for (final a in _floodSensors(DemoData.mapAreas(widget.riskAreas)))
+                        Marker(
+                          point: a.sensor!,
+                          width: 30,
+                          height: 30,
+                          child: Tooltip(
+                            message: a.reason ?? a.label,
+                            child: GestureDetector(
+                              onTap: () => _showSensor(context, a),
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                        color: _hazardColor(HazardKind.flood), width: 2),
+                                    boxShadow: const [
+                                      BoxShadow(color: Colors.black26, blurRadius: 3)
+                                    ]),
+                                child: Icon(Icons.water_drop,
+                                    size: 18,
+                                    color: a.level == '정상' || a.level == '관심'
+                                        ? _hazardColor(HazardKind.flood)
+                                        : _floodColor(a.level)),
+                              ),
+                            ),
+                          ),
+                        ),
                     if (visible.contains(HazardKind.wind) && !widget.demo)
                       for (final w in widget.windPoints)
                         Marker(
@@ -1348,6 +1377,33 @@ void _showHazard(BuildContext c, DemoHazard h) => showModalBottomSheet<void>(
       builder: (_) => _detailSheet(
           c, h.name, h.summary, h.time, h.guide, '위험 안내 목업 데이터 · 실제 발생 정보 아님'),
     );
+/// 센서마다 하나 (같은 수위계가 규칙 두 개로 영역 두 개를 내면 높은 단계만)
+List<RiskArea> _floodSensors(List<RiskArea> areas) {
+  const order = ['정상', '관심', '주의', '경계', '심각'];
+  final best = <String, RiskArea>{};
+  for (final a in areas) {
+    final p = a.sensor;
+    if (a.hazard != 'flood' || p == null) continue;
+    final key = '${p.latitude.toStringAsFixed(5)},${p.longitude.toStringAsFixed(5)}';
+    final cur = best[key];
+    if (cur == null || order.indexOf(a.level) > order.indexOf(cur.level)) best[key] = a;
+  }
+  return best.values.toList();
+}
+
+void _showSensor(BuildContext c, RiskArea a) => showModalBottomSheet<void>(
+      context: c,
+      showDragHandle: true,
+      builder: (context) => _detailSheet(
+        context,
+        '수위계 · ${a.label}',
+        a.reason ?? a.label,
+        _hhmm(a.observedAt),
+        '이 센서를 중심으로 한 원이 침수 ${a.level} 영역입니다. 주의 이상이면 경로가 이 원을 피합니다.',
+        DemoData.on ? '포항 디지털 트윈 센서 실제 위치 · 측정값은 시연값' : '포항 디지털 트윈 센서 실측',
+      ),
+    );
+
 void _showGrid(BuildContext c, FloodGrid g) => showModalBottomSheet<void>(
       context: c,
       showDragHandle: true,
@@ -3345,10 +3401,22 @@ void _showMapLegend(BuildContext context,
                     '구룡포읍 전체에 내려져 화면을 다 덮으므로 위쪽 특보 카드로 확인'),
             ],
             if (!routeMode && visible.contains(HazardKind.flood)) ...[
+              section('수위계'),
+              row(
+                  Container(
+                      width: 22,
+                      height: 22,
+                      decoration: BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: _hazardColor(HazardKind.flood), width: 2)),
+                      child: Icon(Icons.water_drop, size: 14, color: _floodColor('경계'))),
+                  '물방울',
+                  '침수 판정의 원인 센서(수위계·맨홀) 실제 위치 = 침수 원의 중심. 색 = 단계, 누르면 측정값'),
               section('침수 격자'),
               row(fill(_floodColor('경계')), '작은 칸',
                   '위 침수 영역을 약 100m 칸으로 나눈 것 (경로가 피하는 범위와 같음)'),
-              row(dot(_floodColor('경계')), '칸 가운데 점', '누르면 그 칸의 단계·측정값·출처'),
+              row(dot(_floodColor('경계')), '칸 가운데 점', '칸 위치 표시일 뿐 측정 지점이 아님 — 누르면 그 칸의 단계·출처'),
             ],
             if (!routeMode && visible.contains(HazardKind.wind)) ...[
               section('바람'),

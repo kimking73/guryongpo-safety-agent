@@ -487,6 +487,13 @@ List<RiskArea> riskAreasFromGeoJson(Map<String, dynamic> fc) {
           level: levelKo(f['properties']?['level'] as String?),
           label: f['properties']?['label'] as String? ?? '',
           hazard: f['properties']?['hazard'] as String? ?? '',
+          sensor: switch (f['properties']?['location']) {
+            {'lat': final num lat, 'lng': final num lng} =>
+              LatLng(lat.toDouble(), lng.toDouble()),
+            _ => null,
+          },
+          reason: f['properties']?['reason'] as String?,
+          observedAt: f['properties']?['observed_at'] as String?,
           polygons: switch (type) {
             'Polygon' => [ring(coords.first as List)],
             'MultiPolygon' => [
