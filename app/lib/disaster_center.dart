@@ -3114,7 +3114,7 @@ class _ProfileDetailsCardState extends State<ProfileDetailsCard> {
   final form = GlobalKey<FormState>();
   final fields = <String, TextEditingController>{};
   final jobs = <String>{};
-  String transport = '도보';
+  String transport = '';
   String originMode = '현재 위치';
   bool loading = true;
   static const jobOptions = [
@@ -3150,7 +3150,7 @@ class _ProfileDetailsCardState extends State<ProfileDetailsCard> {
     final p = await AccountService().optionalProfile();
     for (final e in fields.entries) e.value.text = p[e.key] ?? '';
     jobs.addAll((p['jobs'] ?? '').split('|').where((x) => x.isNotEmpty));
-    transport = p['transport'] ?? '도보';
+    transport = p['transport'] ?? '';
     originMode = p['originMode'] == '직접 지정' ? '직접 지정' : '현재 위치';
     if (mounted) setState(() => loading = false);
   }
@@ -3268,21 +3268,23 @@ class _ProfileDetailsCardState extends State<ProfileDetailsCard> {
                       TextFormField(
                         controller: fields['age'],
                         keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(labelText: '나이'),
+                        decoration: const InputDecoration(labelText: '나이 (선택)'),
+                        // 비워 둘 수 있다 (2026-10-07). 적으면 숫자만
                         validator: (x) =>
-                            x == null || x.isEmpty || int.tryParse(x) == null
+                            x != null && x.trim().isNotEmpty && int.tryParse(x.trim()) == null
                                 ? '숫자를 입력하세요'
                                 : null,
                       ),
                       DropdownButtonFormField<String>(
                         initialValue: transport,
                         decoration:
-                            const InputDecoration(labelText: '기본 이동 수단'),
-                        items: const ['도보', '휠체어', '자동차']
-                            .map((x) =>
-                                DropdownMenuItem(value: x, child: Text(x)))
+                            const InputDecoration(labelText: '기본 이동 수단 (선택)'),
+                        // '선택 안 함'(빈 값)이면 AI·경로에 보내지 않는다 — 기본은 도보로 안내 (2026-10-07)
+                        items: const ['', '도보', '휠체어', '자동차']
+                            .map((x) => DropdownMenuItem(
+                                value: x, child: Text(x.isEmpty ? '선택 안 함' : x)))
                             .toList(),
-                        onChanged: (x) => setState(() => transport = x ?? '도보'),
+                        onChanged: (x) => setState(() => transport = x ?? ''),
                       ),
                       const SizedBox(height: 8),
                       const Text('직업 (복수 선택)'),

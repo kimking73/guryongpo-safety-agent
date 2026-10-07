@@ -711,12 +711,11 @@ class _BootScreenState extends ConsumerState<BootScreen> {
     setState(
         () => text = a.isMock ? 'Firebase 미설정: 목업 모드로 시작합니다.' : '로그인 확인 완료');
     await Future<void>.delayed(const Duration(milliseconds: 700));
-    final setupComplete = await AccountService().hasCompletedSetup();
+    // 첫 설정(주소·나이·이동 수단)을 강제하지 않는다 (2026-10-07 사용자 요청) — 바로 시작하고 프로필에서 자유롭게 입력.
+    // 비어 있으면 성인·도보 기준으로 안내하고, AI 대화에서 말한 정보는 'AI가 기억한 정보'로 빈 칸에 채워진다
     appBooted = true;
     final from = widget.from;
-    final next = !setupComplete
-        ? '/location'
-        : (from != null && from.startsWith('/') && !from.startsWith('/boot') ? from : '/');
+    final next = from != null && from.startsWith('/') && !from.startsWith('/boot') ? from : '/';
     if (mounted) context.go(next);
   }
 
