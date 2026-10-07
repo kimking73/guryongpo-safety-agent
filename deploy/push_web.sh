@@ -18,7 +18,8 @@ rsync -a --delete --exclude build --exclude .dart_tool "$root/app/" "$work/app/"
 defines=(--dart-define=APP_MODE=remote
          --dart-define=API_BASE_URL="$base"
          --dart-define=AI_BASE_URL="$base"
-         --dart-define=ROUTE_BASE_URL="$base")
+         --dart-define=ROUTE_BASE_URL="$base"
+         --dart-define=APP_BUILD="$(git -C "$root" rev-parse --short HEAD) · $(date '+%m-%d %H:%M')")
 if [ -f "$root/deploy/web-defines.json" ]; then
   defines+=(--dart-define-from-file="$root/deploy/web-defines.json")
 fi

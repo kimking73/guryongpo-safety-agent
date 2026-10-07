@@ -11,6 +11,9 @@ class AppConfig {
   /// 로컬에 firebase-admin 키가 없어 로그인 화면을 못 볼 때 쓴다. 배포 빌드(deploy/push_web.sh)에는 넣지 않는다.
   /// 예: --dart-define=DEV_UID=responder-demo (uid가 responder로 시작하면 서버가 방재단 역할로 본다)
   static const devUid = String.fromEnvironment('DEV_UID');
+
+  /// 배포 빌드 표시 (deploy/push_web.sh: 커밋·빌드 시각). 브라우저가 예전 앱을 쓰는지 화면에서 바로 확인하려고 (2026-10-08)
+  static const build = String.fromEnvironment('APP_BUILD', defaultValue: '개발 빌드');
   static const firebaseApiKey = String.fromEnvironment('FIREBASE_API_KEY');
   static const firebaseAppId = String.fromEnvironment('FIREBASE_APP_ID');
   static const firebaseProjectId = String.fromEnvironment('FIREBASE_PROJECT_ID');

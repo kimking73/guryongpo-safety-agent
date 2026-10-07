@@ -2506,7 +2506,11 @@ class ProfileScreen extends ConsumerWidget {
                 isScrollControlled: true,
                 builder: (_) => const _PlaceForm())),
       ])),
-      OptionalDetailsCard(key: ValueKey('optional-${ref.watch(profileRevision)}'))
+      OptionalDetailsCard(key: ValueKey('optional-${ref.watch(profileRevision)}')),
+      Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Text('앱 버전 ${AppConfig.build}',
+              textAlign: TextAlign.center, style: const TextStyle(fontSize: 11, color: Colors.black45))),
     ]);
   }
 }
