@@ -21,8 +21,8 @@ export function initialState(tw) {
     editing: false,
     addPlaceOpen: false, newPlaceName: '', newPlaceAddr: '', newPlaceErr: false, extraPlaces: [],
     mailOpen: false, mailEmail: '', mailPw: '', mailErr: false, mailUser: '',
-    crewOpen: false, crewCode: '', crewLogged: false, crewErr: false,
-    hh: HOUSEHOLDS, lastSim: 0
+    crewOpen: false, crewCode: '', crewLogged: false, crewErr: false, crewByDemo: false,
+    hh: HOUSEHOLDS, lastSim: 0, crewMapFull: false
   };
 }
 

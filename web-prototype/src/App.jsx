@@ -37,7 +37,7 @@ export default function App() {
   useEffect(() => {
     const id = setInterval(() => set(st => tick(st, twRef.current, Date.now())), 1000);
     const onNet = () => set({ online: navigator.onLine });
-    const onEsc = e => { if (e.key === 'Escape') set(st => st.mapFull ? { mapFull: false } : null); };
+    const onEsc = e => { if (e.key === 'Escape') set(st => st.mapFull || st.crewMapFull ? { mapFull: false, crewMapFull: false } : null); };
     window.addEventListener('online', onNet);
     window.addEventListener('offline', onNet);
     window.addEventListener('keydown', onEsc);
@@ -54,6 +54,8 @@ export default function App() {
   const simEl = s.askStart ? Math.max(0, (s.now - s.askStart) * timeScale(tw)) : 0;
   const pings = 1 + Math.floor(simEl / (2 * MIN)); // 응답 없으면 2분마다 다시 묻는다
   const online = s.online && !tw.simOffline;
+  // 화면 점멸: 대피 알림이 떠 있거나 아직 상태를 고르지 않았을 때, 무응답일 때
+  const flashOn = s.flash && active && (s.evacOpen || s.evacStatus === null || s.evacStatus === 'noresp');
 
   // 진동 알림: 대피 알림이 뜨거나 다시 물을 때, 무응답으로 방재단에 연락될 때 (길게)
   const alertKey = useRef('');
@@ -84,6 +86,9 @@ export default function App() {
       {s.metricOpen && <MetricModal s={s} set={set} />}
       {s.mailOpen && <MailModal s={s} set={set} />}
       {evacVisible && <EvacModal s={s} set={set} tw={tw} pings={pings} />}
+      {flashOn && (
+        <div aria-hidden="true" style={{ position: 'fixed', inset: 0, zIndex: 60, pointerEvents: 'none', background: 'rgba(215,49,43,0.28)', boxShadow: 'inset 0 0 0 14px #D7312B', animation: 'gkFlash 1s steps(1,end) infinite' }} />
+      )}
       <TweaksPanel tw={tw} onChange={changeTweaks} />
     </div>
   );
