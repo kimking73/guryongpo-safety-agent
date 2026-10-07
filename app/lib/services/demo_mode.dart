@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../models/domain_models.dart';
 import 'app_config.dart';
 
 /// 시연 모드 (2026-10-05). 끄면(기본) 실측 데이터, 켜면 서버 시연 데이터 — 실제 센서 위치에 시연 측정값(호우·침수 + 강풍)을
@@ -11,6 +12,15 @@ class DemoData {
   static bool on = false;
   /// 실측 경로 → 시연 경로 (/api/v1/X → /api/v1/demo/X)
   static String path(String live, String demo) => on ? demo : live;
+
+  /// 시연 모드 지도에서 칠하지 않는 위험 영역: 읍 전체(반경 4km)에 내려진 호우·강풍 특보 (2026-10-07).
+  /// 화면 전체를 노랑·주황으로 덮어 침수·산사태 영역이 안 보였다. 데이터는 그대로라 상황판 제목·특보 카드·AI 답에는 남는다
+  /// (경로 서버도 같은 이유로 호우 영역은 피하지 않는다).
+  static const townWideHazards = {'heavy_rain', 'strong_wind'};
+
+  /// 지도에 그릴 위험 영역. 시연 모드면 읍 전체 특보 영역을 뺀다 (실측 화면은 그대로)
+  static List<RiskArea> mapAreas(List<RiskArea> areas) =>
+      on ? [for (final a in areas) if (!townWideHazards.contains(a.hazard)) a] : areas;
 }
 
 class DemoModeNotifier extends StateNotifier<bool> {

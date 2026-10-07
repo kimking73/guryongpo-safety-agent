@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'services/account_service.dart';
 import 'services/location_service.dart';
 import 'services/app_config.dart';
+import 'services/demo_mode.dart';
 import 'services/geocoding_service.dart';
 import 'models/domain_models.dart';
 import 'prototype_safety_screens.dart';
@@ -661,7 +662,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                 if (!routeMode && widget.riskAreas.isNotEmpty)
                   PolygonLayer(
                     polygons: [
-                      for (final area in widget.riskAreas)
+                      for (final area in DemoData.mapAreas(widget.riskAreas))
                         for (final ring in area.polygons)
                           if (ring.length >= 3)
                             Polygon(

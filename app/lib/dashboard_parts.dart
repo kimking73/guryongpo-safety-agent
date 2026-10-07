@@ -8,6 +8,7 @@ import 'main.dart';
 import 'models/domain_models.dart';
 import 'repositories/remote_repository.dart' show RemoteError;
 import 'services/app_config.dart';
+import 'services/demo_mode.dart';
 import 'services/voice_service.dart';
 import 'services/account_service.dart';
 import 'services/location_service.dart';
@@ -36,7 +37,7 @@ List<Polygon> floodGridPolygons(List<FloodGrid> grids,
 
 /// 서버 위험 영역(/risk/areas) → 지도 폴리곤. 단계 색은 침수 그리드와 같은 기준
 List<Polygon> riskAreaPolygons(List<RiskArea> areas) => [
-      for (final a in areas)
+      for (final a in DemoData.mapAreas(areas))
         for (final ring in a.polygons)
           Polygon(
               points: ring,
