@@ -17,9 +17,8 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import memory as M
 from . import state as S
-from .auth import current_uid, signed_in_uid
+from .auth import signed_in_uid
 from .service import ChatRequest, ChatResponse, ChatService
 from .voice import MAX_BYTES, BadAudio, GoogleVoice, NoSpeech, VoiceUnavailable, to_pcm16k
 from .usage import get_tracker
@@ -32,7 +31,7 @@ logger = logging.getLogger("guardian_ai.api")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
-    # 종료 직전: 서비스가 만들어졌다면 백그라운드 기억 저장이 끝날 때까지 기다린다 (재시작 때 기억 유실 방지)
+    # 종료 직전: 서비스가 만들어졌다면 백그라운드 프로필 반영이 끝날 때까지 기다린다 (재시작 때 유실 방지)
     if get_service.cache_info().currsize:
         get_service().close()
 
@@ -60,48 +59,19 @@ def usage() -> dict:
     return get_tracker().summary()
 
 
-# 사용자 기억 보기·지우기. 인증(Firebase 토큰)은 A의 방식이 정해지면 붙인다 — 그 전에는 외부에 열지 않는다
-# (배포 시 Caddy가 /api/ai/memory를 넘기지 않게, B10).
-# 내 기억 (2026-10-07): 로그인한 본인 것만 — 앱 프로필 화면의 'AI가 기억한 정보'·빈 칸 채우기가 쓴다.
-# 공개 주소에서도 연다 (Caddy 가 막는 것은 /api/ai/memory* 뿐). 토큰 확인은 auth.py (서버와 같은 규칙)
-@app.get("/api/ai/me/memory")
-def my_memory(uid: str = Depends(current_uid), service: ChatService = Depends(get_service)) -> dict:
-    return M.export(service.store, uid)
-
-
-@app.delete("/api/ai/me/memory/facts/{key:path}")
-def forget_my_fact(key: str, uid: str = Depends(current_uid), service: ChatService = Depends(get_service)) -> dict:
-    return {"key": key, "deleted": M.forget_fact(service.store, uid, key)}
-
-
-@app.get("/api/ai/memory/{user_id}")
-def get_memory(user_id: str, service: ChatService = Depends(get_service)) -> dict:
-    return {**M.export(service.store, user_id), "backend": service.memory_backend}
-
-
-@app.delete("/api/ai/memory/{user_id}")
-def delete_memory(user_id: str, service: ChatService = Depends(get_service)) -> dict:
-    return {"user_id": user_id, "deleted": M.forget(service.store, user_id)}
-
-
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(req: ChatRequest, service: ChatService = Depends(get_service),
          authorization: str | None = Header(default=None)) -> ChatResponse:
-    return service.chat(_remember_only_signed_in(req, authorization), **_verified(req, authorization))
+    return service.chat(req, **_signed_in(req, authorization))
 
 
-def _verified(req: ChatRequest, authorization: str | None) -> dict:
-    """로그인 토큰의 uid 가 요청의 user_id 와 같을 때만 서버 프로필을 기준으로 쓰게 한다 (남의 프로필을 못 읽게)"""
+def _signed_in(req: ChatRequest, authorization: str | None) -> dict:
+    """로그인(익명 제외) 토큰의 uid 가 요청의 user_id 와 같을 때만 그 사람의 서버 프로필을 읽고(verified_uid),
+    대화에서 들은 내용으로 고친다(token — 서버 API를 본인 토큰으로 부른다). 아니면 프로필 읽기·고치기 둘 다 안 함"""
     uid = signed_in_uid(authorization)
-    return {"verified_uid": uid} if uid and uid == req.user_id else {}
-
-
-def _remember_only_signed_in(req: ChatRequest, authorization: str | None) -> ChatRequest:
-    """장기 기억(대화를 넘어 남기는 사실·요약)은 로그인(익명 제외)한 본인만 (사용자 결정 2026-10-08).
-    토큰이 없거나 익명이거나 user_id 가 토큰의 uid 와 다르면 remember=False — 이번 대화의 단기 기억(60분)만 쓴다"""
-    if req.remember and signed_in_uid(authorization) != req.user_id:
-        return req.model_copy(update={"remember": False})
-    return req
+    if not uid or uid != req.user_id:
+        return {}
+    return {"verified_uid": uid, "token": (authorization or "").partition(" ")[2].strip()}
 
 
 # --- 음성 (B5) -----------------------------------------------------------------
@@ -151,7 +121,7 @@ def voice(audio: UploadFile = File(...), user_id: str = Form(...), conversation_
         user_id=user_id, question=transcript, conversation_id=conversation_id, remember=remember, demo=demo,
         current_location=S.Location(lat=lat, lon=lon) if lat is not None and lon is not None else None,
         profile=S.UserProfile.model_validate_json(profile) if profile else None)
-    res = service.chat(_remember_only_signed_in(req, authorization), **_verified(req, authorization))
+    res = service.chat(req, **_signed_in(req, authorization))
     t1 = _t.perf_counter()
     try:
         audio_b64 = base64.b64encode(google.tts(res.voice_text or res.answer)).decode()

@@ -2,7 +2,9 @@
 
 HTTP 창구는 api.py, 이 파일은 요청·응답 형식과 기억을 맡는다.
 - 단기 기억(대화 안): checkpointer(InMemorySaver), thread_id = conversation_id. 마지막 문답 후 1시간이 지나면 지운다
-- 장기 기억(사용자별, 대화를 넘어): store — 새 대화마다 불러와 프로필·프롬프트에 넣고, 응답 뒤 백그라운드로 갱신 (memory.py)
+- 사용자 정보: 서버 프로필(user_profiles·user_places) 하나만 쓴다 (2026-10-08 사용자 결정). 질문마다 읽고(tools.get_user_profile),
+  응답 뒤 백그라운드로 이번 문답에서 들은 사용자 정보를 그 프로필에 바로 고친다 (profile_sync.py). 앱 프로필 화면도 같은 곳을 읽는다.
+  장기 기억 저장소(ai_memory.store)는 더 이상 쓰지 않는다 (데이터만 남김)
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from pydantic import BaseModel, Field
 from . import demo
 from . import graph as G
 from . import memory as M
+from . import profile_sync as P
 from . import state as S
 
 logger = logging.getLogger(__name__)
@@ -43,11 +46,10 @@ class ChatRequest(BaseModel):
     profile: S.UserProfile | None = None          # 없으면 user_id만 있는 기본 프로필
     current_location: S.Location | None = None
     conversation_id: str | None = None             # 없으면 새 대화를 시작한다
-    # 사용자 기억(대화를 넘어 남기는 사실)을 불러오고 저장할지. 기본 켜짐(사용자 결정 2026-10-02) —
-    # 앱에 "기억 끄기·지우기"를 두고, 정식 서비스 전 동의 화면을 붙인다.
+    # 대화에서 들은 사용자 정보(나이·보행·직업·집 등)로 서버 프로필을 고칠지. 로그인한 본인일 때만 실제로 고친다 (api.py)
     remember: bool = True
     # 앱 시연 모드: 위험 판정·관측값·특보·재난문자·예보를 서버 시연 데이터로 읽고, 경로도 시연 위험 영역을 피한다 (demo.py).
-    # 시연 대화는 장기 기억에 남기지 않는다 (실제 상황 기억과 섞이지 않게).
+    # 시연 대화로는 프로필을 고치지 않는다.
     demo: bool = False
 
 
@@ -119,7 +121,7 @@ def make_serde() -> JsonPlusSerializer:
 
 
 def make_checkpointer() -> InMemorySaver:
-    """대화 기억(단기) — 서버 메모리. 재시작하면 사라진다 (서비스도 M.make_backends()에서 같은 것을 쓴다)."""
+    """대화 기억(단기) — 서버 메모리. 재시작하면 사라진다 ."""
     return InMemorySaver(serde=make_serde())
 
 
@@ -137,15 +139,15 @@ class _Inline(Executor):
 
 class ChatService:
     def __init__(self, classifier: G.Classifier | None = None, checkpointer=None,
-                 overrides: dict[str, G.Node] | None = None, store=None, extractor=None,
+                 overrides: dict[str, G.Node] | None = None, writer=None, extractor=None,
                  executor: Executor | None = None, now: Callable[[], datetime] | None = None):
         """classifier를 안 주면 실제 서비스 구성: OpenAI 분류기 + 실제 DB를 읽는 침수 agent(B3)
-        + 위치·경로·산사태·강풍태풍·생활안전 agent + 원문 기반 행동 권고·재난 단계 판정 + 숫자·내용 환각 검증 + PostgreSQL 기억(단기·장기) + 기억 추출기 (OPENAI_API_KEY, AI_DB_*, AI_MEM_DB_* 필요).
-        classifier를 주면(테스트) 나머지 노드는 stub 그대로, 기억은 메모리 저장, 추출기 없음(넘기면 바로 실행).
+        + 위치·경로·산사태·강풍태풍·생활안전 agent + 원문 기반 행동 권고·재난 단계 판정 + 숫자·내용 환각 검증 + 대화 기억(서버 메모리)
+        + 사용자 정보 추출기 → 서버 프로필 반영 (OPENAI_API_KEY, AI_DB_*, API_URL 필요).
+        classifier를 주면(테스트) 나머지 노드는 stub 그대로, 서버 프로필 읽기·쓰기 없음(user_source·writer 를 넣을 때만), 추출기도 넘길 때만(바로 실행).
         """
         nodes: dict[str, G.Node] = {}
         phase_of = None             # 재난 단계 판정 (실제 서비스만 — DB를 읽는다)
-        self.memory_backend = "memory"
         self.user_source = None   # 로그인 uid → 서버 프로필 (실제 서비스만; 테스트는 직접 넣는다)
         if classifier is None:
             self.user_source = lambda uid: T.get_user_profile(uid)
@@ -161,9 +163,9 @@ class ChatService:
             from .llm import OpenAIMemoryExtractor
             classifier = OpenAIClassifier()
             phase_of = decide_phase
-            checkpointer, store, self.memory_backend = M.make_backends(make_serde())
             extractor = OpenAIMemoryExtractor()
-            executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="memory")
+            writer = P.ProfileWriter(locate=_locate_place)
+            executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="profile")
             nodes = {
                 S.Specialist.RAIN_FLOOD.value: make_rain_flood_agent(writer=OpenAIWriter()),
                 S.Specialist.LOCATION_ROUTE.value: make_location_route_agent(writer=OpenAILocationWriter()),
@@ -181,7 +183,7 @@ class ChatService:
             {G.MANAGER: G.make_manager(classifier, phase_of=phase_of), **nodes, **(overrides or {})},
             checkpointer=checkpointer or make_checkpointer(),
         )
-        self.store = store if store is not None else M.InMemoryStore()
+        self.writer = writer
         self.extractor = extractor
         self.executor = executor or _Inline()
         # 진행 중인 대화: conversation_id → (주인 user_id, 마지막 문답 시각). 단기 기억과 같이 메모리에만 있다.
@@ -210,29 +212,20 @@ class ChatService:
             self._active[cid] = (user_id, now)
         return cid
 
-    def chat(self, req: ChatRequest, verified_uid: str | None = None) -> ChatResponse:
-        """verified_uid: 로그인 토큰으로 확인한 본인 uid (api.py). 있으면 서버 프로필을 기준으로 답한다."""
+    def chat(self, req: ChatRequest, verified_uid: str | None = None, token: str | None = None) -> ChatResponse:
+        """verified_uid: 로그인 토큰으로 확인한 본인 uid, token: 그 토큰 (api.py). 둘 다 있으면 서버 프로필을 읽어 답하고,
+        답한 뒤 이번 문답에서 들은 사용자 정보로 그 프로필을 고친다."""
         conversation_id = self._open_conversation(req.conversation_id, req.user_id)
         config = {"configurable": {"thread_id": conversation_id}}
         history = self.app.get_state(config).values.get("history", [])
 
-        # 사용자 정보 = 서버 프로필(users·user_profiles·user_places)이 기준 (2026-10-08 사용자 결정: 프로필 하나를 기준으로).
-        # 앱이 보낸 값은 서버에 아직 없는 칸만 보충한다 (계정 동기화 1초 지연 등). 서버 프로필이 없으면 앱 값 + 기억
+        # 사용자 정보 = 서버 프로필 (2026-10-08 사용자 결정: 프로필 하나만). 앱이 함께 보낸 값은 서버 프로필이 없을 때
+        # (로그인 안 함·서버 장애·테스트) 또는 서버에 아직 없는 칸에만 쓴다 — 앱도 같은 서버 프로필을 보여 주므로 같은 값이다
         profile = req.profile or S.UserProfile(user_id=req.user_id)
         server = self.user_source(verified_uid) if verified_uid and self.user_source else None
         if server and server.get("available"):
             known = S.UserProfile.model_validate({"user_id": req.user_id, **server["profile"]})
             profile = profile.model_copy(update={k: getattr(known, k) for k in server["profile"]})
-        memory: list[str] = []
-        if req.remember:
-            try:
-                facts, episodes = M.load(self.store, req.user_id)
-                use_server = bool(server and server.get("available"))
-                # 서버 프로필·앱 어디에도 없는 칸만 기억으로 채운다 (예: 보호자 여부는 서버·채팅 요청 어디에도 안 올라옴)
-                profile = M.apply_to_profile(profile, facts)
-                memory = M.memory_lines(facts, episodes, include_profile_facts=not use_server)
-            except Exception:  # noqa: BLE001 — 기억을 못 읽어도 답은 한다
-                logger.exception("사용자 기억 불러오기 실패")
 
         # 단계별 시간을 재며 실행한다 (지연 측정, B5). 병렬 agent는 끝난 순서대로 앞 단계와의 간격이 기록된다
         timings: dict[str, float] = {}
@@ -246,7 +239,7 @@ class ChatService:
                     "current_location": req.current_location,
                     "question": req.question,
                     "history": history,
-                    "user_memory": memory,
+                    "user_memory": [],
                 },
                 config,
                 stream_mode="updates",
@@ -260,8 +253,8 @@ class ChatService:
         logger.info("응답 시간 %.1fs%s %s", timings["total"], " [시연]" if req.demo else "",
                     {k: v for k, v in timings.items() if k != "total"})
         answer = result.get("final_answer", "")
-        if req.remember and self.extractor is not None and not req.demo:
-            self.executor.submit(self._remember, req.user_id, conversation_id, req.question, answer, memory)
+        if req.remember and token and self.extractor is not None and self.writer is not None and not req.demo:
+            self.executor.submit(self._collect, token, req.user_id, req.question, answer, P.describe(profile))
         # 다음 질문의 지시어 해석("거기는?")에 쓰도록 이번 문답을 기록한다.
         self.app.update_state(config, {"history": [
             *history,
@@ -290,18 +283,19 @@ class ChatService:
         )
 
     def close(self) -> None:
-        """서버 종료 때: 백그라운드 기억 저장이 끝날 때까지 기다린다 (재시작 직전 대화의 기억이 사라지지 않게)."""
+        """서버 종료 때: 백그라운드 프로필 반영이 끝날 때까지 기다린다 (재시작 직전 대화 내용이 빠지지 않게)."""
         self.executor.shutdown(wait=True)
 
-    def _remember(self, user_id: str, conversation_id: str, question: str, answer: str, known: list[str]) -> None:
-        """응답 뒤 백그라운드: 이번 문답에서 사용자 사실·대화 요약을 뽑아 장기 기억에 저장. 실패는 로그만."""
+    def _collect(self, token: str, user_id: str, question: str, answer: str, known: list[str]) -> None:
+        """응답 뒤 백그라운드: 이번 문답에서 사용자가 자기에 대해 말한 것을 뽑아 서버 프로필에 바로 반영. 실패는 로그만."""
         try:
-            update = self.extractor(question, answer, known,
-                                    M.conversation_summary(self.store, user_id, conversation_id))
-            n = M.save(self.store, user_id, conversation_id, update, locate=_locate_place)
-            logger.info("사용자 기억 갱신 user=%s 사실 %d건 요약 '%s'", user_id, n, update.summary[:40])
+            update = self.extractor(question, answer, known)
+            if not update.facts:
+                return
+            done = self.writer.apply(token, update.facts)
+            logger.info("프로필 반영 user=%s 칸 %s 장소 %s", user_id, sorted(done["profile"]), done["places"])
         except Exception:  # noqa: BLE001
-            logger.exception("사용자 기억 저장 실패")
+            logger.exception("대화 내용 프로필 반영 실패")
 
 
 # 사람이 말한 위치 표현 ("구룡포시장 바로 뒤", "수협 앞") — 떼고 그 장소로 찾는다 (좌표는 그 장소 기준의 근사치)

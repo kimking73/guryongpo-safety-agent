@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:guryongpo_safety/services/account_service.dart';
 import 'package:guryongpo_safety/services/account_sync.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -79,6 +80,63 @@ void main() {
     expect(AccountSync.desiredContact(prefs)!['name'], '비상 연락처');
     prefs = await prefsWith({'optional_profile': jsonEncode({'비상 연락처': '옆집 아주머니'})});
     expect(AccountSync.desiredContact(prefs), isNull);
+  });
+
+  group('서버 프로필 → 화면 (2026-10-08: 프로필은 서버 하나, AI도 같은 곳을 고친다)', () {
+    Map<String, String> optional(SharedPreferences p) =>
+        (jsonDecode(p.getString('optional_profile')!) as Map).map((k, v) => MapEntry('$k', '$v'));
+    final server = <String, dynamic>{
+      'profile': {
+        'birth_year': 1954, 'mobility': 'wheelchair', 'occupation': 'fisher, 목수', 'walking_ability': 'limited',
+        'vision_impaired': false, 'hearing_impaired': true, 'has_dependents': true, 'blood_type': 'O+',
+      },
+      'places': [
+        {'id': 'h1', 'place_type': 'home', 'label': '집', 'address': '구룡포길 1', 'location': {'lat': 35.98, 'lng': 129.55}, 'notify': true},
+        {'id': 'p9', 'place_type': 'frequent', 'label': '구룡포수협', 'address': '호미로 1', 'location': {'lat': 35.99, 'lng': 129.56}, 'notify': true},
+      ],
+      'contacts': [{'id': 'c1', 'name': '딸', 'phone': '010-1234-5678'}],
+    };
+
+    test('AI가 고친 서버 값이 화면 값이 된다 — 나이·이동수단·직업 칩·보행·청각·동반자·혈액형·집·저장 장소·연락처', () async {
+      final prefs = await prefsWith({'optional_profile': jsonEncode({'age': '40', '시각 지원': '저시력'})});
+      expect(await AccountSync.applyServerProfile(prefs, server, now: DateTime(2026, 10, 8)), isTrue);
+      final o = optional(prefs);
+      expect(o['age'], '72');
+      expect(o['transport'], '휠체어');
+      expect(o['jobs'], '어업 종사자·뱃사람|목수');
+      expect(o['보행 능력'], '보행 불편');
+      expect(o['시각 지원'], '필요 없음');
+      expect(o['청각 지원'], '지원 필요');
+      expect(o['보호가 필요한 동반자 여부'], '예');
+      expect(o['혈액형'], 'O+');
+      expect(o['homeAddress'], '구룡포길 1');
+      expect(o['homeLat'], '35.98');
+      expect(o['비상 연락처'], '딸 010-1234-5678');
+      final saved = jsonDecode(prefs.getString('saved_places')!) as List;
+      expect(saved.single['name'], '구룡포수협');
+      // 내려받은 직후에는 올릴 것이 없다 (AI가 고친 값을 기기 값으로 다시 덮어쓰지 않게)
+      expect(AccountSync.changedFields(AccountSync.profilePatch(prefs, now: DateTime(2026, 10, 8)),
+          jsonDecode(prefs.getString('server_profile_base')!) as Map<String, dynamic>), isEmpty);
+      expect(AccountSync.desiredPlaces(prefs).keys.toSet(), {'home', 'saved:srv-p9'});
+      // 두 번째로 내려받으면 바뀐 것 없음
+      expect(await AccountSync.applyServerProfile(prefs, server, now: DateTime(2026, 10, 8)), isFalse);
+    });
+
+    test('같은 뜻이면 화면 값을 그대로 둔다 (저시력 = 시각 지원 예), 서버에서 지운 장소는 화면에서도 지운다', () async {
+      final prefs = await prefsWith({});
+      await AccountSync.applyServerProfile(prefs, server, now: DateTime(2026, 10, 8));
+      await AccountService().saveOptionalProfile({...optional(prefs), '청각 지원': '난청'});
+      final next = {...server, 'places': [(server['places'] as List)[0]]};
+      await AccountSync.applyServerProfile(prefs, next, now: DateTime(2026, 10, 8));
+      expect(optional(prefs)['청각 지원'], '난청');
+      expect(jsonDecode(prefs.getString('saved_places')!) as List, isEmpty);
+    });
+  });
+
+  test('올릴 때는 마지막으로 맞춘 값과 달라진 칸만', () {
+    expect(AccountSync.changedFields({'birth_year': 1950, 'occupation': null, 'has_dependents': true},
+        {'birth_year': 1950, 'occupation': 'fisher', 'has_dependents': true}), {'occupation': null});
+    expect(AccountSync.changedFields({'birth_year': 1950}, {}), {'birth_year': 1950});
   });
 
   test('아무것도 입력 안 했으면 보낼 칸 없음', () async {

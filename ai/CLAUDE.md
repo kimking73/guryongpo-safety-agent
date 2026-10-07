@@ -58,12 +58,13 @@
   7–19 s, one retry 30–35 s. Live tree test: `tests/test_tree_live.py -m "live and db"` (11 cases, ~6 min).
 - Data: tools read PostgreSQL directly with read-only role `AI_DB_*` (`../db/init/07_ai_readonly.sh`); every tool takes
   `fetch=` and returns `{"available": False, "reason"}` on failure; observations prefer A's simulated values for 6 h like
-  the risk engine. `RiskLevel` = DB 5 levels (`.rank`), `ActionGuide` = `action_guides` row. `get_user_profile` reads `users`·`user_profiles`·`user_places` by Firebase uid (2026-10-08): for a signed-in chat (token uid = user_id, api.py `_verified`) the server profile is the source of truth, app-sent values then memory facts only fill gaps (has_dependents reaches the AI only via memory — the app sends it nowhere), and memory text lines are notes + summaries only.
+  the risk engine. `RiskLevel` = DB 5 levels (`.rank`), `ActionGuide` = `action_guides` row. `get_user_profile` reads `users`·`user_profiles`·`user_places` by Firebase uid (2026-10-08): for a signed-in chat (token uid = user_id, api.py `_signed_in`) the server profile is the source of truth, app-sent values only fill gaps.
 - Memory: short-term `InMemorySaver` (60 min after last turn or restart; expired/unknown/other users' ids → new
-  conversation), long-term `PostgresStore` in schema `ai_memory` via role `AI_MEM_DB_*` (`../db/init/08_ai_memory.sh`):
-  self-stated user facts + conversation summaries, loaded per chat (empty profile fields, manager prompt, flood evidence),
-  saved after answering in a thread (`OpenAIMemoryExtractor`); `remember` defaults True; `/api/ai/memory/{uid}` has no
-  auth — keep it off the public proxy.
+  conversation). User info = the server profile only (user decision 2026-10-08): after answering, a background thread runs
+  `OpenAIMemoryExtractor` and `profile_sync.ProfileWriter` writes the facts to `POST /api/v1/user` + `/api/v1/user/places`
+  **with the user's own token** (no DB write grant for the AI); the app's profile screen reads the same rows
+  (`app/lib/services/account_sync.dart` `pullProfile`). The old long-term store (`ai_memory` schema) is no longer read or
+  written — data and the `AI_MEM_DB_*` role are kept; the memory APIs are gone. `state.user_memory` is always empty.
 - LLM: OpenAI `gpt-6-luna` (Responses API structured output; reasoning model → no `temperature`; classifier/writer
   effort low, checker low since B5 (`OPENAI_VERIFY_EFFORT`); SDK retries off). `OPENAI_VERIFY_MODEL` can raise only the checker. Key is borrowed — no
   dashboard cap; `usage.py` estimates and warns at 50/80/100% of 200,000원 (step 3a).
@@ -104,12 +105,13 @@ Flutter app/web (teammate C). This lane (B) also owns GraphHopper routing and GC
 | `guardian_ai/action.py` | Action advisor: `decide_phase`, decision tree `decide`, `pick_guides`, `make_action_advisor` |
 | `guardian_ai/polish.py` | B5: `build_card`, `fallback_voice`, `make_polish(polisher)` (LLM only > 600 chars), `make_final_check()` (rule → `polish_feedback`) |
 | `guardian_ai/voice.py` | B5 voice (deferred): `to_pcm16k` (ffmpeg), `GoogleVoice.stt/.tts` (key `secrets/gcp-voice.json`) |
-| `guardian_ai/memory.py` | Memory: `make_backends()` → InMemorySaver + PostgresStore in `ai_memory` (fallback InMemoryStore), `CONVERSATION_TTL_MIN`, user facts/episodes load·apply·save·export·forget |
+| `guardian_ai/memory.py` | `CONVERSATION_TTL_MIN` (short-term conversation memory; long-term store retired 2026-10-08) |
+| `guardian_ai/profile_sync.py` | Chat facts → server profile: `to_patch`, `ProfileWriter.apply(token, facts)` (POST /api/v1/user, places), `describe` |
 | `guardian_ai/db.py` | Read-only PostgreSQL access (`Database`, `default_fetch`, `conninfo()` from `AI_DB_*`) |
 | `guardian_ai/usage.py` | OpenAI token/cost ledger per month (`data/openai_usage.json`, volume `ai-data` in compose), warns at 50/80/100% of `OPENAI_BUDGET_KRW`; `GET /api/ai/usage` |
 | `guardian_ai/llm.py` | `make_client()`, `OpenAIClassifier`, `OpenAIWriter` (flood sentences), `OpenAIFactChecker` (`OPENAI_VERIFY_MODEL`, `OPENAI_VERIFY_EFFORT`, `checks_intent`), specialist/action/polish writers, prompts |
 | `guardian_ai/service.py` | `ChatRequest`/`ChatResponse`, `ChatService` (service.py:119; real nodes wired in `__init__`, `chat()` streams for `timings`), `Card`·`RouteInfo`, checkpointer + `STATE_TYPES` allowlist |
-| `guardian_ai/api.py` | FastAPI app for the `ai` container: `/api/chat`, `/api/voice`, `/api/tts`, `/api/ai/health`, `/api/ai/usage`, `/api/ai/memory/{uid}` |
+| `guardian_ai/api.py` | FastAPI app for the `ai` container: `/api/chat`, `/api/voice`, `/api/tts`, `/api/ai/health`, `/api/ai/usage` |
 | `tests/` | Topology (stub overrides), manager/API (fakes, offline), `test_tools_db.py` (fake fetch), `test_tools_db_live.py` (local DB, `db` marker), `test_routing_live.py` (real OpenAI, `live` marker), `test_b4.py`·`test_b5.py`·`test_voice.py` (offline), `test_tree_live.py` (decision tree, `live and db`, ~6 min) |
 | `Dockerfile` | `ai` container, port 8001 (service defined in `../docker-compose.yml`) |
 | `docs/agent-design.md` | Team-facing design doc (Korean): graph, node I/O, decision tree, tool contract, open questions |

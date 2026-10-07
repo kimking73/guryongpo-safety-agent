@@ -1,4 +1,4 @@
-import 'ai_memory_card.dart';
+import 'profile_refresh.dart';
 import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -2447,7 +2447,7 @@ class ProfileScreen extends ConsumerWidget {
       Text('사용자 정보', style: Theme.of(c).textTheme.headlineSmall),
       ProfileDetailsCard(key: ValueKey('profile-${ref.watch(profileRevision)}')),
       const SizedBox(height: 12),
-      const AiMemoryCard(),
+      const ServerProfileRefresh(),
       const SizedBox(height: 12),
       const AccountCard(),
       if (AppConfig.isRemote) const DemoModeSwitch(),

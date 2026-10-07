@@ -518,36 +518,36 @@ class OpenAIFactChecker:
 # ---------------------------------------------------------------------------
 
 class MemoryFact(BaseModel):
-    field: Literal["age", "walking_impaired", "has_dependents", "mobility", "occupation", "frequent_place", "home_address", "note"]
-    value: str = Field(description="age는 숫자, walking_impaired·has_dependents는 true/false, "
+    field: Literal["age", "walking_impaired", "has_dependents", "mobility", "occupation", "vision_impaired",
+                   "hearing_impaired", "home_address", "frequent_place"]
+    value: str = Field(description="age는 숫자, walking_impaired·has_dependents·vision_impaired·hearing_impaired는 true/false, "
                                    "mobility는 walk·car·wheelchair·public_transport 중 하나, 나머지는 짧은 문장")
     quote: str = Field(description="근거가 된 사용자 발언 원문 일부")
 
 
 class MemoryUpdate(BaseModel):
     facts: list[MemoryFact] = Field(description="새로 알게 됐거나 바뀐 사실. 없으면 빈 목록")
-    summary: str = Field(description="이번 대화에서 사용자가 무엇을 물었는지 한 문장 (재난 수치는 쓰지 않음)")
+    summary: str = Field(default="", description="(쓰지 않음 — 빈 문자열)")
 
 
-EXTRACTOR_PROMPT = """너는 재난 안내 서비스 '구룡가디언'의 기억 관리자다. 사용자와 AI의 이번 문답을 보고,
-다음 대화에서도 이 사용자를 돕는 데 필요한 '사용자 자신에 대한 사실'만 고른다.
+EXTRACTOR_PROMPT = """너는 재난 안내 서비스 '구룡가디언'의 사용자 프로필 관리자다. 사용자와 AI의 이번 문답을 보고,
+사용자 프로필에 넣을 '사용자 자신에 대한 사실'만 고른다. 고른 것은 바로 사용자 프로필에 저장된다.
 
-저장할 것 (사용자가 자기 자신에 대해 직접 말한 것만):
-- age 나이, walking_impaired 보행 불편(다리·무릎이 아픔, 지팡이 등), has_dependents 보호가 필요한 동반자(아이·노부모 등),
-  mobility 이동수단, occupation 직업(어업·선박 보유 등),
+고를 것 (사용자가 자기 자신에 대해 직접 말한 것만):
+- age 나이, walking_impaired 보행 불편(다리·무릎이 아픔, 지팡이 등 — 괜찮아졌다고 하면 false),
+  has_dependents 보호가 필요한 동반자(아이·노부모·반려동물 등), mobility 이동수단, occupation 직업(어업·선박 보유 등),
+  vision_impaired 시각 장애·잘 안 보임, hearing_impaired 청각 장애·잘 안 들림,
   home_address 집 주소·집 위치(사용자가 말한 그대로: 도로명 주소, "구룡포시장 뒤" 같은 장소 설명),
-  frequent_place 자주 가는 곳(장소 이름이나 주소 하나씩 — 예: "구룡포수협 위판장", "호미로 152"),
-  note 그 밖의 재난 대응에 필요한 사실
-저장하지 말 것:
+  frequent_place 자주 가는 곳(장소 이름이나 주소 하나씩 — 예: "구룡포수협 위판장", "호미로 152")
+고르지 말 것:
 - 추측·암시("비가 와서 힘들어요"는 보행 불편이 아님), AI 답변에만 있는 내용
-- 재난 상황·날씨·수위·특보 같은 그때그때 바뀌는 정보 (항상 DB 최신값을 쓰므로 기억하면 안 됨)
-- 이미 기억하는 것과 같은 사실 (바뀐 경우만 다시 저장)
-summary: 이 대화 전체에서 사용자가 무엇을 물었는지 한 문장 (예: "침수 위험과 가까운 대피소, 가는 시간을 물어봄").
-'이 대화의 지금까지 요약'이 주어지면 그 내용을 유지하면서 이번 질문을 더한다. 수치·날짜는 쓰지 않는다."""
+- 재난 상황·날씨·수위·특보 같은 그때그때 바뀌는 정보
+- '지금 프로필'과 같은 사실 (바뀐 경우만 고른다)
+summary 는 빈 문자열로 둔다."""
 
 
 class OpenAIMemoryExtractor:
-    """service.ChatService가 응답 뒤 백그라운드에서 부른다. 실패해도 답변에는 영향이 없다."""
+    """service.ChatService가 응답 뒤 백그라운드에서 부른다 → profile_sync 가 서버 프로필에 반영. 실패해도 답변에는 영향이 없다."""
 
     def __init__(self, client: OpenAI | None = None, model: str | None = None,
                  tracker: UsageTracker | None = None):
@@ -556,7 +556,7 @@ class OpenAIMemoryExtractor:
         self.tracker = tracker or get_tracker()
 
     def __call__(self, question: str, answer: str, known: list[str], conversation_summary: str = "") -> MemoryUpdate:
-        body = ["이미 기억하는 것:", *(f"- {k}" for k in known or ["(없음)"])]
+        body = ["지금 프로필:", *(f"- {k}" for k in known or ["(없음)"])]
         if conversation_summary:
             body.append(f"이 대화의 지금까지 요약: {conversation_summary}")
         body += [f"\n사용자: {question}", f"AI: {answer}"]

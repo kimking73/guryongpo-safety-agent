@@ -105,10 +105,9 @@ docker compose run --rm loader                        # 정적 데이터(대피�
 ```
 - **AI 읽기 전용 계정 만들기 (2026-10-01 이전에 만든 DB 한 번만)**: `.env`에 `.env.example`의 `AI_DB_USER`·`AI_DB_PASSWORD` 두 줄을 넣고
   `docker compose up -d db` → `docker compose exec db sh /docker-entrypoint-initdb.d/07_ai_readonly.sh`. 새로 만드는 DB는 자동.
-- **AI 기억 저장 계정 만들기 (2026-10-02 이전에 만든 DB 한 번만)**: `.env`에 `.env.example`의 `AI_MEM_DB_USER`·`AI_MEM_DB_PASSWORD` 두 줄을 넣고
-  `docker compose up -d db` → `docker compose exec db sh /docker-entrypoint-initdb.d/08_ai_memory.sh` → `docker compose up -d --build ai`.
-  AI의 사용자 기억(사용자가 말한 사실·대화 요약)은 `ai_memory` 스키마에 남아 AI를 재시작해도 이어진다. 대화 기억(진행 중인 대화)은
-  AI 서버 메모리에만 있어 마지막 문답 후 1시간 또는 재시작 때 사라진다. 확인: `curl localhost:8001/api/ai/memory/<user_id>`
+- **사용자 정보는 서버 프로필 하나 (2026-10-08)**: AI가 대화에서 들은 나이·보행·직업·집 등은 사용자 본인 로그인으로 서버 프로필
+  (`user_profiles`·`user_places`)에 바로 반영되고, 앱 프로필 화면도 같은 곳을 읽는다. 예전 AI 기억(`ai_memory` 스키마)은 쓰지 않는다
+  (데이터만 남김, `AI_MEM_DB_*` 계정도 그대로). 대화 기억(진행 중인 대화)은 AI 서버 메모리에만 있어 마지막 문답 후 1시간 또는 재시작 때 사라진다.
 - **음성(질문 녹음 → 답 음성) 켜기 (B5, Google Cloud)**: GCP 콘솔에서 Speech-to-Text API·Text-to-Speech API를 사용 설정하고,
   서비스 계정을 만들어 키(JSON)를 `secrets/gcp-voice.json`으로 저장 → `docker compose up -d --force-recreate ai`.
   키가 없으면 채팅은 그대로 되고 `/api/voice`·`/api/tts`만 503(앱은 "음성 기능을 지금 쓸 수 없습니다"). 키 파일은 커밋하지 않는다.

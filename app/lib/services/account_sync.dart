@@ -1,17 +1,22 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'app_config.dart';
 import 'auth_service.dart';
 
 /// 앱 입력값을 로그인 계정(서버)과 맞춘다. 화면은 지금처럼 AccountService(기기 저장)만 쓰고, 여기서 서버로 올리고 내려받는다.
 ///
+/// 사용자 프로필은 서버 한 곳(user_profiles·user_places·emergency_contacts)이 기준 (2026-10-08 사용자 결정):
+/// AI도 대화에서 들은 내용으로 같은 곳을 고친다. 기기 저장은 화면 표시용 사본 — [pullProfile]이 서버 값으로 다시 채운다
+/// (앱 시작·로그인, 프로필 화면 열 때, AI 대화 뒤). 올릴 때는 마지막으로 맞춘 서버 값과 달라진 칸만 보낸다 (AI가 고친 값을 덮어쓰지 않게).
+///
 /// - 통째 저장: GET·PUT /api/v1/user/app-state — 아래 [syncedKeys] 그대로 (다른 기기에서 같은 계정이면 그대로 복원)
 /// - 서버 판단용 칸: PATCH /api/v1/user (출생연도·이동수단·직업·보행·시각·청각·보호 동반자·혈액형), /api/v1/user/places
 ///   (집·직장·저장 장소), /api/v1/user/contacts (비상 연락처) — 통째 저장의 프로필 화면 값과 같게 (2026-10-08)
 ///   → 선제 경고(A5)가 이 값으로 대상자를 고른다
-/// - 언제: 앱 시작·로그인 때 [pullOrPush], 화면에서 저장할 때 [changed] (1초 모아서 올림)
+/// - 언제: 앱 시작·로그인 때 [pullOrPush] + [pullProfile], 화면에서 저장할 때 [changed] (1초 모아서 올림)
 /// - 충돌: 올리지 못한 변경(오프라인)이 기기에 있으면 기기 값이 이기고, 아니면 서버 값이 이긴다
 class AccountSync {
   AccountSync._();
@@ -21,7 +26,6 @@ class AccountSync {
   static const syncedKeys = [
     'profile_age', 'profile_transport', 'profile_setup_complete', 'optional_profile', 'saved_places', _placeIdsKey,
     _contactKey,
-    'ai_memory_applied',   // AI 기억을 프로필에 반영한 기록 (services/ai_memory.dart) — 다른 기기에서 같은 기억을 다시 덮어쓰지 않게
   ];
   static const _dirtyKey = 'account_sync_dirty';
   /// 앱 장소 → 서버 장소 id·내용 지문 ({"home": {"id": "...", "fp": "..."}, "saved:123": …}). 통째 저장에 함께 실어 다른 기기에서도 중복 등록 안 함
@@ -31,6 +35,10 @@ class AccountSync {
   /// profilePatch 번역 규칙 버전 — 올리면 로그인한 기기가 판단용 칸을 한 번 다시 보낸다
   static const patchVersion = 2;
   static const _patchVersionKey = 'account_sync_patch_version';
+  /// 마지막으로 서버와 맞춘 판단용 칸 (profilePatch 형태). 올릴 때 이것과 다른 칸만 보낸다 — 기기마다 따로 (통째 저장에 안 실음)
+  static const _baseKey = 'server_profile_base';
+  /// 서버 프로필을 내려받아 화면 값이 바뀌면 올라간다 — 프로필 화면이 다시 읽는다
+  static final updated = ValueNotifier<int>(0);
 
   // 로그인(익명 제외)한 사람만 계정에 저장한다 (2026-10-08). 로그인 안 하면 프로필은 이 기기에만
   bool get enabled => AuthService.enabled && AuthService.signedIn;
@@ -56,13 +64,40 @@ class AccountSync {
         await applySnapshot(prefs, Map<String, dynamic>.from(state));
         // 번역 규칙이 바뀌면(판단용 칸 = 화면 값, 2026-10-08) 내려받은 값으로 판단용 칸을 한 번 다시 맞춘다
         if (prefs.getInt(_patchVersionKey) != patchVersion) {
-          await push();
+          await push(full: true);
           await prefs.setInt(_patchVersionKey, patchVersion);
         }
-        return;
+      } else if (hasLocalData(prefs)) {
+        await push();
       }
-      if (hasLocalData(prefs)) await push();
     } catch (_) {}
+    await pullProfile();
+  }
+
+  /// 서버 프로필 → 이 기기 화면 값. 기기에서 고치고 아직 못 올린 것이 있으면 먼저 올린다. 화면 값이 바뀌었으면 true
+  Future<bool> pullProfile() async {
+    if (!enabled) return false;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if ((prefs.getBool(_dirtyKey) ?? false) || (_debounce?.isActive ?? false)) {
+        _debounce?.cancel();
+        await push();
+      }
+      final r = await (await _dio()).get<Map<String, dynamic>>('/api/v1/user');
+      final changed = await applyServerProfile(prefs, r.data ?? const {});
+      if (changed) updated.value++;
+      return changed;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// AI 대화 뒤: AI가 답한 다음 백그라운드로 프로필을 고치므로(보통 수 초) 조금 뒤 두 번 내려받는다
+  void pullAfterChat() {
+    if (!enabled) return;
+    for (final s in const [8, 20]) {
+      Timer(Duration(seconds: s), () => unawaited(pullProfile()));
+    }
   }
 
   /// 로그아웃: 이 기기에 남은 계정 정보를 지운다 (계정에는 저장돼 있음). 다음 익명 사용자는 빈 상태로 시작
@@ -73,16 +108,19 @@ class AccountSync {
     }
   }
 
-  /// 기기 값 → 서버 (통째 + 판단용 칸 + 장소). 동시에 두 번 돌지 않게 묶는다
-  Future<void> push() => _running ??= _push().whenComplete(() => _running = null);
+  /// 기기 값 → 서버 (통째 + 판단용 칸 + 장소). 동시에 두 번 돌지 않게 묶는다.
+  /// 판단용 칸은 마지막으로 서버와 맞춘 값([_baseKey])과 달라진 칸만 (full 이면 전부)
+  Future<void> push({bool full = false}) => _running ??= _push(full).whenComplete(() => _running = null);
 
-  Future<void> _push() async {
+  Future<void> _push(bool full) async {
     if (!enabled) return;
     final prefs = await SharedPreferences.getInstance();
     try {
       final dio = await _dio();
-      final profile = profilePatch(prefs);
+      final patch = profilePatch(prefs);
+      final profile = full ? patch : changedFields(patch, _base(prefs));
       if (profile.isNotEmpty) await dio.patch<Object?>('/api/v1/user', data: profile);
+      await prefs.setString(_baseKey, jsonEncode({..._base(prefs), ...patch}));
       await _syncPlaces(dio, prefs);
       await _syncContact(dio, prefs);
       await dio.put<Object?>('/api/v1/user/app-state', data: {'state': snapshot(prefs)});
@@ -148,6 +186,17 @@ class AccountSync {
     final r = await dio.post<Map<String, dynamic>>('/api/v1/user/contacts', data: want);
     await prefs.setString(_contactKey, jsonEncode({'id': '${r.data?['id']}', 'fp': fp}));
   }
+
+  static Map<String, Object?> _base(SharedPreferences prefs) {
+    final raw = prefs.getString(_baseKey);
+    return raw == null ? {} : Map<String, Object?>.from(jsonDecode(raw) as Map);
+  }
+
+  /// 올릴 칸: 마지막으로 서버와 맞춘 값과 다른 것만
+  static Map<String, Object?> changedFields(Map<String, Object?> patch, Map<String, Object?> base) => {
+        for (final e in patch.entries)
+          if (!base.containsKey(e.key) || jsonEncode(base[e.key]) != jsonEncode(e.value)) e.key: e.value,
+      };
 
   static Map<String, Map<String, String>> _placeIds(SharedPreferences prefs) {
     final raw = prefs.getString(_placeIdsKey);
@@ -277,5 +326,145 @@ class AccountSync {
       };
     }
     return out;
+  }
+
+  static const _transportName = {'walk': '도보', 'wheelchair': '휠체어', 'car': '자동차', 'bicycle': '자전거', 'public_transit': '대중교통'};
+  static const _placeTypeName = {'home': '집', 'work': '직장', 'lodging': '숙소'};
+
+  /// 서버 프로필(GET /api/v1/user) → 기기 화면 값 (2026-10-08: 프로필은 서버 하나, 기기는 표시용 사본).
+  /// 화면 값이 서버와 같은 뜻이면 그대로 둔다 (예: 시각 '저시력'과 서버 '예'). 서버에 없는 장소는 화면에서도 지우고,
+  /// 서버에만 있는 장소(AI가 더한 곳·다른 기기)는 화면에 더한다. 끝나면 '마지막으로 맞춘 값'을 지금 값으로. 바뀌었으면 true
+  static Future<bool> applyServerProfile(SharedPreferences prefs, Map<String, dynamic> user, {DateTime? now}) async {
+    final before = jsonEncode(snapshot(prefs));
+    final profile = Map<String, dynamic>.from((user['profile'] as Map?) ?? const {});
+    final o = _optional(prefs);
+    String v(String k) => (o[k] ?? o[_legacy[k]] ?? '').trim();
+    final local = profilePatch(prefs, now: now);
+    void set(String k, String value) {
+      o.remove(_legacy[k]);
+      if (value.isEmpty) {
+        o.remove(k);
+      } else {
+        o[k] = value;
+      }
+    }
+
+    // 나이·이동수단
+    final by = profile['birth_year'];
+    if (by is num) {
+      if (local['birth_year'] != by) set('age', '${(now ?? DateTime.now()).year - by.toInt()}');
+    }
+    final mobility = '${profile['mobility'] ?? ''}';
+    if (_transportName.containsKey(mobility) && local['mobility'] != mobility) set('transport', _transportName[mobility]!);
+    // 직업: 서버 코드 → 화면 칩 이름 (직접 입력한 직업은 그대로)
+    final names = {for (final e in jobCode.entries) e.value: e.key};
+    final jobs = '${profile['occupation'] ?? ''}'.split(',').map((j) => j.trim()).where((j) => j.isNotEmpty).toList();
+    if (jsonEncode(local['occupation']) != jsonEncode(jobs.isEmpty ? null : jobs.join(', ')) && profile.containsKey('occupation')) {
+      set('jobs', jobs.map((j) => names[j] ?? j).join('|'));
+      set('직업', '');
+    }
+    // 보행·시각·청각·보호 동반자·혈액형: 화면 값의 뜻이 서버와 다를 때만 바꾼다
+    final walking = '${profile['walking_ability'] ?? 'normal'}';
+    final localWalking = switch (v('보행 능력')) { '보행 불편' => 'limited', '보행 어려움' => 'unable', _ => 'normal' };
+    if (walking != localWalking) {
+      set('보행 능력', switch (walking) { 'limited' => '보행 불편', 'unable' => '보행 어려움', _ => '보행 가능' });
+    }
+    for (final (key, field) in [('시각 지원', 'vision_impaired'), ('청각 지원', 'hearing_impaired')]) {
+      final want = profile[field] == true;
+      final has = v(key).isNotEmpty && v(key) != '필요 없음';
+      if (want != has) set(key, want ? '지원 필요' : (v(key).isEmpty ? '' : '필요 없음'));
+    }
+    final dependents = profile['has_dependents'] == true;
+    if (dependents != (v('보호가 필요한 동반자 여부') == '예')) {
+      set('보호가 필요한 동반자 여부', dependents ? '예' : (v('보호가 필요한 동반자 여부').isEmpty ? '' : '아니요'));
+    }
+    if (profile.containsKey('blood_type')) {
+      final blood = '${profile['blood_type'] ?? ''}';
+      if (blood != (_bloodTypes.contains(v('혈액형')) ? v('혈액형') : '')) set('혈액형', blood);
+    }
+
+    // 장소: 서버 장소 id ↔ 화면 장소 (집·직장 = 프로필 주소, 나머지 = 저장 장소)
+    final known = _placeIds(prefs);
+    final byId = {for (final e in known.entries) e.value['id']: e.key};
+    final saved = [
+      for (final p in jsonDecode(prefs.getString('saved_places') ?? '[]') as List) Map<String, dynamic>.from(p as Map)
+    ];
+    final seen = <String>{};
+    void setPlaceFields(String key, Map<String, dynamic> pl) {
+      final loc = Map<String, dynamic>.from(pl['location'] as Map);
+      set('${key}Lat', '${loc['lat']}');
+      set('${key}Lon', '${loc['lng']}');
+      set('${key}Address', '${pl['address'] ?? ''}');
+      final label = '${pl['label'] ?? ''}';
+      set('${key}Name', label == (key == 'home' ? '집' : '직장') ? '' : label);
+    }
+    for (final raw in (user['places'] as List?) ?? const []) {
+      final pl = Map<String, dynamic>.from(raw as Map);
+      final id = '${pl['id']}';
+      var key = byId[id];
+      final type = '${pl['place_type']}';
+      // 처음 보는 서버 장소: 화면에 집·직장이 비어 있으면 그 칸으로, 아니면 저장 장소로
+      if (key == null && (type == 'home' || type == 'work') && !known.containsKey(type) && v('${type}Lat').isEmpty) key = type;
+      if (key == null) {
+        key = 'saved:srv-$id';
+        saved.add({'id': 'srv-$id'});
+      }
+      seen.add(key);
+      known[key] = {'id': id, 'fp': ''};
+      if (key == 'home' || key == 'work') {
+        setPlaceFields(key, pl);
+        continue;
+      }
+      final i = saved.indexWhere((m) => 'saved:${m['id']}' == key);
+      if (i < 0) continue;
+      final loc = Map<String, dynamic>.from(pl['location'] as Map);
+      saved[i] = {
+        ...saved[i],
+        'name': '${pl['label'] ?? '장소'}',
+        'type': _placeTypeName[type] ?? (saved[i]['type'] ?? '기타'),
+        'address': '${pl['address'] ?? ''}',
+        'lat': loc['lat'],
+        'lon': loc['lng'],
+        'alert': pl['notify'] != false,
+      };
+    }
+    // 서버에서 지워진 장소는 화면에서도 지운다
+    for (final key in known.keys.where((k) => !seen.contains(k)).toList()) {
+      known.remove(key);
+      if (key == 'home' || key == 'work') {
+        for (final f in ['Lat', 'Lon', 'Address', 'Name']) {
+          set('$key$f', '');
+        }
+      } else {
+        saved.removeWhere((m) => 'saved:${m['id']}' == key);
+      }
+    }
+
+    // 비상 연락처 (서버 첫 번째)
+    final contacts = (user['contacts'] as List?) ?? const [];
+    if (contacts.isEmpty) {
+      if (prefs.containsKey(_contactKey)) set('비상 연락처', '');
+      await prefs.remove(_contactKey);
+    } else {
+      final c = Map<String, dynamic>.from(contacts.first as Map);
+      final mine = desiredContact(prefs);
+      if (mine == null || mine['phone'] != c['phone']) set('비상 연락처', '${c['name'] ?? ''} ${c['phone']}'.trim());
+    }
+
+    if (o.isNotEmpty || prefs.containsKey('optional_profile')) await prefs.setString('optional_profile', jsonEncode(o));
+    await prefs.setString('saved_places', jsonEncode(saved));
+    // 지금 화면 값 = 서버 값 → 다음 올림에서 다시 보내지 않게 지문·기준값을 맞춘다
+    final desired = desiredPlaces(prefs);
+    for (final k in known.keys) {
+      known[k] = {'id': known[k]!['id']!, 'fp': desired[k] == null ? '' : jsonEncode(desired[k])};
+    }
+    await prefs.setString(_placeIdsKey, jsonEncode(known));
+    if (contacts.isNotEmpty) {
+      final want = desiredContact(prefs);
+      await prefs.setString(_contactKey,
+          jsonEncode({'id': '${(contacts.first as Map)['id']}', 'fp': want == null ? '' : jsonEncode(want)}));
+    }
+    await prefs.setString(_baseKey, jsonEncode(profilePatch(prefs, now: now)));
+    return before != jsonEncode(snapshot(prefs));
   }
 }

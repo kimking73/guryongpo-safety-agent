@@ -4,7 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:latlong2/latlong.dart';
 import '../models/domain_models.dart';
 import '../services/account_service.dart';
-import '../services/ai_memory.dart';
+import '../services/account_sync.dart';
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
 import '../services/demo_mode.dart';
@@ -263,7 +263,7 @@ class RemoteSafetyRepository implements SafetyRepository {
             if (DemoData.on) 'demo': true,
           }));
       _conversationId = r.data!['conversation_id'] as String?;
-      AiMemoryService.fillAfterChat();   // AI가 이번 대화에서 기억한 내용으로 빈 프로필 칸 채우기
+      AccountSync.instance.pullAfterChat();   // AI가 이번 대화에서 들은 내용으로 고친 서버 프로필을 내려받아 화면에
       return chatAnswerFromJson(r.data!, names: await _routeHazardNames());
     } on RemoteError catch (e) {
       return ChatAnswer(e.message, isError: true);
@@ -287,6 +287,7 @@ class RemoteSafetyRepository implements SafetyRepository {
     });
     final r = await _guard(() => _client.ai.post<Map<String, dynamic>>('/api/voice', data: form), passDetail: const {422, 503});
     _conversationId = r.data!['conversation_id'] as String?;
+    AccountSync.instance.pullAfterChat();
     return VoiceAnswer(r.data!['transcript'] as String, chatAnswerFromJson(r.data!, names: await _routeHazardNames()));
   }
 

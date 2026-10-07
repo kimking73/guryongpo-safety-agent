@@ -134,10 +134,11 @@ def test_chat_turns_demo_on_for_nodes_and_skips_memory(monkeypatch):
 
     svc = ChatService(classifier=G.keyword_classify, overrides={Specialist.RAIN_FLOOD.value: node},
                       extractor=lambda *a, **k: extracted.append(a))
-    svc.chat(ChatRequest(user_id="u1", question="침수 위험 있어?", demo=True))
-    svc.chat(ChatRequest(user_id="u1", question="침수 위험 있어?"))
+    svc.writer = object()               # 실제로 부르지 않음 (추출 결과가 None 이라 반영 전에 끝남)
+    svc.chat(ChatRequest(user_id="u1", question="침수 위험 있어?", demo=True), verified_uid="u1", token="t")
+    svc.chat(ChatRequest(user_id="u1", question="침수 위험 있어?"), verified_uid="u1", token="t")
     assert seen == [True, False]
-    assert len(extracted) == 1          # 시연 대화는 장기 기억에 남기지 않는다
+    assert len(extracted) == 1          # 시연 대화로는 프로필을 고치지 않는다
     assert not D.is_active()
 
 

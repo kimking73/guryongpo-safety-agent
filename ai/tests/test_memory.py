@@ -1,18 +1,15 @@
-"""대화 기억(단기)·사용자 기억(장기) — 메모리 저장소로 실행 (DB·LLM 없이)."""
+"""대화 기억(단기)과 대화 내용 → 서버 프로필 반영 (DB·LLM 없이, 2026-10-08: 사용자 정보는 서버 프로필 하나만)."""
 
-import pytest
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
+import time
 
-from guardian_ai import flood as F
 from guardian_ai import graph as G
-from guardian_ai import memory as M
-from guardian_ai.llm import MemoryFact, MemoryUpdate, build_prompt
+from guardian_ai.llm import MemoryFact, MemoryUpdate
 from guardian_ai.service import ChatRequest, ChatService
-from guardian_ai.state import Location, Specialist, UserProfile
-from guardian_ai.tools import route_profile
+from guardian_ai.state import Specialist, UserProfile
 
-KNEE = MemoryUpdate(facts=[MemoryFact(field="walking_impaired", value="true", quote="제가 무릎이 안 좋아요"),
-                           MemoryFact(field="frequent_place", value="구룡포시장", quote="시장에 자주 가요")],
-                    summary="무릎이 불편하다며 대피소 가는 길을 물어봄")
+KNEE = MemoryUpdate(facts=[MemoryFact(field="walking_impaired", value="true", quote="제가 무릎이 안 좋아요")])
 
 
 class Spy:
@@ -26,46 +23,80 @@ class Spy:
         return G.keyword_classify(state)
 
 
-def service(extract=lambda q, a, known, summary="": KNEE, spy=None):
-    return ChatService(classifier=spy or G.keyword_classify, extractor=extract)
+class FakeWriter:
+    """서버 프로필 대신: 반영 요청을 기록하고, 그 값을 user_source 가 돌려준다 (서버 왕복 흉내)"""
+
+    def __init__(self):
+        self.calls, self.profile = [], {}
+
+    def apply(self, token, facts, today=None):
+        self.calls.append((token, [f.field for f in facts]))
+        for f in facts:
+            if f.field == "walking_impaired":
+                self.profile["walking_impaired"] = f.value == "true"
+        return {"profile": dict(self.profile), "places": []}
+
+    def source(self, uid):
+        return {"available": True, "profile": dict(self.profile)}
 
 
-def ask(svc, question, user="u1", **kw):
-    return svc.chat(ChatRequest(user_id=user, question=question, **kw))
+def service(extract=lambda q, a, known, summary="": KNEE, spy=None, **kw):
+    svc = ChatService(classifier=spy or G.keyword_classify, extractor=extract, **kw)
+    svc.writer = FakeWriter()
+    svc.user_source = svc.writer.source
+    return svc
 
 
-def test_new_conversation_recalls_facts_from_previous_one():
+def ask(svc, question, user="u1", signed_in=True, **kw):
+    extra = {"verified_uid": user, "token": f"tok-{user}"} if signed_in else {}
+    return svc.chat(ChatRequest(user_id=user, question=question, **kw), **extra)
+
+
+def test_what_user_said_goes_to_server_profile_and_next_question_reads_it():
     spy = Spy()
     svc = service(spy=spy)
-    first = ask(svc, "제가 무릎이 안 좋아요. 대피소 어디예요?")
-    second = ask(svc, "비 오는데 어디로 가요?")                      # conversation_id 없음 = 새 대화
-    assert second.conversation_id != first.conversation_id
-
-    state = spy.states[-1]
-    assert state["user"].walking_impaired is True                 # 기억 → 프로필
-    assert route_profile(state["user"]) == "elderly"              # → 노약자 경로
-    assert any("보행 불편" in m and "무릎" in m for m in state["user_memory"])
-    assert any("지난 대화" in m and "대피소" in m for m in state["user_memory"])
-    assert "이 사용자에 대해 기억하는 것" in build_prompt(state)  # 분류 프롬프트에 들어감
+    ask(svc, "제가 무릎이 안 좋아요. 대피소 어디예요?")
+    assert svc.writer.calls == [("tok-u1", ["walking_impaired"])]          # 본인 토큰으로 서버 프로필 수정
+    ask(svc, "비 와요?")                                                    # 새 대화도 서버 프로필에서 읽음
+    assert spy.states[-1]["user"].walking_impaired is True
+    assert spy.states[-1]["user_memory"] == []                              # 예전 장기 기억 문장은 쓰지 않음
 
 
-def test_profile_sent_by_app_wins_over_memory():
+def test_not_signed_in_neither_reads_nor_writes_profile():
     spy = Spy()
     svc = service(spy=spy)
-    ask(svc, "무릎이 안 좋아요")
-    ask(svc, "비 와요?", profile=UserProfile(user_id="u1", walking_impaired=False))
-    assert spy.states[-1]["user"].walking_impaired is False
+    svc.writer.profile["walking_impaired"] = True
+    ask(svc, "무릎이 안 좋아요", signed_in=False)
+    assert svc.writer.calls == [] and not spy.states[-1]["user"].walking_impaired
 
 
-def test_remember_off_neither_saves_nor_loads():
-    calls = []
-    spy = Spy()
-    svc = service(extract=lambda *a: calls.append(a) or KNEE, spy=spy)
+def test_remember_off_does_not_write():
+    svc = service()
     ask(svc, "무릎이 안 좋아요", remember=False)
-    assert calls == [] and M.export(svc.store, "u1")["facts"] == {}
-    ask(svc, "무릎이 안 좋아요")                                     # 켜고 저장
-    ask(svc, "비 와요?", remember=False)                             # 꺼진 대화는 불러오지도 않음
-    assert spy.states[-1]["user_memory"] == [] and not spy.states[-1]["user"].walking_impaired
+    assert svc.writer.calls == []
+
+
+def test_nothing_said_about_self_writes_nothing():
+    svc = service(extract=lambda *a, **k: MemoryUpdate(facts=[]))
+    ask(svc, "대피소 어디예요?")
+    assert svc.writer.calls == []
+
+
+def test_server_profile_wins_over_app_values_and_app_fills_gaps():
+    spy = Spy()
+    svc = service(spy=spy)
+    svc.writer.profile.update(walking_impaired=False)
+    ask(svc, "대피소", profile=UserProfile(user_id="u1", walking_impaired=True, age=70))
+    u = spy.states[-1]["user"]
+    assert u.walking_impaired is False and u.age == 70
+
+
+def test_extractor_is_told_the_current_profile():
+    seen = []
+    svc = service(extract=lambda q, a, known, summary="": seen.append(known) or MemoryUpdate(facts=[]))
+    svc.writer.profile.update(walking_impaired=True)
+    ask(svc, "대피소 어디예요?")
+    assert seen == [["보행 불편: True"]]
 
 
 def test_other_users_conversation_id_starts_a_new_conversation():
@@ -75,7 +106,6 @@ def test_other_users_conversation_id_starts_a_new_conversation():
     theirs = ask(svc, "아까 뭐 물어봤지?", user="bob", conversation_id=mine.conversation_id)
     assert theirs.conversation_id != mine.conversation_id
     assert spy.states[-1]["history"] == []                           # alice의 대화 기록을 못 봄
-    assert spy.states[-1]["user_memory"] == []                       # alice의 기억도 못 봄
 
 
 def test_same_conversation_still_continues():
@@ -86,37 +116,20 @@ def test_same_conversation_still_continues():
     assert [m["role"] for m in spy.states[-1]["history"]] == ["user", "assistant"]
 
 
-def test_continued_conversation_widens_its_summary_instead_of_replacing_it():
-    seen = []
-
-    def extract(q, a, known, summary=""):
-        seen.append(summary)
-        return MemoryUpdate(facts=[], summary=f"{summary} + {q}".strip(" +"))
-    svc = service(extract=extract)
-    first = ask(svc, "대피소 어디예요?")
-    ask(svc, "거기까지 얼마나 걸려요?", conversation_id=first.conversation_id)
-    assert seen == ["", "대피소 어디예요?"]                        # 두 번째 추출은 첫 요약을 받는다
-    assert M.load(svc.store, "u1")[1][0]["summary"] == "대피소 어디예요? + 거기까지 얼마나 걸려요?"
-
-
-def test_close_waits_for_pending_memory_saves():
-    from concurrent.futures import ThreadPoolExecutor
-    import time
-
+def test_close_waits_for_pending_profile_writes():
     def slow(q, a, known, summary=""):
         time.sleep(0.2)
         return KNEE
-    svc = ChatService(classifier=G.keyword_classify, extractor=slow, executor=ThreadPoolExecutor(1))
+    svc = service(extract=slow, executor=ThreadPoolExecutor(1))
     ask(svc, "무릎이 안 좋아요")
-    svc.close()                                                      # 종료 = 저장이 끝날 때까지 대기
-    assert "walking_impaired" in M.export(svc.store, "u1")["facts"]
+    svc.close()                                                      # 종료 = 반영이 끝날 때까지 대기
+    assert svc.writer.calls
 
 
-def test_conversation_expires_after_an_hour_of_silence_but_user_memory_stays():
-    from datetime import datetime, timedelta, timezone
+def test_conversation_expires_after_an_hour_of_silence_but_profile_stays():
     clock = {"t": datetime(2026, 10, 2, 9, 0, tzinfo=timezone.utc)}
     spy = Spy()
-    svc = ChatService(classifier=spy, extractor=lambda q, a, known, summary="": KNEE, now=lambda: clock["t"])
+    svc = service(spy=spy, now=lambda: clock["t"])
     first = ask(svc, "무릎이 안 좋아요. 대피소 어디예요?")
 
     clock["t"] += timedelta(minutes=30)                              # 1시간 안 → 같은 대화
@@ -126,7 +139,7 @@ def test_conversation_expires_after_an_hour_of_silence_but_user_memory_stays():
     later = ask(svc, "거기 지금 가도 돼요?", conversation_id=first.conversation_id)
     assert later.conversation_id != first.conversation_id
     assert spy.states[-1]["history"] == []                           # 옛 대화의 "거기"는 모름
-    assert spy.states[-1]["user"].walking_impaired is True           # 사용자 기억은 이어짐
+    assert spy.states[-1]["user"].walking_impaired is True           # 프로필은 이어짐
     old = svc.app.get_state({"configurable": {"thread_id": first.conversation_id}}).values
     assert not old                                                   # 만료된 대화는 메모리에서 지움
 
@@ -137,48 +150,13 @@ def test_unknown_conversation_id_starts_new_one():
     assert res.conversation_id != "from-before-restart"
 
 
-def test_extractor_failure_does_not_break_the_answer():
-    def broken(*a):
+def test_extractor_or_server_failure_does_not_break_the_answer():
+    def broken(*a, **k):
         raise TimeoutError("LLM 응답 없음")
-    res = ask(service(extract=broken), "무릎이 안 좋아요")
-    assert res.answer and not res.used_fallback
-
-
-def test_memory_becomes_evidence_so_mentions_are_not_flagged():
-    from test_flood_verify import heavy_rain_db
-    out = F.make_rain_flood_agent(fetch=heavy_rain_db)({
-        "mode": "chat", "question": "비 와요?", "user": UserProfile(user_id="u1", home=Location(lat=35.99, lon=129.556)),
-        "user_memory": ["보행 불편: true (사용자 말: \"무릎이 안 좋아요\")"]})
-    ev = out["specialist_results"][0].evidence
-    assert any(e.source == "user_memory" and "무릎" in str(e.value) for e in ev)
-
-
-def test_profile_fact_is_overwritten_and_places_accumulate():
+    assert ask(service(extract=broken), "무릎이 안 좋아요").answer
     svc = service()
-    M.save(svc.store, "u1", "c1", KNEE)
-    M.save(svc.store, "u1", "c2", MemoryUpdate(
-        facts=[MemoryFact(field="walking_impaired", value="false", quote="이제 다 나았어요"),
-               MemoryFact(field="frequent_place", value="구룡포항", quote="항구에도 가요")], summary="안부"))
-    facts, episodes = M.load(svc.store, "u1")
-    assert facts["walking_impaired"]["value"] == "false"             # 최신 발언이 우선
-    assert {"frequent_place:구룡포시장", "frequent_place:구룡포항"} <= set(facts)
-    assert len(episodes) == 2
-
-
-def test_export_and_forget():
-    svc = service()
-    M.save(svc.store, "u1", "c1", KNEE)
-    assert set(M.export(svc.store, "u1")["facts"]) == {"walking_impaired", "frequent_place:구룡포시장"}
-    assert M.forget(svc.store, "u1") == 3                            # 사실 2 + 요약 1
-    assert M.export(svc.store, "u1") == {"user_id": "u1", "facts": {}, "episodes": []}
-
-
-@pytest.mark.parametrize("field, value, expect", [
-    ("age", "72", 72), ("age", "칠십", None), ("mobility", "wheelchair", "wheelchair"), ("has_dependents", "true", True)])
-def test_profile_conversion(field, value, expect):
-    p = M.apply_to_profile(UserProfile(user_id="u1"), {field: {"value": value}})
-    got = getattr(p, field)
-    assert (got.value if hasattr(got, "value") else got) == expect
+    svc.writer.apply = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("api 503"))
+    assert ask(svc, "무릎이 안 좋아요").answer
 
 
 def test_rain_flood_route_agent_selection_unchanged():

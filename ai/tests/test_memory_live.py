@@ -1,4 +1,4 @@
-"""기억 추출기(실제 OpenAI): 사용자가 자기에 대해 직접 말한 것만 저장하고, 추측·재난 정보는 저장하지 않는가.
+"""사용자 정보 추출기(실제 OpenAI, 결과는 서버 프로필로): 사용자가 자기에 대해 직접 말한 것만 고르고, 추측·재난 정보는 고르지 않는가.
 
 실행: cd 코드/ai && .venv/bin/python -m pytest tests/test_memory_live.py -m live -q   (OpenAI 6회, 2원 이하)
 """
@@ -49,4 +49,3 @@ def test_does_not_save_guesses_or_disaster_data(extract, question):
     update = extract(question, ANSWER, [])
     assert "walking_impaired" not in fields(update), fields(update)
     assert not any("mm" in f.value or "수위" in f.value or "경보" in f.value for f in update.facts), fields(update)
-    assert update.summary
