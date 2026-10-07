@@ -610,13 +610,25 @@ bool appBooted = false;
 
 final appRouter = GoRouter(
     initialLocation: '/boot',
+    refreshListenable: AuthService.changes,
     redirect: (_, state) {
-      if (appBooted || state.matchedLocation == '/boot') return null;
-      return Uri(path: '/boot', queryParameters: {'from': state.uri.toString()}).toString();
+      final loc = state.matchedLocation;
+      if (!appBooted) {
+        return loc == '/boot' ? null : Uri(path: '/boot', queryParameters: {'from': state.uri.toString()}).toString();
+      }
+      // 로그인 강제 (사용자 결정 2026-10-08): 로그인 안 했으면 로그인 화면만. 로그인하면 가려던 화면으로. 목업 모드는 제외
+      if (AuthService.enabled && !AuthService.signedIn && loc != '/login') {
+        return Uri(path: '/login', queryParameters: {'from': state.uri.toString()}).toString();
+      }
+      if (AuthService.signedIn && loc == '/login') {
+        final from = state.uri.queryParameters['from'];
+        return from != null && from.startsWith('/') && !from.startsWith('/login') && !from.startsWith('/boot') ? from : '/';
+      }
+      return null;
     },
     routes: [
   GoRoute(path: '/boot', builder: (_, s) => BootScreen(from: s.uri.queryParameters['from'])),
-  GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
+  GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),   // 로그인 후 이동은 위 redirect 가 한다
   GoRoute(path: '/location', builder: (_, __) => const InitialSetupScreen()),
   ShellRoute(builder: (_, __, child) => Shell(child: child), routes: [
     GoRoute(path: '/', builder: (_, __) => const Dashboard()),

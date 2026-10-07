@@ -103,8 +103,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           : await auth.signInWithEmail(email.text, password.text);
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(signUp ? '가입했습니다. 지금 정보가 이 계정에 저장됩니다.' : '로그인했습니다.')));
-      context.pop();
+          .showSnackBar(SnackBar(content: Text(signUp ? '가입했습니다.' : '로그인했습니다.')));
+      // 화면 이동은 라우터가 한다 (로그인되면 /login → 가려던 화면, main.dart redirect)
     } on AuthFailure catch (e) {
       setState(() => error = e.message);
     } finally {
@@ -132,10 +132,42 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     }
   }
 
+  Future<void> _google() async {
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    try {
+      await ref.read(authService).signInWithGoogle();
+    } on AuthFailure catch (e) {
+      setState(() => error = e.message);
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  // 로그인 강제 화면 (2026-10-08): 로그인해야 앱을 쓴다. 뒤로 가기 없음
   @override
   Widget build(BuildContext c) => Scaffold(
-      appBar: AppBar(title: Text(signUp ? '이메일로 가입' : '이메일로 로그인')),
+      appBar: AppBar(title: const Text('구룡가디언 로그인'), automaticallyImplyLeading: false),
       body: ListView(padding: const EdgeInsets.all(24), children: [
+        const Icon(Icons.health_and_safety_outlined, size: 56, color: Color(0xff16803c)),
+        const SizedBox(height: 8),
+        const Text('구룡포 재난 정보·대피 경로·AI 안내를 쓰려면 로그인해 주세요.\n'
+            '프로필과 AI가 기억한 정보는 이 계정에 저장되어 다른 기기에서도 이어집니다.',
+            textAlign: TextAlign.center),
+        const SizedBox(height: 20),
+        FilledButton.icon(
+            onPressed: busy ? null : _google,
+            icon: const Icon(Icons.g_mobiledata, size: 28),
+            label: const Text('Google로 계속하기')),
+        const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Row(children: [
+              Expanded(child: Divider()),
+              Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: Text('또는 이메일')),
+              Expanded(child: Divider()),
+            ])),
         SegmentedButton<bool>(
             segments: const [
               ButtonSegment(value: false, label: Text('로그인')),

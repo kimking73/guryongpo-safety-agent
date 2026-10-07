@@ -1,7 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show ValueNotifier, kIsWeb;
 import '../firebase_options.dart';
 import 'account_sync.dart';
 import 'app_config.dart';
@@ -48,9 +48,8 @@ String authErrorMessage(String code) => switch (code) {
       _ => '로그인하지 못했습니다. 다시 시도해 주세요. ($code)',
     };
 
-/// Firebase 로그인 (Google·이메일). 로그인하지 않으면 계정 없이 쓴다 — 익명 계정을 만들지 않는다 (사용자 결정 2026-10-08).
-/// 서버에 정보를 남기는 기능(계정 동기화·AI 장기 기억·개인 경고·푸시·대피 응답)은 로그인한 사람만 (signedIn).
-/// 예전에 만들어진 익명 세션은 시작할 때 로그아웃한다.
+/// Firebase 로그인 (Google·이메일). **로그인해야 앱을 쓴다** — 로그인 안 하면 로그인 화면만 (main.dart 라우터, 사용자 결정 2026-10-08).
+/// 익명 계정은 만들지 않고, 예전에 만들어진 익명 세션은 시작할 때 로그아웃한다. 목업 모드(Firebase 없음)는 로그인 없이.
 class AuthService {
   /// Firebase 설정: --dart-define 값이 있으면 그것(예전 방식), 없으면 firebase_options.dart
   static FirebaseOptions? get firebaseOptions => AppConfig.hasFirebaseConfig
@@ -62,6 +61,10 @@ class AuthService {
   /// 목업 모드(APP_MODE=mock)이거나 이 플랫폼 설정이 없으면 Firebase를 쓰지 않는다
   static bool get enabled => AppConfig.isRemote && firebaseOptions != null;
   static bool get ready => Firebase.apps.isNotEmpty;
+
+  /// 로그인·로그아웃 때마다 오른다 — 라우터(refreshListenable)가 듣고 로그인 화면으로 보내거나 돌려보낸다
+  static final changes = ValueNotifier<int>(0);
+  static bool _listening = false;
 
   /// Google·이메일로 로그인했는지 (익명 제외). 정보 저장 기능을 여는 기준. 로컬 개발 dev uid 도 로그인으로 본다
   static bool get signedIn {
@@ -75,6 +78,10 @@ class AuthService {
     try {
       if (!ready) await Firebase.initializeApp(options: firebaseOptions);
       final auth = FirebaseAuth.instance;
+      if (!_listening) {
+        _listening = true;
+        auth.userChanges().listen((_) => changes.value++);
+      }
       // 웹은 저장된 로그인을 되살리는 데 잠깐 걸린다 — currentUser 가 비어 있다고 바로 익명 로그인하면
       // 새로고침할 때마다 새 익명 계정이 생기고 Google·이메일 로그인이 풀린다 (2026-10-05 수정)
       final restored = auth.currentUser ??
