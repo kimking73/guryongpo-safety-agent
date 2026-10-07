@@ -87,7 +87,7 @@ class AiMemoryService {
     final k = item.profileKey, v = item.profileValue;
     if (k == null || v == null) return;
     final cur = (await _profileValues())[k] ?? '';
-    await _save({k: mergedProfileValue(k, cur, v), if (k == '직업') ..._jobsWith(v, await _account.optionalProfile())});
+    await _save({k: mergedProfileValue(k, cur, v), if (k == '직업') ..._jobsWith(jobChip(v), await _account.optionalProfile())});
     changed.value++;
   }
 
@@ -177,18 +177,7 @@ bool _yes(String v) => const ['true', '1', 'yes', '예'].contains(v.trim().toLow
     case 'has_dependents':
       return ('보호가 필요한 동반자 여부', _yes(v) ? '예' : '아니요');
     case 'occupation':
-      final job = RegExp('어업|어선|어부|뱃|선장|선원|수산|해녀').hasMatch(v)
-          ? '어업 종사자·뱃사람'
-          : RegExp('농업|농사|농부|과수').hasMatch(v)
-              ? '농업 종사자'
-              : RegExp('학생').hasMatch(v)
-                  ? '학생'
-                  : RegExp('자영업|가게|식당|장사').hasMatch(v)
-                      ? '자영업자'
-                      : RegExp('회사|직장').hasMatch(v)
-                          ? '직장인'
-                          : v;
-      return ('직업', job);
+      return ('직업', jobChoice(v));
     case 'frequent_place':
       return ('자주 방문하는 장소', v);
     default:
@@ -230,9 +219,10 @@ String mergedProfileValue(String key, String cur, String v) =>
                 : AiMemoryStatus.differs;        // 반영한 뒤 사용자가 프로필을 직접 고침 → 유지
     if (status == AiMemoryStatus.filled) fill[pk] = pv;
     if (status == AiMemoryStatus.overwritten) fill[pk] = mergedProfileValue(pk, cur, pv);
-    // 직업은 사용자 상세 카드의 직업 칩(jobs, '|'로 이음)에도 (2026-10-08)
-    if (pk == '직업' && (status == AiMemoryStatus.filled || status == AiMemoryStatus.overwritten)) {
-      fill.addAll(_jobsWith(pv, profile));
+    // 직업은 사용자 상세 카드의 직업 칩(jobs, '|'로 이음)에도 (2026-10-08). 이미 반영된(same) 기억도 칩이 없으면 더한다 —
+    // 칩 반영 전에 저장된 기억은 '선택 정보' 직업 칸에만 들어가 있었다. 사용자가 직접 고친(differs) 경우만 건드리지 않는다
+    if (pk == '직업' && status != AiMemoryStatus.differs) {
+      fill.addAll(_jobsWith(jobChip('${f['value'] ?? ''}'), profile));
     }
     if (status != AiMemoryStatus.differs) applied[e.key] = stamp;
     items.add(AiMemoryItem(
@@ -245,9 +235,29 @@ String mergedProfileValue(String key, String cur, String v) =>
 /// 사용자 상세 카드의 직업 칩 (disaster_center.dart ProfileDetailsCard.jobOptions 와 같게)
 const profileJobOptions = ['어업 종사자·뱃사람', '자영업자', '농업 종사자', '축산업 종사자', '양식업 종사자·수산물 양식', '기타'];
 
-/// 직업 기억 → jobs 칩 목록에 더한 값 ({'jobs': 'a|b'}). 칩에 없는 직업은 '기타'
-Map<String, String> _jobsWith(String job, Map<String, String> profile) {
-  final chip = profileJobOptions.contains(job) ? job : '기타';
+/// 선택 정보 카드 '직업' 선택지 (main.dart OptionalDetailsCard.choices 와 같게)
+const optionalJobChoices = ['어업 종사자·뱃사람', '자영업자', '농업 종사자', '직장인', '학생', '기타'];
+
+/// 직업 기억(자유 문장) → 선택 정보 카드 '직업' 선택지
+String jobChoice(String raw) =>
+    RegExp('어업|어선|어부|뱃|선장|선원|해녀').hasMatch(raw) ? '어업 종사자·뱃사람'
+    : RegExp('농업|농사|농부|과수').hasMatch(raw) ? '농업 종사자'
+    : RegExp('자영업|가게|식당|장사|상인').hasMatch(raw) ? '자영업자'
+    : RegExp('회사|직장|공무원|사무').hasMatch(raw) ? '직장인'
+    : RegExp('학생').hasMatch(raw) ? '학생'
+    : optionalJobChoices.contains(raw) ? raw : '기타';
+
+/// 직업 기억 → 사용자 상세 카드 직업 칩 (양식·축산은 칩이 따로 있다. 먼저 본다 — '수산물 양식'이 어업에 걸리지 않게)
+String jobChip(String raw) =>
+    RegExp('양식').hasMatch(raw) ? '양식업 종사자·수산물 양식'
+    : RegExp('축산|가축|목장|소 키|돼지').hasMatch(raw) ? '축산업 종사자'
+    : RegExp('어업|어선|어부|뱃|선장|선원|해녀|수산').hasMatch(raw) ? '어업 종사자·뱃사람'
+    : RegExp('농업|농사|농부|과수').hasMatch(raw) ? '농업 종사자'
+    : RegExp('자영업|가게|식당|장사|상인').hasMatch(raw) ? '자영업자'
+    : profileJobOptions.contains(raw) ? raw : '기타';
+
+/// 직업 칩 하나를 jobs 칩 목록에 더한 값 ({'jobs': 'a|b'}). 이미 있으면 빈 맵
+Map<String, String> _jobsWith(String chip, Map<String, String> profile) {
   final jobs = (profile['jobs'] ?? '').split('|').where((x) => x.isNotEmpty).toList();
   if (jobs.contains(chip)) return const {};
   return {'jobs': [...jobs, chip].join('|')};

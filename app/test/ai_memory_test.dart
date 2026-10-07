@@ -14,6 +14,7 @@ void main() {
     expect(memoryToProfile('walking_impaired', 'false'), ('보행 능력', '보행 가능'));
     expect(memoryToProfile('has_dependents', 'true'), ('보호가 필요한 동반자 여부', '예'));
     expect(memoryToProfile('occupation', '어선을 가진 어부'), ('직업', '어업 종사자·뱃사람'));
+    expect(memoryToProfile('occupation', '목수'), ('직업', '기타'));          // 선택지에 없으면 기타
     expect(memoryToProfile('frequent_place:구룡포시장', '구룡포시장'), ('자주 방문하는 장소', '구룡포시장'));
     expect(memoryToProfile('note:보청기 사용', '보청기 사용'), isNull);
     expect(factLabel('frequent_place:구룡포시장'), '자주 가는 곳');
@@ -54,6 +55,13 @@ void main() {
     expect(fill, {'직업': '어업 종사자·뱃사람', 'jobs': '어업 종사자·뱃사람'});
     (_, fill) = planMemorySync({'occupation': {'value': '목수', 'updated_at': 't1'}}, {'jobs': '자영업자'}, {});
     expect(fill['jobs'], '자영업자|기타');      // 칩에 없는 직업은 '기타'를 덧붙임
+    // 칩 반영 전에 '선택 정보' 직업 칸에만 들어간 기억(same)도 칩을 더한다
+    final applied = {'occupation': 't1'};
+    (_, fill) = planMemorySync({'occupation': {'value': '전복 양식', 'updated_at': 't1'}}, {'직업': '기타'}, applied);
+    expect(fill, {'jobs': '양식업 종사자·수산물 양식'});
+    // 사용자가 직업을 직접 바꾼 뒤(differs)에는 칩도 건드리지 않는다
+    (_, fill) = planMemorySync({'occupation': {'value': '어부', 'updated_at': 't1'}}, {'직업': '학생'}, applied);
+    expect(fill, isEmpty);
   });
 }
 
