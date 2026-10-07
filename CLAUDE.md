@@ -87,6 +87,7 @@ Check these when relevant:
 - `ai/docs/agent-design.md` — agent graph, node I/O, decision tree, tool contract with lane A, chat API (§8)
 - `ai/docs/code_check_list.md` — known defects with repro and target task; check before debugging/testing
 - `README.md` — what teammates see; keep it in sync when setup or rules change
+- `docs/demo-scenario.md` — demo-mode scenario (sensor values in `server/risk/demo.py` `DEMO_DT`), 5 scenes with coordinates, AI questions; guarded by `server/tests/test_demo_scenario.py`
 - Service proposal (requirements source): `[구룡가디언]구룡포 재난 지킴이-구룡포는구룡_최종 복사본.docx` (gitignored;
   contains personal data — never commit). Read with `textutil -convert txt -stdout <file>`
 - Architecture diagram: `../아키텍쳐/구룡가디언_architecture.html`
