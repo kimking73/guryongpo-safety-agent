@@ -28,6 +28,10 @@
 		reverse_proxy api:8000
 	}
 
+	# 앱 시작 파일은 매번 새 버전인지 확인 (2026-10-08: 배포해도 브라우저가 예전 앱을 보여 줌). 바뀌지 않았으면 ETag 로 304
+	@appshell path / /index.html /flutter_bootstrap.js /flutter_service_worker.js /main.dart.js /version.json /manifest.json
+	header @appshell Cache-Control "no-cache"
+
 	# Flutter 웹 (deploy/push_web.sh 가 빌드해 올린다). 없는 경로는 앱이 처리하도록 index.html
 	handle {
 		root * /srv/web
