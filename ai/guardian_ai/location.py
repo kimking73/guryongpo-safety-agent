@@ -11,6 +11,10 @@ LLM이 실패하면 template_summary()가 근거를 그대로 넣은 정해진 �
 대피소 고르기 규칙은 앱과 같다 (tools.get_safe_shelters): 발효 중인 침수·산사태 영역 안의 대피소와,
 침수 중 지하 시설은 뺀다. 갈 만한 곳이 없으면 가장 가까운 곳을 경고와 함께 안내한다.
 경로는 사용자 정보로 성인/노약자를 고른다 (tools.route_profile).
+
+해상(B11, 2026-10-07): 경로는 경로 서버 /api/route/sea로 구한다 — 육지면 일반 경로와 같고, 바다 위면 가장 가까운
+항구까지 바닷길(거리·방위) + 항구 육상 지점부터 도보 경로. 목적지를 말하지 않았으면 대피소를 항구 기준으로 다시 고른다
+(바다 위 좌표에서 가까운 대피소가 아니라 배를 댄 뒤 가까운 곳). 해상 범위 밖(422)·해상 경로 장애는 일반 경로로 대신한다.
 """
 
 from __future__ import annotations
@@ -47,6 +51,7 @@ class LocationData:
     place_missing: str | None = None              # 목적지를 못 찾은 이유
     place_hazard: str | None = None               # 목적지가 들어 있는 위험 영역 이름
     route: dict[str, Any] | None = None
+    sea: dict[str, Any] | None = None             # 바다 위일 때 해상 구간 (경로 서버 /api/route/sea의 port·sea_leg)
     evidence: list[Evidence] = field(default_factory=list)
     unavailable: list[str] = field(default_factory=list)
 
@@ -74,10 +79,36 @@ def collect(state: GuardianState, fetch: Fetch | None = None, route_client=None,
 
     target = route_target(d)
     if target is not None:
-        d.route = T.request_route((location.lat, location.lon), (target["lat"], target["lon"]),
-                                  profile=d.profile, client=route_client)
+        _route(d, fetch, route_client)
     d.evidence, d.unavailable = build_evidence(d)
     return d
+
+
+def _route(d: LocationData, fetch: Fetch | None, route_client) -> None:
+    """해상 경로 서버로 바다 위인지 함께 본다. 바다 위가 아니거나 해상 경로를 못 쓰면 일반 경로."""
+    origin, target = (d.location.lat, d.location.lon), route_target(d)
+    sea = T.request_sea_route(origin, (target["lat"], target["lon"]), profile=d.profile, client=route_client)
+    if not (sea.get("available") and sea.get("at_sea")):
+        land = sea.get("land_route") if sea.get("available") else None
+        d.route = {**land, "available": True} if land else \
+            T.request_route(origin, (target["lat"], target["lon"]), profile=d.profile, client=route_client)
+        return
+    d.sea = {"port": sea["port"], "sea_leg": sea["sea_leg"]}
+    if d.place is None:
+        # 목적지를 말하지 않았으면 배를 댄 항구 기준으로 갈 만한 대피소를 다시 고른다
+        lp = sea["port"]["land_point"]
+        d.shelters = T.get_safe_shelters(lp["lat"], lp["lon"], limit=CANDIDATES, fetch=fetch)
+        items = d.shelters.get("items", [])
+        d.chosen = next((s for s in items if s["safe"]), None) or (items[0] if items else None)
+        if d.chosen is None:
+            d.route = {"available": False, "reason": "항구 근처 대피소를 찾지 못함"}
+            return
+        d.route = T.request_route((lp["lat"], lp["lon"]), (d.chosen["lat"], d.chosen["lon"]), profile=d.profile,
+                                  client=route_client)
+        return
+    land = sea.get("land_route")
+    d.route = {**land, "available": True} if land else \
+        {"available": False, "reason": sea.get("land_route_error") or "항구에서 목적지까지 경로 없음"}
 
 
 def route_target(d: LocationData) -> dict[str, Any] | None:
@@ -94,14 +125,23 @@ def route_info(d: LocationData) -> dict[str, Any] | None:
     if target is None or not r.get("available"):
         return None
     kind = d.place["kind"] if target is d.place else "shelter"
-    return {"destination": {"name": target["name"], "lat": target["lat"], "lon": target["lon"], "kind": kind},
+    info = {"destination": {"name": target["name"], "lat": target["lat"], "lon": target["lon"], "kind": kind},
             **{k: r.get(k) for k in ("profile", "distance_m", "duration_s", "avoided", "still_inside", "geometry")},
             "hazards_ok": r.get("hazards_ok", True)}
+    if d.sea is not None:
+        port, leg = d.sea["port"], d.sea["sea_leg"]
+        # 앱이 바닷길(path)과 항구 → 목적지 도보 경로(geometry)를 함께 그린다
+        info["sea"] = {"port_name": port["name"], "berth": port["berth"], "land_point": port["land_point"],
+                       **{k: leg.get(k) for k in ("distance_m", "straight_m", "bearing_deg", "bearing_label", "path",
+                                                  "path_found")}}
+    return info
 
 
 def build_evidence(d: LocationData) -> tuple[list[Evidence], list[str]]:
     ev = [Evidence(source="request", key="기준 위치", value=location_text(d))]
     missing: list[str] = []
+    if d.sea is not None:
+        _sea_evidence(d.sea, ev, missing)
     if d.place is not None:
         return _place_evidence(d, ev, missing)
     if d.destination_query:
@@ -136,6 +176,24 @@ def build_evidence(d: LocationData) -> tuple[list[Evidence], list[str]]:
         return ev, missing
     _route_evidence(r, ev, missing)
     return ev, missing
+
+
+def _sea_evidence(sea: dict[str, Any], ev: list[Evidence], missing: list[str]) -> None:
+    port, leg = sea["port"], sea["sea_leg"]
+    ev += [Evidence(source="route", key="현재 위치", value="해상(바다 위)"),
+           Evidence(source="route", key="배를 댈 가장 가까운 항구", value=port["name"]),
+           Evidence(source="route", key=f"{port['name']} 방향", value=leg["bearing_label"])]
+    if leg.get("path_found", True):
+        ev.append(Evidence(source="route", key=f"{port['name']}까지 바닷길 거리", value=leg["distance_m"], unit="m"))
+        if not leg.get("direct", True):
+            ev.append(Evidence(source="route", key="바닷길", value="곶·방파제를 돌아 들어가야 함 (지도의 바닷길을 따라감)"))
+    else:
+        ev.append(Evidence(source="route", key=f"{port['name']}까지 직선거리", value=leg["straight_m"], unit="m"))
+        missing.append("바닷길(육지·방파제를 피하는 길을 찾지 못해 방향만 안내)")
+    alts = [a["name"] for a in leg.get("alternatives") or []]
+    if alts:
+        ev.append(Evidence(source="route", key="다른 가까운 항구", value=", ".join(alts)))
+    ev.append(Evidence(source="route", key="육상 경로 출발점", value=f"{port['name']} (배에서 내린 뒤)"))
 
 
 def _route_evidence(r: dict[str, Any], ev: list[Evidence], missing: list[str]) -> None:
@@ -175,6 +233,16 @@ def _place_evidence(d: LocationData, ev: list[Evidence], missing: list[str]) -> 
 
 def template_summary(d: LocationData) -> str:
     """LLM 없이 근거를 그대로 넣은 문장. LLM 실패·시간 초과 때 쓴다."""
+    text = _template_body(d)
+    if d.sea is None:
+        return text
+    port, leg = d.sea["port"], d.sea["sea_leg"]
+    how = f"바닷길로 {leg['distance_m']}m" if leg.get("path_found", True) else f"직선거리 {leg['straight_m']}m(바닷길은 찾지 못함)"
+    return (f"지금 바다 위에 계십니다. {leg['bearing_label']}의 가장 가까운 항구 {port['name']}까지 {how}이며, "
+            f"배를 댄 뒤 걸어서 이동하세요. " + text)
+
+
+def _template_body(d: LocationData) -> str:
     if d.place is not None:
         p, r, target = d.place, d.route or {}, route_target(d)
         parts = [f"{location_text(d)}에서 {p['name']}까지 안내합니다."]

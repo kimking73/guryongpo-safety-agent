@@ -49,7 +49,7 @@ flowchart TD
 | `rain_flood_agent` | 강수와 수위를 함께 고려한 호우·침수 답변 | 〃 | specialist_results | get_risk_at, get_observations, get_hazard_zones, get_weather_warnings, get_disaster_messages, get_facilities | O |
 | `wind_typhoon_agent` | 강풍·태풍 답변 (선박 보유자는 계류 등 포함) | 〃 | specialist_results | get_risk_at, get_observations, get_weather_warnings, get_disaster_messages | O |
 | `life_safety_agent` | 미세먼지·자외선 등급 (행동요령은 행동 권고가 원문으로) | current_location | specialist_results | get_life_safety | O |
-| `location_route_agent` | 위치 기반 경고, 대피소까지 안전 경로 | user, current_location | specialist_results (route 포함) | get_risk_at, get_facilities, request_route | O |
+| `location_route_agent` | 위치 기반 경고, 대피소까지 안전 경로 (바다 위면 항구 경유) | user, current_location | specialist_results (route 포함) | get_risk_at, get_facilities, request_route, request_sea_route | O |
 | `action_advisor` | 판단 트리로 행동 우선순위 결정 → 전문 agent 결과와 합쳐 초안 작성 | phase, specialist_results, user | action_plan, draft | get_action_guides, get_facilities | 문장화만 |
 | `intent_check` | 초안이 질문 의도에 답하는지 (chat만). 실제 서비스는 아래 `hallucination_check`와 한 번의 LLM 호출로 함께 (B5) | question, history, draft | checks.intent | - | O |
 | `hallucination_check` | 초안의 수치·사실이 evidence와 일치하는지 | draft, specialist_results[].evidence, action_plan | checks.hallucination | - | 숫자는 규칙 대조 + LLM |
@@ -177,6 +177,13 @@ A의 FastAPI는 앱·웹이 부르는 창구로 남고, AI는 거치지 않는�
 | `find_place` | query, user | available, name, lat, lon, kind(home·work·place·shelter·medical), source(user·db·kakao), address, out_of_area | profile 등록 장소, shelters·medical_facilities, 카카오 로컬 키워드 검색 |
 | `hazards_at` | lat, lon | labels(지점이 들어 있는 침수·산사태 영역, 주의 이상) | risk_assessments |
 | `request_route` | origin, destination, profile(adult·elderly) | available, distance_m, duration_s, ascend_m, descend_m, max_slope_pct, avoided, still_inside, hazards_ok, geometry | route 서비스 HTTP (B6·B7). 회피: 판정 엔진의 침수·산사태 영역(주의 이상), 맨홀 없음 |
+| `request_sea_route` | origin, destination(생략 가능), profile | available, at_sea, port{name, berth, land_point}, sea_leg{distance_m, straight_m, bearing_label, path, path_found, alternatives}, destination, land_route, land_route_error | route 서비스 HTTP `/api/route/sea` (B11, 2026-10-07). 위치·경로 agent가 경로를 낼 때 먼저 부른다 — 육지면 land_route = 일반 경로, 바다 위면 항구 기준으로 대피소를 다시 고른다. 422(범위 밖)·장애는 `request_route`로 대신 |
+
+**시연 모드 (2026-10-07, `guardian_ai/demo.py`)**: `ChatRequest.demo=true`면 위 tool이 실시간 표(`risk_assessments`,
+`observations`, `weather_warnings`, `disaster_messages`, `v_latest_forecasts`, `ingest_runs`)를 같은 이름의 WITH 절로 가린 SQL을 보낸다.
+WITH 절은 api `/api/v1/demo/*`(server/risk/demo.py — 실제 센서 위치 + 시연 측정값, DB 저장 안 함)로 채운다. SQL·판단 규칙은 그대로,
+고정 자료(대피소·산사태 취약지역·행동요령)는 실제 표. 경로 tool은 `demo: true`를 붙인다. 시연 데이터를 못 받으면 실측으로 바꾸지 않고
+`available: False`. 시연 대화는 장기 기억에 저장하지 않는다.
 
 데이터에서 알게 된 것 (2026-10-01): 구룡포 대피소 19곳은 지진해일(17)·민방위(2)만 지정, **침수 지정 대피소 없음** →
 침수 안내는 `shelter_type=None`으로 가까운 대피소를 쓴다. 의료시설 5곳은 포항 시내 응급실(구룡포에서 약 20km).
@@ -252,7 +259,8 @@ AI는 별도 컨테이너(`ai`, 포트 8001)로 운영한다. 배포 시 Caddy�
                "home": { "lat": 35.9935, "lon": 129.5498, "label": "집" },
                "frequent_places": [{ "lat": 35.9879, "lon": 129.5548, "label": "직장" }] },
   "current_location": { "lat": 35.99, "lon": 129.556 },
-  "conversation_id": null
+  "conversation_id": null,
+  "demo": false                    // 앱 시연 모드 — 시연 데이터로 답하고 시연 위험 영역을 피한다 (5절 '시연 모드')
 }
 // 응답
 {
@@ -268,7 +276,9 @@ AI는 별도 컨테이너(`ai`, 포트 8001)로 운영한다. 배포 시 Caddy�
     "destination": { "name": "충혼탑 앞", "lat": 35.99144, "lon": 129.56073, "kind": "shelter" },  // kind: shelter·medical·home·work·place
     "profile": "elderly", "distance_m": 1024, "duration_s": 984,
     "avoided": ["flood-67"], "still_inside": [], "hazards_ok": true,
-    "geometry": "…"                // 경로 서버와 같은 인코딩 polyline → 앱 "지도에서 경로 보기"
+    "geometry": "…",               // 경로 서버와 같은 인코딩 polyline → 앱 "지도에서 경로 보기"
+    "sea": null                    // 바다 위에서 물었을 때만: { port_name, berth, land_point, distance_m, straight_m, bearing_deg,
+                                   //   bearing_label, path(바닷길 polyline), path_found } — 이때 geometry·거리·시간은 항구 → 목적지 도보
   }
 }
 ```
@@ -288,7 +298,7 @@ AI는 별도 컨테이너(`ai`, 포트 8001)로 운영한다. 배포 시 Caddy�
 ### 음성 (B5, Google Cloud Speech-to-Text v1 · Text-to-Speech v1)
 
 `POST /api/voice` (multipart): `audio`(녹음 파일, 아무 형식 — 서버가 ffmpeg로 16kHz mono 변환, 30초·5MB 이내), `user_id`,
-`conversation_id`, `lat`, `lon`, `profile`(JSON 문자열), `remember` → 채팅 응답 + `transcript`(받아쓴 질문) + `audio_b64`(답의
+`conversation_id`, `lat`, `lon`, `profile`(JSON 문자열), `remember`, `demo` → 채팅 응답 + `transcript`(받아쓴 질문) + `audio_b64`(답의
 `voice_text`를 읽은 mp3). 대화는 `/api/chat`과 이어진다. 못 알아들음·너무 긺 → 422(문구를 그대로 보여 줌), 키 없음 → 503.
 `POST /api/tts` `{text}` → mp3 (같은 문장 10분 캐시). 앱: AI 대화창 마이크(16kHz mono WAV 녹음) → 받아쓴 질문·답 표시 + 답 음성 자동 재생,
 "음성으로 듣기"는 `voice_text`를 `/api/tts`로. 키: 서비스 계정 JSON `secrets/gcp-voice.json` (`GCP_VOICE_CREDENTIALS`로 바꿀 수 있음),

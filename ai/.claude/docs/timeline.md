@@ -233,3 +233,15 @@ B와 맞물리는 새 A·C 작업: A12(15–16 대피 응답 API, B12·B13 선�
 - 2026-10-05 시연 데이터 변경(사용자 결정 — 서버에서 계산·시연 모드에만, 호우·침수 + 강풍): 실제 센서 좌표 그대로 측정값만 시나리오 값, 실측과 같은 판정 규칙, DB 저장 안 함(`server/risk/demo.py`, c576c96).
   경로 서버 `demo` 플래그(route·check·sea → `/api/v1/demo/risk/areas`). 배포 후 시연 산사태 영역이 포항 전역 489곳이라 실측처럼 구룡포 bbox로 제한 → 36곳(3d95de1). VM·웹 배포, server 201·route 58 통과.
 - 2026-10-06 세션 정리: 루트 CLAUDE.md(시연 모드·demo 엔드포인트·경로 demo 플래그·앱 파일), ai/CLAUDE.md 현재 상태, 이 파일 다음 세션 시작점·이월 항목 갱신.
+- 2026-10-07 경로 안내 점검·수정 (B7 후속, 앱 수정은 사용자 허락): ① 앱 "가까운/안전한 길"(`strategy`, 김다인 629dccf)이 사용자 유형을 덮어쓰던 것 →
+  `profiles.rules_for`: fastest = 사용자 유형 규칙 그대로, safest = 노약자 경사·계단 규칙 + 걸음 속도는 사용자 유형대로, 응답 profile = 요청 그대로.
+  ② `/api/route/check`에 `strategy` 추가 — 재계산해도 같은 종류의 길 (앱 `checkRoute`가 보냄). ③ 앱 위험 구역 이름: 시연 모드면 `/api/route/hazards?demo=true`, 모드 바뀌거나 1분 지나면 다시 받음.
+  실측(무위험, 35.98,129.56→35.995,129.545): 성인 가까운 28분·성인 안전 28분(예전 38분)·노약자 가까운 38분(예전 28분). 노약자는 두 버튼 결과가 같다.
+  ④ AI 시연 모드 (`guardian_ai/demo.py`, `ChatRequest.demo`, 앱 채팅·음성이 보냄): 실시간 표 6개를 같은 이름의 WITH 절(api /demo/* 데이터)로 가린 SQL —
+  tool SQL·규칙 그대로. 경로 tool은 demo:true, 시연 대화는 장기 기억 저장 안 함. compose ai에 `API_URL`.
+  ⑤ B11 AI 연결: `tools.request_sea_route`, 위치·경로 agent가 /api/route/sea 먼저 → 바다 위면 항구 기준 대피소 다시 고름, 근거(항구·방향·바닷길),
+  `ChatResponse.route.sea`, 앱이 바닷길을 점선으로 (바다 경로는 이동 중 재확인 안 함).
+  ⑥ **배포 중인 VM에서 시연 모드 길찾기가 전부 실패하던 것** 발견·수정: 시연 영역 id 음수 → GraphHopper area `flood__3` 거부 → `area_id`가 `flood_n3`.
+  실측(로컬 AI + VM 시연 데이터): 시연 침수 질문 = 경보·침수심 230mm·호우경보, 지하주차장 제외 → 구룡포중학교 앞 1087m / 실측 = 정상.
+  바다(35.995,129.585) = 북서쪽 삼정항 바닷길 1560m → 삼정2리 버스승강장 앞 225m 3분. 새 결함 #8(침수+대피 질문이 내용 검사에 막혀 대체 답) 기록.
+  로컬 api `/demo/risk/areas`는 500 (빈 geometry, server/risk/demo.py `_bbox_of`, A 레인 — 미수정). 테스트 route 61, ai 172 + db 6, app 기존 실패 8 외 통과. 미배포·미커밋.

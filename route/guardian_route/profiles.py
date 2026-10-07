@@ -50,3 +50,16 @@ PROFILE_RULES: dict[str, dict[str, list[dict[str, Any]]]] = {
         "speed": [{"if": "true", "multiply_by": "0.75"}],   # 보행 약 5km/h → 약 3.8km/h
     },
 }
+
+
+def rules_for(profile: str, strategy: str | None = None) -> dict[str, list[dict[str, Any]]]:
+    """사용자 유형 + 앱의 경로 선택(strategy) → GraphHopper 규칙. 위험 구역 회피는 어느 쪽이든 service.build_model이 더한다.
+
+    - None·fastest(가까운 길): 사용자 유형 규칙 그대로 (성인 = 가장 빠른 길, 노약자 = 급경사 회피·느린 걸음)
+    - safest(안전한 길): 사용자 유형과 상관없이 급경사를 피하고(노약자 경사·계단 규칙), 걸음 속도는 사용자 유형대로
+    사용자 유형은 바꾸지 않는다 — 노인이 가까운 길을 골라도 노약자 규칙, 성인이 안전한 길을 골라도 성인 걸음 속도 (2026-10-07).
+    """
+    rules = PROFILE_RULES[profile]
+    if strategy != "safest":
+        return rules
+    return {"priority": PROFILE_RULES["elderly"]["priority"], "speed": rules["speed"]}

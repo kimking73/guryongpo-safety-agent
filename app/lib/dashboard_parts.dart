@@ -216,6 +216,8 @@ class _RouteMapState extends ConsumerState<RouteMap> with WidgetsBindingObserver
   void _ensureRouteMonitoring(SafetyRoute? route) {
     // 다른 곳에서 출발하는 길찾기 경로는 내 GPS로 다시 계산하지 않는다
     if (widget.facilityId == customRouteId && !ref.read(customRouteFollowsUser)) return;
+    // 바다 위에서 받은 경로는 도보 구간이 항구에서 시작해 지금 위치로 재계산하면 엉뚱한 길이 된다
+    if (route != null && route.seaPoints.isNotEmpty) return;
     if (!AppConfig.isRemote ||
         route?.encodedGeometry == null ||
         _arrived ||
@@ -369,7 +371,7 @@ class _RouteMapState extends ConsumerState<RouteMap> with WidgetsBindingObserver
             ],
           ]))));
     }
-    final bounds = LatLngBounds.fromPoints([current, ...route.polylinePoints]);
+    final bounds = LatLngBounds.fromPoints([current, ...route.seaPoints, ...route.polylinePoints]);
     final boundsKey = '${bounds.northWest}:${bounds.southEast}';
     if (fittedBounds != boundsKey) {
       fittedBounds = boundsKey;
@@ -417,6 +419,12 @@ class _RouteMapState extends ConsumerState<RouteMap> with WidgetsBindingObserver
                         points: route.polylinePoints,
                         color: Colors.blue.shade700,
                         strokeWidth: 6),
+                    if (route.seaPoints.length > 1)
+                      Polyline(
+                          points: route.seaPoints,
+                          color: Colors.teal.shade700,
+                          strokeWidth: 5,
+                          pattern: const StrokePattern.dotted()),
                     if (!AppConfig.isRemote)
                       Polyline(points: const [
                         LatLng(35.9911, 129.5520),

@@ -151,6 +151,14 @@ def test_off_route_recalculates_from_current_position():
     assert sent[0]["points"][0] == [129.5495, 35.9910]      # 새 경로는 현재 위치에서 출발
 
 
+def test_reroute_keeps_chosen_strategy():
+    """'안전한 길'로 가다 벗어나도 다시 계산한 길은 안전한 길 (2026-10-07: 예전엔 사용자 유형 기본 길로 바뀌었다)"""
+    c, sent = client()
+    res = check(c, 35.9910, 129.5495, profile="adult", strategy="safest")
+    assert res["reroute"] is True and res["route"]["strategy"] == "safest" and res["route"]["profile"] == "adult"
+    assert sent[0]["custom_model"]["priority"] == PROFILE_RULES["elderly"]["priority"]
+
+
 def test_new_hazard_ahead_triggers_reroute():
     c, _ = client([ZONE])
     res = check(c, 35.9905, 129.5492)          # 앞쪽 경로(LINE)에 구역이 새로 생긴 상황

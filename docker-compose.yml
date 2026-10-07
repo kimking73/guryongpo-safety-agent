@@ -111,6 +111,8 @@ services:
     environment:
       # request_route tool이 부르는 경로 안내 서버. 꺼져 있어도 ai는 뜨고, 경로만 "지금 안내 불가"로 답한다.
       ROUTE_URL: http://route:8002
+      # 앱 시연 모드 대화(ChatRequest.demo)가 시연 데이터(/api/v1/demo/*)를 받는 api 서버 (guardian_ai/demo.py)
+      API_URL: http://api:8000
       # DB는 읽기 전용 계정(AI_DB_USER)으로 직접 조회한다 (B3). 계정·비밀번호·DB 이름은 .env
       AI_DB_HOST: db
       AI_DB_PORT: "5432"

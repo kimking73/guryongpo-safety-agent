@@ -19,6 +19,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from pydantic import BaseModel, Field
 
+from . import demo
 from . import graph as G
 from . import memory as M
 from . import state as S
@@ -44,6 +45,9 @@ class ChatRequest(BaseModel):
     # 사용자 기억(대화를 넘어 남기는 사실)을 불러오고 저장할지. 기본 켜짐(사용자 결정 2026-10-02) —
     # 앱에 "기억 끄기·지우기"를 두고, 정식 서비스 전 동의 화면을 붙인다.
     remember: bool = True
+    # 앱 시연 모드: 위험 판정·관측값·특보·재난문자·예보를 서버 시연 데이터로 읽고, 경로도 시연 위험 영역을 피한다 (demo.py).
+    # 시연 대화는 장기 기억에 남기지 않는다 (실제 상황 기억과 섞이지 않게).
+    demo: bool = False
 
 
 class RouteDestination(BaseModel):
@@ -51,6 +55,19 @@ class RouteDestination(BaseModel):
     lat: float
     lon: float
     kind: str                     # shelter, medical, home, work, place
+
+
+class SeaLegInfo(BaseModel):
+    """바다 위에서 물었을 때 해상 구간 (B11). path는 바닷길 꺾은선 (geometry와 같은 인코딩 polyline, 출발 → 접안점)."""
+    port_name: str
+    berth: dict[str, float]          # 배를 댈 곳 {lat, lon}
+    land_point: dict[str, float]     # 도보 경로 출발점 {lat, lon}
+    distance_m: int
+    straight_m: int
+    bearing_deg: float
+    bearing_label: str
+    path: str
+    path_found: bool = True          # False면 바닷길을 못 찾음 — path는 점 하나, 방향만 참고
 
 
 class RouteInfo(BaseModel):
@@ -63,6 +80,7 @@ class RouteInfo(BaseModel):
     still_inside: list[str] = Field(default_factory=list)
     hazards_ok: bool = True
     geometry: str
+    sea: SeaLegInfo | None = None    # 바다 위였으면 항구까지 해상 구간. 이때 geometry·거리·시간은 항구 → 목적지 도보 경로
 
 
 class CardChip(BaseModel):
@@ -207,27 +225,30 @@ class ChatService:
         # 단계별 시간을 재며 실행한다 (지연 측정, B5). 병렬 agent는 끝난 순서대로 앞 단계와의 간격이 기록된다
         timings: dict[str, float] = {}
         started = last = time.perf_counter()
-        for chunk in self.app.stream(
-            {
-                "mode": "chat",
-                "user": profile,
-                "current_location": req.current_location,
-                "question": req.question,
-                "history": history,
-                "user_memory": memory,
-            },
-            config,
-            stream_mode="updates",
-        ):
-            now = time.perf_counter()
-            for node in chunk:
-                timings[node] = round(timings.get(node, 0.0) + now - last, 2)
-            last = now
+        # 시연 모드는 이 요청 동안만 켠다 (tools·경로 tool이 demo.is_active()를 본다. LangGraph는 병렬 노드에 contextvars를 복사)
+        with demo.active(req.demo):
+            for chunk in self.app.stream(
+                {
+                    "mode": "chat",
+                    "user": profile,
+                    "current_location": req.current_location,
+                    "question": req.question,
+                    "history": history,
+                    "user_memory": memory,
+                },
+                config,
+                stream_mode="updates",
+            ):
+                now = time.perf_counter()
+                for node in chunk:
+                    timings[node] = round(timings.get(node, 0.0) + now - last, 2)
+                last = now
         timings["total"] = round(time.perf_counter() - started, 2)
         result = self.app.get_state(config).values
-        logger.info("응답 시간 %.1fs %s", timings["total"], {k: v for k, v in timings.items() if k != "total"})
+        logger.info("응답 시간 %.1fs%s %s", timings["total"], " [시연]" if req.demo else "",
+                    {k: v for k, v in timings.items() if k != "total"})
         answer = result.get("final_answer", "")
-        if req.remember and self.extractor is not None:
+        if req.remember and self.extractor is not None and not req.demo:
             self.executor.submit(self._remember, req.user_id, conversation_id, req.question, answer, memory)
         # 다음 질문의 지시어 해석("거기는?")에 쓰도록 이번 문답을 기록한다.
         self.app.update_state(config, {"history": [

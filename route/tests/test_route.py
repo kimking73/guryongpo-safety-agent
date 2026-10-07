@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from guardian_route.api import app, get_service
 from guardian_route.gh import GraphHopperClient
 from guardian_route.polyline import decode as decode_polyline
+from guardian_route.profiles import PROFILE_RULES
 from guardian_route.service import RouteService
 
 
@@ -67,22 +68,37 @@ def test_profile_defaults_to_adult():
     assert c.post("/api/route", json=BODY).json()["profile"] == "adult"
 
 
-def test_fastest_strategy_uses_fast_walking_profile():
-    c, seen = client(ok)
-    response = c.post("/api/route", json={**BODY, "strategy": "fastest", "profile": "elderly"})
-    assert response.status_code == 200
-    assert response.json()["strategy"] == "fastest"
-    assert response.json()["profile"] == "adult"
-    assert "custom_model" not in json.loads(seen[0].content)
+def sent_model(seen):
+    return json.loads(seen[0].content).get("custom_model") or {}
 
 
-def test_safest_strategy_keeps_accessibility_profile():
+def test_fastest_keeps_elderly_rules():
+    """노인이 '가까운 길'을 골라도 노약자 경사 규칙·느린 걸음 그대로 (2026-10-07: 예전엔 성인 규칙으로 바뀌었다)"""
     c, seen = client(ok)
-    response = c.post("/api/route", json={**BODY, "strategy": "safest", "profile": "elderly"})
-    assert response.status_code == 200
-    assert response.json()["strategy"] == "safest"
-    assert response.json()["profile"] == "elderly"
-    assert "custom_model" in json.loads(seen[0].content)
+    res = c.post("/api/route", json={**BODY, "strategy": "fastest", "profile": "elderly"}).json()
+    assert res["strategy"] == "fastest" and res["profile"] == "elderly"
+    assert sent_model(seen) == PROFILE_RULES["elderly"]
+
+
+def test_fastest_adult_sends_no_rules():
+    c, seen = client(ok)
+    res = c.post("/api/route", json={**BODY, "strategy": "fastest", "profile": "adult"}).json()
+    assert res["profile"] == "adult" and "custom_model" not in json.loads(seen[0].content)
+
+
+def test_safest_adult_avoids_slopes_at_adult_speed():
+    """성인이 '안전한 길'을 고르면 급경사는 피하되 걸음 속도는 성인 그대로 (소요 시간이 부풀지 않는다)"""
+    c, seen = client(ok)
+    res = c.post("/api/route", json={**BODY, "strategy": "safest", "profile": "adult"}).json()
+    assert res["strategy"] == "safest" and res["profile"] == "adult"
+    model = sent_model(seen)
+    assert model["priority"] == PROFILE_RULES["elderly"]["priority"] and "speed" not in model
+
+
+def test_safest_elderly_keeps_elderly_rules():
+    c, seen = client(ok)
+    res = c.post("/api/route", json={**BODY, "strategy": "safest", "profile": "elderly"}).json()
+    assert res["profile"] == "elderly" and sent_model(seen) == PROFILE_RULES["elderly"]
 
 
 def test_graphhopper_down_gives_503():
@@ -188,5 +204,5 @@ def test_demo_flag_avoids_demo_zones_only():
     svc.route(RouteRequest(**req))
     svc.route(RouteRequest(**req, demo=True))
     areas = [list(m["areas"]["features"][0]["id"] for _ in [0]) for m in gh.models if m and "areas" in m]
-    assert ["flood_1"] in areas and ["flood__2"] in areas
+    assert ["flood_1"] in areas and ["flood_n2"] in areas   # 음수 id (GraphHopper는 __를 거부)
     assert svc.source(True) is demo and svc.source(False) is real

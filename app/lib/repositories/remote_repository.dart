@@ -25,6 +25,8 @@ class RemoteSafetyRepository implements SafetyRepository {
   final AccountService _account;
   String? _conversationId;
   Map<String, String>? _hazardNames;
+  bool? _hazardNamesDemo;
+  DateTime? _hazardNamesAt;
 
   /// 사용자 위치 주변 이 거리(m) 안의 위험 영역까지 위험도에 넣는다
   static const riskRadiusM = 300;
@@ -90,6 +92,8 @@ class RemoteSafetyRepository implements SafetyRepository {
             },
             'geometry': geometry,
             'profile': profile,
+            // 다시 계산해도 처음 고른 종류(가까운/안전한)의 길이 나오게 /api/route와 같은 값
+            'strategy': _strategy(routeType),
             if (DemoData.on) 'demo': true,
           },
         ));
@@ -179,9 +183,9 @@ class RemoteSafetyRepository implements SafetyRepository {
                 'lat': facility.position.latitude,
                 'lon': facility.position.longitude
               },
-              // 두 전략 모두 활성 위험 영역은 회피한다. 가까운 경로는 시간 우선,
-              // 안전 경로는 사용자 이동 조건(고령·휠체어·보행 불편)을 반영한다.
-              'strategy': routeType == RouteType.nearest ? 'fastest' : 'safest',
+              // 두 경로 모두 위험 영역은 피한다. 가까운 경로 = 사용자 유형 규칙 그대로,
+              // 안전 경로 = 급경사도 피함. 걸음 속도는 둘 다 사용자 유형(profile)대로.
+              'strategy': _strategy(routeType),
               'profile': routeProfileFor(age, transport, walkingImpaired: walking),
               // 시연 모드: 경로 서버가 시연 위험 영역을 피한다
               if (DemoData.on) 'demo': true,
@@ -191,12 +195,27 @@ class RemoteSafetyRepository implements SafetyRepository {
         names: await _routeHazardNames());
   }
 
-  /// 경로 서버의 위험 구역 id → 이름 (응답의 avoided·still_inside는 id). 한 번만 받아 둔다
+  static String _strategy(RouteType t) =>
+      t == RouteType.nearest ? 'fastest' : 'safest';
+
+  /// 경로 서버의 위험 구역 id → 이름 (응답의 avoided·still_inside는 id).
+  /// 시연 모드면 시연 위험 영역에서 받는다. 위험 영역은 바뀌므로 모드가 바뀌거나 1분이 지나면 다시 받는다
+  /// (경로 서버도 위험 영역을 60초 캐시).
   Future<Map<String, String>> _routeHazardNames() async {
-    if (_hazardNames != null) return _hazardNames!;
+    final demo = DemoData.on;
+    final at = _hazardNamesAt;
+    if (_hazardNames != null &&
+        _hazardNamesDemo == demo &&
+        at != null &&
+        DateTime.now().difference(at) < const Duration(minutes: 1)) {
+      return _hazardNames!;
+    }
     try {
-      final r =
-          await _client.route.get<Map<String, dynamic>>('/api/route/hazards');
+      final r = await _client.route.get<Map<String, dynamic>>(
+          '/api/route/hazards',
+          queryParameters: {if (demo) 'demo': true});
+      _hazardNamesDemo = demo;
+      _hazardNamesAt = DateTime.now();
       return _hazardNames = {
         for (final f
             in (r.data!['features'] as List).cast<Map<String, dynamic>>())
@@ -234,6 +253,8 @@ class RemoteSafetyRepository implements SafetyRepository {
             if (_conversationId != null) 'conversation_id': _conversationId,
             'current_location': {'lat': o.latitude, 'lon': o.longitude, 'label': '현재 위치'},
             'profile': profile,
+            // 시연 모드: AI도 서버 시연 데이터로 답하고 시연 위험 영역을 피한 경로를 낸다
+            if (DemoData.on) 'demo': true,
           }));
       _conversationId = r.data!['conversation_id'] as String?;
       return chatAnswerFromJson(r.data!, names: await _routeHazardNames());
@@ -254,6 +275,7 @@ class RemoteSafetyRepository implements SafetyRepository {
       'lat': '${o.latitude}',
       'lon': '${o.longitude}',
       'profile': jsonEncode(profile),
+      if (DemoData.on) 'demo': 'true',
     });
     final r = await _guard(() => _client.ai.post<Map<String, dynamic>>('/api/voice', data: form), passDetail: const {422, 503});
     _conversationId = r.data!['conversation_id'] as String?;
@@ -575,7 +597,14 @@ SafetyRoute routeFromJson(
       names[id] ?? id
   ];
   final slope = (j['max_slope_pct'] as num?)?.toInt() ?? 0;
+  // AI 채팅 경로: 바다 위에서 물었으면 항구까지 해상 구간 (ai service.SeaLegInfo)
+  final sea = j['sea'] as Map<String, dynamic>?;
+  final seaFound = sea != null && sea['path_found'] != false;
   final summary = [
+    if (sea != null)
+      seaFound
+          ? '바다 위: ${sea['bearing_label']}의 ${sea['port_name']}까지 바닷길 ${sea['distance_m']}m (점선) → 배를 댄 뒤 아래 도보 경로'
+          : '바다 위: 바닷길을 찾지 못했습니다. ${sea['bearing_label']} ${sea['port_name']} 방향 직선 ${sea['straight_m']}m',
     if (avoided.isNotEmpty)
       '위험 구역 ${avoided.length}곳을 피했습니다: ${avoided.join(', ')}',
     if (inside.isNotEmpty) '주의: 다른 길이 없어 지나는 위험 구역 — ${inside.join(', ')}',
@@ -596,5 +625,6 @@ SafetyRoute routeFromJson(
     maxSlopePercent: slope,
     hazardsOk: j['hazards_ok'] != false,
     encodedGeometry: j['geometry'] as String,
+    seaPoints: seaFound ? decodePolyline(sea['path'] as String) : const [],
   );
 }

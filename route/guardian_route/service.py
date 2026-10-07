@@ -18,10 +18,11 @@ from shapely.ops import substring, transform
 from . import polyline
 from .gh import GraphHopperClient, GraphHopperUnavailable, RouteNotFound
 from .hazards import DEMO_AREAS_PATH, Hazard, HazardSource, RiskAreaHazardSource, default_source
-from .profiles import PROFILE_RULES
+from .profiles import PROFILE_RULES, rules_for
 from .sea import ALTERNATIVES, ApiShelterSource, SeaChart, ShelterSource, bearing_label, pick_shelter
 
 Profile = Literal["adult", "elderly"]
+Strategy = Literal["fastest", "safest"]
 CheckReason = Literal["off_route", "hazard_on_route"]
 
 # 위험 구역 안 도로의 우선순위 배수. 0이면 그 길을 완전히 막아 출발지·도착지가 구역 안일 때 경로가 아예 없어진다.
@@ -47,14 +48,14 @@ class LatLon(BaseModel):
 class RouteRequest(BaseModel):
     origin: LatLon
     destination: LatLon
-    strategy: Literal["fastest", "safest"] | None = None  # omitted keeps the pre-strategy profile behavior
+    strategy: Strategy | None = None  # 앱의 경로 선택: fastest(가까운 길) = 사용자 유형 규칙 그대로, safest(안전한 길) = 급경사도 피함. 없으면 fastest와 같음
     profile: Profile = "adult"      # adult(최단 시간, 경사 무시), elderly(급경사 회피·같은 경사면 계단 선호, 느린 속도)
     demo: bool = False              # 앱 시연 모드: 실제 위험 영역 대신 시연 위험 영역(api /demo/risk/areas)을 피한다
 
 
 class RouteResponse(BaseModel):
-    strategy: Literal["fastest", "safest"] | None = None
-    profile: Profile
+    strategy: Strategy | None = None
+    profile: Profile                                        # 요청한 사용자 유형 그대로 (걸음 속도 기준)
     distance_m: int
     duration_s: int
     ascend_m: int = 0                                       # 오르막 합계
@@ -73,6 +74,7 @@ class RouteCheckRequest(BaseModel):
     destination: LatLon
     geometry: str                   # 지금 안내 중인 경로 (직전 /api/route 응답의 geometry)
     profile: Profile = "adult"
+    strategy: Strategy | None = None  # 직전 /api/route 요청과 같은 값 — 다시 계산해도 같은 종류의 길 (가까운/안전한)
     demo: bool = False
 
 
@@ -202,16 +204,8 @@ class RouteService:
         """
         points = [(req.origin.lat, req.origin.lon), (req.destination.lat, req.destination.lon)]
         zones = self._zones(req.demo)
-        # Active hazard polygons remain avoided for both strategies. Fastest
-        # prioritizes travel time; safest applies the established slope and
-        # accessibility weighting. Requests without a strategy preserve their
-        # existing profile-based behavior.
-        profile = (
-            "adult" if req.strategy == "fastest"
-            else "elderly" if req.strategy == "safest"
-            else req.profile
-        )
-        rules = PROFILE_RULES[profile]
+        # 위험 구역은 strategy와 상관없이 피한다. strategy는 경사 규칙만 바꾸고 사용자 유형(걸음 속도)은 그대로 (profiles.rules_for)
+        rules = rules_for(req.profile, req.strategy)
 
         safe = self.gh.route(points, custom_model=build_model(rules, zones))
         avoided: list[str] = []
@@ -225,7 +219,7 @@ class RouteService:
 
         return RouteResponse(
             strategy=req.strategy,
-            profile=profile,
+            profile=req.profile,
             distance_m=round(safe["distance"]),
             duration_s=round(safe["time"] / 1000),     # GraphHopper time은 밀리초
             ascend_m=round(safe.get("ascend") or 0),
@@ -284,7 +278,7 @@ class RouteService:
         new_route = None
         if reasons or hazards_ahead:
             new_route = self.route(RouteRequest(origin=req.current, destination=req.destination, profile=req.profile,
-                                                demo=req.demo))
+                                                strategy=req.strategy, demo=req.demo))
             # 새 경로가 피할 수 있는 구역이 있을 때만 위험 사유로 재계산한다 (없으면 같은 경로를 계속 주게 된다)
             if set(hazards_ahead) - set(new_route.still_inside):
                 reasons.append("hazard_on_route")
@@ -332,8 +326,10 @@ def avoid_model(zones: list[Hazard]) -> dict[str, Any] | None:
 
 
 def area_id(hazard_id: str) -> str:
-    """GraphHopper area 이름은 영문·숫자·밑줄만 된다 (in_<이름>으로 쓰기 때문). flood-001 → flood_001"""
-    return re.sub(r"\W", "_", hazard_id)
+    """GraphHopper area 이름은 영문·숫자·밑줄만 되고 밑줄 두 개(__)도 거부한다 (in_<이름>으로 쓰기 때문).
+    flood-001 → flood_001. 시연 위험 영역 id는 음수라 flood--3이 되는데, flood__3이 되면 경로 요청이 통째로 실패했다
+    (2026-10-07 VM 시연 모드 길찾기 전부 실패) → 음수는 n으로: flood--3 → flood_n3"""
+    return re.sub(r"_+", "_", re.sub(r"\W", "_", hazard_id.replace("--", "-n")))
 
 
 def _line(encoded: str) -> BaseGeometry:

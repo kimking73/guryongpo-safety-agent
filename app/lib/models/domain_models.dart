@@ -313,6 +313,7 @@ class SafetyRoute {
     this.maxSlopePercent = 0,
     this.hazardsOk = true,
     this.encodedGeometry,
+    this.seaPoints = const [],
   });
 
   final String shelterId;
@@ -333,6 +334,9 @@ class SafetyRoute {
   final int maxSlopePercent;
   final bool hazardsOk;
   final String? encodedGeometry;
+
+  /// AI에게 바다 위에서 물었을 때 항구까지 바닷길 (점선으로 그림). polylinePoints는 항구 → 목적지 도보 경로
+  final List<LatLng> seaPoints;
 }
 
 class RouteCheckResult {

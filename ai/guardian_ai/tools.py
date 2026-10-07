@@ -23,6 +23,7 @@ from typing import Any, Literal
 
 import httpx
 
+from . import demo
 from .db import Fetch, default_fetch
 from .state import Mobility, UserProfile
 
@@ -79,7 +80,10 @@ def _age_min(t: Any, now: datetime) -> float | None:
 
 
 def _query(fetch: Fetch | None, sql: str, params: dict[str, Any]) -> list[dict[str, Any]]:
-    return (fetch or default_fetch)(sql, params)
+    f = fetch or default_fetch
+    if demo.is_active():   # 앱 시연 모드: 실시간 표를 서버 시연 데이터로 가린 SQL (demo.py)
+        f = demo.demo_fetch(f)
+    return f(sql, params)
 
 
 def _unavailable(source: str, e: Exception) -> dict[str, Any]:
@@ -600,11 +604,36 @@ def request_route(
         "destination": {"lat": destination[0], "lon": destination[1]},
         "profile": profile,
     }
+    return _post_route("/api/route", body, client)
+
+
+def request_sea_route(
+    origin: tuple[float, float],
+    destination: tuple[float, float] | None = None,
+    profile: Literal["adult", "elderly"] = "adult",
+    client: httpx.Client | None = None,
+) -> dict[str, Any]:
+    """B11 해상 경로 (route 서비스 POST /api/route/sea). 바다 위면 가장 가까운 항구까지 바닷길 + 항구 육상 지점부터 도보 경로.
+
+    반환: route 서비스 응답 키(at_sea, port, sea_leg, destination, land_route, land_route_error) + available=True.
+    at_sea=False면 land_route가 출발지부터의 일반 경로(/api/route와 같은 내용)다.
+    destination을 생략하면 경로 서버가 항구에서 가까운 갈 만한 대피소를 고른다.
+    구룡포 일대 밖(422)·서버 장애는 {"available": False, "reason"} — 위치·경로 agent는 일반 경로로 대신한다.
+    """
+    body: dict[str, Any] = {"origin": {"lat": origin[0], "lon": origin[1]}, "profile": profile}
+    if destination is not None:
+        body["destination"] = {"lat": destination[0], "lon": destination[1]}
+    return _post_route("/api/route/sea", body, client)
+
+
+def _post_route(path: str, body: dict[str, Any], client: httpx.Client | None) -> dict[str, Any]:
+    if demo.is_active():
+        body = {**body, "demo": True}   # 경로 서버도 시연 위험 영역을 피한다 (앱 시연 모드와 같다)
     own = client is None
     http = client or httpx.Client(base_url=os.environ.get("ROUTE_URL") or DEFAULT_ROUTE_URL,
                                   timeout=ROUTE_TIMEOUT_S)
     try:
-        res = http.post("/api/route", json=body)
+        res = http.post(path, json=body)
     except httpx.HTTPError as e:
         return {"available": False, "reason": f"경로 안내 서버에 연결할 수 없습니다 ({type(e).__name__})",
                 "source": "route"}
@@ -671,6 +700,6 @@ AGENT_TOOLS: dict[str, list] = {
                          get_disaster_messages, get_facilities],
     "wind_typhoon_agent": [get_risk_at, get_observations, get_weather_warnings, get_disaster_messages],
     "life_safety_agent": [get_life_safety],
-    "location_route_agent": [get_risk_at, get_safe_shelters, find_place, hazards_at, request_route],
+    "location_route_agent": [get_risk_at, get_safe_shelters, find_place, hazards_at, request_route, request_sea_route],
     "action_advisor": [get_action_guides, get_facilities],
 }

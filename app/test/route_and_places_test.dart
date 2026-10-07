@@ -67,6 +67,22 @@ void main() {
     expect((a.destinationName, a.destinationKind), ('구룡포항', 'place'));
     expect(a.destinationPos, const LatLng(35.9905, 129.556));
     expect(chatAnswerFromJson({'answer': '안녕하세요'}).route, isNull);
+    expect(a.route!.seaPoints, isEmpty);
+  });
+
+  test('바다 위에서 받은 AI 경로: 바닷길 점선 + 항구부터 도보 경로', () {
+    final route = Map<String, dynamic>.from(_chat['route'] as Map);
+    final sea = {
+      'port_name': '구룡포항', 'berth': {'lat': 35.99, 'lon': 129.558}, 'land_point': {'lat': 35.99, 'lon': 129.557},
+      'distance_m': 1830, 'straight_m': 1620, 'bearing_deg': 250.0, 'bearing_label': '서남서쪽',
+      'path': '_p~iF~ps|U_ulLnnqC', 'path_found': true,
+    };
+    final a = chatAnswerFromJson({..._chat, 'route': {...route, 'sea': sea}});
+    expect(a.route!.seaPoints, hasLength(2));
+    expect(a.route!.riskAvoidanceSummary, contains('서남서쪽의 구룡포항까지 바닷길 1830m'));
+    final lost = chatAnswerFromJson({..._chat, 'route': {...route, 'sea': {...sea, 'path_found': false}}});
+    expect(lost.route!.seaPoints, isEmpty);
+    expect(lost.route!.riskAvoidanceSummary, contains('직선 1620m'));
   });
 
   test('등록 장소 저장·삭제와 AI 요청 profile', () async {

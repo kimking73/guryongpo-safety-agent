@@ -122,6 +122,8 @@ def test_zone_containing_the_destination_is_not_widened():
 def test_area_id_is_graphhopper_safe():
     assert area_id("flood-001") == "flood_001"
     assert area_id("zone.a b") == "zone_a_b"
+    # 시연 위험 영역 id는 음수 (api /demo/risk/areas). GraphHopper는 밑줄 두 개(flood__3)를 거부한다
+    assert area_id("flood--3") == "flood_n3" and "__" not in area_id("landslide--12")
 
 
 def test_sample_file_ignores_manholes():

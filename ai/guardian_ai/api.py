@@ -103,7 +103,7 @@ def _voice_error(e: Exception) -> HTTPException:
 @app.post("/api/voice", response_model=VoiceResponse)
 def voice(audio: UploadFile = File(...), user_id: str = Form(...), conversation_id: str | None = Form(None),
           lat: float | None = Form(None), lon: float | None = Form(None), profile: str | None = Form(None),
-          remember: bool = Form(True), service: ChatService = Depends(get_service),
+          remember: bool = Form(True), demo: bool = Form(False), service: ChatService = Depends(get_service),
           google: GoogleVoice = Depends(get_voice)) -> VoiceResponse:
     """녹음 업로드 → 받아쓰기 → /api/chat과 같은 대화 → 답의 voice_text를 음성으로. profile은 ChatRequest.profile과 같은 JSON 문자열."""
     import time as _t
@@ -119,7 +119,7 @@ def voice(audio: UploadFile = File(...), user_id: str = Form(...), conversation_
         raise _voice_error(e) from e
     t_stt = _t.perf_counter() - t0
     req = ChatRequest(
-        user_id=user_id, question=transcript, conversation_id=conversation_id, remember=remember,
+        user_id=user_id, question=transcript, conversation_id=conversation_id, remember=remember, demo=demo,
         current_location=S.Location(lat=lat, lon=lon) if lat is not None and lon is not None else None,
         profile=S.UserProfile.model_validate_json(profile) if profile else None)
     res = service.chat(req)

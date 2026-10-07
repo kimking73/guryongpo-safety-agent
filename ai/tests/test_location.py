@@ -34,14 +34,21 @@ def all_unsafe_db(sql, params):
     return []
 
 
-def route_server(sent=None, status=200, body=None):
+LAND_ROUTE = {"profile": "elderly", "distance_m": 1024, "duration_s": 984, "ascend_m": 3, "descend_m": 2,
+              "max_slope_pct": 9, "avoided": ["flood-12"], "still_inside": [], "geometry": "abc", "source": "graphhopper",
+              "hazards_ok": True}
+
+
+def route_server(sent=None, status=200, body=None, sea=None):
+    """가짜 경로 서버. /api/route/sea는 육지(at_sea=False) + 같은 경로, sea를 주면 그 응답. sent에는 요청 본문"""
     def handler(req):
         if sent is not None:
             sent.append(json.loads(req.content))
-        return httpx.Response(status, json=body or {
-            "profile": "elderly", "distance_m": 1024, "duration_s": 984, "ascend_m": 3, "descend_m": 2,
-            "max_slope_pct": 9, "avoided": ["flood-12"], "still_inside": [], "geometry": "abc", "source": "graphhopper",
-            "hazards_ok": True})
+        if status != 200:
+            return httpx.Response(status, json=body)
+        if req.url.path == "/api/route/sea":
+            return httpx.Response(200, json=sea or {"at_sea": False, "land_route": body or LAND_ROUTE})
+        return httpx.Response(200, json=body or LAND_ROUTE)
     return httpx.Client(base_url="http://route", transport=httpx.MockTransport(handler))
 
 

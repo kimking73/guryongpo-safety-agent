@@ -517,6 +517,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
     }
     final bounds = LatLngBounds.fromPoints([
       widget.currentLocation,
+      ...route.seaPoints,
       ...route.polylinePoints,
       destination.position
     ]);
@@ -689,6 +690,12 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                       color: Colors.blue.shade800,
                       strokeWidth: 7,
                     ),
+                    if (route.seaPoints.length > 1)
+                      Polyline(
+                          points: route.seaPoints,
+                          color: Colors.teal.shade700,
+                          strokeWidth: 5,
+                          pattern: const StrokePattern.dotted()),
                   ]),
                 MarkerLayer(
                   markers: [
