@@ -3115,6 +3115,8 @@ class _ProfileDetailsCardState extends State<ProfileDetailsCard> {
   final fields = <String, TextEditingController>{};
   final jobs = <String>{};
   String transport = '';
+  // 선택 정보 카드(main.dart OptionalDetailsCard)와 같은 키 — 어느 쪽에서 고쳐도 같다. AI 기억도 여기로 들어온다 (2026-10-08)
+  String walking = '', dependents = '';
   String originMode = '현재 위치';
   bool loading = true;
   static const jobOptions = [
@@ -3151,6 +3153,8 @@ class _ProfileDetailsCardState extends State<ProfileDetailsCard> {
     for (final e in fields.entries) e.value.text = p[e.key] ?? '';
     jobs.addAll((p['jobs'] ?? '').split('|').where((x) => x.isNotEmpty));
     transport = p['transport'] ?? '';
+    walking = p['보행 능력'] ?? '';
+    dependents = p['보호가 필요한 동반자 여부'] ?? '';
     originMode = p['originMode'] == '직접 지정' ? '직접 지정' : '현재 위치';
     if (mounted) setState(() => loading = false);
   }
@@ -3166,6 +3170,8 @@ class _ProfileDetailsCardState extends State<ProfileDetailsCard> {
       ...await AccountService().optionalProfile(),
       for (final e in fields.entries) e.key: e.value.text.trim(),
       'transport': transport,
+      '보행 능력': walking,
+      '보호가 필요한 동반자 여부': dependents,
       'jobs': jobs.join('|'),
       'originMode': originMode,
     };
@@ -3285,6 +3291,22 @@ class _ProfileDetailsCardState extends State<ProfileDetailsCard> {
                                 value: x, child: Text(x.isEmpty ? '선택 안 함' : x)))
                             .toList(),
                         onChanged: (x) => setState(() => transport = x ?? ''),
+                      ),
+                      DropdownButtonFormField<String>(
+                        initialValue: const ['', '보행 가능', '보행 불편', '보행 어려움'].contains(walking) ? walking : '보행 불편',
+                        decoration: const InputDecoration(labelText: '보행 능력 (선택)'),
+                        items: const ['', '보행 가능', '보행 불편', '보행 어려움']
+                            .map((x) => DropdownMenuItem(value: x, child: Text(x.isEmpty ? '선택 안 함' : x)))
+                            .toList(),
+                        onChanged: (x) => setState(() => walking = x ?? ''),
+                      ),
+                      DropdownButtonFormField<String>(
+                        initialValue: const ['', '예', '아니요'].contains(dependents) ? dependents : '',
+                        decoration: const InputDecoration(labelText: '보호가 필요한 동반자 (아이·노부모 등, 선택)'),
+                        items: const ['', '예', '아니요']
+                            .map((x) => DropdownMenuItem(value: x, child: Text(x.isEmpty ? '선택 안 함' : x)))
+                            .toList(),
+                        onChanged: (x) => setState(() => dependents = x ?? ''),
                       ),
                       const SizedBox(height: 8),
                       const Text('직업 (복수 선택)'),

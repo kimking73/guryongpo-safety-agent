@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'account_service.dart';
@@ -73,7 +74,10 @@ class AiMemoryService {
     final profile = await _profileValues();
     final applied = await _applied();
     final (items, fill) = planMemorySync(facts, profile, applied);   // applied 도 이 안에서 갱신
-    if (fill.isNotEmpty) await _save(fill);
+    if (fill.isNotEmpty) {
+      await _save(fill);
+      changed.value++;     // 열려 있는 프로필 화면이 다시 읽게
+    }
     await _saveApplied(applied);
     return items;
   }
@@ -83,7 +87,8 @@ class AiMemoryService {
     final k = item.profileKey, v = item.profileValue;
     if (k == null || v == null) return;
     final cur = (await _profileValues())[k] ?? '';
-    await _save({k: mergedProfileValue(k, cur, v)});
+    await _save({k: mergedProfileValue(k, cur, v), if (k == '직업') ..._jobsWith(v, await _account.optionalProfile())});
+    changed.value++;
   }
 
   /// 기억에서 지우기 (AI가 다음 대화부터 쓰지 않는다)
@@ -95,6 +100,9 @@ class AiMemoryService {
       return false;
     }
   }
+
+  /// 프로필에 AI 기억을 써 넣을 때마다 오른다 — 프로필 화면(AiMemoryCard)이 듣고 카드들을 다시 읽게 한다
+  static final changed = ValueNotifier<int>(0);
 
   /// 대화 뒤 몇 초 기다렸다 빈 칸 채우기 (기억 저장은 답이 나간 뒤 백그라운드라 바로는 없다). 시연 대화는 기억에 안 남는다
   static void fillAfterChat() {
@@ -222,10 +230,25 @@ String mergedProfileValue(String key, String cur, String v) =>
                 : AiMemoryStatus.differs;        // 반영한 뒤 사용자가 프로필을 직접 고침 → 유지
     if (status == AiMemoryStatus.filled) fill[pk] = pv;
     if (status == AiMemoryStatus.overwritten) fill[pk] = mergedProfileValue(pk, cur, pv);
+    // 직업은 사용자 상세 카드의 직업 칩(jobs, '|'로 이음)에도 (2026-10-08)
+    if (pk == '직업' && (status == AiMemoryStatus.filled || status == AiMemoryStatus.overwritten)) {
+      fill.addAll(_jobsWith(pv, profile));
+    }
     if (status != AiMemoryStatus.differs) applied[e.key] = stamp;
     items.add(AiMemoryItem(
         key: e.key, label: factLabel(e.key), value: pv, quote: quote, status: status,
         profileKey: pk, profileValue: pv, current: cur.isEmpty ? null : cur));
   }
   return (items, fill);
+}
+
+/// 사용자 상세 카드의 직업 칩 (disaster_center.dart ProfileDetailsCard.jobOptions 와 같게)
+const profileJobOptions = ['어업 종사자·뱃사람', '자영업자', '농업 종사자', '축산업 종사자', '양식업 종사자·수산물 양식', '기타'];
+
+/// 직업 기억 → jobs 칩 목록에 더한 값 ({'jobs': 'a|b'}). 칩에 없는 직업은 '기타'
+Map<String, String> _jobsWith(String job, Map<String, String> profile) {
+  final chip = profileJobOptions.contains(job) ? job : '기타';
+  final jobs = (profile['jobs'] ?? '').split('|').where((x) => x.isNotEmpty).toList();
+  if (jobs.contains(chip)) return const {};
+  return {'jobs': [...jobs, chip].join('|')};
 }

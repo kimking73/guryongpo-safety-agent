@@ -21,13 +21,28 @@ class _AiMemoryCardState extends ConsumerState<AiMemoryCard> {
   void initState() {
     super.initState();
     _sync();
+    AiMemoryService.changed.addListener(_onChanged);   // 대화 뒤 자동 반영이 화면이 열려 있을 때 일어나도 바로 보이게
+  }
+
+  @override
+  void dispose() {
+    AiMemoryService.changed.removeListener(_onChanged);
+    super.dispose();
+  }
+
+  void _onChanged() {
+    if (!mounted) return;
+    _profileChanged();
+    service.sync().then((r) {
+      if (mounted) setState(() => items = r);
+    });
   }
 
   Future<void> _sync() async {
     final r = await service.sync();
     if (!mounted) return;
     setState(() => items = r);
-    if (r.any((i) => i.status == AiMemoryStatus.filled || i.status == AiMemoryStatus.overwritten)) _profileChanged();
+    // 프로필에 써 넣었으면 service 가 changed 를 올리고 _onChanged 가 카드들을 다시 읽게 한다
   }
 
   void _profileChanged() => ref.read(profileRevision.notifier).state++;
@@ -92,7 +107,6 @@ class _AiMemoryCardState extends ConsumerState<AiMemoryCard> {
           TextButton(
               onPressed: () async {
                 await service.apply(i);
-                _profileChanged();
                 await _sync();
               },
               child: const Text('반영')),

@@ -48,4 +48,12 @@ void main() {
         {'자주 방문하는 장소': '항구'}, applied);
     expect(fill, {'자주 방문하는 장소': '항구, 시장'});
   });
+
+  test('직업은 사용자 상세 카드의 직업 칩에도 들어간다', () {
+    var (_, fill) = planMemorySync({'occupation': {'value': '어선을 가진 어부', 'updated_at': 't1'}}, {}, {});
+    expect(fill, {'직업': '어업 종사자·뱃사람', 'jobs': '어업 종사자·뱃사람'});
+    (_, fill) = planMemorySync({'occupation': {'value': '목수', 'updated_at': 't1'}}, {'jobs': '자영업자'}, {});
+    expect(fill['jobs'], '자영업자|기타');      // 칩에 없는 직업은 '기타'를 덧붙임
+  });
 }
+
