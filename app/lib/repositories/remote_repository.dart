@@ -94,6 +94,7 @@ class RemoteSafetyRepository implements SafetyRepository {
             'profile': profile,
             // 다시 계산해도 처음 고른 종류(가까운/안전한)의 길이 나오게 /api/route와 같은 값
             'strategy': _strategy(routeType),
+            'mode': TravelSetting.mode.api,
             if (DemoData.on) 'demo': true,
           },
         ));
@@ -186,6 +187,7 @@ class RemoteSafetyRepository implements SafetyRepository {
               // 두 경로 모두 위험 영역은 피한다. 가까운 경로 = 사용자 유형 규칙 그대로,
               // 안전 경로 = 급경사도 피함. 걸음 속도는 둘 다 사용자 유형(profile)대로.
               'strategy': _strategy(routeType),
+              'mode': TravelSetting.mode.api,
               'profile': routeProfileFor(age, transport, walkingImpaired: walking),
               // 시연 모드: 경로 서버가 시연 위험 영역을 피한다
               if (DemoData.on) 'demo': true,
@@ -630,6 +632,7 @@ SafetyRoute routeFromJson(
     profile: j['profile'] as String? ?? 'adult',
     maxSlopePercent: slope,
     maxUphillPercent: (j['max_uphill_pct'] as num?)?.toInt() ?? 0,
+    mode: j['mode'] == 'car' ? TravelMode.car : TravelMode.walk,
     hazardsOk: j['hazards_ok'] != false,
     encodedGeometry: j['geometry'] as String,
     seaPoints: seaFound ? decodePolyline(sea['path'] as String) : const [],

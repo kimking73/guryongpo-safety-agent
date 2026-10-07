@@ -118,7 +118,8 @@ class _CustomRouteScreenState extends ConsumerState<CustomRouteScreen> {
         }
       }
 
-      final rs = await Future.wait([for (final t in RouteTypeInfo.ordered) one(t)]);
+      TravelSetting.mode = ref.read(travelMode);
+      final rs = await Future.wait([for (final t in ref.read(travelMode).routeTypes) one(t)]);
       RiskStatus? risk;
       try {
         risk = await repository.risk(b.position);
@@ -195,7 +196,20 @@ class _CustomRouteScreenState extends ConsumerState<CustomRouteScreen> {
           });
         }),
       ]),
-      const Text('출발지와 목적지를 도로명 주소로 입력하거나 장소를 고르세요. 구룡포 일대 도보 경로를 안내합니다.'),
+      const Text('출발지와 목적지를 도로명 주소로 입력하거나 장소를 고르세요. 구룡포 일대 도보·자동차 경로를 안내합니다.'),
+      const SizedBox(height: 8),
+      // 도보·자동차 (2026-10-07) — 대시보드 경로와 같은 설정. 바꾸면 비교 결과를 지우고 다시 찾게 한다
+      Wrap(spacing: 6, children: [
+        for (final m in TravelMode.values)
+          ChoiceChip(
+              avatar: Icon(m.icon, size: 16),
+              label: Text(m.label),
+              selected: ref.watch(travelMode) == m,
+              onSelected: (_) => setState(() {
+                    ref.read(travelMode.notifier).state = m;
+                    results = [];
+                  })),
+      ]),
       const SizedBox(height: 12),
       TextField(
           controller: fromText,
@@ -263,7 +277,7 @@ class _RouteOption extends StatelessWidget {
               if (r == null)
                 Text('이 경로를 찾지 못했습니다. ${result.error ?? ''}', style: TextStyle(color: Theme.of(c).colorScheme.error))
               else ...[
-                Text('${(r.distanceMeters / 1000).toStringAsFixed(1)}km · 도보 ${r.estimatedMinutes}분 · 최대 오르막 ${r.maxUphillPercent}%',
+                Text('${(r.distanceMeters / 1000).toStringAsFixed(1)}km · ${r.mode.label} ${r.estimatedMinutes}분 · 최대 오르막 ${r.maxUphillPercent}%',
                     style: const TextStyle(fontSize: 16)),
                 if (r.avoided.isNotEmpty) Text('피한 위험 구역: ${r.avoided.join(', ')}'),
                 if (r.stillInside.isNotEmpty)

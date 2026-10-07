@@ -23,6 +23,8 @@ from .sea import ALTERNATIVES, ApiShelterSource, SeaChart, ShelterSource, bearin
 
 Profile = Literal["adult", "elderly"]
 Strategy = Literal["shortest", "safest", "flat", "fastest"]   # fastest = 예전 이름, safest와 같음
+Mode = Literal["walk", "car"]     # 이동 수단 (2026-10-07 자동차 추가) → GraphHopper 프로필 foot·car
+GH_PROFILE = {"walk": "foot", "car": "car"}
 CheckReason = Literal["off_route", "hazard_on_route"]
 
 # 위험 구역 안 도로의 우선순위 배수. 0이면 그 길을 완전히 막아 출발지·도착지가 구역 안일 때 경로가 아예 없어진다.
@@ -50,11 +52,13 @@ class RouteRequest(BaseModel):
     destination: LatLon
     strategy: Strategy | None = None  # 앱의 경로 선택: shortest(가까운 = 위험 회피 없는 최단) · safest(안전 = 위험 회피, 기본) · flat(오르막 회피) — profiles.rules_for
     profile: Profile = "adult"      # adult(최단 시간, 경사 무시), elderly(급경사 회피·같은 경사면 계단 선호, 느린 속도)
+    mode: Mode = "walk"             # walk(도보, 기본) · car(자동차 — 차로·회전 제한, 위험 구역 회피는 같다. 사용자 유형은 안 씀)
     demo: bool = False              # 앱 시연 모드: 실제 위험 영역 대신 시연 위험 영역(api /demo/risk/areas)을 피한다
 
 
 class RouteResponse(BaseModel):
     strategy: Strategy | None = None
+    mode: Mode = "walk"
     profile: Profile                                        # 요청한 사용자 유형 그대로 (걸음 속도 기준)
     distance_m: int
     duration_s: int
@@ -76,6 +80,7 @@ class RouteCheckRequest(BaseModel):
     geometry: str                   # 지금 안내 중인 경로 (직전 /api/route 응답의 geometry)
     profile: Profile = "adult"
     strategy: Strategy | None = None  # 직전 /api/route 요청과 같은 값 — 다시 계산해도 같은 종류의 길
+    mode: Mode = "walk"
     demo: bool = False
 
 
@@ -206,23 +211,25 @@ class RouteService:
         points = [(req.origin.lat, req.origin.lon), (req.destination.lat, req.destination.lon)]
         zones = self._zones(req.demo)
         # 가까운 경로(shortest)만 위험 구역을 피하지 않는다 — 지나는 구역은 still_inside로 알린다. 나머지는 규칙만 다르다 (profiles.rules_for)
-        rules = rules_for(req.profile, req.strategy)
+        rules = rules_for(req.profile, req.strategy, req.mode)
         avoid = req.strategy != "shortest"
+        gh_profile = GH_PROFILE[req.mode]
 
-        safe = self.gh.route(points, custom_model=build_model(rules, zones if avoid else []))
+        safe = self.gh.route(points, profile=gh_profile, custom_model=build_model(rules, zones if avoid else []))
         avoided: list[str] = []
         still_inside: list[str] = []
         if zones and not avoid:
             still_inside = [z.id for z in zones if _line(safe["points"]).intersects(z.geometry)]
         elif zones:
-            safe = self._widen_until_clear(points, rules, zones, safe)
-            base = self.gh.route(points, custom_model=build_model(rules, []))
+            safe = self._widen_until_clear(points, rules, zones, safe, gh_profile)
+            base = self.gh.route(points, profile=gh_profile, custom_model=build_model(rules, []))
             safe_line, base_line = _line(safe["points"]), _line(base["points"])
             still_inside = [z.id for z in zones if safe_line.intersects(z.geometry)]
             avoided = [z.id for z in zones if base_line.intersects(z.geometry) and z.id not in still_inside]
 
         return RouteResponse(
             strategy=req.strategy,
+            mode=req.mode,
             profile=req.profile,
             distance_m=round(safe["distance"]),
             duration_s=round(safe["time"] / 1000),     # GraphHopper time은 밀리초
@@ -236,7 +243,8 @@ class RouteService:
             hazards_ok=getattr(self.source(req.demo), "ok", True),
         )
 
-    def _widen_until_clear(self, points, rules, zones: list[Hazard], path: dict[str, Any]) -> dict[str, Any]:
+    def _widen_until_clear(self, points, rules, zones: list[Hazard], path: dict[str, Any],
+                           gh_profile: str = "foot") -> dict[str, Any]:
         """경로가 피할 수 있는 구역을 지나면 그 구역을 넓혀 다시 요청한다 (WIDEN_STEPS_M 설명). 못 피하면 처음 경로."""
         # 요청 좌표 + GraphHopper가 붙인 도로 위 시작·끝점 (좌표는 구역 밖이어도 가장 가까운 길이 구역 안일 수 있다)
         snapped = polyline.decode(path["points"])
@@ -251,7 +259,7 @@ class RouteService:
             wide = {z.id for z in crossed}
             widened = [Hazard(z.id, z.kind, transform(to_deg, transform(to_m, z.geometry).buffer(widen_m)), z.grade, z.source, z.name)
                        if z.id in wide else z for z in zones]
-            retry = self.gh.route(points, custom_model=build_model(rules, widened))
+            retry = self.gh.route(points, profile=gh_profile, custom_model=build_model(rules, widened))
             if not any(_line(retry["points"]).intersects(z.geometry) for z in crossed):
                 return retry
         return path
@@ -283,7 +291,7 @@ class RouteService:
         new_route = None
         if reasons or hazards_ahead:
             new_route = self.route(RouteRequest(origin=req.current, destination=req.destination, profile=req.profile,
-                                                strategy=req.strategy, demo=req.demo))
+                                                strategy=req.strategy, mode=req.mode, demo=req.demo))
             # 새 경로가 피할 수 있는 구역이 있을 때만 위험 사유로 재계산한다 (없으면 같은 경로를 계속 주게 된다)
             if set(hazards_ahead) - set(new_route.still_inside):
                 reasons.append("hazard_on_route")

@@ -51,7 +51,7 @@ def test_route_converts_graphhopper_response():
     c, seen = client(ok)
     res = c.post("/api/route", json=BODY)
     assert res.status_code == 200
-    assert res.json() == {"strategy": None, "profile": "adult", "distance_m": 986, "duration_s": 710,
+    assert res.json() == {"strategy": None, "mode": "walk", "profile": "adult", "distance_m": 986, "duration_s": 710,
                           "ascend_m": 10, "descend_m": 2, "max_slope_pct": 8, "max_uphill_pct": 3,   # 내리막 7.6%도 급경사로 본다
                           "avoided": [], "still_inside": [], "geometry": PATH["points"], "source": "graphhopper",
                           "hazards_ok": True}
@@ -116,6 +116,21 @@ def test_shortest_is_distance_first():
     model = sent_model(seen)
     assert model["distance_influence"] == SHORTEST_DISTANCE_INFLUENCE and "priority" not in model
     assert model["speed"] == PROFILE_RULES["elderly"]["speed"]   # 시간은 노약자 걸음
+
+
+def test_car_uses_car_profile_without_walking_rules():
+    """자동차: GraphHopper car 프로필, 사용자 유형(걸음 속도·경사) 규칙 없음 — 노약자여도 (2026-10-07)"""
+    c, seen = client(ok)
+    res = c.post("/api/route", json={**BODY, "mode": "car", "profile": "elderly", "strategy": "flat"}).json()
+    sent = json.loads(seen[0].content)
+    assert sent["profile"] == "car" and "custom_model" not in sent and res["mode"] == "car"
+
+
+def test_car_shortest_is_distance_first():
+    from guardian_route.profiles import SHORTEST_DISTANCE_INFLUENCE
+    c, seen = client(ok)
+    c.post("/api/route", json={**BODY, "mode": "car", "strategy": "shortest"})
+    assert sent_model(seen) == {"distance_influence": SHORTEST_DISTANCE_INFLUENCE}
 
 
 def test_max_uphill_is_direction_aware():
@@ -218,7 +233,7 @@ def test_demo_flag_avoids_demo_zones_only():
         def __init__(self):
             self.models = []
 
-        def route(self, points, custom_model=None):
+        def route(self, points, profile="foot", custom_model=None):
             self.models.append(custom_model)
             return {"distance": 100, "time": 60000, "points": "_p~iF~ps|U_ulLnnqC", "ascend": 0, "descend": 0}
 

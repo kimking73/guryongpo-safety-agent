@@ -80,6 +80,9 @@ final rootMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
 /// `safe` avoids the illustrated hazard; `near` illustrates the shorter route.
 final routeKind = StateProvider<RouteType>((_) => RouteType.safest);
+
+/// 도보·자동차 (2026-10-07). 경로 provider 가 watch → 바꾸면 경로를 다시 받는다
+final travelMode = StateProvider<TravelMode>((_) => TravelMode.walk);
 final chatMessages = StateProvider<List<ChatMessage>>((_) => []);
 final userOccupation = StateProvider<String>((_) => '');
 final autoVoiceAlerts = StateProvider<bool>((_) => false);
@@ -210,6 +213,7 @@ final routeProvider =
       : (await ref.read(facilitiesProvider.future))
           .firstWhere((f) => f.id == facilityId);
   final origin = ref.watch(routeStartOrigin) ?? ref.read(userLocation).position;
+  TravelSetting.mode = ref.watch(travelMode);
   return ref
       .watch(repo)
       .routeFor(facility, UserMode.user, ref.watch(routeKind), origin);
@@ -1102,6 +1106,8 @@ class Dashboard extends ConsumerWidget {
         showDragHandle: true,
         builder: (_) => const ShelterPickerSheet(),
       ),
+      travelMode: ref.watch(travelMode),
+      onTravelModeChanged: (m) => ref.read(travelMode.notifier).state = m,
       onRouteTypeChanged: (type) {
         if (destination != null) {
           ref.read(routeKind.notifier).state = type;

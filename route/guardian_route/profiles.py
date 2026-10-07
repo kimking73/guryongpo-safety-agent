@@ -65,7 +65,7 @@ UPHILL_RULES = [
 ]
 
 
-def rules_for(profile: str, strategy: str | None = None) -> dict[str, Any]:
+def rules_for(profile: str, strategy: str | None = None, mode: str = "walk") -> dict[str, Any]:
     """사용자 유형 + 앱의 경로 선택(strategy) → GraphHopper 규칙 (2026-10-07 세 가지로).
 
     - shortest(가까운 경로): 위험 구역을 피하지 않는 최단 거리 (service가 구역 회피를 빼고, 지나는 구역은 still_inside로 알린다)
@@ -73,7 +73,12 @@ def rules_for(profile: str, strategy: str | None = None) -> dict[str, Any]:
       fastest는 예전 앱이 보내던 이름이라 safest와 같게 둔다
     - flat(오르막 회피 경로): 위험 구역 회피 + 오르막 회피. 노약자는 이미 오르막·내리막 모두 피하므로 노약자 규칙 그대로
     걸음 속도는 어느 쪽이든 사용자 유형대로.
+
+    mode="car"(자동차, 2026-10-07): GraphHopper car 프로필 기본 모델(차로·제한 속도·회전 제한) 위에 위험 구역 회피만 더한다.
+    사용자 유형(걸음 속도·경사·계단)은 차에 해당하지 않아 쓰지 않고, 오르막 회피(flat)는 안전 경로와 같다.
     """
+    if mode == "car":
+        return {"priority": [], "speed": [], "distance_influence": SHORTEST_DISTANCE_INFLUENCE} if strategy == "shortest" else {}
     rules = PROFILE_RULES[profile]
     if strategy == "shortest":
         return {"priority": [], "speed": rules["speed"], "distance_influence": SHORTEST_DISTANCE_INFLUENCE}

@@ -232,6 +232,26 @@ String? shelterExclusion(Facility f, List<RiskArea> areas) {
   return null;
 }
 
+/// 이동 수단 (2026-10-07 자동차 추가). 경로 서버 mode: walk(GraphHopper foot) · car(GraphHopper car — 차로·회전 제한,
+/// 위험 구역 회피는 같고 사용자 유형·오르막 회피는 안 씀)
+enum TravelMode { walk, car }
+
+extension TravelModeInfo on TravelMode {
+  String get label => this == TravelMode.car ? '자동차' : '도보';
+  String get api => this == TravelMode.car ? 'car' : 'walk';
+  IconData get icon => this == TravelMode.car ? Icons.directions_car : Icons.directions_walk;
+
+  /// 이 이동 수단에서 고를 수 있는 경로 종류 (자동차는 오르막 회피 없음)
+  List<RouteType> get routeTypes => this == TravelMode.car
+      ? const [RouteType.nearest, RouteType.safest]
+      : RouteTypeInfo.ordered;
+}
+
+/// 지금 고른 이동 수단 — 저장소(경로 API 호출)가 읽는다. 바꾸는 곳은 main.dart travelMode provider (DemoData.on 과 같은 방식)
+class TravelSetting {
+  static TravelMode mode = TravelMode.walk;
+}
+
 /// 경로 종류 (2026-10-07 세 가지): 가까운 = 위험 회피 없는 최단 거리, 안전 = 위험 구역 회피(기본), 오르막 회피 = 위험 회피 + 오르막 회피.
 /// 걸음 속도는 셋 다 사용자 유형(성인·노약자)대로. 경로 서버 strategy: shortest · safest · flat (route/guardian_route/profiles.py)
 enum RouteType { safest, nearest, flat }
@@ -348,6 +368,7 @@ class SafetyRoute {
     this.profile = 'adult',
     this.maxSlopePercent = 0,
     this.maxUphillPercent = 0,
+    this.mode = TravelMode.walk,
     this.hazardsOk = true,
     this.encodedGeometry,
     this.seaPoints = const [],
@@ -372,6 +393,9 @@ class SafetyRoute {
 
   /// 진행 방향 기준 가장 급한 오르막 (경로 서버 max_uphill_pct)
   final int maxUphillPercent;
+
+  /// 도보·자동차 (경로 서버 mode)
+  final TravelMode mode;
   final bool hazardsOk;
   final String? encodedGeometry;
 

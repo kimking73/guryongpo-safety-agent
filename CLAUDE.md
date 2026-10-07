@@ -19,7 +19,7 @@ Lanes: **A** server/DB/data collection/risk engine (`server/`, `db/`) · **B** A
 - Python 3.12 containers (local venvs ≥3.11), FastAPI + uvicorn for every HTTP service
 - PostgreSQL 17 + PostGIS 3.5 (`imresamu/postgis`, multi-arch — official image lacks arm64)
 - AI: LangGraph ≥1.0, Pydantic v2, openai SDK (`gpt-6-luna`, Responses API; switched from Gemini 2026-10-01); voice: Google Cloud STT/TTS code in place (B5), deferred by the user — no key yet
-- Routing (B6 done, B7 in progress): GraphHopper 11 (Java 21, foot profile, flexible mode) + OSM + elevation (SRTM 90m, or 국토지리정보원 DEM via `graphhopper/build_dem.sh`)
+- Routing (B6 done, B7 in progress): GraphHopper 11 (Java 21, foot + car profiles (car since 2026-10-07), flexible mode) + OSM + elevation (SRTM 90m, or 국토지리정보원 DEM via `graphhopper/build_dem.sh`)
 - Client: Flutter (web deployed via `deploy/push_web.sh`; iOS simulator without CocoaPods = SPM copy in an ASCII path); Firebase auth (anonymous + Google + email, app ID `kr.guryong.guardian`) + FCM
 - Infra: Docker Compose (OrbStack on Mac, Docker Desktop + WSL2 on Windows); GCP project
   `guryong-guardian-0924` (asia-northeast3); deploy VM (another GCP project, static IP 34.64.177.195) + Caddy at

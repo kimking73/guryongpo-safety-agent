@@ -239,6 +239,8 @@ class DisasterDashboard extends StatefulWidget {
     this.routeType = RouteType.safest,
     this.onChooseFacility,
     this.onRouteTypeChanged,
+    this.travelMode = TravelMode.walk,
+    this.onTravelModeChanged,
     this.onEndRoute,
     this.onRetryRoute,
     this.demo = true,
@@ -262,6 +264,8 @@ class DisasterDashboard extends StatefulWidget {
   final RouteType routeType;
   final VoidCallback? onChooseFacility;
   final ValueChanged<RouteType>? onRouteTypeChanged;
+  final TravelMode travelMode;
+  final ValueChanged<TravelMode>? onTravelModeChanged;
   final VoidCallback? onEndRoute;
   final VoidCallback? onRetryRoute;
 
@@ -1211,13 +1215,21 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Text(
-                '${route.distanceMeters >= 1000 ? '${(route.distanceMeters / 1000).toStringAsFixed(1)}km' : '${route.distanceMeters}m'} · 도보 ${route.estimatedMinutes}분 · ${route.routeType.label} · 최대 오르막 ${route.maxUphillPercent}%${route.hazardsOk ? '' : ' · 위험 정보 확인 불가'}\n${route.riskAvoidanceSummary}',
+                '${route.distanceMeters >= 1000 ? '${(route.distanceMeters / 1000).toStringAsFixed(1)}km' : '${route.distanceMeters}m'} · ${route.mode.label} ${route.estimatedMinutes}분 · ${route.routeType.label} · 최대 오르막 ${route.maxUphillPercent}%${route.hazardsOk ? '' : ' · 위험 정보 확인 불가'}\n${route.riskAvoidanceSummary}',
                 style: const TextStyle(fontSize: 12),
               ),
             ),
           if (destination != null)
             Wrap(spacing: 6, children: [
-              for (final t in RouteTypeInfo.ordered)
+              for (final m in TravelMode.values)
+                ChoiceChip(
+                  avatar: Icon(m.icon, size: 16),
+                  label: Text(m.label),
+                  selected: widget.travelMode == m,
+                  onSelected: (_) => widget.onTravelModeChanged?.call(m),
+                ),
+              const SizedBox(width: 8),
+              for (final t in widget.travelMode.routeTypes)
                 ChoiceChip(
                   label: Text(t.label),
                   tooltip: t.description,
