@@ -170,6 +170,14 @@ def export(store: BaseStore, user_id: str) -> dict[str, Any]:
     return {"user_id": user_id, "facts": facts, "episodes": episodes}
 
 
+def forget_fact(store: BaseStore, user_id: str, key: str) -> bool:
+    """사실 하나 지우기 (앱 프로필의 'AI가 기억한 정보'에서 지울 때). 있었으면 True."""
+    if store.get(_facts_ns(user_id), key) is None:
+        return False
+    store.delete(_facts_ns(user_id), key)
+    return True
+
+
 def forget(store: BaseStore, user_id: str) -> int:
     """사용자 기억(사실·대화 요약)을 모두 지운다. 지운 항목 수."""
     n = 0

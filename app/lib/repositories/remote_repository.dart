@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:latlong2/latlong.dart';
 import '../models/domain_models.dart';
 import '../services/account_service.dart';
+import '../services/ai_memory.dart';
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
 import '../services/demo_mode.dart';
@@ -238,7 +239,9 @@ class RemoteSafetyRepository implements SafetyRepository {
       'user_id': uid,
       // 사용자 유형 구분(주민·관광객)이 앱에서 빠져 서버 기본값(resident)을 쓴다
       if (age != null) 'age': age,
-      'mobility': switch (transport) { '휠체어' => 'wheelchair', '자동차' => 'car', _ => 'walk' },
+      // 입력했을 때만 보낸다 (2026-10-07: 예전엔 없으면 'walk'로 채워 AI 기억 "휠체어 타요"가 늘 무시됐다)
+      if (transport != null && transport.isNotEmpty)
+        'mobility': switch (transport) { '휠체어' => 'wheelchair', '자동차' => 'car', _ => 'walk' },
       if (walking) 'walking_impaired': true,
       ...placesForProfile(places),
     });
@@ -258,6 +261,7 @@ class RemoteSafetyRepository implements SafetyRepository {
             if (DemoData.on) 'demo': true,
           }));
       _conversationId = r.data!['conversation_id'] as String?;
+      AiMemoryService.fillAfterChat();   // AI가 이번 대화에서 기억한 내용으로 빈 프로필 칸 채우기
       return chatAnswerFromJson(r.data!, names: await _routeHazardNames());
     } on RemoteError catch (e) {
       return ChatAnswer(e.message, isError: true);

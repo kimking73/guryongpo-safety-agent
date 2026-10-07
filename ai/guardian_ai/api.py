@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import memory as M
 from . import state as S
+from .auth import current_uid
 from .service import ChatRequest, ChatResponse, ChatService
 from .voice import MAX_BYTES, BadAudio, GoogleVoice, NoSpeech, VoiceUnavailable, to_pcm16k
 from .usage import get_tracker
@@ -61,6 +62,18 @@ def usage() -> dict:
 
 # 사용자 기억 보기·지우기. 인증(Firebase 토큰)은 A의 방식이 정해지면 붙인다 — 그 전에는 외부에 열지 않는다
 # (배포 시 Caddy가 /api/ai/memory를 넘기지 않게, B10).
+# 내 기억 (2026-10-07): 로그인한 본인 것만 — 앱 프로필 화면의 'AI가 기억한 정보'·빈 칸 채우기가 쓴다.
+# 공개 주소에서도 연다 (Caddy 가 막는 것은 /api/ai/memory* 뿐). 토큰 확인은 auth.py (서버와 같은 규칙)
+@app.get("/api/ai/me/memory")
+def my_memory(uid: str = Depends(current_uid), service: ChatService = Depends(get_service)) -> dict:
+    return M.export(service.store, uid)
+
+
+@app.delete("/api/ai/me/memory/facts/{key:path}")
+def forget_my_fact(key: str, uid: str = Depends(current_uid), service: ChatService = Depends(get_service)) -> dict:
+    return {"key": key, "deleted": M.forget_fact(service.store, uid, key)}
+
+
 @app.get("/api/ai/memory/{user_id}")
 def get_memory(user_id: str, service: ChatService = Depends(get_service)) -> dict:
     return {**M.export(service.store, user_id), "backend": service.memory_backend}

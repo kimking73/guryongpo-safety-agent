@@ -1,3 +1,4 @@
+import 'ai_memory_card.dart';
 import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -80,6 +81,9 @@ final rootMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
 /// `safe` avoids the illustrated hazard; `near` illustrates the shorter route.
 final routeKind = StateProvider<RouteType>((_) => RouteType.safest);
+
+/// 프로필 값이 화면 밖에서 바뀌면 올린다 (AI 기억 반영 등) — 프로필 카드들이 key 로 보고 다시 읽는다
+final profileRevision = StateProvider<int>((_) => 0);
 
 /// 도보·자동차 (2026-10-07). 경로 provider 가 watch → 바꾸면 경로를 다시 받는다
 final travelMode = StateProvider<TravelMode>((_) => TravelMode.walk);
@@ -2428,7 +2432,9 @@ class ProfileScreen extends ConsumerWidget {
   Widget build(BuildContext c, WidgetRef ref) {
     return ListView(padding: const EdgeInsets.all(16), children: [
       Text('사용자 정보', style: Theme.of(c).textTheme.headlineSmall),
-      const ProfileDetailsCard(),
+      ProfileDetailsCard(key: ValueKey('profile-${ref.watch(profileRevision)}')),
+      const SizedBox(height: 12),
+      const AiMemoryCard(),
       const SizedBox(height: 12),
       const AccountCard(),
       if (AppConfig.isRemote) const DemoModeSwitch(),
@@ -2501,7 +2507,7 @@ class ProfileScreen extends ConsumerWidget {
                 isScrollControlled: true,
                 builder: (_) => const _PlaceForm())),
       ])),
-      const OptionalDetailsCard()
+      OptionalDetailsCard(key: ValueKey('optional-${ref.watch(profileRevision)}'))
     ]);
   }
 }
