@@ -128,10 +128,18 @@ def apply_to_profile(profile: UserProfile, facts: dict[str, dict]) -> UserProfil
     return profile.model_copy(update=update) if update else profile
 
 
-def memory_lines(facts: dict[str, dict], episodes: list[dict]) -> list[str]:
-    """프롬프트·근거에 넣을 문장. 사용자가 실제로 한 말(quote)을 같이 남겨 근거가 되게 한다."""
+# 프로필 항목(나이·직업·집 등)은 서버 프로필이 기준이라 기억 문장에서 뺀다 (2026-10-08, 사용자 결정 — 프로필과 기억이 다를 때
+# 근거끼리 어긋나지 않게). 기억은 앱을 거쳐 프로필로 넘어가는 통로 + 기타 메모·대화 요약을 맡는다
+PROFILE_BACKED = PROFILE_FIELDS | {"home_address", "frequent_place"}
+
+
+def memory_lines(facts: dict[str, dict], episodes: list[dict], include_profile_facts: bool = False) -> list[str]:
+    """프롬프트·근거에 넣을 문장: 기타 메모 + 지난 대화 요약 (include_profile_facts 면 프로필 항목도 — 서버 프로필이 없을 때).
+    사용자가 실제로 한 말(quote)을 같이 남겨 근거가 되게 한다."""
     lines = []
     for key, f in sorted(facts.items()):
+        if not include_profile_facts and key.split(":", 1)[0] in PROFILE_BACKED:
+            continue
         label = FACT_LABELS.get(key.split(":", 1)[0], "기타")
         quote = f" (사용자 말: \"{f['quote']}\")" if f.get("quote") else ""
         lines.append(f"{label}: {f.get('value')}{quote}")

@@ -61,7 +61,7 @@ def test_chat_endpoint_applies_the_rule(client, monkeypatch):
     c, svc = client
     seen = []
     real = svc.chat
-    monkeypatch.setattr(svc, "chat", lambda req: (seen.append(req.remember), real(req))[1])
+    monkeypatch.setattr(svc, "chat", lambda req, **kw: (seen.append(req.remember), real(req, **kw))[1])
     c.post("/api/chat", json={"user_id": "u9", "question": "대피소 어디야"})
     c.post("/api/chat", json={"user_id": "u9", "question": "대피소 어디야"}, headers={"Authorization": "Bearer dev:u9"})
     assert seen == [False, True]
@@ -91,3 +91,45 @@ def test_place_queries_strip_relative_words():
     assert _place_queries("구룡포수협 위판장") == ["구룡포수협 위판장", "구룡포수협"]
     assert _place_queries("구룡포초등학교 앞") == ["구룡포초등학교 앞", "구룡포초등학교"]
     assert _place_queries("구룡포시장") == ["구룡포시장"]
+
+
+def test_server_profile_is_the_source(monkeypatch):
+    """로그인 확인된 사용자는 서버 프로필(user_profiles·user_places)이 기준 (2026-10-08). 앱 값은 빈 칸만 보충,
+    기억의 프로필 항목은 프로필에 넣지 않고 문장에서도 빠진다 (메모·대화 요약만 남음)"""
+    from guardian_ai import memory as M
+    from guardian_ai import state as S
+    from guardian_ai.graph import keyword_classify
+    from guardian_ai.service import ChatRequest, ChatService
+    svc = ChatService(classifier=keyword_classify)
+    svc.user_source = lambda uid: {"available": True, "profile": {"age": 70, "occupation": "어업",
+                                                                   "home": {"lat": 35.98, "lon": 129.56, "label": "집"}}}
+    from guardian_ai.llm import MemoryFact, MemoryUpdate
+    M.save(svc.store, "u1", "c0", MemoryUpdate(facts=[
+        MemoryFact(field="age", value="50", quote="저 50살"),
+        MemoryFact(field="note", value="고양이를 키움", quote="고양이 있어요")], summary="대피소를 물음"))
+    seen = {}
+    real = svc.app.stream
+    def spy(state, *a, **kw):
+        seen["user"], seen["memory"] = state["user"], state.get("user_memory", [])
+        return real(state, *a, **kw)
+    monkeypatch.setattr(svc.app, "stream", spy)
+    svc.chat(ChatRequest(user_id="u1", question="대피소 어디야",
+                         profile=S.UserProfile(user_id="u1", age=40, has_dependents=True)), verified_uid="u1")
+    u = seen["user"]
+    assert u.age == 70 and u.occupation == "어업" and u.home.label == "집" and u.has_dependents is True
+    assert not any("50" in line for line in seen["memory"]) and any("고양이" in line for line in seen["memory"])
+
+
+def test_get_user_profile_maps_db_rows():
+    from datetime import datetime
+    from guardian_ai.tools import get_user_profile
+    rows = {"u": [{"user_type": "worker", "birth_year": 1956, "mobility": "public_transit", "walking_ability": "limited",
+                   "has_dependents": False, "occupation": " 어업 ", "vision_impaired": None, "hearing_impaired": True}],
+            "p": [{"place_type": "work", "label": "구룡포항", "lat": 35.99, "lon": 129.56},
+                  {"place_type": "home", "label": None, "lat": 35.98, "lon": 129.55}]}
+    fetch = lambda sql, params=None: rows["p" if "user_places" in sql else "u"]
+    p = get_user_profile("uid", fetch=fetch, today=datetime(2026, 10, 8))["profile"]
+    assert p["age"] == 70 and p["mobility"] == "public_transport" and p["walking_impaired"] is True
+    assert p["occupation"] == "어업" and p["hearing_impaired"] is True and "visual_impaired" not in p
+    assert p["user_type"] == "resident" and p["home"]["label"] == "집" and p["frequent_places"][0]["label"] == "구룡포항"
+    assert get_user_profile("x", fetch=lambda *a, **k: [])["available"] is False

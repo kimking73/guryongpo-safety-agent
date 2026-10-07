@@ -172,7 +172,9 @@ class AccountSync {
       if (transport != null) 'mobility': _mobility[transport] ?? 'walk',
       if (occupation.isNotEmpty) 'occupation': occupation,
       if (jobs.any((j) => j.contains('어업') || j.contains('뱃사람'))) 'owns_vessel': true,
-      if (v('보행 능력').isNotEmpty) 'walking_ability': 'limited',
+      // 보행 가능 → normal (예전엔 무엇을 골라도 limited 로 보냈다 — 2026-10-08 고침, AI가 이 값을 읽는다)
+      if (v('보행 능력').isNotEmpty)
+        'walking_ability': switch (v('보행 능력')) { '보행 가능' => 'normal', '보행 어려움' => 'unable', _ => 'limited' },
       if (v('시각 지원').isNotEmpty) 'vision_impaired': true,
       if (v('청각 지원').isNotEmpty) 'hearing_impaired': true,
     };

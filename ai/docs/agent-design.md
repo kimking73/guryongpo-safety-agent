@@ -171,7 +171,7 @@ A의 FastAPI는 앱·웹이 부르는 창구로 남고, AI는 거치지 않는�
 | `get_facilities` | kind(shelter·medical·manhole), lat, lon, limit, shelter_type | facility_id, name, lat, lon, distance_m + 종류별(대피소 종류·수용인원, 응급실 직통) | shelters, medical_facilities, manholes |
 | `get_life_safety` | lat, lon | uv·pm10·pm25 각 value·grade (미세먼지는 수집 권한 전까지 None) | v_latest_observations |
 | `get_action_guides` | disaster, phase, level, targets | `ActionGuide`와 같은 키: id, min_level, targets, priority, title, content, voice_text, source_name | action_guides (51건) |
-| `get_user_profile` | user_id | UserProfile 키 | **목업** — 지금은 앱이 요청에 프로필을 실어 보낸다 |
+| `get_user_profile` | 로그인 uid (Firebase) | {available, profile: UserProfile 키 중 서버에 있는 것} | **실제** (2026-10-08) — `users`·`user_profiles`·`user_places` (앱 계정 동기화가 채움). 채팅에서 로그인 토큰 uid = user_id 일 때 서버 프로필이 기준, 앱이 보낸 값은 빈 칸만 보충. 장기 기억의 프로필 항목(나이·직업·집 등)은 앱을 거쳐 프로필로 넘어가고, 답변 근거에는 기타 메모·대화 요약만 쓴다 |
 | `get_forecast` | lat, lon, hours=48 | periods(날짜별 최고 강수확률·강수형태·비 시간 수·1시간 최대 강수량·최대 풍속·파고), next_rain | v_latest_forecasts (기상청 초단기·단기, 구룡포 격자 2곳) |
 | `get_safe_shelters` | lat, lon, limit=8 | name, lat, lon, distance_m, is_indoor, underground, safe, excluded_reason(위험 영역 안·침수 중 지하) | shelters, risk_assessments (앱과 같은 규칙) |
 | `find_place` | query, user | available, name, lat, lon, kind(home·work·place·shelter·medical), source(user·db·kakao), address, out_of_area | profile 등록 장소, shelters·medical_facilities, 카카오 로컬 키워드 검색 |

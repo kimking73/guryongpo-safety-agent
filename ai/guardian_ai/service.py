@@ -146,7 +146,9 @@ class ChatService:
         nodes: dict[str, G.Node] = {}
         phase_of = None             # 재난 단계 판정 (실제 서비스만 — DB를 읽는다)
         self.memory_backend = "memory"
+        self.user_source = None   # 로그인 uid → 서버 프로필 (실제 서비스만; 테스트는 직접 넣는다)
         if classifier is None:
+            self.user_source = lambda uid: T.get_user_profile(uid)
             # 키가 없는 테스트 환경에서 import 오류를 피하려고 여기서 import 한다
             from .action import decide_phase, make_action_advisor
             from .flood import make_rain_flood_agent
@@ -208,18 +210,27 @@ class ChatService:
             self._active[cid] = (user_id, now)
         return cid
 
-    def chat(self, req: ChatRequest) -> ChatResponse:
+    def chat(self, req: ChatRequest, verified_uid: str | None = None) -> ChatResponse:
+        """verified_uid: 로그인 토큰으로 확인한 본인 uid (api.py). 있으면 서버 프로필을 기준으로 답한다."""
         conversation_id = self._open_conversation(req.conversation_id, req.user_id)
         config = {"configurable": {"thread_id": conversation_id}}
         history = self.app.get_state(config).values.get("history", [])
 
+        # 사용자 정보 = 서버 프로필(users·user_profiles·user_places)이 기준 (2026-10-08 사용자 결정: 프로필 하나를 기준으로).
+        # 앱이 보낸 값은 서버에 아직 없는 칸만 보충한다 (계정 동기화 1초 지연 등). 서버 프로필이 없으면 앱 값 + 기억
         profile = req.profile or S.UserProfile(user_id=req.user_id)
+        server = self.user_source(verified_uid) if verified_uid and self.user_source else None
+        if server and server.get("available"):
+            known = S.UserProfile.model_validate({"user_id": req.user_id, **server["profile"]})
+            profile = profile.model_copy(update={k: getattr(known, k) for k in server["profile"]})
         memory: list[str] = []
         if req.remember:
             try:
                 facts, episodes = M.load(self.store, req.user_id)
-                profile = M.apply_to_profile(profile, facts)
-                memory = M.memory_lines(facts, episodes)
+                use_server = bool(server and server.get("available"))
+                if not use_server:
+                    profile = M.apply_to_profile(profile, facts)
+                memory = M.memory_lines(facts, episodes, include_profile_facts=not use_server)
             except Exception:  # noqa: BLE001 — 기억을 못 읽어도 답은 한다
                 logger.exception("사용자 기억 불러오기 실패")
 

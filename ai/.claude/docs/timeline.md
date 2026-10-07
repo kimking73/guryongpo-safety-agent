@@ -255,3 +255,4 @@ B와 맞물리는 새 A·C 작업: A12(15–16 대피 응답 API, B12·B13 선�
   서버 지킴이 테스트 `server/tests/test_demo_scenario.py` (server 207 passed). AI 결함 #8 완화(지시문·근거) + 분류기 '대피소' 목적지 제외 + AI 근거에서 '[시연]' 표시 제거
   → 시연 질문 7/7. 도중 로컬 OrbStack 멈춤(메모리 부족 추정) → `orbctl restart docker` 뒤 스스로 회복, DB 유지. 로컬 DB 시드가 오래돼 demo 영역 500 → `docker compose run --rm loader`로 해결.
   배포(6dc0f1f·214752e): VM 시연 장면 5개 로컬과 같은 값. AI 시연 질문은 지시문만으로 5/7 → `flood.strip_deferrals`(남의 주제 '확인 불가' 문장 제거) 뒤 **VM 7/7, 재시도 0, 답 10~16초**. 웹앱은 바뀐 것 없음(push_web 안 함).
+- 2026-10-08: 프로필 단일 기준화(사용자 결정) — `tools.get_user_profile` 실제 구현(users·user_profiles·user_places, 로그인 uid), 채팅에서 토큰 uid = user_id 면 서버 프로필이 기준·앱 값은 빈 칸 보충, 장기 기억은 메모·대화 요약만 근거로(프로필 항목은 앱을 거쳐 프로필로). 앱 계정 동기화 보행 능력 버그 수정(무엇을 골라도 limited → 가능 normal·어려움 unable). ai_memory 보강은 사용자가 나중으로 미룸. AI 185 passed.

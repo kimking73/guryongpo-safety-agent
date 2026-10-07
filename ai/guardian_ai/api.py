@@ -87,7 +87,13 @@ def delete_memory(user_id: str, service: ChatService = Depends(get_service)) -> 
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(req: ChatRequest, service: ChatService = Depends(get_service),
          authorization: str | None = Header(default=None)) -> ChatResponse:
-    return service.chat(_remember_only_signed_in(req, authorization))
+    return service.chat(_remember_only_signed_in(req, authorization), **_verified(req, authorization))
+
+
+def _verified(req: ChatRequest, authorization: str | None) -> dict:
+    """로그인 토큰의 uid 가 요청의 user_id 와 같을 때만 서버 프로필을 기준으로 쓰게 한다 (남의 프로필을 못 읽게)"""
+    uid = signed_in_uid(authorization)
+    return {"verified_uid": uid} if uid and uid == req.user_id else {}
 
 
 def _remember_only_signed_in(req: ChatRequest, authorization: str | None) -> ChatRequest:
@@ -145,7 +151,7 @@ def voice(audio: UploadFile = File(...), user_id: str = Form(...), conversation_
         user_id=user_id, question=transcript, conversation_id=conversation_id, remember=remember, demo=demo,
         current_location=S.Location(lat=lat, lon=lon) if lat is not None and lon is not None else None,
         profile=S.UserProfile.model_validate_json(profile) if profile else None)
-    res = service.chat(_remember_only_signed_in(req, authorization))
+    res = service.chat(_remember_only_signed_in(req, authorization), **_verified(req, authorization))
     t1 = _t.perf_counter()
     try:
         audio_b64 = base64.b64encode(google.tts(res.voice_text or res.answer)).decode()

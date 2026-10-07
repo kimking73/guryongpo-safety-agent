@@ -576,13 +576,57 @@ def get_life_safety(lat: float, lon: float, fetch: Fetch | None = None) -> dict[
     return out
 
 
-def get_user_profile(user_id: str) -> dict[str, Any]:
-    """사용자 정보 (테이블: users). UserProfile 모델과 같은 키."""
-    return {
-        "user_id": user_id, "user_type": "resident",
-        "home": {"lat": 35.9905, "lon": 129.5560, "label": "집"},
-        "age": 67, "mobility": "walk", "occupation": "어업(선박 보유)",
-    }
+# 사용자 프로필 (서버 기준, 2026-10-08 — 사용자 결정: 프로필을 하나의 기준으로). 앱이 계정 동기화로 올린 값이다
+USER_PROFILE_SQL = """
+SELECT u.id::text AS user_id, p.user_type::text AS user_type, p.birth_year, p.mobility::text AS mobility,
+       p.walking_ability::text AS walking_ability, p.has_dependents, p.occupation, p.vision_impaired, p.hearing_impaired
+FROM users u LEFT JOIN user_profiles p ON p.user_id = u.id
+WHERE u.firebase_uid = %(uid)s
+"""
+USER_PLACES_SQL = """
+SELECT pl.place_type::text AS place_type, pl.label, ST_Y(pl.geom) AS lat, ST_X(pl.geom) AS lon
+FROM user_places pl JOIN users u ON u.id = pl.user_id
+WHERE u.firebase_uid = %(uid)s
+ORDER BY pl.created_at
+"""
+_MOBILITY_DB = {"walk": "walk", "car": "car", "wheelchair": "wheelchair", "public_transit": "public_transport"}
+
+
+def get_user_profile(uid: str, fetch: Fetch | None = None, today: datetime | None = None) -> dict[str, Any]:
+    """로그인 uid(Firebase) → 서버에 저장된 사용자 프로필 (테이블: users·user_profiles·user_places, 앱 계정 동기화가 채움).
+
+    반환: {"available": True, "profile": {UserProfile 필드 중 서버에 있는 것}} — 칸이 비어 있으면 빼서, 부르는 쪽이
+    앱이 보낸 값으로 보충할 수 있게 한다. 사용자가 없으면 available=False(reason). 사용: ChatService (모든 agent 공통)
+    """
+    try:
+        rows = _query(fetch, USER_PROFILE_SQL, {"uid": uid})
+        places = _query(fetch, USER_PLACES_SQL, {"uid": uid}) if rows else []
+    except Exception as e:  # noqa: BLE001
+        return _unavailable("user_profiles", e)
+    if not rows:
+        return {"available": False, "reason": "서버에 사용자 없음", "source": "user_profiles"}
+    r = rows[0]
+    out: dict[str, Any] = {}
+    if r.get("user_type"):            # 구룡포 근무자(worker)는 지리를 아는 주민으로 본다
+        out["user_type"] = "tourist" if r["user_type"] == "tourist" else "resident"
+    if r.get("birth_year"):
+        out["age"] = (today or datetime.now(KST)).year - int(r["birth_year"])
+    if r.get("mobility") in _MOBILITY_DB:
+        out["mobility"] = _MOBILITY_DB[r["mobility"]]
+    if r.get("walking_ability"):
+        out["walking_impaired"] = r["walking_ability"] != "normal"
+    for k in ("has_dependents", "vision_impaired", "hearing_impaired"):
+        if r.get(k) is not None:
+            out["visual_impaired" if k == "vision_impaired" else k] = bool(r[k])
+    if (r.get("occupation") or "").strip():
+        out["occupation"] = r["occupation"].strip()
+    home = next((pl for pl in places if pl["place_type"] == "home"), None)
+    if home:
+        out["home"] = {"lat": float(home["lat"]), "lon": float(home["lon"]), "label": home["label"] or "집"}
+    others = [{"lat": float(pl["lat"]), "lon": float(pl["lon"]), "label": pl["label"]} for pl in places if pl is not home]
+    if others:
+        out["frequent_places"] = others
+    return {"available": True, "profile": out, "source": "user_profiles"}
 
 
 def request_route(

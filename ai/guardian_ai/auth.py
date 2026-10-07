@@ -4,7 +4,7 @@
 - API_AUTH_MODE=dev 면 'Bearer dev:<uid>' 도 통과 (로컬·테스트). 배포 VM 은 firebase.
 - 그 밖에는 Firebase ID 토큰을 Google 공개키로 검증한다 (google-auth — 음성 기능 때문에 이미 쓰는 라이브러리, firebase_admin 불필요).
   프로젝트 id = FIREBASE_PROJECT_ID, 없으면 FIREBASE_CREDENTIALS(서비스 계정 json, compose 가 ./secrets 를 /srv/secrets 로 연결)의 project_id.
-지금은 '내 기억' API(/api/ai/me/memory)만 쓴다. 채팅은 예전처럼 요청 본문의 user_id 를 쓴다.
+'내 기억' API(/api/ai/me/memory)와 채팅에서 쓴다: 채팅은 토큰 uid 가 요청의 user_id 와 같을 때만 기억을 저장하고 서버 프로필을 기준으로 삼는다.
 """
 
 from __future__ import annotations

@@ -36,6 +36,13 @@ void main() {
     expect(p['birth_year'], 1981);
   });
 
+  test('보행 능력: 보행 가능 → normal, 보행 어려움 → unable (AI가 서버 프로필을 읽는다, 2026-10-08)', () async {
+    for (final (choice, want) in [('보행 가능', 'normal'), ('보행 불편', 'limited'), ('보행 어려움', 'unable')]) {
+      final prefs = await prefsWith({'optional_profile': jsonEncode({'보행 능력': choice})});
+      expect(AccountSync.profilePatch(prefs)['walking_ability'], want, reason: choice);
+    }
+  });
+
   test('아무것도 입력 안 했으면 보낼 칸 없음', () async {
     final prefs = await prefsWith({});
     expect(AccountSync.profilePatch(prefs), isEmpty);
