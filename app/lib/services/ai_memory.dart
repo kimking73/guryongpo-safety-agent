@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:dio/dio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'account_service.dart';
 import 'api_client.dart';
 import 'app_config.dart';
@@ -8,11 +10,13 @@ import 'demo_mode.dart';
 /// AI가 기억한 사용자 정보 → 앱 프로필 (2026-10-07).
 ///
 /// AI는 대화에서 사용자가 자기에 대해 직접 말한 것(나이·보행 불편·이동 수단 등)을 장기 기억에 남긴다
-/// (ai/guardian_ai/memory.py). 여기서 로그인한 본인 기억(GET /api/ai/me/memory)을 받아
-///   - 프로필 칸이 비어 있으면 자동으로 채우고
-///   - 이미 다른 값이 있으면 덮어쓰지 않고 '프로필과 다름'으로 보여 사용자가 고르게 한다 (AiMemoryCard).
+/// (ai/guardian_ai/memory.py). 여기서 로그인한 본인 기억(GET /api/ai/me/memory)을 받아 '가장 최근 값'으로 맞춘다:
+///   - 프로필 칸이 비어 있으면 채운다
+///   - 새로 생기거나 바뀐 기억(updated_at 이 지난번 반영과 다름)이면 프로필 값이 달라도 덮어쓴다 (사용자 요청)
+///   - 이미 반영한 기억인데 프로필이 다르면 = 그 뒤에 사용자가 프로필을 직접 고친 것 → 유지하고 [반영]만 보여 준다
+/// 반영 기록은 'ai_memory_applied' ({기억 키: updated_at}, 계정 동기화 항목).
 /// 프로필 값이 AI 요청에서 항상 우선이므로(앱이 보낸 값 > 기억), 프로필에 들어가야 경로·답에 확실히 쓰인다.
-enum AiMemoryStatus { same, filled, differs, noField }
+enum AiMemoryStatus { same, filled, overwritten, differs, noField }
 
 class AiMemoryItem {
   const AiMemoryItem({
@@ -67,31 +71,10 @@ class AiMemoryService {
       return const [];
     }
     final profile = await _profileValues();
-    final fill = <String, String>{};
-    final items = <AiMemoryItem>[];
-    for (final e in facts.entries) {
-      final f = (e.value as Map).cast<String, dynamic>();
-      final mapped = memoryToProfile(e.key, '${f['value'] ?? ''}');
-      final quote = '${f['quote'] ?? ''}';
-      if (mapped == null) {
-        items.add(AiMemoryItem(
-            key: e.key, label: factLabel(e.key), value: '${f['value'] ?? ''}', quote: quote,
-            status: AiMemoryStatus.noField));
-        continue;
-      }
-      final (pk, pv) = mapped;
-      final cur = (profile[pk] ?? '').trim();
-      final status = cur.isEmpty
-          ? AiMemoryStatus.filled
-          : _same(pk, cur, pv)
-              ? AiMemoryStatus.same
-              : AiMemoryStatus.differs;
-      if (status == AiMemoryStatus.filled) fill[pk] = pv;
-      items.add(AiMemoryItem(
-          key: e.key, label: factLabel(e.key), value: pv, quote: quote, status: status,
-          profileKey: pk, profileValue: pv, current: cur.isEmpty ? null : cur));
-    }
+    final applied = await _applied();
+    final (items, fill) = planMemorySync(facts, profile, applied);   // applied 도 이 안에서 갱신
     if (fill.isNotEmpty) await _save(fill);
+    await _saveApplied(applied);
     return items;
   }
 
@@ -100,7 +83,7 @@ class AiMemoryService {
     final k = item.profileKey, v = item.profileValue;
     if (k == null || v == null) return;
     final cur = (await _profileValues())[k] ?? '';
-    await _save({k: k == '자주 방문하는 장소' && cur.trim().isNotEmpty ? '$cur, $v' : v});
+    await _save({k: mergedProfileValue(k, cur, v)});
   }
 
   /// 기억에서 지우기 (AI가 다음 대화부터 쓰지 않는다)
@@ -138,8 +121,22 @@ class AiMemoryService {
     await _account.saveOptionalProfile({...await _account.optionalProfile(), ...values});
   }
 
-  static bool _same(String key, String cur, String v) =>
-      key == '자주 방문하는 장소' ? cur.contains(v) : cur == v;
+
+  static const _appliedKey = 'ai_memory_applied';
+
+  Future<Map<String, String>> _applied() async {
+    final raw = (await SharedPreferences.getInstance()).getString(_appliedKey);
+    if (raw == null) return {};
+    try {
+      return (jsonDecode(raw) as Map).map((k, v) => MapEntry('$k', '$v'));
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<void> _saveApplied(Map<String, String> applied) async {
+    await (await SharedPreferences.getInstance()).setString(_appliedKey, jsonEncode(applied));
+  }
 }
 
 const _factLabels = {
@@ -189,4 +186,46 @@ bool _yes(String v) => const ['true', '1', 'yes', '예'].contains(v.trim().toLow
     default:
       return null;
   }
+}
+
+bool _same(String key, String cur, String v) => key == '자주 방문하는 장소' ? cur.contains(v) : cur == v;
+
+/// 자주 가는 곳은 덧붙이고, 나머지는 바꾼다
+String mergedProfileValue(String key, String cur, String v) =>
+    key == '자주 방문하는 장소' && cur.trim().isNotEmpty ? '$cur, $v' : v;
+
+/// 기억(facts: 키 → {value, quote, updated_at}) + 지금 프로필 + 반영 기록 → (항목별 상태, 프로필에 쓸 값).
+/// 가장 최근 값이 이긴다: 빈 칸 채움 · 새로 말한 기억은 덮어씀 · 반영 뒤 사용자가 직접 고친 값은 유지. applied 를 갱신한다
+(List<AiMemoryItem>, Map<String, String>) planMemorySync(
+    Map<String, dynamic> facts, Map<String, String> profile, Map<String, String> applied) {
+  final fill = <String, String>{};
+  final items = <AiMemoryItem>[];
+  for (final e in facts.entries) {
+    final f = (e.value as Map).cast<String, dynamic>();
+    final mapped = memoryToProfile(e.key, '${f['value'] ?? ''}');
+    final quote = '${f['quote'] ?? ''}';
+    final stamp = '${f['updated_at'] ?? ''}';
+    if (mapped == null) {
+      items.add(AiMemoryItem(
+          key: e.key, label: factLabel(e.key), value: '${f['value'] ?? ''}', quote: quote,
+          status: AiMemoryStatus.noField));
+      continue;
+    }
+    final (pk, pv) = mapped;
+    final cur = (profile[pk] ?? '').trim();
+    final status = cur.isEmpty
+        ? AiMemoryStatus.filled
+        : _same(pk, cur, pv)
+            ? AiMemoryStatus.same
+            : applied[e.key] != stamp
+                ? AiMemoryStatus.overwritten     // 새로 말한 내용 → 덮어씀
+                : AiMemoryStatus.differs;        // 반영한 뒤 사용자가 프로필을 직접 고침 → 유지
+    if (status == AiMemoryStatus.filled) fill[pk] = pv;
+    if (status == AiMemoryStatus.overwritten) fill[pk] = mergedProfileValue(pk, cur, pv);
+    if (status != AiMemoryStatus.differs) applied[e.key] = stamp;
+    items.add(AiMemoryItem(
+        key: e.key, label: factLabel(e.key), value: pv, quote: quote, status: status,
+        profileKey: pk, profileValue: pv, current: cur.isEmpty ? null : cur));
+  }
+  return (items, fill);
 }

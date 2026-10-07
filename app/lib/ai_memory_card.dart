@@ -27,7 +27,7 @@ class _AiMemoryCardState extends ConsumerState<AiMemoryCard> {
     final r = await service.sync();
     if (!mounted) return;
     setState(() => items = r);
-    if (r.any((i) => i.status == AiMemoryStatus.filled)) _profileChanged();
+    if (r.any((i) => i.status == AiMemoryStatus.filled || i.status == AiMemoryStatus.overwritten)) _profileChanged();
   }
 
   void _profileChanged() => ref.read(profileRevision.notifier).state++;
@@ -49,7 +49,7 @@ class _AiMemoryCardState extends ConsumerState<AiMemoryCard> {
           ]),
           Text(
               service.available
-                  ? 'AI 대화에서 직접 말씀하신 내용입니다. 비어 있는 프로필 칸은 자동으로 채우고, 다른 값이 있으면 고르실 수 있습니다.'
+                  ? 'AI 대화에서 직접 말씀하신 내용입니다. 새로 말씀하신 내용은 프로필에 바로 반영합니다. 그 뒤에 프로필을 직접 고치시면 고친 값을 유지합니다.'
                   : '로그인하면 AI 대화에서 말씀하신 내용(나이·보행·이동 수단 등)이 여기에 나타나고 프로필에 반영됩니다.',
               style: Theme.of(c).textTheme.bodySmall),
           const SizedBox(height: 6),
@@ -66,7 +66,8 @@ class _AiMemoryCardState extends ConsumerState<AiMemoryCard> {
     final (tag, color) = switch (i.status) {
       AiMemoryStatus.same => ('프로필에 반영됨', Colors.green.shade700),
       AiMemoryStatus.filled => ('빈 칸에 채움', Colors.green.shade700),
-      AiMemoryStatus.differs => ('프로필과 다름', Colors.deepOrange),
+      AiMemoryStatus.overwritten => ('최근 대화 내용으로 바꿈', Colors.green.shade700),
+      AiMemoryStatus.differs => ('프로필에서 직접 바꾼 값을 유지', Colors.deepOrange),
       AiMemoryStatus.noField => ('참고용 (프로필 칸 없음)', Colors.blueGrey),
     };
     return Padding(
@@ -80,7 +81,11 @@ class _AiMemoryCardState extends ConsumerState<AiMemoryCard> {
           ])),
           if (i.quote.isNotEmpty)
             Text('말씀하신 내용: "${i.quote}"', style: const TextStyle(fontSize: 12, color: Colors.black54)),
-          Text(i.status == AiMemoryStatus.differs ? '$tag · 지금 프로필: ${i.current}' : tag,
+          Text(switch (i.status) {
+                AiMemoryStatus.differs => '$tag · 지금 프로필: ${i.current}',
+                AiMemoryStatus.overwritten => '$tag (이전 프로필: ${i.current})',
+                _ => tag,
+              },
               style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w600)),
         ])),
         if (i.status == AiMemoryStatus.differs)

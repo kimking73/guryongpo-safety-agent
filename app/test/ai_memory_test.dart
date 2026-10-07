@@ -27,4 +27,25 @@ void main() {
     await acc.saveOptionalProfile({'보행 능력': '보행 불편'});
     expect(await acc.walkingImpaired(), isTrue);
   });
+
+  test('가장 최근 값이 이긴다: 새 기억은 덮어쓰고, 반영 뒤 직접 고친 값은 유지', () {
+    Map<String, dynamic> facts(String age, String at) => {'age': {'value': age, 'quote': '$age살', 'updated_at': at}};
+    final applied = <String, String>{};
+    // 1) 프로필 30 · 새 기억 50 → 덮어씀
+    var (items, fill) = planMemorySync(facts('50', 't1'), {'age': '30'}, applied);
+    expect(items.single.status, AiMemoryStatus.overwritten);
+    expect(fill, {'age': '50'});
+    // 2) 그 뒤 사용자가 프로필을 40으로 직접 고침 · 기억은 그대로(t1) → 유지
+    (items, fill) = planMemorySync(facts('50', 't1'), {'age': '40'}, applied);
+    expect(items.single.status, AiMemoryStatus.differs);
+    expect(fill, isEmpty);
+    // 3) 대화에서 다시 말함 (t2) → 덮어씀
+    (items, fill) = planMemorySync(facts('51', 't2'), {'age': '40'}, applied);
+    expect(items.single.status, AiMemoryStatus.overwritten);
+    expect(fill, {'age': '51'});
+    // 빈 칸은 채움, 자주 가는 곳은 덧붙임
+    (items, fill) = planMemorySync({'frequent_place:시장': {'value': '시장', 'updated_at': 't3'}},
+        {'자주 방문하는 장소': '항구'}, applied);
+    expect(fill, {'자주 방문하는 장소': '항구, 시장'});
+  });
 }

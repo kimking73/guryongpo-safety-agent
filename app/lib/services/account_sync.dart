@@ -19,6 +19,7 @@ class AccountSync {
   /// 계정을 따라가는 기기 저장 항목 (AccountService 키)
   static const syncedKeys = [
     'profile_age', 'profile_transport', 'profile_setup_complete', 'optional_profile', 'saved_places', _placeIdsKey,
+    'ai_memory_applied',   // AI 기억을 프로필에 반영한 기록 (services/ai_memory.dart) — 다른 기기에서 같은 기억을 다시 덮어쓰지 않게
   ];
   static const _dirtyKey = 'account_sync_dirty';
   /// 앱 장소 → 서버 장소 id·내용 지문 ({"home": {"id": "...", "fp": "..."}, "saved:123": …}). 통째 저장에 함께 실어 다른 기기에서도 중복 등록 안 함
