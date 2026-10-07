@@ -117,6 +117,8 @@ def collect_landslide(state: GuardianState, fetch: Fetch | None = None) -> Colle
                                        value=z["distance_m"], unit="m"))
             d.facts["zone"] = z["distance_m"]
         else:
+            # 반경을 숫자 근거로도 둔다 — 키에만 있으면 "1000m 안에 없음"이 숫자 검사에 걸려 답이 막혔다 (2026-10-07, 결함 #8)
+            d.evidence.append(Evidence(source="hazard_zones", key="산사태 취약지역 확인 반경", value=ZONE_RADIUS_M, unit="m"))
             d.evidence.append(Evidence(source="hazard_zones", key=f"반경 {ZONE_RADIUS_M}m 안 산사태 취약지역", value="없음"))
 
     rain = T.get_observations("rain", lat, lon, fetch=fetch) if risk.get("available") else {"available": False}

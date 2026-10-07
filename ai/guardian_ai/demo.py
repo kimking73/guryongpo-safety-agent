@@ -133,15 +133,24 @@ def observation_rows(features: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+# 서버 시연 문구 앞의 "[시연] " 표시. 앱 화면용이라 AI 근거에서는 뗀다 — 남기면 답이 그 표시를 빼고 말할 때마다
+# 내용 검사가 "시연 정보를 실제처럼 말함"으로 막았다 (2026-10-07). 시연 중이라는 것은 앱 시연 모드 표시가 알린다.
+DEMO_MARK = "[시연] "
+
+
+def _unmark(text: str | None) -> str | None:
+    return text.replace(DEMO_MARK, "").strip() if text else text
+
+
 def warning_rows(widget: dict[str, Any]) -> list[dict[str, Any]]:
     return [{"hazard": w["hazard"], "level": w["level"], "region_name": w.get("region_name") or "포항시",
              "issued_at": w.get("issued_at"), "effective_at": w.get("issued_at"), "released_at": None,
-             "headline": w.get("label")} for w in widget.get("items", [])]
+             "headline": _unmark(w.get("label"))} for w in widget.get("items", [])]
 
 
 def message_rows(widget: dict[str, Any]) -> list[dict[str, Any]]:
     return [{"sent_at": m["sent_at"], "sender": m.get("sender"), "region_name": "포항시", "category": None, "hazard": None,
-             "alert_class": m.get("alert_class"), "message": m["message"]} for m in widget.get("items", [])]
+             "alert_class": m.get("alert_class"), "message": _unmark(m["message"])} for m in widget.get("items", [])]
 
 
 def forecast_rows(forecast: dict[str, Any], wave: dict[str, Any]) -> list[dict[str, Any]]:

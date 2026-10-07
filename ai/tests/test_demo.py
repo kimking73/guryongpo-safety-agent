@@ -63,8 +63,8 @@ def test_rows_follow_demo_endpoints():
     assert set(obs) == {(22, "rain_1h"), (22, "wind_speed"), (21, "uv_index")}   # temp는 쓰지 않는 지표, 23은 시나리오와 겹침
     assert obs[(22, "rain_1h")]["unit"] == "mm" and obs[(22, "rain_1h")]["quality"] == "simulated"
     assert obs[(21, "uv_index")]["quality"] is None
-    assert rows["warnings"][0]["headline"] == "[시연] 포항시 호우경보" and rows["warnings"][0]["released_at"] is None
-    assert rows["messages"][0]["message"] == "[시연] 호우경보 발효"
+    assert rows["warnings"][0]["headline"] == "포항시 호우경보" and rows["warnings"][0]["released_at"] is None
+    assert rows["messages"][0]["message"] == "호우경보 발효"
     cats = {(r["grid_nx"], r["category"]) for r in rows["forecasts"]}
     assert cats == {(nx, c) for nx in (105, 106) for c in ("POP", "PTY", "PCP", "WSD", "WAV")}
 

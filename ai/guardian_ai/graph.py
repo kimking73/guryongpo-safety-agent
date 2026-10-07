@@ -108,7 +108,8 @@ def keyword_classify(state: GuardianState) -> list[Specialist]:
 # 분류기(LLM)가 실패했을 때 목적지·보행 불편을 뽑는 규칙. LLM 결과가 있으면 그쪽을 쓴다.
 _DEST_RE = re.compile(r"([0-9A-Za-z가-힣·]+?)(?:까지|에|으로|로)\s*(?:어떻게|걸어서|가|갈|걸|이동|대피)")
 # 장소가 아닌 말 ("대피소로 가"는 가까운 대피소 안내와 같다)
-_NOT_PLACE = {"대피소", "대피", "안전한", "어디", "여기", "거기", "그쪽", "밖", "어디로", "빨리", "지금", "걸어서"}
+_NOT_PLACE = {"대피소", "대피", "안전한", "어디", "여기", "거기", "그쪽", "밖", "어디로", "빨리", "지금", "걸어서",
+              "대피 장소", "대피장소", "가까운 대피소", "안전한 곳", "안전한 장소", "대피할 곳"}
 _MOBILITY_WORDS = ("무릎", "다리가", "다리를", "지팡이", "휠체어", "거동", "걷기 힘", "걷기가 힘", "잘 못 걸", "보행이")
 
 
@@ -279,7 +280,8 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
         return {
             **turn,                         # 새 질문이면 초기화 값들, 재시도면 아무것도 없음
             **user_update,
-            "destination_query": destination or None,
+            # 분류기도 "대피소" 같은 일반 단어를 목적지로 뽑는다 → 장소 검색이 실패해 "요청하신 '대피소'는 찾지 못해"라고 답했다 (2026-10-07)
+            "destination_query": destination if destination and destination.strip() not in _NOT_PLACE else None,
             "can_move": can_move,
             "damage": damage,
             "phase": _phase(view),          # 특보·위험 판정으로 (action.decide_phase), 없으면 '재난 중'

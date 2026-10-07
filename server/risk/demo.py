@@ -1,7 +1,7 @@
 """시연 모드 데이터 (2026-10-05) — 실제 센서 위치 그대로, 측정값만 시나리오 값으로 바꿔 실측과 같은 규칙으로 판정.
 
 - 센서: DB stations (포항 DT 수위계·맨홀·강우량계·대기 센서, 구룡포 AWS)의 실제 좌표·이름
-- 값  : SCENARIO (호우·침수 + 강풍). 포항 DT 수위계 값은 /internal/simulate heavy_rain_flood 와 같다
+- 값  : 호우·침수 + 강풍. 포항 DT 수위계 값은 DEMO_DT (항구 저지대 침수, /internal/simulate 와 따로)
 - 판정: engine.evaluate(침수·DT 강우) · hazards.evaluate_heavy_rain / evaluate_strong_wind / evaluate_landslide
         — 실측 판정과 같은 함수·같은 risk_rules (반경 100/150/300/500m, 15cm 기준 등)
 - 저장하지 않는다: observations·risk_assessments·경고(A5)는 그대로 → 실측 모드·실제 사용자·선제 경고에 영향 없음
@@ -16,13 +16,30 @@ from typing import Optional
 
 from app import db
 from . import engine, hazards, queries
-from .simulate import HEAVY_RAIN_FLOOD
 
 KST = timezone(timedelta(hours=9))
 SCENARIO_NAME = "호우·침수 + 강풍 (시연)"
 LEVELS = ["normal", "watch", "advisory", "warning", "critical"]
 UNITS = {"flood_depth": "mm", "manhole_level": "mm", "river_level": "mm", "rain_1h": "mm"}
 
+# 포항 DT 시연 값 (external_id → 지표, 값, DT 등급). /internal/simulate heavy_rain_flood 와 따로 둔다 (2026-10-07).
+# 그 값(구룡포교 주의·수협 경보 등)은 시가지 → 동쪽 대피소로 가는 유일한 해안 도로와 하천 다리를 막아 1km 대피에 5km를 돌았다.
+# 산사태(호우경보 × 산사태위험지도 1·2등급 100m)는 그대로 두고, 침수를 기능이 보이게 배치 (scratchpad 측정, 시연 안내는 server/README):
+#   - 환승센터 경보(300m): 항구에 있는 사람이 위험 영역 안 → 대피 안내, 지하 대피소 제외, 해안 도로로 구룡포중학교 앞까지 1.2km
+#   - 하나과메기 지표면 주의(150m): 읍사무소 서쪽 → 하정축양장 앞 공터 경로가 이 구역을 피해 약 500m 돌아감 (회피 장면)
+#   - 나머지는 보통(100m, 지도에만 단계 표시 — 경로·대피소 판단은 주의 이상)
+DEMO_DT = {
+    "10": ("flood_depth", 230, 4),     # 구룡포환승센터 지표면 — 23cm, 경보
+    "7":  ("flood_depth", 120, 3),     # 하나과메기 지표면 — 12cm, 주의
+    "2":  ("manhole_level", 0, 2),     # 하나과메기 스마트맨홀 — 보통 (value 는 판단 미사용)
+    "11": ("flood_depth", 60, 2),      # 구룡포수협 지표면 — 보통
+    "4":  ("manhole_level", 0, 2),     # 구룡포수협 스마트맨홀 — 보통
+    "9":  ("flood_depth", 60, 2),      # 해양경찰서 지표면 — 보통
+    "8":  ("flood_depth", 30, 2),      # 구룡포파출소 지표면 — 보통
+    "3":  ("manhole_level", 0, 1),     # 로터리종합건재 스마트맨홀 — 정상
+    "1":  ("river_level", 1200, 2),    # 구룡포교 하천 — 보통 (다리는 열어 둔다)
+    "5":  ("rain_1h", 38.5, 4),        # 행정복지센터 강우량계 — 경보 (호우경보와 같은 단계)
+}
 # 구룡포 AWS 시연 값: 3시간 96mm(호우경보 기준 90mm 이상) · 12시간 168mm, 평균 16.5m/s(강풍주의보 14 이상) · 순간 24m/s, 북동풍
 AWS = {"rain_1h": 41.5, "rain_3h": 96.0, "rain_12h": 168.0, "rain_day": 182.0, "rain_15m": 11.0,
        "wind_speed": 16.5, "wind_gust": 24.0, "wind_dir": 45.0, "temp": 19.2, "humidity": 97.0, "pressure_sea": 996.0}
@@ -81,9 +98,9 @@ def results() -> list[engine.Result]:
     stations = db.fetch_all(STATIONS_SQL)
     latest = []
     for s in stations:
-        if s["source_code"] != "pohang_dt" or s["external_id"] not in HEAVY_RAIN_FLOOD:
+        if s["source_code"] != "pohang_dt" or s["external_id"] not in DEMO_DT:
             continue
-        metric, value, lv = HEAVY_RAIN_FLOOD[s["external_id"]]
+        metric, value, lv = DEMO_DT[s["external_id"]]
         latest.append({"station_id": s["id"], "external_id": s["external_id"], "name": s["name"], "kind": s["kind"],
                        "lng": s["lng"], "lat": s["lat"], "metric": metric, "value": value, "unit": UNITS[metric],
                        "source_level": lv, "observed_at": now, "simulated": True})
@@ -177,8 +194,8 @@ def stations_layer(bbox: tuple[float, float, float, float]) -> dict:
         p = f["properties"]
         ext = ext_by_id.get(f["id"])
         metrics = dict(p.get("metrics") or {})
-        if p.get("source") == "pohang_dt" and ext in HEAVY_RAIN_FLOOD:
-            metric, value, lv = HEAVY_RAIN_FLOOD[ext]
+        if p.get("source") == "pohang_dt" and ext in DEMO_DT:
+            metric, value, lv = DEMO_DT[ext]
             metrics[metric] = value
             dt = layers.DT_LEVEL.get(lv)
             p.update(metric=metric, unit=UNITS[metric], value=None if p.get("kind") == "manhole" else value, source_level=lv,

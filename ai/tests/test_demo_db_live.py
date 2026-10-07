@@ -42,6 +42,6 @@ def test_observations_warnings_messages_forecast_use_demo_rows(fetch):  # noqa: 
     assert rain["available"] and [(i["metric"], i["value"]) for i in rain["items"]] == [("rain_1h", 41.5)]
     assert rain["items"][0]["simulated"] is True
     assert [i["value"] for i in uv["items"]] == [7.4]
-    assert warnings["items"][0]["headline"] == "[시연] 포항시 호우경보" and warnings["items"][0]["status"] == "active"
-    assert messages["items"][0]["text"] == "[시연] 호우경보 발효"
+    assert warnings["items"][0]["headline"] == "포항시 호우경보" and warnings["items"][0]["status"] == "active"
+    assert messages["items"][0]["text"] == "호우경보 발효"
     assert forecast["available"] is False or forecast["periods"]   # 시연 예보 시각이 지나면 비어 있을 수 있다

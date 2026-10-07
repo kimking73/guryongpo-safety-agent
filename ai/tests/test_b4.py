@@ -361,3 +361,13 @@ def test_not_confirmed_items_are_listed_by_code():
         {**tree_state(Phase.AFTER, damage="yes"), "specialist_results": [result(Specialist.RAIN_FLOOD, RiskLevel.NORMAL, "현황")]})
     assert "확인되지 않음: 통제 도로, 보험·법률 정보" in out["draft"]
 
+
+
+def test_landslide_zone_radius_is_a_number_the_checker_accepts():
+    """근처에 취약지역이 없을 때 '반경 1000m 안에 없음'이 숫자 검사에 막히지 않는다 (2026-10-07 결함 #8, 바다 위 질문)"""
+    from guardian_ai.specialists import collect_landslide
+    from guardian_ai.state import Location
+    from guardian_ai.verify import check_numbers
+    d = collect_landslide({"question": "산사태 위험 있어?", "current_location": Location(lat=35.995, lon=129.585)},
+                          fetch=lambda sql, params: [])
+    assert check_numbers("반경 1000m 안에는 산사태 취약지역이 없습니다.", d.evidence).ok

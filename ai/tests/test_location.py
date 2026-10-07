@@ -246,6 +246,15 @@ def test_manager_takes_destination_and_mobility_from_llm_classifier():
     assert out["user"].walking_impaired is True
 
 
+def test_generic_shelter_word_from_classifier_is_not_a_destination():
+    """분류기가 "대피소"를 목적지로 뽑아도 장소 검색을 하지 않는다 — 가장 가까운 안전한 대피소로 (2026-10-07 시연 질문)"""
+    parsed = Classification(agents=[Specialist.LOCATION_ROUTE], reason="경로", destination="대피소", mobility_limited=True)
+    clf = OpenAIClassifier(client=SimpleNamespace(responses=SimpleNamespace(
+        parse=lambda **kw: SimpleNamespace(output_parsed=parsed, output_text="", usage=None))), model="t")
+    out = G.make_manager(clf)({"mode": "chat", "question": "다리가 불편한데 대피소까지 얼마나 걸려?", "user": UserProfile(user_id="u1")})
+    assert out["destination_query"] is None
+
+
 def test_mobility_from_question_does_not_override_app_value():
     out = G.manager({"mode": "chat", "question": "무릎이 아파요 어디로 대피해?",
                      "user": UserProfile(user_id="u1", walking_impaired=False)})
