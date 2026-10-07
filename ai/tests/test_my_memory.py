@@ -126,13 +126,13 @@ def test_get_user_profile_maps_db_rows():
     from datetime import datetime
     from guardian_ai.tools import get_user_profile
     rows = {"u": [{"user_type": "worker", "birth_year": 1956, "mobility": "public_transit", "walking_ability": "limited",
-                   "has_dependents": False, "occupation": " 어업 ", "vision_impaired": None, "hearing_impaired": True}],
+                   "has_dependents": False, "occupation": "fisher, 수산업", "vision_impaired": None, "hearing_impaired": True}],
             "p": [{"place_type": "work", "label": "구룡포항", "lat": 35.99, "lon": 129.56},
                   {"place_type": "home", "label": None, "lat": 35.98, "lon": 129.55}]}
     fetch = lambda sql, params=None: rows["p" if "user_places" in sql else "u"]
     p = get_user_profile("uid", fetch=fetch, today=datetime(2026, 10, 8))["profile"]
     assert p["age"] == 70 and p["mobility"] == "public_transport" and p["walking_impaired"] is True
-    assert p["occupation"] == "어업" and p["hearing_impaired"] is True and "visual_impaired" not in p
+    assert p["occupation"] == "어업 종사자·뱃사람, 수산업" and p["hearing_impaired"] is True and "visual_impaired" not in p
     assert p["user_type"] == "resident" and p["home"]["label"] == "집" and p["frequent_places"][0]["label"] == "구룡포항"
     assert get_user_profile("x", fetch=lambda *a, **k: [])["available"] is False
     # DB 기본값(normal·false)은 '입력 안 함'일 수 있어 기준으로 쓰지 않는다 → 앱이 보낸 값이 남는다

@@ -589,6 +589,8 @@ FROM user_places pl JOIN users u ON u.id = pl.user_id
 WHERE u.firebase_uid = %(uid)s
 ORDER BY pl.created_at
 """
+_JOB_NAMES = {"fisher": "어업 종사자·뱃사람", "merchant": "자영업자", "farmer": "농업 종사자", "office": "직장인",
+              "student": "학생", "other": "기타"}
 _MOBILITY_DB = {"walk": "walk", "car": "car", "wheelchair": "wheelchair", "public_transit": "public_transport"}
 
 
@@ -620,8 +622,9 @@ def get_user_profile(uid: str, fetch: Fetch | None = None, today: datetime | Non
     for k in ("has_dependents", "vision_impaired", "hearing_impaired"):
         if r.get(k):
             out["visual_impaired" if k == "vision_impaired" else k] = True
-    if (r.get("occupation") or "").strip():
-        out["occupation"] = r["occupation"].strip()
+    jobs = [_JOB_NAMES.get(j.strip(), j.strip()) for j in (r.get("occupation") or "").split(",") if j.strip()]
+    if jobs:                          # 앱은 직업을 코드로 보낸다 (fisher, other …) → 답변에 쓸 한글로
+        out["occupation"] = ", ".join(jobs)
     home = next((pl for pl in places if pl["place_type"] == "home"), None)
     if home:
         out["home"] = {"lat": float(home["lat"]), "lon": float(home["lon"]), "label": home["label"] or "집"}

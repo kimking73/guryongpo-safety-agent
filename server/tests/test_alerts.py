@@ -385,3 +385,10 @@ def test_lodging_counts_as_home_for_onboarding(client, fake_db):
     assert client.get("/api/v1/user", headers=AUTH).json()["onboarding"] == {"completed": True, "missing": []}
     fake_db.rows["FROM user_places pl"] = []
     assert client.get("/api/v1/user", headers=AUTH).json()["onboarding"]["missing"] == ["home_place"]
+
+
+def test_fisher_among_several_jobs():
+    """앱은 직업 여러 개를 'fisher, other' 로 보낸다 (2026-10-08) — 그중 어업이 있으면 어업 맞춤"""
+    from alerts.messages import profile_tags
+    assert "fisher" in profile_tags({"occupation": "fisher, other"})
+    assert "fisher" not in profile_tags({"occupation": "office, 수산업자"})

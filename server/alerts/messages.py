@@ -40,7 +40,8 @@ def profile_tags(u: dict, now: Optional[datetime] = None) -> list[str]:
         tags.append("elderly")
     if u.get("walking_ability") in ("limited", "unable") or u.get("mobility") == "wheelchair":
         tags.append("walking_limited")
-    if (u.get("occupation") or "") == "fisher":
+    # 앱은 직업 여러 개를 'fisher, other' 처럼 보낸다 (2026-10-08 판단용 칸 = 화면 값)
+    if "fisher" in {j.strip() for j in (u.get("occupation") or "").split(",")}:
         tags.append("fisher")
     if u.get("owns_vessel"):
         tags.append("vessel_owner")

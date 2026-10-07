@@ -18,10 +18,13 @@ void main() {
     expect(AccountSync.profilePatch(prefs, now: DateTime(2026, 10, 5)), {
       'birth_year': 1959,
       'mobility': 'wheelchair',
-      'occupation': '어업 종사자·뱃사람, 기타',
+      'occupation': 'fisher, other',
       'owns_vessel': true,
-      'walking_ability': 'limited',
+      'walking_ability': 'normal',     // '지팡이'는 화면 선택지가 아니다 → 보통
       'vision_impaired': true,
+      'hearing_impaired': false,
+      'has_dependents': false,
+      'blood_type': null,
     });
   });
 
@@ -41,6 +44,41 @@ void main() {
       final prefs = await prefsWith({'optional_profile': jsonEncode({'보행 능력': choice})});
       expect(AccountSync.profilePatch(prefs)['walking_ability'], want, reason: choice);
     }
+  });
+
+  test('판단용 칸 = 화면 값 (2026-10-08): 필요 없음 → 아니오, 보호 동반자·혈액형, 직접 입력한 직업은 그대로', () async {
+    final prefs = await prefsWith({
+      'optional_profile': jsonEncode({
+        '시각 지원': '필요 없음', '청각 지원': '난청', '보호가 필요한 동반자 여부': '예', '혈액형': 'O+',
+        '직업': '수산업자', 'jobs': '학생',
+      }),
+    });
+    final p = AccountSync.profilePatch(prefs);
+    expect(p['vision_impaired'], false);
+    expect(p['hearing_impaired'], true);
+    expect(p['has_dependents'], true);
+    expect(p['blood_type'], 'O+');
+    expect(p['occupation'], '수산업자, student');
+    expect(p['owns_vessel'], false);
+  });
+
+  test('프로필 화면에서 지운 칸은 서버 기본값으로 되돌린다, 예전 칸 이름도 읽는다', () async {
+    final prefs = await prefsWith({'optional_profile': jsonEncode({'보호 동반자': '예', '혈액형': '모름'})});
+    final p = AccountSync.profilePatch(prefs);
+    expect(p['has_dependents'], true);
+    expect(p['blood_type'], null);
+    expect(p.containsKey('blood_type'), isTrue);
+    expect(p['occupation'], null);
+    expect(p['walking_ability'], 'normal');
+  });
+
+  test('비상 연락처 글자 → 이름·전화번호, 번호가 없으면 보내지 않음', () async {
+    var prefs = await prefsWith({'optional_profile': jsonEncode({'비상 연락처': '딸 010-1234-5678'})});
+    expect(AccountSync.desiredContact(prefs), {'name': '딸', 'phone': '010-1234-5678', 'priority': 1});
+    prefs = await prefsWith({'optional_profile': jsonEncode({'비상연락처': '01098765432'})});
+    expect(AccountSync.desiredContact(prefs)!['name'], '비상 연락처');
+    prefs = await prefsWith({'optional_profile': jsonEncode({'비상 연락처': '옆집 아주머니'})});
+    expect(AccountSync.desiredContact(prefs), isNull);
   });
 
   test('아무것도 입력 안 했으면 보낼 칸 없음', () async {
