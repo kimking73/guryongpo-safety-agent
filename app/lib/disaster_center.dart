@@ -536,8 +536,9 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
   @override
   Widget build(BuildContext context) {
     final routeMode = dashboardMode == _DashboardMode.facilities;
+    // 경로 모드(대피소·의료시설 경로)에서도 긴급 지도와 같은 침수·산사태 층을 보인다 (2026-10-07) — 경로가 무엇을 피하는지 보이게
     final visible = routeMode
-        ? <HazardKind>{}
+        ? <HazardKind>{HazardKind.flood, HazardKind.slide}
         : compositeView
             ? <HazardKind>{
                 HazardKind.flood,
@@ -659,7 +660,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                   PolygonLayer(
                       polygons: _disasterFloodPolygons(floodGrids,
                           severeOnly: compositeView)),
-                if (!routeMode && widget.riskAreas.isNotEmpty)
+                if (widget.riskAreas.isNotEmpty)
                   PolygonLayer(polygons: hazardAreaPolygons(widget.riskAreas)),
                 if (route != null && route.polylinePoints.length > 1)
                   PolylineLayer(polylines: [
@@ -685,7 +686,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                     if (visible.contains(HazardKind.flood))
                       ...floodGridDotMarkers(context, floodGrids, severeOnly: compositeView),
                     // 수위계 위치 (2026-10-07): 침수 영역 원의 중심 = 판정 원인 센서의 실제 좌표 (포항 DT 수위계·맨홀)
-                    if (!routeMode && visible.contains(HazardKind.flood))
+                    if (visible.contains(HazardKind.flood))
                       ...floodSensorMarkers(context, widget.riskAreas),
                     if (visible.contains(HazardKind.wind) && !widget.demo)
                       for (final w in widget.windPoints)
@@ -3411,7 +3412,7 @@ void _showMapLegend(BuildContext context,
           children: [
             const Text('지도 범례',
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            if (!routeMode) ...[
+            if (visible.isNotEmpty) ...[
               section('위험 영역 (면)'),
               const Text('채움색 = 위험 단계, 테두리색 = 재난 종류',
                   style: TextStyle(fontSize: 12, color: Colors.black54)),
@@ -3427,7 +3428,7 @@ void _showMapLegend(BuildContext context,
                     '호우·강풍 특보는 칠하지 않음',
                     '구룡포읍 전체에 내려져 화면을 다 덮으므로 위쪽 특보 카드로 확인'),
             ],
-            if (!routeMode && visible.contains(HazardKind.flood)) ...[
+            if (visible.contains(HazardKind.flood)) ...[
               section('수위계'),
               row(
                   Container(
@@ -3445,7 +3446,7 @@ void _showMapLegend(BuildContext context,
                   '위 침수 영역을 약 100m 칸으로 나눈 것 (경로가 피하는 범위와 같음)'),
               row(dot(_floodColor('경계')), '칸 가운데 점', '칸 위치 표시일 뿐 측정 지점이 아님 — 누르면 그 칸의 단계·출처'),
             ],
-            if (!routeMode && visible.contains(HazardKind.wind)) ...[
+            if (visible.contains(HazardKind.wind)) ...[
               section('바람'),
               row(icon(Icons.navigation, Colors.blueGrey.shade700), '화살표 방향',
                   '바람이 불어가는 쪽'),
