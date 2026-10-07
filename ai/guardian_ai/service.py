@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import re
 import time
 import uuid
 from concurrent.futures import Executor, ThreadPoolExecutor
@@ -292,11 +293,28 @@ class ChatService:
             logger.exception("사용자 기억 저장 실패")
 
 
-def _locate_place(text: str) -> dict | None:
-    """기억할 집 주소·자주 가는 곳 → 좌표 (카카오 장소 검색, tools.find_place). 구룡포 일대 밖이거나 못 찾으면 None"""
-    from . import tools as T
-    found = T.find_place(text)
-    if not found.get("available") or found.get("out_of_area"):
-        return None
-    return {"lat": found["lat"], "lon": found["lon"], "address": found.get("address") or found.get("name")}
+# 사람이 말한 위치 표현 ("구룡포시장 바로 뒤", "수협 앞") — 떼고 그 장소로 찾는다 (좌표는 그 장소 기준의 근사치)
+_RELATIVE = re.compile(r"\s*(바로\s*)?(뒤|뒷편|앞|앞쪽|옆|근처|부근|인근|건너편|맞은편|쪽|위쪽|아래쪽)$")
 
+
+def _place_queries(text: str) -> list[str]:
+    """검색해 볼 형태들: 원문 → 위치 표현을 뗀 것 → 마지막 단어를 뗀 것 ("구룡포수협 위판장" → "구룡포수협")"""
+    t = (text or "").strip()
+    out = [t]
+    bare = _RELATIVE.sub("", t).strip()
+    out.append(bare)
+    words = bare.split()
+    if len(words) > 1:
+        out.append(" ".join(words[:-1]))
+    return [q for i, q in enumerate(out) if q and q not in out[:i]]
+
+
+def _locate_place(text: str) -> dict | None:
+    """기억할 집 주소·자주 가는 곳 → 좌표 (카카오 장소 검색, tools.find_place). 여러 형태로 찾아 보고(_place_queries),
+    구룡포 일대 밖 결과는 버린다 (2026-10-08: "구룡포수협 위판장"이 호미곶 위판장으로 잡혔다). 못 찾으면 None"""
+    from . import tools as T
+    for q in _place_queries(text):
+        found = T.find_place(q)
+        if found.get("available") and not found.get("out_of_area"):
+            return {"lat": found["lat"], "lon": found["lon"], "address": found.get("address") or found.get("name")}
+    return None

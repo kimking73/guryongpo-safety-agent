@@ -82,3 +82,12 @@ def test_place_facts_keep_coordinates():
            locate=lambda t: None)
     facts, _ = M.load(store, "u1")
     assert facts["home_address"]["value"] == "호미로 152" and "lat" not in facts["home_address"]
+
+
+def test_place_queries_strip_relative_words():
+    """사람이 말한 위치 표현을 떼고, 그래도 안 되면 마지막 단어를 떼서 찾는다 (2026-10-08 실측 예)"""
+    from guardian_ai.service import _place_queries
+    assert _place_queries("구룡포시장 바로 뒤") == ["구룡포시장 바로 뒤", "구룡포시장"]
+    assert _place_queries("구룡포수협 위판장") == ["구룡포수협 위판장", "구룡포수협"]
+    assert _place_queries("구룡포초등학교 앞") == ["구룡포초등학교 앞", "구룡포초등학교"]
+    assert _place_queries("구룡포시장") == ["구룡포시장"]
