@@ -17,6 +17,7 @@ ls -lh "$backup"
 ls -1t ~/backups/db-*.dump | tail -n +11 | xargs -r rm --
 
 echo "== 코드 받기"
+before=$(git rev-parse HEAD)
 git pull --ff-only
 git log --oneline -1
 
@@ -26,6 +27,11 @@ compose run --rm --build loader | tail -3
 echo "== 재빌드·재시작"
 mkdir -p deploy/web
 compose up -d --build --remove-orphans
+# Caddyfile 은 파일 하나를 연결해서, git 이 파일을 바꾸면 컨테이너는 예전 파일을 계속 본다 (2026-10-08) → 바뀌었으면 재시작
+if ! git diff --quiet "$before" HEAD -- deploy/Caddyfile; then
+  echo "== Caddyfile 이 바뀌어 caddy 재시작"
+  compose restart caddy
+fi
 
 echo "== 상태 확인 (최대 3분)"
 for _ in $(seq 36); do
