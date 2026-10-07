@@ -65,3 +65,20 @@ def test_chat_endpoint_applies_the_rule(client, monkeypatch):
     c.post("/api/chat", json={"user_id": "u9", "question": "대피소 어디야"})
     c.post("/api/chat", json={"user_id": "u9", "question": "대피소 어디야"}, headers={"Authorization": "Bearer dev:u9"})
     assert seen == [False, True]
+
+
+def test_place_facts_keep_coordinates():
+    """집 주소·자주 가는 곳은 저장할 때 좌표를 찾아 함께 남긴다 (2026-10-08). 집 주소는 하나만(덮어씀), 못 찾으면 글자만"""
+    from langgraph.store.memory import InMemoryStore
+    store = InMemoryStore()
+    found = {"구룡포시장": {"lat": 35.987, "lon": 129.553, "address": "경북 포항시 남구 구룡포읍 구룡포길 1"}}
+    upd = MemoryUpdate(facts=[MemoryFact(field="home_address", value="구룡포시장", quote="집이 구룡포시장 바로 뒤예요"),
+                              MemoryFact(field="frequent_place", value="어딘가 모를 곳", quote="자주 가요")], summary="x")
+    M.save(store, "u1", "c1", upd, locate=lambda t: found.get(t))
+    facts, _ = M.load(store, "u1")
+    assert facts["home_address"]["lat"] == 35.987 and facts["home_address"]["address"].endswith("구룡포길 1")
+    assert "lat" not in facts["frequent_place:어딘가 모를 곳"]
+    M.save(store, "u1", "c2", MemoryUpdate(facts=[MemoryFact(field="home_address", value="호미로 152", quote="이사했어요")], summary="y"),
+           locate=lambda t: None)
+    facts, _ = M.load(store, "u1")
+    assert facts["home_address"]["value"] == "호미로 152" and "lat" not in facts["home_address"]

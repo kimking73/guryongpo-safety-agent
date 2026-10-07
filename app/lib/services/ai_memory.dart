@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:latlong2/latlong.dart';
+import '../models/domain_models.dart';
 import 'account_service.dart';
 import 'api_client.dart';
 import 'app_config.dart';
@@ -29,6 +31,8 @@ class AiMemoryItem {
     this.profileKey,
     this.profileValue,
     this.current,
+    this.fill,
+    this.place,
   });
 
   /// AI 기억의 키 (age, mobility, frequent_place:… 등) — 지우기에 쓴다
@@ -47,6 +51,10 @@ class AiMemoryItem {
 
   /// 지금 프로필 값 (다를 때 비교용)
   final String? current;
+
+  /// 집 주소처럼 여러 칸을 한 번에 쓰는 기억 ([반영] 때 그대로 저장), 내 장소에 넣을 장소 (자주 가는 곳)
+  final Map<String, String>? fill;
+  final SavedPlace? place;
 }
 
 class AiMemoryService {
@@ -74,16 +82,30 @@ class AiMemoryService {
     final profile = await _profileValues();
     final applied = await _applied();
     final (items, fill) = planMemorySync(facts, profile, applied);   // applied 도 이 안에서 갱신
-    if (fill.isNotEmpty) {
-      await _save(fill);
-      changed.value++;     // 열려 있는 프로필 화면이 다시 읽게
+    // 집 주소·자주 가는 곳(좌표 있는 것) → 프로필 집 주소·내 장소 (2026-10-08)
+    final (placeItems, homeFill, newPlaces) = planPlaceSync(facts, profile, await _account.places(), applied);
+    fill.addAll(homeFill);
+    if (fill.isNotEmpty) await _save(fill);
+    for (final p in newPlaces) {
+      await _account.addPlace(p);
     }
+    if (fill.isNotEmpty || newPlaces.isNotEmpty) changed.value++;     // 열려 있는 프로필 화면이 다시 읽게
     await _saveApplied(applied);
-    return items;
+    return [...items, ...placeItems];
   }
 
   /// '프로필과 다름' 항목을 프로필에 반영 (자주 가는 곳은 덧붙임)
   Future<void> apply(AiMemoryItem item) async {
+    if (item.place != null) {
+      await _account.addPlace(item.place!);
+      changed.value++;
+      return;
+    }
+    if (item.fill != null) {
+      await _save(item.fill!);
+      changed.value++;
+      return;
+    }
     final k = item.profileKey, v = item.profileValue;
     if (k == null || v == null) return;
     final cur = (await _profileValues())[k] ?? '';
@@ -154,6 +176,7 @@ const _factLabels = {
   'mobility': '이동 수단',
   'occupation': '직업',
   'frequent_place': '자주 가는 곳',
+  'home_address': '집 주소',
   'note': '기타',
 };
 
@@ -199,6 +222,7 @@ String mergedProfileValue(String key, String cur, String v) =>
   final items = <AiMemoryItem>[];
   for (final e in facts.entries) {
     final f = (e.value as Map).cast<String, dynamic>();
+    if (_isPlaceFact(e.key, f)) continue;     // 집 주소·좌표 있는 자주 가는 곳은 planPlaceSync
     final mapped = memoryToProfile(e.key, '${f['value'] ?? ''}');
     final quote = '${f['quote'] ?? ''}';
     final stamp = '${f['updated_at'] ?? ''}';
@@ -266,3 +290,65 @@ Map<String, String> _jobsWith(String chip, Map<String, String> profile) {
   if (jobs.contains(chip)) return const {};
   return {'jobs': [...jobs, chip].join('|')};
 }
+
+/// 집 주소, 또는 좌표를 찾은 자주 가는 곳 — 프로필 칸이 아니라 집 주소·내 장소로 간다
+bool _isPlaceFact(String key, Map<String, dynamic> f) =>
+    key == 'home_address' || (key.startsWith('frequent_place') && f['lat'] is num && f['lon'] is num);
+
+/// 집 주소 → 프로필 집(homeAddress·좌표), 좌표 있는 자주 가는 곳 → 내 장소 (2026-10-08).
+/// 규칙은 planMemorySync 와 같다: 빈 칸은 채움, 새로 말한 기억은 덮어씀, 반영한 뒤 사용자가 바꾸거나 지운 것은 유지.
+/// 돌려주는 것: (항목별 상태, 프로필에 쓸 값, 내 장소에 더할 장소). applied 를 갱신한다
+(List<AiMemoryItem>, Map<String, String>, List<SavedPlace>) planPlaceSync(Map<String, dynamic> facts,
+    Map<String, String> profile, List<SavedPlace> places, Map<String, String> applied) {
+  final items = <AiMemoryItem>[];
+  final fill = <String, String>{};
+  final add = <SavedPlace>[];
+  const dist = Distance();
+  for (final e in facts.entries) {
+    final f = (e.value as Map).cast<String, dynamic>();
+    if (!_isPlaceFact(e.key, f)) continue;
+    final value = '${f['value'] ?? ''}'.trim();
+    final address = '${f['address'] ?? ''}'.trim().isEmpty ? value : '${f['address']}'.trim();
+    final stamp = '${f['updated_at'] ?? ''}';
+    final quote = '${f['quote'] ?? ''}';
+    final lat = (f['lat'] as num?)?.toDouble(), lon = (f['lon'] as num?)?.toDouble();
+    if (e.key == 'home_address') {
+      final cur = (profile['homeAddress'] ?? '').trim();
+      final values = {
+        'homeName': (profile['homeName'] ?? '').trim().isEmpty ? '집' : profile['homeName']!,
+        'homeAddress': address,
+        // 좌표를 못 찾았으면 예전 좌표를 지운다 (다른 집의 좌표가 남지 않게)
+        'homeLat': lat == null ? '' : '$lat',
+        'homeLon': lon == null ? '' : '$lon',
+      };
+      final status = cur.isEmpty
+          ? AiMemoryStatus.filled
+          : cur == address || cur == value
+              ? AiMemoryStatus.same
+              : applied[e.key] != stamp
+                  ? AiMemoryStatus.overwritten
+                  : AiMemoryStatus.differs;
+      if (status == AiMemoryStatus.filled || status == AiMemoryStatus.overwritten) fill.addAll(values);
+      if (status != AiMemoryStatus.differs) applied[e.key] = stamp;
+      items.add(AiMemoryItem(
+          key: e.key, label: '집 주소', value: address, quote: quote, status: status,
+          current: cur.isEmpty ? null : cur, fill: values));
+      continue;
+    }
+    final here = LatLng(lat!, lon!);
+    final place = SavedPlace(
+        id: 'ai-${e.key.hashCode.toUnsigned(31)}', name: value, type: '기타', position: here, address: address);
+    final exists = places.any((p) => p.name == value || dist.as(LengthUnit.Meter, p.position, here) < 50);
+    final status = exists
+        ? AiMemoryStatus.same
+        : applied[e.key] == stamp
+            ? AiMemoryStatus.differs        // 내 장소에 넣은 뒤 사용자가 지움 → 다시 넣지 않는다
+            : AiMemoryStatus.filled;
+    if (status == AiMemoryStatus.filled) add.add(place);
+    if (status != AiMemoryStatus.differs) applied[e.key] = stamp;
+    items.add(AiMemoryItem(
+        key: e.key, label: '자주 가는 곳 → 내 장소', value: '$value ($address)', quote: quote, status: status, place: place));
+  }
+  return (items, fill, add);
+}
+

@@ -80,6 +80,8 @@ class _AiMemoryCardState extends ConsumerState<AiMemoryCard> {
   Widget _row(BuildContext c, AiMemoryItem i) {
     final (tag, color) = switch (i.status) {
       AiMemoryStatus.same => ('프로필에 반영됨', Colors.green.shade700),
+      AiMemoryStatus.filled when i.place != null => ('내 장소에 추가함', Colors.green.shade700),
+      AiMemoryStatus.same when i.place != null => ('내 장소에 있음', Colors.green.shade700),
       AiMemoryStatus.filled => ('빈 칸에 채움', Colors.green.shade700),
       AiMemoryStatus.overwritten => ('최근 대화 내용으로 바꿈', Colors.green.shade700),
       AiMemoryStatus.differs => ('프로필에서 직접 바꾼 값을 유지', Colors.deepOrange),
@@ -97,6 +99,7 @@ class _AiMemoryCardState extends ConsumerState<AiMemoryCard> {
           if (i.quote.isNotEmpty)
             Text('말씀하신 내용: "${i.quote}"', style: const TextStyle(fontSize: 12, color: Colors.black54)),
           Text(switch (i.status) {
+                AiMemoryStatus.differs when i.place != null => '내 장소에서 지운 것을 유지',
                 AiMemoryStatus.differs => '$tag · 지금 프로필: ${i.current}',
                 AiMemoryStatus.overwritten => '$tag (이전 프로필: ${i.current})',
                 _ => tag,

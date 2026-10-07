@@ -70,5 +70,25 @@ void main() {
     expect(items.single.status, AiMemoryStatus.same);
     expect(fill, {'직업': '어업 종사자·뱃사람', 'jobs': '어업 종사자·뱃사람'});
   });
+
+  test('집 주소는 프로필 집으로, 좌표 있는 자주 가는 곳은 내 장소로 (지운 장소는 다시 넣지 않음)', () {
+    final facts = <String, dynamic>{
+      'home_address': {'value': '구룡포시장 뒤', 'address': '구룡포읍 구룡포길 1', 'lat': 35.987, 'lon': 129.553, 'updated_at': 't1'},
+      'frequent_place:구룡포수협 위판장': {'value': '구룡포수협 위판장', 'address': '구룡포읍 호미로 1', 'lat': 35.991, 'lon': 129.557, 'updated_at': 't1'},
+      'frequent_place:어딘가': {'value': '어딘가', 'updated_at': 't1'},   // 좌표 없음 → 선택 정보 글자 (planMemorySync)
+    };
+    final applied = <String, String>{};
+    var (items, fill, add) = planPlaceSync(facts, {}, const [], applied);
+    expect(fill, {'homeName': '집', 'homeAddress': '구룡포읍 구룡포길 1', 'homeLat': '35.987', 'homeLon': '129.553'});
+    expect(add.single.name, '구룡포수협 위판장');
+    expect(items.length, 2);
+    // 사용자가 내 장소에서 지움 → 같은 기억으로 다시 넣지 않는다
+    (items, fill, add) = planPlaceSync(facts, {'homeAddress': '구룡포읍 구룡포길 1'}, const [], applied);
+    expect(add, isEmpty);
+    expect(items.firstWhere((i) => i.place != null).status, AiMemoryStatus.differs);
+    // 좌표 없는 자주 가는 곳은 planMemorySync 가 선택 정보 글자로
+    final (_, textFill) = planMemorySync(facts, {}, {});
+    expect(textFill, {'자주 방문하는 장소': '어딘가'});
+  });
 }
 

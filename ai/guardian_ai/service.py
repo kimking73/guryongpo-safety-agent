@@ -286,7 +286,17 @@ class ChatService:
         try:
             update = self.extractor(question, answer, known,
                                     M.conversation_summary(self.store, user_id, conversation_id))
-            n = M.save(self.store, user_id, conversation_id, update)
+            n = M.save(self.store, user_id, conversation_id, update, locate=_locate_place)
             logger.info("사용자 기억 갱신 user=%s 사실 %d건 요약 '%s'", user_id, n, update.summary[:40])
         except Exception:  # noqa: BLE001
             logger.exception("사용자 기억 저장 실패")
+
+
+def _locate_place(text: str) -> dict | None:
+    """기억할 집 주소·자주 가는 곳 → 좌표 (카카오 장소 검색, tools.find_place). 구룡포 일대 밖이거나 못 찾으면 None"""
+    from . import tools as T
+    found = T.find_place(text)
+    if not found.get("available") or found.get("out_of_area"):
+        return None
+    return {"lat": found["lat"], "lon": found["lon"], "address": found.get("address") or found.get("name")}
+

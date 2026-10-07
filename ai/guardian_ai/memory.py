@@ -38,7 +38,12 @@ PROFILE_FIELDS = {"age", "walking_impaired", "has_dependents", "mobility", "occu
 FACT_LABELS = {
     "age": "나이", "walking_impaired": "보행 불편", "has_dependents": "보호가 필요한 동반자",
     "mobility": "이동수단", "occupation": "직업", "frequent_place": "자주 가는 곳", "note": "기타",
+    "home_address": "집 주소",
 }
+# 장소 사실: 저장할 때 좌표를 찾아 함께 남긴다 (save(locate=…)) — 앱이 집 주소·내 장소로 지도에 넣는다 (2026-10-08)
+PLACE_FIELDS = {"home_address", "frequent_place"}
+# 하나만 두고 덮어쓰는 사실 (나머지 frequent_place·note 는 값마다 쌓인다)
+SINGLE_FIELDS = PROFILE_FIELDS | {"home_address"}
 
 
 def _facts_ns(user_id: str) -> tuple[str, ...]:
@@ -139,7 +144,7 @@ def memory_lines(facts: dict[str, dict], episodes: list[dict]) -> list[str]:
 ALLOWED_FIELDS = set(FACT_LABELS)
 
 
-def save(store: BaseStore, user_id: str, conversation_id: str, update) -> int:
+def save(store: BaseStore, user_id: str, conversation_id: str, update, locate=None) -> int:
     """기억 추출 결과(llm.MemoryUpdate)를 저장한다. 저장한 사실 수를 돌려준다.
 
     사실 key: 프로필 필드는 그 이름(덮어씀 — 최신 발언이 우선), 자주 가는 곳·기타는 "frequent_place:<값>"·"note:<값>".
@@ -149,9 +154,17 @@ def save(store: BaseStore, user_id: str, conversation_id: str, update) -> int:
     for f in update.facts:
         if f.field not in ALLOWED_FIELDS or not str(f.value).strip():
             continue
-        key = f.field if f.field in PROFILE_FIELDS else f"{f.field}:{str(f.value).strip()[:40]}"
-        store.put(_facts_ns(user_id), key, {"value": str(f.value).strip(), "quote": f.quote.strip(),
-                                            "conversation_id": conversation_id, "updated_at": now.isoformat()})
+        key = f.field if f.field in SINGLE_FIELDS else f"{f.field}:{str(f.value).strip()[:40]}"
+        item = {"value": str(f.value).strip(), "quote": f.quote.strip(),
+                "conversation_id": conversation_id, "updated_at": now.isoformat()}
+        if f.field in PLACE_FIELDS and locate is not None:
+            try:
+                where = locate(item["value"])
+            except Exception:  # noqa: BLE001 — 좌표를 못 찾아도 글자로는 저장한다
+                where = None
+            if where:
+                item.update(lat=where["lat"], lon=where["lon"], address=where.get("address") or where.get("name"))
+        store.put(_facts_ns(user_id), key, item)
         saved += 1
     if update.summary.strip():
         store.put(_episodes_ns(user_id), conversation_id,

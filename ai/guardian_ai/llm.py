@@ -518,7 +518,7 @@ class OpenAIFactChecker:
 # ---------------------------------------------------------------------------
 
 class MemoryFact(BaseModel):
-    field: Literal["age", "walking_impaired", "has_dependents", "mobility", "occupation", "frequent_place", "note"]
+    field: Literal["age", "walking_impaired", "has_dependents", "mobility", "occupation", "frequent_place", "home_address", "note"]
     value: str = Field(description="age는 숫자, walking_impaired·has_dependents는 true/false, "
                                    "mobility는 walk·car·wheelchair·public_transport 중 하나, 나머지는 짧은 문장")
     quote: str = Field(description="근거가 된 사용자 발언 원문 일부")
@@ -534,7 +534,10 @@ EXTRACTOR_PROMPT = """너는 재난 안내 서비스 '구룡가디언'의 기억
 
 저장할 것 (사용자가 자기 자신에 대해 직접 말한 것만):
 - age 나이, walking_impaired 보행 불편(다리·무릎이 아픔, 지팡이 등), has_dependents 보호가 필요한 동반자(아이·노부모 등),
-  mobility 이동수단, occupation 직업(어업·선박 보유 등), frequent_place 자주 가는 곳, note 그 밖의 재난 대응에 필요한 사실
+  mobility 이동수단, occupation 직업(어업·선박 보유 등),
+  home_address 집 주소·집 위치(사용자가 말한 그대로: 도로명 주소, "구룡포시장 뒤" 같은 장소 설명),
+  frequent_place 자주 가는 곳(장소 이름이나 주소 하나씩 — 예: "구룡포수협 위판장", "호미로 152"),
+  note 그 밖의 재난 대응에 필요한 사실
 저장하지 말 것:
 - 추측·암시("비가 와서 힘들어요"는 보행 불편이 아님), AI 답변에만 있는 내용
 - 재난 상황·날씨·수위·특보 같은 그때그때 바뀌는 정보 (항상 DB 최신값을 쓰므로 기억하면 안 됨)
