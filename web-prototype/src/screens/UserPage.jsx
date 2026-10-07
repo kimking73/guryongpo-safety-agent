@@ -185,7 +185,7 @@ export default function UserPage({ s, set }) {
   const notiToggles = [
     { k: 'voice', icon: 'volume_up', label: '음성 안내 자동 재생', desc: '시각 장애 선택 시 자동으로 켜져요' },
     { k: 'vibrate', icon: 'vibration', label: '진동 알림', desc: canVibrate ? '대피 알림이 오면 휴대폰이 진동해요 · 켜면 한 번 울려요' : '이 기기에서는 진동이 지원되지 않아요 (안드로이드 휴대폰에서 작동)' },
-    { k: 'flash', icon: 'flash_on', label: '화면 점멸', desc: '청각 장애 선택 시 자동으로 켜져요' }
+    { k: 'flash', icon: 'flash_on', label: '화면 점멸', desc: '대피 알림이 오면 화면이 빨갛게 깜빡여요 · 청각 장애 선택 시 자동으로 켜져요' }
   ];
   const demoToggles = [
     { k: 'demoCrew', icon: 'shield_person', label: '방재단 시연',
@@ -195,8 +195,11 @@ export default function UserPage({ s, set }) {
   ];
   const toggleDemo = k => set(st => {
     if (k === 'demoCrew') {
-      return st.demoCrew ? { demoCrew: false }
-        : { demoCrew: true, crewLogged: true, screen: 'crew', crewOpen: false, hh: HOUSEHOLDS, lastSim: Date.now() - 1500 };
+      // 끄면 가구 정보를 처음으로 되돌리고, 시연이 대신 로그인시켰다면 로그아웃까지 한다
+      return st.demoCrew
+        ? { demoCrew: false, hh: HOUSEHOLDS,
+            ...(st.crewByDemo ? { crewLogged: false, crewByDemo: false, screen: st.screen === 'crew' ? 'user' : st.screen } : {}) }
+        : { demoCrew: true, crewByDemo: !st.crewLogged, crewLogged: true, screen: 'crew', crewOpen: false, hh: HOUSEHOLDS, lastSim: Date.now() - 1500 };
     }
     // 힌남노 시연을 켜면 현위치가 위험 지역이므로 대피 알림을 바로 띄운다
     return !st.demoReplay && DANGER_HERE ? { demoReplay: true, evacOpen: true, evacStatus: null } : { demoReplay: !st.demoReplay };

@@ -48,17 +48,19 @@ function StepBar({ step }) {
   );
 }
 
-function CrewMap({ top }) {
+function CrewMap({ top, full, onToggleFull }) {
   return (
     <div style={{ background: '#FFFFFF', borderRadius: 32, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 8px 0', flexWrap: 'wrap' }}>
         <h2 style={{ margin: 0, fontSize: 26, fontWeight: 800 }}>지도</h2>
         <span style={{ fontSize: 15, color: C.muted, whiteSpace: 'nowrap' }}>우선 확인 가구 · 대피소</span>
       </div>
-      <div style={{ position: 'relative', height: 620, borderRadius: 24, overflow: 'hidden', background: 'repeating-linear-gradient(135deg,#E9EDF7 0 14px,#F3F5FA 14px 28px)' }}>
+      <div style={{ position: full ? 'fixed' : 'relative', inset: full ? 0 : 'auto', zIndex: full ? 60 : 'auto', height: full ? '100vh' : 620, borderRadius: full ? 0 : 24, overflow: 'hidden', background: 'repeating-linear-gradient(135deg,#E9EDF7 0 14px,#F3F5FA 14px 28px)' }}>
         <div style={{ position: 'absolute', left: '2%', top: '12%', width: '52%', height: '76%', borderRadius: '50%', background: 'rgba(215,49,43,0.12)', border: `2px dashed ${C.red}`, boxSizing: 'border-box' }} />
         <span style={{ position: 'absolute', left: '4%', top: '5%', fontSize: 15, fontWeight: 800, color: C.redDark, background: '#FFFFFF', borderRadius: 999, padding: '6px 12px', whiteSpace: 'nowrap' }}>위험지역 · 해안 저지대</span>
-        <span style={{ position: 'absolute', right: 14, bottom: 14, fontFamily: 'ui-monospace,Menlo,monospace', fontSize: 13, color: C.muted, background: '#FFFFFF', borderRadius: 999, padding: '6px 12px' }}>예시 위치 · 실제 지도 연결 전</span>
+        <button onClick={onToggleFull} title={full ? '전체 화면 닫기' : '전체 화면'} style={{ position: 'absolute', right: 16, bottom: 16, zIndex: 4, display: 'flex', alignItems: 'center', gap: 8, height: 56, padding: '0 22px 0 16px', borderRadius: 999, border: 'none', background: C.navy, color: '#FFFFFF', cursor: 'pointer', fontSize: 18, fontWeight: 800, whiteSpace: 'nowrap', boxShadow: '0 6px 20px rgba(20,36,92,0.25)' }}>
+          <Icon n={full ? 'close_fullscreen' : 'open_in_full'} size={28} />{full ? '전체 화면 닫기' : '전체 화면'}
+        </button>
         {MAP_SHELTERS.map(([n, x, y]) => (
           <span key={n} style={{ position: 'absolute', left: x + '%', top: y + '%', transform: 'translate(-50%,-50%)', display: 'flex', alignItems: 'center', gap: 6, background: '#FFFFFF', border: `3px solid ${C.navy}`, color: C.navy, borderRadius: 999, padding: '4px 12px 4px 6px', fontSize: 14, fontWeight: 800, whiteSpace: 'nowrap' }}>
             <Icon n="home_health" size={22} />{n}
@@ -170,13 +172,7 @@ export default function CrewDashboard({ s, set, online }) {
         top={<>
           <Circle size={56} bg={C.red} fg="#FFFFFF" style={{ marginBottom: 4 }}><Icon n="badge" size={30} /></Circle>
           <div style={{ fontSize: 14, fontWeight: 800, color: '#FFFFFF', marginBottom: 14 }}>방재단</div>
-        </>}
-        bottom={
-          <button onClick={() => set({ crewLogged: false, crewCode: '', screen: 'user' })} style={{ marginTop: 'auto', width: 92, flexShrink: 0, padding: '14px 0 12px', borderRadius: 24, border: '2px solid rgba(255,255,255,0.4)', background: 'transparent', color: '#FFFFFF', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-            <Icon n="logout" size={30} />
-            <span style={{ fontSize: 15, fontWeight: 700 }}>로그아웃</span>
-          </button>
-        } />
+        </>} />
 
       <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         <header style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '20px 40px', flexWrap: 'wrap' }}>
@@ -203,7 +199,7 @@ export default function CrewDashboard({ s, set, online }) {
               </div>
             ))}
           </div>
-          <CrewMap top={top} />
+          <CrewMap top={top} full={s.crewMapFull} onToggleFull={() => set(st => ({ crewMapFull: !st.crewMapFull }))} />
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,480px),1fr))', gap: 20, alignItems: 'start' }}>
             <PriorityList top={top} />
             <AssignmentBoard list={list} />

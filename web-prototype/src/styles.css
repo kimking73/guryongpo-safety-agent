@@ -24,3 +24,8 @@ button, input { font-family: inherit; }
   0%, 100% { transform: scaleY(0.3); }
   50% { transform: scaleY(1); }
 }
+
+@keyframes gkFlash {
+  0%, 45% { opacity: 1; }
+  55%, 100% { opacity: 0; }
+}
