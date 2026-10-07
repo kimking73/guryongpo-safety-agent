@@ -29,3 +29,14 @@ def test_heavy_rain_warning_matches_dashboard():
     """AWS 3시간 강수가 호우경보 기준(90mm) 이상이고, 상황판 특보도 호우경보 — 산사태 경고(위험지도 1·2등급) 유지"""
     assert demo.AWS["rain_3h"] >= 90
     assert any(w["hazard"] == "heavy_rain" and w["level"] == "warning" for w in demo.WARNINGS)
+
+
+def test_landslide_warning_uses_grade1_riskmap_only():
+    """시연 산사태 경고 범위 = 위험지도 1등급 100m (실측 규칙 11은 1·2등급). 다른 규칙과 원본은 그대로"""
+    rules = [{"id": 10, "condition": {"all": [{"within": "hazard_zones.landslide", "riskmap_area": "riskmap_g1_buf100"}]}},
+             {"id": 11, "condition": '{"all": [{"risk": "heavy_rain", "min_level": "warning"}, '
+                                     '{"within": "hazard_zones.landslide", "buffer_m": 100, "riskmap_area": "riskmap_g12_buf100"}]}'}]
+    out = demo.demo_landslide_rules(rules)
+    assert out[1]["condition"]["all"][1] == {"within": "hazard_zones.landslide", "buffer_m": 100, "riskmap_area": "riskmap_g1_buf100"}
+    assert out[1]["condition"]["all"][0] == {"risk": "heavy_rain", "min_level": "warning"}
+    assert out[0] == rules[0] and "riskmap_g12_buf100" in rules[1]["condition"]
