@@ -288,3 +288,18 @@ def test_no_route_in_response_when_answer_fell_back():
         Specialist.LOCATION_ROUTE.value: L.make_location_route_agent(writer=always_wrong, fetch=flood_db, route_client=route_server())})
     res = svc.chat(ChatRequest(user_id="u1", question="어디로 대피해야 해?", current_location=HERE))
     assert res.used_fallback and res.route is None
+
+
+def test_location_answer_drops_sentences_deferring_risk_topics():
+    """위치·경로 답의 "침수 위험 여부는 확인할 수 없습니다"는 침수 agent 답과 모순 → 지운다. 경로 사실 문장은 남긴다 (결함 #8)"""
+    from guardian_ai.flood import RISK_TOPICS, strip_deferrals
+    text = ("현재 위치의 침수 위험 여부는 여기서 안내하지 않습니다. 구룡포중학교 앞까지 1187m, 도보 15분입니다. "
+            "다른 길이 없어 위험 영역 1곳을 지납니다. 바람과 파도 상황은 확인할 수 없습니다.")
+    assert strip_deferrals(text, RISK_TOPICS) == "구룡포중학교 앞까지 1187m, 도보 15분입니다. 다른 길이 없어 위험 영역 1곳을 지납니다."
+
+
+def test_risk_answer_drops_sentences_deferring_evacuation_place():
+    from guardian_ai.flood import PLACE_TOPICS, strip_deferrals
+    text = "강풍 위험 단계는 주의입니다. 배 출항 가능 여부는 확인할 수 없습니다. 어디로 대피할지는 위치·경로 안내에서 확인해 주세요."
+    assert strip_deferrals(text, PLACE_TOPICS) == "강풍 위험 단계는 주의입니다. 배 출항 가능 여부는 확인할 수 없습니다."
+    assert strip_deferrals("대피소 정보를 확인할 수 없습니다.", PLACE_TOPICS) == "대피소 정보를 확인할 수 없습니다."  # 다 지워지면 원문

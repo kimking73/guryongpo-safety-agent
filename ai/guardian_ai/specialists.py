@@ -268,7 +268,8 @@ def make_specialist(agent: Specialist, collect: Callable[..., Collected], templa
                                       state.get("manager_feedback") or ""), "LLM"
             except Exception as e:  # noqa: BLE001 — LLM 장애로 답이 끊기면 안 된다
                 logger.warning("%s 문장 작성 실패 → 템플릿 (%s: %s)", agent.value, type(e).__name__, e)
-        summary = summary or template(d)
+        from .flood import PLACE_TOPICS, strip_deferrals
+        summary = strip_deferrals(summary, PLACE_TOPICS) if summary else template(d)
         logger.info("%s [%s] 단계=%s 근거=%d 확인불가=%s", agent.value, how, d.level.value, len(d.evidence),
                     d.unavailable or "-")
         return {"specialist_results": [SpecialistResult(agent=agent, summary=summary, risk_level=d.level,
