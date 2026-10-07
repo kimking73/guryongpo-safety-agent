@@ -133,3 +133,7 @@ def test_get_user_profile_maps_db_rows():
     assert p["occupation"] == "어업" and p["hearing_impaired"] is True and "visual_impaired" not in p
     assert p["user_type"] == "resident" and p["home"]["label"] == "집" and p["frequent_places"][0]["label"] == "구룡포항"
     assert get_user_profile("x", fetch=lambda *a, **k: [])["available"] is False
+    # DB 기본값(normal·false)은 '입력 안 함'일 수 있어 기준으로 쓰지 않는다 → 앱이 보낸 값이 남는다
+    rows["u"][0].update(walking_ability="normal", has_dependents=False, hearing_impaired=False)
+    p = get_user_profile("uid", fetch=fetch)["profile"]
+    assert not {"walking_impaired", "has_dependents", "hearing_impaired"} & p.keys()

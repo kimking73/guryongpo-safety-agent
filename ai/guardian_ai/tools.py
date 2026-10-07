@@ -613,11 +613,13 @@ def get_user_profile(uid: str, fetch: Fetch | None = None, today: datetime | Non
         out["age"] = (today or datetime.now(KST)).year - int(r["birth_year"])
     if r.get("mobility") in _MOBILITY_DB:
         out["mobility"] = _MOBILITY_DB[r["mobility"]]
-    if r.get("walking_ability"):
-        out["walking_impaired"] = r["walking_ability"] != "normal"
+    # 아래 칸은 DB 기본값(normal·false)이 '입력 안 함'과 구별되지 않아, 해당할 때(true)만 기준으로 쓴다 —
+    # false 를 기준으로 쓰면 앱이 보낸 true(예: 보호자 여부는 서버로 안 올라감)를 덮어쓴다 (2026-10-08)
+    if r.get("walking_ability") in ("limited", "unable"):
+        out["walking_impaired"] = True
     for k in ("has_dependents", "vision_impaired", "hearing_impaired"):
-        if r.get(k) is not None:
-            out["visual_impaired" if k == "vision_impaired" else k] = bool(r[k])
+        if r.get(k):
+            out["visual_impaired" if k == "vision_impaired" else k] = True
     if (r.get("occupation") or "").strip():
         out["occupation"] = r["occupation"].strip()
     home = next((pl for pl in places if pl["place_type"] == "home"), None)
