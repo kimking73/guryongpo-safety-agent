@@ -152,11 +152,20 @@ def test_off_route_recalculates_from_current_position():
 
 
 def test_reroute_keeps_chosen_strategy():
-    """'안전한 길'로 가다 벗어나도 다시 계산한 길은 안전한 길 (2026-10-07: 예전엔 사용자 유형 기본 길로 바뀌었다)"""
+    """'오르막 회피'로 가다 벗어나도 다시 계산한 길은 오르막 회피 (2026-10-07: 예전엔 사용자 유형 기본 길로 바뀌었다)"""
+    from guardian_route.profiles import UPHILL_RULES
     c, sent = client()
-    res = check(c, 35.9910, 129.5495, profile="adult", strategy="safest")
-    assert res["reroute"] is True and res["route"]["strategy"] == "safest" and res["route"]["profile"] == "adult"
-    assert sent[0]["custom_model"]["priority"] == PROFILE_RULES["elderly"]["priority"]
+    res = check(c, 35.9910, 129.5495, profile="adult", strategy="flat")
+    assert res["reroute"] is True and res["route"]["strategy"] == "flat" and res["route"]["profile"] == "adult"
+    assert sent[0]["custom_model"]["priority"] == UPHILL_RULES
+
+
+def test_shortest_does_not_avoid_but_reports_zones():
+    """가까운 경로: 위험 구역을 회피 규칙에 넣지 않고(areas 없음), 지나는 구역은 still_inside 로 알린다"""
+    c, sent = client([ZONE])
+    res = c.post("/api/route", json={**body("adult"), "strategy": "shortest"}).json()
+    assert "areas" not in sent[0]["custom_model"] and len(sent) == 1
+    assert res["still_inside"] == ["flood-009"] and res["avoided"] == [] and res["geometry"] == LINE
 
 
 def test_new_hazard_ahead_triggers_reroute():

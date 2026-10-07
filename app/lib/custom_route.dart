@@ -118,7 +118,7 @@ class _CustomRouteScreenState extends ConsumerState<CustomRouteScreen> {
         }
       }
 
-      final rs = await Future.wait([one(RouteType.nearest), one(RouteType.safest)]);
+      final rs = await Future.wait([for (final t in RouteTypeInfo.ordered) one(t)]);
       RiskStatus? risk;
       try {
         risk = await repository.risk(b.position);
@@ -168,15 +168,18 @@ class _CustomRouteScreenState extends ConsumerState<CustomRouteScreen> {
     final ok = results.where((r) => r.route != null).toList();
     final near = ok.where((r) => r.type == RouteType.nearest).firstOrNull?.route;
     final safe = ok.where((r) => r.type == RouteType.safest).firstOrNull?.route;
+    final flat = ok.where((r) => r.type == RouteType.flat).firstOrNull?.route;
     String? advice;
     if (near != null && safe != null) {
-      if (near.stillInside.isNotEmpty && safe.stillInside.isEmpty) {
-        advice = '가까운 경로는 위험 구역을 지납니다. 안전 경로를 권합니다.';
-      } else if (safe.distanceMeters - near.distanceMeters < 100 && safe.maxSlopePercent <= near.maxSlopePercent) {
-        advice = '두 경로 차이가 거의 없습니다. 안전 경로를 권합니다.';
+      if (near.stillInside.length > safe.stillInside.length) {
+        advice = '가까운 경로는 위험 구역을 지납니다 (${near.stillInside.join(', ')}). 안전 경로를 권합니다.';
+      } else if (safe.distanceMeters - near.distanceMeters < 100) {
+        advice = '가까운 경로와 안전 경로의 차이가 거의 없습니다. 안전 경로를 권합니다.';
       } else {
-        advice = '안전 경로는 급경사·계단을 피해 ${((safe.distanceMeters - near.distanceMeters) / 1000).toStringAsFixed(1)}km 더 깁니다. '
-            '걷기 불편하거나 비가 많이 오면 안전 경로, 급하면 가까운 경로.';
+        advice = '안전 경로는 위험 구역을 피해 ${((safe.distanceMeters - near.distanceMeters) / 1000).toStringAsFixed(1)}km 더 깁니다.';
+      }
+      if (flat != null && flat.maxUphillPercent < safe.maxUphillPercent) {
+        advice = '$advice 오르막이 힘들면 오르막 회피 경로 (최대 오르막 ${safe.maxUphillPercent}% → ${flat.maxUphillPercent}%).';
       }
     }
     return ListView(padding: const EdgeInsets.all(16), children: [
@@ -242,16 +245,15 @@ class _RouteOption extends StatelessWidget {
   final VoidCallback onShow;
   @override
   Widget build(BuildContext c) {
-    final nearest = result.type == RouteType.nearest;
-    final title = nearest ? '가까운 경로' : '안전 경로';
-    final what = nearest ? '최단 시간 · 위험 구역은 피함' : '위험 구역 회피 + 급경사·계단 회피 (노약자·휠체어 기준)';
+    final title = result.type.label;
+    final what = result.type.description;
     final r = result.route;
     return Card(
         child: Padding(
             padding: const EdgeInsets.all(12),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [
-                Icon(nearest ? Icons.bolt : Icons.shield_outlined, color: const Color(0xff16803c)),
+                Icon(switch (result.type) { RouteType.nearest => Icons.bolt, RouteType.safest => Icons.shield_outlined, RouteType.flat => Icons.trending_flat }, color: const Color(0xff16803c)),
                 const SizedBox(width: 6),
                 Expanded(child: Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold))),
                 if (r != null) FilledButton.tonal(onPressed: onShow, child: const Text('지도에서 보기')),
@@ -261,7 +263,7 @@ class _RouteOption extends StatelessWidget {
               if (r == null)
                 Text('이 경로를 찾지 못했습니다. ${result.error ?? ''}', style: TextStyle(color: Theme.of(c).colorScheme.error))
               else ...[
-                Text('${(r.distanceMeters / 1000).toStringAsFixed(1)}km · 도보 ${r.estimatedMinutes}분 · 최대 경사 ${r.maxSlopePercent}%',
+                Text('${(r.distanceMeters / 1000).toStringAsFixed(1)}km · 도보 ${r.estimatedMinutes}분 · 최대 오르막 ${r.maxUphillPercent}%',
                     style: const TextStyle(fontSize: 16)),
                 if (r.avoided.isNotEmpty) Text('피한 위험 구역: ${r.avoided.join(', ')}'),
                 if (r.stillInside.isNotEmpty)

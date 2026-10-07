@@ -195,8 +195,7 @@ class RemoteSafetyRepository implements SafetyRepository {
         names: await _routeHazardNames());
   }
 
-  static String _strategy(RouteType t) =>
-      t == RouteType.nearest ? 'fastest' : 'safest';
+  static String _strategy(RouteType t) => t.strategy;
 
   /// 경로 서버의 위험 구역 id → 이름 (응답의 avoided·still_inside는 id).
   /// 시연 모드면 시연 위험 영역에서 받는다. 위험 영역은 바뀌므로 모드가 바뀌거나 1분이 지나면 다시 받는다
@@ -630,6 +629,7 @@ SafetyRoute routeFromJson(
     stillInside: inside,
     profile: j['profile'] as String? ?? 'adult',
     maxSlopePercent: slope,
+    maxUphillPercent: (j['max_uphill_pct'] as num?)?.toInt() ?? 0,
     hazardsOk: j['hazards_ok'] != false,
     encodedGeometry: j['geometry'] as String,
     seaPoints: seaFound ? decodePolyline(sea['path'] as String) : const [],

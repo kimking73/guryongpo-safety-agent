@@ -52,14 +52,31 @@ PROFILE_RULES: dict[str, dict[str, list[dict[str, Any]]]] = {
 }
 
 
-def rules_for(profile: str, strategy: str | None = None) -> dict[str, list[dict[str, Any]]]:
-    """사용자 유형 + 앱의 경로 선택(strategy) → GraphHopper 규칙. 위험 구역 회피는 어느 쪽이든 service.build_model이 더한다.
+# 가까운 경로(shortest): 거리 1km마다 이만큼(초) 더 비싸게 쳐서 시간·길 종류 선호도보다 거리를 앞세운다 (GraphHopper
+# custom_model distance_influence, 기본 70). 1000은 길 종류 선호도에 밀려 항구 → 구룡포중학교가 1221m(최단 1182m)였다 →
+# 5000부터 최단과 같아짐 (2026-10-07 시연 장면 3곳 측정, 20000도 같은 결과)
+SHORTEST_DISTANCE_INFLUENCE = 5000
 
-    - None·fastest(가까운 길): 사용자 유형 규칙 그대로 (성인 = 가장 빠른 길, 노약자 = 급경사 회피·느린 걸음)
-    - safest(안전한 길): 사용자 유형과 상관없이 급경사를 피하고(노약자 경사·계단 규칙), 걸음 속도는 사용자 유형대로
-    사용자 유형은 바꾸지 않는다 — 노인이 가까운 길을 골라도 노약자 규칙, 성인이 안전한 길을 골라도 성인 걸음 속도 (2026-10-07).
+# 오르막 회피(flat): average_slope는 진행 방향 기준 부호가 있다 (+ 오르막, − 내리막. 2026-10-07 확인: 같은 길을 반대로 가면
+# 최대 오르막 6%↔4%가 바뀐다). 오르막만 노약자와 같은 기준선(1/18·1/12)·배수로 피하고 내리막은 그대로 둔다.
+UPHILL_RULES = [
+    {"if": f"average_slope > {SLOPE_ACCESSIBLE_MAX}", "multiply_by": str(ELDERLY_OVER_ACCESSIBLE)},
+    {"else_if": f"average_slope > {SLOPE_SIDEWALK_MAX}", "multiply_by": str(ELDERLY_OVER_SIDEWALK)},
+]
+
+
+def rules_for(profile: str, strategy: str | None = None) -> dict[str, Any]:
+    """사용자 유형 + 앱의 경로 선택(strategy) → GraphHopper 규칙 (2026-10-07 세 가지로).
+
+    - shortest(가까운 경로): 위험 구역을 피하지 않는 최단 거리 (service가 구역 회피를 빼고, 지나는 구역은 still_inside로 알린다)
+    - None·safest·fastest(안전 경로): 위험 구역 회피 + 사용자 유형 규칙 그대로 (성인 = 경사 무시, 노약자 = 급경사 회피)
+      fastest는 예전 앱이 보내던 이름이라 safest와 같게 둔다
+    - flat(오르막 회피 경로): 위험 구역 회피 + 오르막 회피. 노약자는 이미 오르막·내리막 모두 피하므로 노약자 규칙 그대로
+    걸음 속도는 어느 쪽이든 사용자 유형대로.
     """
     rules = PROFILE_RULES[profile]
-    if strategy != "safest":
-        return rules
-    return {"priority": PROFILE_RULES["elderly"]["priority"], "speed": rules["speed"]}
+    if strategy == "shortest":
+        return {"priority": [], "speed": rules["speed"], "distance_influence": SHORTEST_DISTANCE_INFLUENCE}
+    if strategy == "flat" and profile != "elderly":
+        return {"priority": UPHILL_RULES, "speed": rules["speed"]}
+    return rules

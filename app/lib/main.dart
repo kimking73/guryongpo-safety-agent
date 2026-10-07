@@ -1215,7 +1215,7 @@ class RouteFollowScreen extends ConsumerWidget {
     return ListView(padding: const EdgeInsets.all(16), children: [
       Row(children: [
         Expanded(
-            child: Text('이동 중 안내 · ${routeType == RouteType.nearest ? '가까운 경로' : '안전 경로'}',
+            child: Text('이동 중 안내 · ${routeType.label}',
                 style: Theme.of(c).textTheme.headlineSmall)),
         TextButton.icon(
             onPressed: () => c.pop(), icon: const Icon(Icons.dashboard_outlined), label: const Text('대시보드')),

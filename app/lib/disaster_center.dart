@@ -1211,24 +1211,19 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Text(
-                '${route.distanceMeters >= 1000 ? '${(route.distanceMeters / 1000).toStringAsFixed(1)}km' : '${route.distanceMeters}m'} · 도보 ${route.estimatedMinutes}분 · ${route.routeType == RouteType.nearest ? '가까운 경로' : '안전 경로'}${route.hazardsOk ? '' : ' · 위험 정보 확인 불가'}\n${route.riskAvoidanceSummary}',
+                '${route.distanceMeters >= 1000 ? '${(route.distanceMeters / 1000).toStringAsFixed(1)}km' : '${route.distanceMeters}m'} · 도보 ${route.estimatedMinutes}분 · ${route.routeType.label} · 최대 오르막 ${route.maxUphillPercent}%${route.hazardsOk ? '' : ' · 위험 정보 확인 불가'}\n${route.riskAvoidanceSummary}',
                 style: const TextStyle(fontSize: 12),
               ),
             ),
           if (destination != null)
             Wrap(spacing: 6, children: [
-              ChoiceChip(
-                label: const Text('가까운 경로'),
-                selected: widget.routeType == RouteType.nearest,
-                onSelected: (_) =>
-                    widget.onRouteTypeChanged?.call(RouteType.nearest),
-              ),
-              ChoiceChip(
-                label: const Text('안전 경로'),
-                selected: widget.routeType == RouteType.safest,
-                onSelected: (_) =>
-                    widget.onRouteTypeChanged?.call(RouteType.safest),
-              ),
+              for (final t in RouteTypeInfo.ordered)
+                ChoiceChip(
+                  label: Text(t.label),
+                  tooltip: t.description,
+                  selected: widget.routeType == t,
+                  onSelected: (_) => widget.onRouteTypeChanged?.call(t),
+                ),
             ]),
           if (destination == null)
             const Text('확대하면 시설이 개별 표시됩니다. 묶음 표식을 누르면 해당 구역으로 확대합니다.',

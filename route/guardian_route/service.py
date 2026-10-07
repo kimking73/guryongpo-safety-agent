@@ -22,7 +22,7 @@ from .profiles import PROFILE_RULES, rules_for
 from .sea import ALTERNATIVES, ApiShelterSource, SeaChart, ShelterSource, bearing_label, pick_shelter
 
 Profile = Literal["adult", "elderly"]
-Strategy = Literal["fastest", "safest"]
+Strategy = Literal["shortest", "safest", "flat", "fastest"]   # fastest = 예전 이름, safest와 같음
 CheckReason = Literal["off_route", "hazard_on_route"]
 
 # 위험 구역 안 도로의 우선순위 배수. 0이면 그 길을 완전히 막아 출발지·도착지가 구역 안일 때 경로가 아예 없어진다.
@@ -48,7 +48,7 @@ class LatLon(BaseModel):
 class RouteRequest(BaseModel):
     origin: LatLon
     destination: LatLon
-    strategy: Strategy | None = None  # 앱의 경로 선택: fastest(가까운 길) = 사용자 유형 규칙 그대로, safest(안전한 길) = 급경사도 피함. 없으면 fastest와 같음
+    strategy: Strategy | None = None  # 앱의 경로 선택: shortest(가까운 = 위험 회피 없는 최단) · safest(안전 = 위험 회피, 기본) · flat(오르막 회피) — profiles.rules_for
     profile: Profile = "adult"      # adult(최단 시간, 경사 무시), elderly(급경사 회피·같은 경사면 계단 선호, 느린 속도)
     demo: bool = False              # 앱 시연 모드: 실제 위험 영역 대신 시연 위험 영역(api /demo/risk/areas)을 피한다
 
@@ -61,6 +61,7 @@ class RouteResponse(BaseModel):
     ascend_m: int = 0                                       # 오르막 합계
     descend_m: int = 0                                      # 내리막 합계
     max_slope_pct: int = 0                                  # 지나는 구간 중 가장 급한 경사 (오르막·내리막 절댓값)
+    max_uphill_pct: int = 0                                 # 진행 방향 기준 가장 급한 오르막 (오르막 회피 경로 비교용)
     avoided: list[str] = Field(default_factory=list)       # 회피 없이 가면 지났을 위험 구역 중 이 경로가 피한 것
     still_inside: list[str] = Field(default_factory=list)  # 다른 길이 없어 이 경로도 지나는 위험 구역 (경고용)
     geometry: str                                           # 인코딩된 polyline (Google 형식, 정밀도 1e5, lat·lon 순)
@@ -74,7 +75,7 @@ class RouteCheckRequest(BaseModel):
     destination: LatLon
     geometry: str                   # 지금 안내 중인 경로 (직전 /api/route 응답의 geometry)
     profile: Profile = "adult"
-    strategy: Strategy | None = None  # 직전 /api/route 요청과 같은 값 — 다시 계산해도 같은 종류의 길 (가까운/안전한)
+    strategy: Strategy | None = None  # 직전 /api/route 요청과 같은 값 — 다시 계산해도 같은 종류의 길
     demo: bool = False
 
 
@@ -204,13 +205,16 @@ class RouteService:
         """
         points = [(req.origin.lat, req.origin.lon), (req.destination.lat, req.destination.lon)]
         zones = self._zones(req.demo)
-        # 위험 구역은 strategy와 상관없이 피한다. strategy는 경사 규칙만 바꾸고 사용자 유형(걸음 속도)은 그대로 (profiles.rules_for)
+        # 가까운 경로(shortest)만 위험 구역을 피하지 않는다 — 지나는 구역은 still_inside로 알린다. 나머지는 규칙만 다르다 (profiles.rules_for)
         rules = rules_for(req.profile, req.strategy)
+        avoid = req.strategy != "shortest"
 
-        safe = self.gh.route(points, custom_model=build_model(rules, zones))
+        safe = self.gh.route(points, custom_model=build_model(rules, zones if avoid else []))
         avoided: list[str] = []
         still_inside: list[str] = []
-        if zones:
+        if zones and not avoid:
+            still_inside = [z.id for z in zones if _line(safe["points"]).intersects(z.geometry)]
+        elif zones:
             safe = self._widen_until_clear(points, rules, zones, safe)
             base = self.gh.route(points, custom_model=build_model(rules, []))
             safe_line, base_line = _line(safe["points"]), _line(base["points"])
@@ -225,6 +229,7 @@ class RouteService:
             ascend_m=round(safe.get("ascend") or 0),
             descend_m=round(safe.get("descend") or 0),
             max_slope_pct=_max_slope(safe),
+            max_uphill_pct=_max_uphill(safe),
             avoided=avoided,
             still_inside=still_inside,
             geometry=safe["points"],
@@ -302,7 +307,7 @@ class RouteService:
         return self.source(demo).hazards()
 
 
-def build_model(rules: dict[str, list[dict[str, Any]]], zones: list[Hazard]) -> dict[str, Any] | None:
+def build_model(rules: dict[str, Any], zones: list[Hazard]) -> dict[str, Any] | None:
     """GraphHopper custom_model: 사용자 유형 규칙 + 위험 구역 회피. 더할 게 없으면 None (기본 도보 모델)."""
     priority = list(rules.get("priority", []))
     speed = list(rules.get("speed", []))
@@ -317,6 +322,8 @@ def build_model(rules: dict[str, list[dict[str, Any]]], zones: list[Hazard]) -> 
         model["priority"] = priority
     if speed:
         model["speed"] = speed
+    if rules.get("distance_influence") is not None:
+        model["distance_influence"] = rules["distance_influence"]
     return model or None
 
 
@@ -342,6 +349,12 @@ def _max_slope(path: dict[str, Any]) -> int:
     """GraphHopper details.average_slope ([시작, 끝, 경사%] 목록)에서 가장 급한 값."""
     slopes = [abs(d[2]) for d in (path.get("details") or {}).get("average_slope", []) if d[2] is not None]
     return round(max(slopes)) if slopes else 0
+
+
+def _max_uphill(path: dict[str, Any]) -> int:
+    """진행 방향 기준 가장 급한 오르막 (average_slope 양수 중 최대, 없으면 0)."""
+    ups = [d[2] for d in (path.get("details") or {}).get("average_slope", []) if d[2] is not None and d[2] > 0]
+    return round(max(ups)) if ups else 0
 
 
 def _meters_projector(lat0: float):

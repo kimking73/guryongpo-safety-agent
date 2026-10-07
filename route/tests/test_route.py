@@ -52,7 +52,7 @@ def test_route_converts_graphhopper_response():
     res = c.post("/api/route", json=BODY)
     assert res.status_code == 200
     assert res.json() == {"strategy": None, "profile": "adult", "distance_m": 986, "duration_s": 710,
-                          "ascend_m": 10, "descend_m": 2, "max_slope_pct": 8,   # 내리막 7.6%도 급경사로 본다
+                          "ascend_m": 10, "descend_m": 2, "max_slope_pct": 8, "max_uphill_pct": 3,   # 내리막 7.6%도 급경사로 본다
                           "avoided": [], "still_inside": [], "geometry": PATH["points"], "source": "graphhopper",
                           "hazards_ok": True}
     # GraphHopper에는 [lon, lat] 순서, 도보 profile, 인코딩된 polyline으로 요청한다
@@ -86,13 +86,42 @@ def test_fastest_adult_sends_no_rules():
     assert res["profile"] == "adult" and "custom_model" not in json.loads(seen[0].content)
 
 
-def test_safest_adult_avoids_slopes_at_adult_speed():
-    """성인이 '안전한 길'을 고르면 급경사는 피하되 걸음 속도는 성인 그대로 (소요 시간이 부풀지 않는다)"""
+def test_safest_adult_avoids_hazards_only():
+    """안전 경로(기본): 성인은 경사 규칙 없이 위험 구역만 피한다 (2026-10-07 세 경로 구분)"""
     c, seen = client(ok)
     res = c.post("/api/route", json={**BODY, "strategy": "safest", "profile": "adult"}).json()
-    assert res["strategy"] == "safest" and res["profile"] == "adult"
+    assert res["strategy"] == "safest" and res["profile"] == "adult" and "custom_model" not in json.loads(seen[0].content)
+
+
+def test_flat_adult_avoids_uphill_only():
+    """오르막 회피: 진행 방향 오르막(average_slope 양수)만 피하고 걸음 속도는 성인"""
+    from guardian_route.profiles import UPHILL_RULES
+    c, seen = client(ok)
+    res = c.post("/api/route", json={**BODY, "strategy": "flat", "profile": "adult"}).json()
     model = sent_model(seen)
-    assert model["priority"] == PROFILE_RULES["elderly"]["priority"] and "speed" not in model
+    assert res["strategy"] == "flat" and model["priority"] == UPHILL_RULES and "speed" not in model
+    assert all("-" not in r.get("if", r.get("else_if", "")) for r in UPHILL_RULES)   # 내리막 조건 없음
+
+
+def test_flat_elderly_keeps_elderly_rules():
+    c, seen = client(ok)
+    c.post("/api/route", json={**BODY, "strategy": "flat", "profile": "elderly"})
+    assert sent_model(seen) == PROFILE_RULES["elderly"]
+
+
+def test_shortest_is_distance_first():
+    from guardian_route.profiles import SHORTEST_DISTANCE_INFLUENCE
+    c, seen = client(ok)
+    c.post("/api/route", json={**BODY, "strategy": "shortest", "profile": "elderly"})
+    model = sent_model(seen)
+    assert model["distance_influence"] == SHORTEST_DISTANCE_INFLUENCE and "priority" not in model
+    assert model["speed"] == PROFILE_RULES["elderly"]["speed"]   # 시간은 노약자 걸음
+
+
+def test_max_uphill_is_direction_aware():
+    from guardian_route.service import _max_uphill
+    assert _max_uphill({"details": {"average_slope": [[0, 1, -9.0], [1, 2, 4.4], [2, 3, None]]}}) == 4
+    assert _max_uphill({"details": {"average_slope": [[0, 1, -9.0]]}}) == 0
 
 
 def test_safest_elderly_keeps_elderly_rules():

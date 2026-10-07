@@ -232,7 +232,34 @@ String? shelterExclusion(Facility f, List<RiskArea> areas) {
   return null;
 }
 
-enum RouteType { safest, nearest }
+/// 경로 종류 (2026-10-07 세 가지): 가까운 = 위험 회피 없는 최단 거리, 안전 = 위험 구역 회피(기본), 오르막 회피 = 위험 회피 + 오르막 회피.
+/// 걸음 속도는 셋 다 사용자 유형(성인·노약자)대로. 경로 서버 strategy: shortest · safest · flat (route/guardian_route/profiles.py)
+enum RouteType { safest, nearest, flat }
+
+extension RouteTypeInfo on RouteType {
+  /// 화면에 나오는 순서
+  static const ordered = [RouteType.nearest, RouteType.safest, RouteType.flat];
+  String get label => switch (this) {
+        RouteType.nearest => '가까운 경로',
+        RouteType.safest => '안전 경로',
+        RouteType.flat => '오르막 회피 경로',
+      };
+  String get shortLabel => switch (this) {
+        RouteType.nearest => '가까운',
+        RouteType.safest => '안전',
+        RouteType.flat => '오르막 회피',
+      };
+  String get description => switch (this) {
+        RouteType.nearest => '최단 거리 · 위험 구역을 피하지 않음 (지나는 구역은 경고)',
+        RouteType.safest => '확인된 침수·산사태 위험 구역을 피함',
+        RouteType.flat => '위험 구역 회피 + 오르막(경사 1/18 초과)을 피함 · 내리막은 그대로',
+      };
+  String get strategy => switch (this) {
+        RouteType.nearest => 'shortest',
+        RouteType.safest => 'safest',
+        RouteType.flat => 'flat',
+      };
+}
 
 /// 65세 이상, 휠체어 사용자 또는 보행 불편 사용자는 접근성 경로를 사용한다.
 String deriveRouteProfile(int? age, String? transport,
@@ -320,6 +347,7 @@ class SafetyRoute {
     this.stillInside = const [],
     this.profile = 'adult',
     this.maxSlopePercent = 0,
+    this.maxUphillPercent = 0,
     this.hazardsOk = true,
     this.encodedGeometry,
     this.seaPoints = const [],
@@ -341,6 +369,9 @@ class SafetyRoute {
   /// Profile and route diagnostics returned by the route API.
   final String profile;
   final int maxSlopePercent;
+
+  /// 진행 방향 기준 가장 급한 오르막 (경로 서버 max_uphill_pct)
+  final int maxUphillPercent;
   final bool hazardsOk;
   final String? encodedGeometry;
 

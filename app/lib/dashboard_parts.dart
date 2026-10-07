@@ -513,7 +513,7 @@ class _RouteMapState extends ConsumerState<RouteMap> with WidgetsBindingObserver
                     Row(children: [
                       Expanded(
                           child: Text(
-                              '${warn != null ? '⚠ $warn — ${facility.id == customRouteId ? '목적지 주변 위험을 확인하세요' : '다른 대피소를 먼저 확인하세요'}\n' : ''}${routeType == RouteType.nearest ? '최단 시간 우선 · 확인된 위험 구역 회피' : '안전·접근성 우선 · 확인된 위험 구역 회피'} · ${route.profile == 'elderly' ? '노약자 프로필' : '성인 프로필'} · ${AppConfig.dataLabel}\n${facility.name} · ${(route.distanceMeters / 1000).toStringAsFixed(1)}km · 도보 ${route.estimatedMinutes}분 · 최대 경사 ${route.maxSlopePercent}%\n${route.hazardsOk ? '' : '⚠ 위험 정보를 불러오지 못한 경로입니다.\n'}${route.riskAvoidanceSummary}',
+                              '${warn != null ? '⚠ $warn — ${facility.id == customRouteId ? '목적지 주변 위험을 확인하세요' : '다른 대피소를 먼저 확인하세요'}\n' : ''}${routeType.label} · ${routeType.description} · ${route.profile == 'elderly' ? '노약자 프로필' : '성인 프로필'} · ${AppConfig.dataLabel}\n${facility.name} · ${(route.distanceMeters / 1000).toStringAsFixed(1)}km · 도보 ${route.estimatedMinutes}분 · 최대 오르막 ${route.maxUphillPercent}% · 최대 경사 ${route.maxSlopePercent}%\n${route.hazardsOk ? '' : '⚠ 위험 정보를 불러오지 못한 경로입니다.\n'}${route.riskAvoidanceSummary}',
                               style: const TextStyle(fontSize: 12))),
                       IconButton(
                           tooltip: '경로 안내 종료',
@@ -529,26 +529,17 @@ class _RouteMapState extends ConsumerState<RouteMap> with WidgetsBindingObserver
                               builder: (_) => const ShelterPickerSheet()),
                           icon: const Icon(Icons.place_outlined),
                           label: const Text('다른 시설 선택')),
-                      FilledButton.tonal(
-                          style: FilledButton.styleFrom(
-                              backgroundColor: routeType == RouteType.nearest
-                                  ? const Color(0xff16803c)
-                                  : Colors.grey.shade100,
-                              foregroundColor: routeType == RouteType.nearest
-                                  ? Colors.white
-                                  : Colors.black87),
-                          onPressed: () => switchRouteType(ref, facility.id, RouteType.nearest),
-                          child: const Text('가까운 경로')),
-                      FilledButton.tonal(
-                          style: FilledButton.styleFrom(
-                              backgroundColor: routeType == RouteType.safest
-                                  ? const Color(0xff16803c)
-                                  : Colors.grey.shade100,
-                              foregroundColor: routeType == RouteType.safest
-                                  ? Colors.white
-                                  : Colors.black87),
-                          onPressed: () => switchRouteType(ref, facility.id, RouteType.safest),
-                          child: const Text('안전 경로')),
+                      for (final t in RouteTypeInfo.ordered)
+                        FilledButton.tonal(
+                            style: FilledButton.styleFrom(
+                                backgroundColor: routeType == t
+                                    ? const Color(0xff16803c)
+                                    : Colors.grey.shade100,
+                                foregroundColor: routeType == t
+                                    ? Colors.white
+                                    : Colors.black87),
+                            onPressed: () => switchRouteType(ref, facility.id, t),
+                            child: Text(t.label)),
                     ])
                   ])),
             ])));
@@ -580,7 +571,7 @@ class ShelterPickerSheet extends ConsumerWidget {
           .map((facility) {
         final warn = shelterExclusion(facility, areas);
         final label = warn ??
-            (routeType == RouteType.safest ? '가장 안전한 경로' : '가까운 대피소 경로');
+            routeType.label;
         return ListTile(
             leading: Icon(
                 warn != null
