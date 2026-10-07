@@ -106,7 +106,8 @@ def test_server_profile_is_the_source(monkeypatch):
     from guardian_ai.llm import MemoryFact, MemoryUpdate
     M.save(svc.store, "u1", "c0", MemoryUpdate(facts=[
         MemoryFact(field="age", value="50", quote="저 50살"),
-        MemoryFact(field="note", value="고양이를 키움", quote="고양이 있어요")], summary="대피소를 물음"))
+        MemoryFact(field="note", value="고양이를 키움", quote="고양이 있어요"),
+        MemoryFact(field="walking_impaired", value="true", quote="무릎이 아파요")], summary="대피소를 물음"))
     seen = {}
     real = svc.app.stream
     def spy(state, *a, **kw):
@@ -117,6 +118,7 @@ def test_server_profile_is_the_source(monkeypatch):
                          profile=S.UserProfile(user_id="u1", age=40, has_dependents=True)), verified_uid="u1")
     u = seen["user"]
     assert u.age == 70 and u.occupation == "어업" and u.home.label == "집" and u.has_dependents is True
+    assert u.walking_impaired is True          # 서버·앱 어디에도 없는 칸은 기억으로 채움
     assert not any("50" in line for line in seen["memory"]) and any("고양이" in line for line in seen["memory"])
 
 

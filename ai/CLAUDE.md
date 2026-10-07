@@ -58,7 +58,7 @@
   7–19 s, one retry 30–35 s. Live tree test: `tests/test_tree_live.py -m "live and db"` (11 cases, ~6 min).
 - Data: tools read PostgreSQL directly with read-only role `AI_DB_*` (`../db/init/07_ai_readonly.sh`); every tool takes
   `fetch=` and returns `{"available": False, "reason"}` on failure; observations prefer A's simulated values for 6 h like
-  the risk engine. `RiskLevel` = DB 5 levels (`.rank`), `ActionGuide` = `action_guides` row. `get_user_profile` reads `users`·`user_profiles`·`user_places` by Firebase uid (2026-10-08): for a signed-in chat (token uid = user_id, api.py `_verified`) the server profile is the source of truth, app-sent values only fill gaps, and memory contributes only notes + summaries (profile facts reach the profile via the app).
+  the risk engine. `RiskLevel` = DB 5 levels (`.rank`), `ActionGuide` = `action_guides` row. `get_user_profile` reads `users`·`user_profiles`·`user_places` by Firebase uid (2026-10-08): for a signed-in chat (token uid = user_id, api.py `_verified`) the server profile is the source of truth, app-sent values then memory facts only fill gaps (has_dependents reaches the AI only via memory — the app sends it nowhere), and memory text lines are notes + summaries only.
 - Memory: short-term `InMemorySaver` (60 min after last turn or restart; expired/unknown/other users' ids → new
   conversation), long-term `PostgresStore` in schema `ai_memory` via role `AI_MEM_DB_*` (`../db/init/08_ai_memory.sh`):
   self-stated user facts + conversation summaries, loaded per chat (empty profile fields, manager prompt, flood evidence),

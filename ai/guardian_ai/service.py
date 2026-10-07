@@ -228,8 +228,8 @@ class ChatService:
             try:
                 facts, episodes = M.load(self.store, req.user_id)
                 use_server = bool(server and server.get("available"))
-                if not use_server:
-                    profile = M.apply_to_profile(profile, facts)
+                # 서버 프로필·앱 어디에도 없는 칸만 기억으로 채운다 (예: 보호자 여부는 서버·채팅 요청 어디에도 안 올라옴)
+                profile = M.apply_to_profile(profile, facts)
                 memory = M.memory_lines(facts, episodes, include_profile_facts=not use_server)
             except Exception:  # noqa: BLE001 — 기억을 못 읽어도 답은 한다
                 logger.exception("사용자 기억 불러오기 실패")
