@@ -1,0 +1,26 @@
+html, body {
+  margin: 0;
+  background: #F3F5FA;
+  color: #0E1838;
+  font-family: Pretendard, -apple-system, 'Apple SD Gothic Neo', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+a { color: #14245C; text-decoration: underline; }
+a:hover { color: #2A3F86; }
+button, input { font-family: inherit; }
+
+.ms {
+  font-family: 'Material Symbols Rounded';
+  font-weight: normal;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.metric-card:hover { box-shadow: 0 8px 28px rgba(20, 36, 92, 0.14); }
+
+@keyframes gkWave {
+  0%, 100% { transform: scaleY(0.3); }
+  50% { transform: scaleY(1); }
+}
