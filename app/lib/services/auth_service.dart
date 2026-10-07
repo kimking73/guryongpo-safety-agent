@@ -20,7 +20,7 @@ class AccountInfo {
   final String? email;
   /// 'google.com' · 'password' · null(익명)
   final String? provider;
-  String get providerLabel => switch (provider) { 'google.com' => 'Google', 'password' => '이메일', _ => '익명' };
+  String get providerLabel => switch (provider) { 'google.com' => 'Google', 'password' => '이메일', _ => '로그인 안 함' };
 }
 
 /// 로그인 실패를 화면에 보여 줄 한국어 문구로
@@ -48,8 +48,9 @@ String authErrorMessage(String code) => switch (code) {
       _ => '로그인하지 못했습니다. 다시 시도해 주세요. ($code)',
     };
 
-/// Firebase 로그인. 시작하면 익명으로 들어오고, 원하면 Google·이메일 계정을 **연결**한다.
-/// 연결하면 uid가 그대로라 익명일 때 저장한 정보(서버 사용자·장소·AI 기억)가 이어진다.
+/// Firebase 로그인 (Google·이메일). 로그인하지 않으면 계정 없이 쓴다 — 익명 계정을 만들지 않는다 (사용자 결정 2026-10-08).
+/// 서버에 정보를 남기는 기능(계정 동기화·AI 장기 기억·개인 경고·푸시·대피 응답)은 로그인한 사람만 (signedIn).
+/// 예전에 만들어진 익명 세션은 시작할 때 로그아웃한다.
 class AuthService {
   /// Firebase 설정: --dart-define 값이 있으면 그것(예전 방식), 없으면 firebase_options.dart
   static FirebaseOptions? get firebaseOptions => AppConfig.hasFirebaseConfig
@@ -62,6 +63,13 @@ class AuthService {
   static bool get enabled => AppConfig.isRemote && firebaseOptions != null;
   static bool get ready => Firebase.apps.isNotEmpty;
 
+  /// Google·이메일로 로그인했는지 (익명 제외). 정보 저장 기능을 여는 기준. 로컬 개발 dev uid 도 로그인으로 본다
+  static bool get signedIn {
+    if (AppConfig.devUid.isNotEmpty) return true;
+    final u = ready ? FirebaseAuth.instance.currentUser : null;
+    return u != null && !u.isAnonymous;
+  }
+
   Future<AuthStateInfo> initialize() async {
     if (!enabled) return const AuthStateInfo(isMock: true, userId: 'mock-guryongpo-user');
     try {
@@ -71,7 +79,10 @@ class AuthService {
       // 새로고침할 때마다 새 익명 계정이 생기고 Google·이메일 로그인이 풀린다 (2026-10-05 수정)
       final restored = auth.currentUser ??
           await auth.authStateChanges().first.timeout(const Duration(seconds: 5), onTimeout: () => null);
-      final user = restored ?? (await auth.signInAnonymously()).user;
+      // 익명 계정을 만들지 않는다. 예전에 자동으로 만든 익명 세션이 남아 있으면 로그아웃 (서버 기록은 그대로)
+      if (restored != null && restored.isAnonymous) await auth.signOut();
+      if (!signedIn) return const AuthStateInfo(isMock: false);
+      final user = auth.currentUser;
       await syncServerUser();
       await AccountSync.instance.pullOrPush(); // 계정에 저장된 앱 정보 내려받기 (없으면 기기 값 올리기)
       return AuthStateInfo(isMock: false, userId: user?.uid, token: await user?.getIdToken());
@@ -83,11 +94,11 @@ class AuthService {
 
   Future<String?> token() async {
     if (AppConfig.devUid.isNotEmpty) return 'dev:${AppConfig.devUid}'; // 로컬 개발 전용 (AppConfig.devUid)
-    return ready ? FirebaseAuth.instance.currentUser?.getIdToken() : null;
+    return signedIn ? FirebaseAuth.instance.currentUser?.getIdToken() : null;
   }
 
   /// 로그인한 Firebase uid (없으면 null — 목업·초기화 전)
-  String? get uid => ready ? FirebaseAuth.instance.currentUser?.uid : null;
+  String? get uid => signedIn ? FirebaseAuth.instance.currentUser?.uid : null;
 
   /// 로그인 상태가 바뀔 때마다 (연결·로그인·로그아웃 포함)
   Stream<AccountInfo?> accountChanges() =>
@@ -141,12 +152,11 @@ class AuthService {
   Future<void> sendPasswordReset(String email) =>
       _run(() => FirebaseAuth.instance.sendPasswordResetEmail(email: email.trim()), sync: false);
 
-  /// 로그아웃 → 다시 익명으로 (재난 앱이라 로그인 없이도 계속 쓸 수 있게)
+  /// 로그아웃 → 계정 없이 계속 쓴다 (재난 정보·길찾기는 로그인 없이도. 익명 계정은 만들지 않는다)
   Future<void> signOut() => _run(() async {
         await AccountSync.instance.push(); // 못 올린 변경을 계정에 남기고
         await AccountSync.instance.clearLocal(); // 이 기기에서는 지운다
         await FirebaseAuth.instance.signOut();
-        await FirebaseAuth.instance.signInAnonymously();
       });
 
   /// Firebase 작업 실행 → 오류는 AuthFailure(한국어), 성공하면 서버 사용자 등록

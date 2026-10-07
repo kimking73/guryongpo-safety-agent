@@ -13,11 +13,12 @@ router = APIRouter(tags=["dashboard"])
 LayerId = Literal["shelters", "medical", "landslide_zones", "manholes", "stations", "risk_areas", "flood_grid"]
 
 
-@router.get("/dashboard", summary="맞춤 대시보드 (실데이터 — app/widgets.py)")
+@router.get("/dashboard", summary="맞춤 대시보드 (실데이터 — app/widgets.py). 로그인 없이도 — 그때는 등록 장소·내 대피 카드만 빠진다")
 def get_dashboard(lat: float = Query(ge=-90, le=90), lng: float = Query(ge=-180, le=180),
-                  u: AuthUser = Depends(current_user)):
+                  u: Optional[AuthUser] = Depends(optional_user)):
+    # 2026-10-08: 앱이 로그인하지 않은 사람에게 익명 계정을 만들지 않게 되어(사용자 결정), 첫 화면은 로그인 없이 열린다
     from .. import incidents, users, widgets
-    user_id = users.find_user_id(u)
+    user_id = users.find_user_id(u) if u else None
     # 내 대피 확인 카드 (A12) — 진행 중인 대피 상황이 있으면 실제 상태, 없으면 null
     return widgets.build(lat, lng, user_id, incidents.my_evacuation(user_id))
 

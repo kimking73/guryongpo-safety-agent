@@ -45,10 +45,11 @@ class _AccountCardState extends ConsumerState<AccountCard> {
         child: Column(children: [
       ListTile(
           leading: Icon(signedIn ? Icons.verified_user_outlined : Icons.person_outline),
-          title: Text(signedIn ? (a.email ?? '로그인됨') : '익명 사용자'),
+          title: Text(signedIn ? (a.email ?? '로그인됨') : '로그인하지 않음'),
           subtitle: Text(signedIn
               ? '${a.providerLabel} 계정으로 로그인 — 다른 기기에서도 같은 정보로 이어 씁니다.'
-              : '로그인하지 않아도 모든 기능을 쓸 수 있습니다. 로그인하면 지금 정보가 계정에 저장됩니다.')),
+              : '재난 정보·지도·길찾기·AI 대화는 로그인 없이 쓸 수 있습니다. 프로필은 이 기기에만 남고 서버에 저장하지 않습니다. '
+                  '로그인하면 프로필 계정 저장, AI가 대화 내용 기억, 내 위치 맞춤 경고·푸시 알림, 대피 응답을 쓸 수 있습니다.')),
       if (busy) const LinearProgressIndicator(),
       if (!signedIn) ...[
         ListTile(
@@ -66,7 +67,7 @@ class _AccountCardState extends ConsumerState<AccountCard> {
             leading: const Icon(Icons.logout),
             title: const Text('로그아웃'),
             enabled: !busy,
-            onTap: () => _do(auth.signOut, '로그아웃했습니다. 익명으로 계속 사용합니다.')),
+            onTap: () => _do(auth.signOut, '로그아웃했습니다. 로그인 없이 계속 쓸 수 있습니다.')),
     ]));
   }
 }

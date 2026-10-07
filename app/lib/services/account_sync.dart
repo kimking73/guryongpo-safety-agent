@@ -25,7 +25,8 @@ class AccountSync {
   /// 앱 장소 → 서버 장소 id·내용 지문 ({"home": {"id": "...", "fp": "..."}, "saved:123": …}). 통째 저장에 함께 실어 다른 기기에서도 중복 등록 안 함
   static const _placeIdsKey = 'server_place_ids';
 
-  bool get enabled => AuthService.enabled && AuthService.ready;
+  // 로그인(익명 제외)한 사람만 계정에 저장한다 (2026-10-08). 로그인 안 하면 프로필은 이 기기에만
+  bool get enabled => AuthService.enabled && AuthService.signedIn;
   Timer? _debounce;
   Future<void>? _running;
 

@@ -4,9 +4,17 @@ from types import SimpleNamespace
 import pytest
 
 
-def test_address_geocode_requires_auth(client):
+def test_address_geocode_works_without_login(client, monkeypatch):
+    """2026-10-08: 앱이 로그인 안 한 사람에게 익명 계정을 만들지 않으므로, 저장하지 않는 주소 변환은 로그인 없이 된다"""
+    from app.routers import user
+    monkeypatch.setattr(user, "geocode_road_address", lambda a: {"address": a, "location": {"lat": 35.98, "lng": 129.55}})
     response = client.post("/api/v1/user/geocode", json={"address": "구룡포읍 호미로 152"})
-    assert response.status_code == 401
+    assert response.status_code == 200 and response.json()["location"]["lat"] == 35.98
+
+
+def test_dashboard_works_without_login(client):
+    r = client.get("/api/v1/dashboard?lat=35.98&lng=129.55")
+    assert r.status_code == 200 and "widgets" in r.json()
 
 
 def test_address_geocode_uses_kakao_on_server(client, monkeypatch):

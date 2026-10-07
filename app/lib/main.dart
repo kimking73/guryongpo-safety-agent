@@ -178,6 +178,8 @@ Future<void> refreshAlertFeed(WidgetRef ref, {bool fullRefresh = true}) async {
     ref.invalidate(alertsProvider);
     return;
   }
+  // 개인 경고 받기는 위치를 서버에 남기므로 로그인한 사람만 (2026-10-08). 공개 특보·재난문자는 대시보드에 그대로
+  if (!AuthService.signedIn) return;
   try {
     final result = await ref.read(repo).pollAlerts(
           ref.read(userLocation).position,
@@ -536,7 +538,7 @@ class _NotificationBootstrapState extends ConsumerState<_NotificationBootstrap>
   Future<void> _pollAlerts({bool fullRefresh = false}) async {
     if (_pollInFlight || !mounted) return;
     unawaited(retryQueuedEvacuationResponses(ref));
-    if (!AppConfig.isRemote) return;
+    if (!AppConfig.isRemote || !AuthService.signedIn) return;   // 개인 경고는 로그인한 사람만 (2026-10-08)
     _pollInFlight = true;
     _pollTimer?.cancel();
     try {

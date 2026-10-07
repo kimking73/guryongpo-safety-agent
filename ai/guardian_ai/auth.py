@@ -38,8 +38,8 @@ def firebase_project_id() -> str | None:
         return None
 
 
-def verify_token(token: str) -> str:
-    """토큰 → uid. 실패하면 HTTPException(401)."""
+def verify_token(token: str, allow_anonymous: bool = False) -> str:
+    """토큰 → uid. 실패하면 HTTPException(401). 익명 로그인 토큰은 거부한다 (2026-10-08: 정보 저장은 로그인한 사람만)."""
     token = (token or "").strip()
     if not token:
         raise HTTPException(401, "로그인이 필요합니다.")
@@ -63,7 +63,20 @@ def verify_token(token: str) -> str:
     uid = (claims or {}).get("user_id") or (claims or {}).get("sub")
     if not uid:
         raise HTTPException(401, "로그인 정보를 확인하지 못했습니다.")
+    if not allow_anonymous and ((claims.get("firebase") or {}).get("sign_in_provider") == "anonymous"):
+        raise HTTPException(401, "Google·이메일로 로그인해야 쓸 수 있습니다.")
     return uid
+
+
+def signed_in_uid(authorization: str | None) -> str | None:
+    """로그인(익명 제외)한 uid, 아니면 None — 예외 없이. 채팅에서 장기 기억을 저장해도 되는지 판단할 때 쓴다"""
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer":
+        return None
+    try:
+        return verify_token(token)
+    except HTTPException:
+        return None
 
 
 def current_uid(authorization: str | None = Header(default=None)) -> str:

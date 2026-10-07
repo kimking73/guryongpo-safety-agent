@@ -44,3 +44,24 @@ def test_forget_one_fact(client):
     assert res == {"key": key, "deleted": True}
     facts, _ = M.load(svc.store, "u1")
     assert set(facts) == {"age"} and M.load(svc.store, "u2")[0]["age"]["value"] == "30"
+
+
+def test_chat_remembers_only_for_signed_in_owner(client):
+    """장기 기억은 로그인(익명 제외)한 본인만 (2026-10-08): 토큰 없음·다른 uid → remember=False"""
+    from guardian_ai.api import _remember_only_signed_in
+    from guardian_ai.service import ChatRequest
+    req = ChatRequest(user_id="u9", question="대피소 어디야")
+    assert _remember_only_signed_in(req, None).remember is False
+    assert _remember_only_signed_in(req, "Bearer dev:someone-else").remember is False
+    assert _remember_only_signed_in(req, "Bearer dev:u9").remember is True
+    assert _remember_only_signed_in(req.model_copy(update={"remember": False}), "Bearer dev:u9").remember is False
+
+
+def test_chat_endpoint_applies_the_rule(client, monkeypatch):
+    c, svc = client
+    seen = []
+    real = svc.chat
+    monkeypatch.setattr(svc, "chat", lambda req: (seen.append(req.remember), real(req))[1])
+    c.post("/api/chat", json={"user_id": "u9", "question": "대피소 어디야"})
+    c.post("/api/chat", json={"user_id": "u9", "question": "대피소 어디야"}, headers={"Authorization": "Bearer dev:u9"})
+    assert seen == [False, True]

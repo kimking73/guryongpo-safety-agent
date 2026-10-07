@@ -14,7 +14,7 @@ void main() {
   });
 
   test('계정 제공자 표시', () {
-    expect(const AccountInfo(uid: 'a', isAnonymous: true).providerLabel, '익명');
+    expect(const AccountInfo(uid: 'a', isAnonymous: true).providerLabel, '로그인 안 함');
     expect(const AccountInfo(uid: 'a', isAnonymous: false, provider: 'google.com').providerLabel, 'Google');
     expect(const AccountInfo(uid: 'a', isAnonymous: false, provider: 'password').providerLabel, '이메일');
   });

@@ -112,6 +112,7 @@ class FcmNotificationService {
 
   Future<void> _registerToken(String token) async {
     if (!await isEnabled || _repository == null) return;
+    if (!AuthService.signedIn) return;   // 푸시 등록(기기 토큰 저장)은 로그인한 사람만 (2026-10-08)
     final platform = switch (defaultTargetPlatform) {
       TargetPlatform.iOS => 'ios',
       _ => 'android',

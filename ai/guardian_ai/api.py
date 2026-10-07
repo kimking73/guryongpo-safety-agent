@@ -12,14 +12,14 @@ import os
 from contextlib import asynccontextmanager
 from functools import lru_cache
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, Header
 from fastapi.responses import Response
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import memory as M
 from . import state as S
-from .auth import current_uid
+from .auth import current_uid, signed_in_uid
 from .service import ChatRequest, ChatResponse, ChatService
 from .voice import MAX_BYTES, BadAudio, GoogleVoice, NoSpeech, VoiceUnavailable, to_pcm16k
 from .usage import get_tracker
@@ -85,8 +85,17 @@ def delete_memory(user_id: str, service: ChatService = Depends(get_service)) -> 
 
 
 @app.post("/api/chat", response_model=ChatResponse)
-def chat(req: ChatRequest, service: ChatService = Depends(get_service)) -> ChatResponse:
-    return service.chat(req)
+def chat(req: ChatRequest, service: ChatService = Depends(get_service),
+         authorization: str | None = Header(default=None)) -> ChatResponse:
+    return service.chat(_remember_only_signed_in(req, authorization))
+
+
+def _remember_only_signed_in(req: ChatRequest, authorization: str | None) -> ChatRequest:
+    """장기 기억(대화를 넘어 남기는 사실·요약)은 로그인(익명 제외)한 본인만 (사용자 결정 2026-10-08).
+    토큰이 없거나 익명이거나 user_id 가 토큰의 uid 와 다르면 remember=False — 이번 대화의 단기 기억(60분)만 쓴다"""
+    if req.remember and signed_in_uid(authorization) != req.user_id:
+        return req.model_copy(update={"remember": False})
+    return req
 
 
 # --- 음성 (B5) -----------------------------------------------------------------
@@ -117,6 +126,7 @@ def _voice_error(e: Exception) -> HTTPException:
 def voice(audio: UploadFile = File(...), user_id: str = Form(...), conversation_id: str | None = Form(None),
           lat: float | None = Form(None), lon: float | None = Form(None), profile: str | None = Form(None),
           remember: bool = Form(True), demo: bool = Form(False), service: ChatService = Depends(get_service),
+          authorization: str | None = Header(default=None),
           google: GoogleVoice = Depends(get_voice)) -> VoiceResponse:
     """녹음 업로드 → 받아쓰기 → /api/chat과 같은 대화 → 답의 voice_text를 음성으로. profile은 ChatRequest.profile과 같은 JSON 문자열."""
     import time as _t
@@ -135,7 +145,7 @@ def voice(audio: UploadFile = File(...), user_id: str = Form(...), conversation_
         user_id=user_id, question=transcript, conversation_id=conversation_id, remember=remember, demo=demo,
         current_location=S.Location(lat=lat, lon=lon) if lat is not None and lon is not None else None,
         profile=S.UserProfile.model_validate_json(profile) if profile else None)
-    res = service.chat(req)
+    res = service.chat(_remember_only_signed_in(req, authorization))
     t1 = _t.perf_counter()
     try:
         audio_b64 = base64.b64encode(google.tts(res.voice_text or res.answer)).decode()

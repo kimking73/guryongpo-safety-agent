@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Response
 from fastapi.responses import JSONResponse
 
 from .. import db, households, mocks, users
-from ..auth import AuthUser, current_user
+from ..auth import AuthUser, current_user, optional_user
 from ..config import settings
 from ..errors import ApiError
 from ..geocoding import geocode_road_address
@@ -74,8 +74,8 @@ def put_app_state(body: AppStateInput, u: AuthUser = Depends(current_user)):
     return Response(status_code=204)
 
 
-@router.post("/user/geocode", summary="도로명 주소를 좌표로 변환")
-def geocode_address(body: AddressGeocodeInput, u: AuthUser = Depends(current_user)):
+@router.post("/user/geocode", summary="도로명 주소를 좌표로 변환 (저장하지 않음 — 로그인 없이도, 2026-10-08)")
+def geocode_address(body: AddressGeocodeInput, u: Optional[AuthUser] = Depends(optional_user)):
     return geocode_road_address(body.address)
 
 

@@ -257,6 +257,8 @@ class RemoteSafetyRepository implements SafetyRepository {
             if (_conversationId != null) 'conversation_id': _conversationId,
             'current_location': {'lat': o.latitude, 'lon': o.longitude, 'label': '현재 위치'},
             'profile': profile,
+            // 장기 기억(대화를 넘어 남기는 정보)은 로그인한 사람만 (2026-10-08) — AI 서버도 토큰으로 다시 확인한다
+            'remember': AuthService.signedIn,
             // 시연 모드: AI도 서버 시연 데이터로 답하고 시연 위험 영역을 피한 경로를 낸다
             if (DemoData.on) 'demo': true,
           }));
@@ -280,6 +282,7 @@ class RemoteSafetyRepository implements SafetyRepository {
       'lat': '${o.latitude}',
       'lon': '${o.longitude}',
       'profile': jsonEncode(profile),
+      'remember': '${AuthService.signedIn}',
       if (DemoData.on) 'demo': 'true',
     });
     final r = await _guard(() => _client.ai.post<Map<String, dynamic>>('/api/voice', data: form), passDetail: const {422, 503});
