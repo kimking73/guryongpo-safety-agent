@@ -63,5 +63,12 @@ void main() {
     (_, fill) = planMemorySync({'occupation': {'value': '어부', 'updated_at': 't1'}}, {'직업': '학생'}, applied);
     expect(fill, isEmpty);
   });
+
+  test('첫 버전이 원문으로 넣은 직업("수산업자")도 같은 직업으로 보고 칩을 고른다', () {
+    final applied = {'occupation': 't1'};
+    final (items, fill) = planMemorySync({'occupation': {'value': '수산업자', 'updated_at': 't1'}}, {'직업': '수산업자'}, applied);
+    expect(items.single.status, AiMemoryStatus.same);
+    expect(fill, {'직업': '어업 종사자·뱃사람', 'jobs': '어업 종사자·뱃사람'});
+  });
 }
 

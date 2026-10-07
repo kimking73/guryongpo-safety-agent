@@ -210,9 +210,13 @@ String mergedProfileValue(String key, String cur, String v) =>
     }
     final (pk, pv) = mapped;
     final cur = (profile[pk] ?? '').trim();
+    // 직업은 선택지 이름으로 바꿔 비교한다 (2026-10-08): 첫 버전이 원문("수산업자")을 칸에 넣었는데 지금은 "어업 종사자·뱃사람"으로
+    // 바꾸므로, 그대로 비교하면 '사용자가 직접 바꾼 값'으로 오해해 칩 반영을 건너뛰었다. 같은 직업이면 칸도 선택지 이름으로 정리
+    final sameJob = pk == '직업' && cur.isNotEmpty && cur != pv && jobChoice(cur) == pv;
+    if (sameJob) fill[pk] = pv;
     final status = cur.isEmpty
         ? AiMemoryStatus.filled
-        : _same(pk, cur, pv)
+        : sameJob || _same(pk, cur, pv)
             ? AiMemoryStatus.same
             : applied[e.key] != stamp
                 ? AiMemoryStatus.overwritten     // 새로 말한 내용 → 덮어씀
@@ -240,7 +244,7 @@ const optionalJobChoices = ['어업 종사자·뱃사람', '자영업자', '농�
 
 /// 직업 기억(자유 문장) → 선택 정보 카드 '직업' 선택지
 String jobChoice(String raw) =>
-    RegExp('어업|어선|어부|뱃|선장|선원|해녀').hasMatch(raw) ? '어업 종사자·뱃사람'
+    RegExp('어업|어선|어부|뱃|선장|선원|해녀|수산').hasMatch(raw) ? '어업 종사자·뱃사람'
     : RegExp('농업|농사|농부|과수').hasMatch(raw) ? '농업 종사자'
     : RegExp('자영업|가게|식당|장사|상인').hasMatch(raw) ? '자영업자'
     : RegExp('회사|직장|공무원|사무').hasMatch(raw) ? '직장인'
