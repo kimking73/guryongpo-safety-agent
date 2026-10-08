@@ -102,6 +102,8 @@ Pretendard 줄인 글꼴(`app/assets/fonts`), 메뉴 4개(대시보드·AI 대�
   (Let's Encrypt). VM `.env`에 `DEPLOY_DOMAIN`·`COMPOSE_PROFILES=deploy`·`CORS_ORIGINS`·`API_INTERNAL_TOKEN`·`KAKAO_REST_KEY`·`DATA_GO_KR_KEY` 추가.
 
 ## 이월 항목 (끝나면 지운다)
+- [ ] **VM 시험 대피 상황 지우기 (2026-10-09 생성)**: `care.incidents` note='b13_test'(시연 가구 12곳 대상, 도움 요청 2·대피 완료 1, 알림 안 감).
+      사용자 확인 끝나면 VM에서 `DELETE FROM care.incidents WHERE note = 'b13_test';`(대상 행은 CASCADE). 초대 코드 1회용(responder, 11-08 만료) 발급함.
 - [ ] **실제 로그인으로 확인 안 한 것 (2026-10-08)**: 대화 → 서버 프로필·수집 기록 반영(테스트 계정·dev 토큰으로는 VM 확인함),
       지원·복구 agent(웹), 새 디자인의 실시간 데이터 대시보드. 재난문자 카드는 SAFETY24 키 전이라 보통 위험 판정 경고/"수집 연결 전".
 - [ ] **조하린·김다인 공유 — B13 (2026-10-08, 사용자 허락으로 A·C 파일 수정)**:
@@ -293,3 +295,4 @@ Pretendard 줄인 글꼴(`app/assets/fonts`), 메뉴 4개(대시보드·AI 대�
 - 2026-10-08 밤 B13: 방문 우선순위 `server/app/priority.py`(사용자 규칙) + 테스트 `server/tests/test_priority.py`(8). 로컬 임시 dev api(api-b13, 8010)로 시연 가구 14곳·수동 대피 상황 → 12곳 대상,
   도움요청+청각장애 1위·지적장애 가구는 2위(장애 아님), 위치 주면 거리순 확인 후 시험 데이터·dev 사용자 삭제. server 220·app 94+7(기존 실패) 통과. VM 배포 전.
 - 2026-10-09: 방재단 현황을 일반 대시보드 화면으로(사용자 요청) — 재난문자·특보·재난 지도·날씨 그대로, 지도 위 사람 아이콘(등록 가구: 장애인·어르신·기타, 대피 대상: 사람+우선순위 숫자·상태 색), 지도 앞 대피 상황 머리·필터·범례, 지도 뒤 방문 우선순위/등록 가구 명단. 목업 웹 스크린샷 확인, app 94+7(기존 실패).
+- 2026-10-09 00:30: VM 배포(deploy.sh·push_web.sh, ef33e9c) — B13·방재단 현황 화면. 시험 대피 상황(note b13_test)·1회용 초대 코드 발급, VM에서 순위 확인(와상 도움요청 1위·지적장애 도움요청 2위·…·대피 완료 12위).
