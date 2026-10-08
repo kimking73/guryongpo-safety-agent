@@ -43,9 +43,9 @@ B와 맞물리는 새 A·C 작업: A12(15–16 대피 응답 API, B12·B13 선�
 **현재 상태**: B1·B2·B3·B6·B7·B8 완료 / **B10** 완료 기준 달성(https://34-64-177-195.nip.io) / **B11** 1차 + AI 연결(10-07) /
 **C8**(B가 진행) 배포 / **B4** 선제 경고 메시지 함수만 남음 + 지원·복구 agent 추가(10-08) / **B5** 음성만 남음(나중에).
 B4·B5·B10·J1·B11 완료 처리(라이브 타임라인 포함)는 사용자에게 먼저 묻는다 — 아직 답 없음.
-마지막 커밋 7c11d36 (VM `deploy.sh`·웹 `push_web.sh` 모두 반영, 2026-10-08 밤). VM 사용자 계정은 10-07에 모두 지웠고 새로 로그인한 계정만 있다.
-테스트 기준: server 212 passed·8 skipped, route 61 passed(live 제외), ai 207(live·db 제외),
-app 98개 중 기존 실패 7개(disaster_center "map options remain stable"·location 3·remote_mapping 1·route_and_places 2 — 1개는 10분 멈춤).
+마지막 앱 커밋 e47f177 (웹 `push_web.sh` 반영, 2026-10-08 23:25). 이 맥에서 VM ssh 됨(10-08 확인). VM 사용자 계정은 10-07에 모두 지웠고 새로 로그인한 계정만 있다.
+테스트 기준: server 212 passed·8 skipped, route 68 passed(live 제외), ai 208(live·db 제외),
+app 101개 중 기존 실패 7개(disaster_center "map options remain stable"·location 3·remote_mapping 1·route_and_places 2 — 1개는 10분 멈춤).
 
 **2026-10-07~08 한 일 (자세한 건 작업 기록)**:
 - 경로: 가까운(회피 없음)·안전·오르막 회피 3종, 자동차 경로(GraphHopper car), 시연 산사태 범위 1등급.
@@ -102,9 +102,6 @@ Pretendard 줄인 글꼴(`app/assets/fonts`), 메뉴 4개(대시보드·AI 대�
   (Let's Encrypt). VM `.env`에 `DEPLOY_DOMAIN`·`COMPOSE_PROFILES=deploy`·`CORS_ORIGINS`·`API_INTERNAL_TOKEN`·`KAKAO_REST_KEY`·`DATA_GO_KR_KEY` 추가.
 
 ## 이월 항목 (끝나면 지운다)
-- [ ] **로컬 Docker(OrbStack) 멈춤 (2026-10-08)**: `docker ps`가 응답 없음, `orbctl restart docker`로도 안 풀림. 세션 시작 때 확인 —
-      안 되면 OrbStack 앱을 껐다 켜기. 그동안 확인은 VM에서 했다(임시 api 컨테이너 `docker compose run -d --rm --no-deps --name api-e2e -e API_AUTH_MODE=dev api`
-      → ai 컨테이너에서 `API_URL=http://api-e2e:8000` 으로 시험, 끝나면 시험 사용자 DELETE·컨테이너 stop).
 - [ ] **실제 로그인으로 확인 안 한 것 (2026-10-08)**: 대화 → 서버 프로필·수집 기록 반영(테스트 계정·dev 토큰으로는 VM 확인함),
       지원·복구 agent(웹), 새 디자인의 실시간 데이터 대시보드. 재난문자 카드는 SAFETY24 키 전이라 보통 위험 판정 경고/"수집 연결 전".
 - [ ] **조하린·김다인 공유 — 10-07~08 추가분**:
@@ -133,15 +130,6 @@ Pretendard 줄인 글꼴(`app/assets/fonts`), 메뉴 4개(대시보드·AI 대�
       medical_facilities·manholes·action_guides·ingest_runs를 읽기 전용으로 직접 읽음 → 컬럼 이름·의미 바꿀 때 B에게 알려 달라.
       `db/init/07_ai_readonly.sh`(B 소유) 추가 사실과 팀원 로컬 DB에 한 번 실행하는 명령도 함께 (README에 적음)
 - [ ] 침수 지정 대피소가 데이터에 없음(구룡포 19곳 = 지진해일 17·민방위 2) → A에게 확인 요청, 그 전까지 침수 안내는 종류 무관 가장 가까운 대피소
-- [ ] **`SAFETY24_API_KEY`(재난안전데이터·긴급재난문자) 받아서 `.env`에 넣기** — 사용자가 추후 저장(2026-10-01).
-      넣은 뒤 VM에 `.env` 복사(해시 비교) → VM에서 `docker compose -f docker-compose.yml up -d --force-recreate api collector`
-      → `/api/health`의 `ingest.safety24`가 ok인지 확인. 기상청·포항 디지털트윈 키는 반영 완료
-- [ ] **남은 API 활용신청** — 사용자가 추후 진행(2026-10-01). 지금 성공: 기상청 특보(wrn_now_data)·AWS 매분(nph-aws2_min)·
-      초단기실황(getUltraSrtNcst)·태풍 목록(typ_lst), 포항 DT 수위·자외선. 실패(403/401):
-      기상청 API허브 — 단기예보 조회서비스의 초단기예보(getUltraSrtFcst)·단기예보(getVilageFcst),
-      중기예보 조회서비스의 중기육상(getMidLandFcst)·중기기온(getMidTa), 태풍 현재 위치(typ_now) /
-      포항 디지털트윈 — 대기질(atmosphere/devices, 40104 권한 없음).
-      키는 그대로라 `.env` 변경 불필요. 신청 후 VM에서 `docker compose -f docker-compose.yml exec -T collector python -m collector --once`로 확인
 - [ ] **휠체어 경로 유형 다시 검토** — 2026-09-26 사용자 결정으로 제외(지금은 휠체어 이용자 → 노약자 경로).
       되살릴 때 참고: 이전 규칙은 계단 ×0(통행 불가), 산길(path·track) ×0.1, 경사 ≥5% ×0.3·≥8% ×0.05(경사로 기준 1/12≈8%),
       속도 ×0.7 (커밋 7407ed3의 route/guardian_route/profiles.py). 검증에서 나온 쟁점: ① 계단 금지 때문에 짧은 계단 대신 급경사로
@@ -178,7 +166,6 @@ Pretendard 줄인 글꼴(`app/assets/fonts`), 메뉴 4개(대시보드·AI 대�
 - [ ] 2026-10-02 QA 남은 것 (심각 1~3번은 해결): 노약자 경사 31% 구간(90m DEM 한계), 의료시설 5곳 모두 17~20km 밖(A),
       화면 1분 새로고침 없음, ~~GPS 미반영~~(2026-10-02 해결, 구룡포 안만), 서버 꺼짐 표시·알림 상세·시설 상세 오류 문구, 프로필 고정 문구,
       빈·엉뚱한 질문 답(B5 의도 검증으로 완화), 로컬 `API_INTERNAL_TOKEN` 없음
-- [ ] **VM `.env`에 `KAKAO_REST_KEY` 넣기** — 로컬은 완료(2026-10-02, 앱 '구룡폰느구룡' REST 키, 카카오맵 사용 ON). 없으면 AI가 "구룡포항까지" 같은 일반 장소를 못 찾고 대피소로 안내함
 - [ ] **A 레인 요청 (생활안전 행동요령)**: 자외선·미세먼지·폭염 대응요령 원문을 action_guides에(기상청·환경부 출처, hazard uv·fine_dust·ultrafine_dust). 들어오면 행동 권고가 자동으로 붙임. 사용자가 A에 전달
 - [ ] 대피 경로가 너무 김: 침수 경보 원(반경 300m)을 돌아가느라 직선 323m 대피소가 2.7km·33분, 노약자 3.9km·63분 (2026-10-03 침수 시연) → 수직 대피(가까운 건물 고층) 안내나 원 크기·회피 강도 조정 검토
 - [ ] 응답 시간 (목표 텍스트 15초·음성 20초, 2026-10-03 결정): 대부분 7~19초, 검증 재시도 1회면 30~35초 → 재시도 때 전문 agent 결과 재사용(데이터 재수집 없이 문장만 다시) 검토
@@ -294,3 +281,6 @@ Pretendard 줄인 글꼴(`app/assets/fonts`), 메뉴 4개(대시보드·AI 대�
   `service.server_profile` + 회귀 테스트. 지원·복구 agent 섞인 질문("태풍 피해 지원")이 강풍 agent의 '지원 정보 확인 불가' 문장으로 검증 실패 → `SUPPORT_TOPICS` 문장 제거(2906f1a), VM 12초·재시도 0.
 - 2026-10-08 디자인 작업 중 고친 것: 버튼 textStyle에 글꼴 빠지면 한글 □, 선택 칩 글자(WidgetStateColor), FilledButton 테마 색이 tonal 버튼까지 흰 글자, GkCard 바탕을 Material로(ListTile 물결·디버그 경고).
   앱 테스트 기존 실패 8 → 7. 세션 정리: CLAUDE.md·ai/CLAUDE.md·이 파일 다음 세션 시작점·이월 항목 갱신.
+- 2026-10-08 밤: 막혀 있던 외부 데이터 정리 — 재난문자는 IP가 아니라 **VM `.env`에 `SAFETY24_API_KEY`가 없던 것**(로컬 키를 해시 비교로 넣고 api·collector 재생성 → 23:27 수집 성공,
+  VM IP 34.64.177.195는 사용자가 safetydata.go.kr에 등록. 로컬 맥 IP는 미등록이라 로컬 수집은 계속 실패). 기상청 단기·중기·태풍·포항 대기질은 이미 수집 성공 중,
+  VM 카카오 키도 있음(AI가 '구룡포 일본인가옥거리'를 카카오 검색으로 찾음). 앱: AI 답 생성 중 다른 메뉴로 가도 답 유지(`chatController`·`chatLoading`, e47f177, 웹 배포).

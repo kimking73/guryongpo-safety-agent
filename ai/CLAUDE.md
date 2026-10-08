@@ -4,10 +4,10 @@
 1. Read `.claude/docs/timeline.md` → status table, "다음 세션 시작점", "이월 항목", work log.
 2. From `코드/`: `git pull` (teammates push to `main`), then `docker compose up -d` and `docker compose ps`
    (db, api, ai all healthy). If `.env` changed since the ai container started: `docker compose up -d --force-recreate ai`.
-3. Baseline tests: `.venv/bin/python -m pytest -q` → **207 passed** (2026-10-08). `-m "db and not live"` needs local db + `AI_DB_*`
+3. Baseline tests: `.venv/bin/python -m pytest -q` → **208 passed** (2026-10-08). `-m "db and not live"` needs local db + `AI_DB_*`
    in `.env` (plain `-m db` also runs paid live tests). `-m live` calls real OpenAI (routing, B3 injection, extractor; a few 원).
-   If `docker compose ps` hangs, the local OrbStack is stuck (2026-10-08) — restart the OrbStack app; VM checks still work.
-   Other lanes' baselines: server 212 passed·8 skipped, route 61, app 98 with 7 known failures (see timeline "다음 세션 시작점";
+   If `docker compose ps` hangs, restart the OrbStack app (happened 2026-10-08); VM checks still work.
+   Other lanes' baselines: server 212 passed·8 skipped, route 68, app 101 with 7 known failures (see timeline "다음 세션 시작점";
    run Flutter on an ASCII-path copy).
 3a. **OpenAI spend check — warn the user** (user's budget 200,000원/month, user request 2026-10-01): read
    `curl -s localhost:8001/api/ai/usage` (local container), the VM's same URL over ssh, and
@@ -18,7 +18,7 @@
    (https://claude.ai/artifact/H3ofVAbENCmCvRtAvaGLAi — 28-day version since 2026-10-03, Artifact tool `action: "read"`) and sync `timeline.md`.
    Its downloaded file may come wrapped in an extra host `<html>` shell — strip it before republishing.
 5. Check `docs/agent-design.md` §7 (open questions) and `docs/code_check_list.md` (#1–6 fixed, #7 mitigated — recheck in a demo scenario).
-6. Route work (B6·B7): `cd ../route && .venv/bin/python -m pytest -q` → **61 passed** (live deselected). Needs
+6. Route work (B6·B7): `cd ../route && .venv/bin/python -m pytest -q` → **68 passed** (live deselected). Needs
    `../graphhopper/data/guryongpo.osm.pbf` (`../graphhopper/fetch_osm.sh`).
 
 ## Session end (do this before finishing)
