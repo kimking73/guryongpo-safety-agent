@@ -21,7 +21,7 @@ Day 1 = 2026-09-23 (Day 10 = 10-02, Day 11 = 10-03).
 | B8 | 1–2 | 개발 환경·GCP·Firebase (docker-compose, PostGIS, .env 규칙, GCP 예산 알림, Firebase 익명인증·FCM) | - | 3명 로컬에서 DB·API 실행 | **완료** (2026-09-24) |
 | B2 | 3–4 | LangGraph 골격·관리자 agent (Gemini 연결, 질문 분류→라우팅, 목업 DB tool, /chat 인터페이스) | B1 | 질문 유형별로 올바른 agent 호출 | **완료** (2026-09-24) |
 | B3 | 5–6 | 침수 agent·환각 검증 (강수+수위 답변, evidence 대조, 최대 반복) | B2, A3 | 틀린 답 주입 시 검증에서 걸러짐 | **완료** (2026-10-01, 틀린 답 10/10 걸러짐·맞는 답 3/3 통과) |
-| B4 | 8–10 | 재난 agent 확장·행동 권고 (산사태·강풍태풍·생활안전·위치경로, 규칙 기반 판단 트리, 선제 경고 메시지 함수) | A4, B3, A7 | 재난별 시나리오에 규칙대로 응답 | **진행 중** (2026-10-03: agent 4종·행동 권고·재난 단계 완료. 남은 것: 선제 경고 메시지 함수(A5용, 사용자 결정으로 다음 작업). 완료 처리는 사용자 확인) |
+| B4 | 8–10 | 재난 agent 확장·행동 권고 (산사태·강풍태풍·생활안전·위치경로, 규칙 기반 판단 트리, 선제 경고 메시지 함수) | A4, B3, A7 | 재난별 시나리오에 규칙대로 응답 | **진행 중** (2026-10-03: agent 4종·행동 권고·재난 단계 완료. 남은 것: 선제 경고 메시지 함수(A5용, 사용자 결정으로 다음 작업). 2026-10-08 지원·복구 agent 추가. 완료 처리는 사용자 확인) |
 | B6 | 8–10 | GraphHopper 구축 (OSM 도로망, 위험지역·맨홀 회피, /route) | A1, A3 | 위험 구역 우회 경로 반환 | **완료** (2026-09-26, 임시 위험지역 데이터 / 회피 시연 16/16, 2026-10-01) |
 | B5 | 11–13 | 의도 검증·다듬기·음성 (STT/TTS, /voice, 지연 측정 → 필요 시 OpenAI Realtime) | B4 | 음성 왕복 동작, 지연 기록 | **진행 중** (2026-10-03: 의도 검증·카드형 다듬기·숫자 재검증·지연 측정·/api/voice·/api/tts·앱 마이크/재생 완료. 음성 대화(실제 Google 왕복·음성 지연 기록)는 사용자 결정으로 나중에 — 코드는 준비됨, 키 없으면 503) |
 | B7 | 11–13 | 경로 가중치·DEM·재계산 (프로필별 가중치, /route/check) | B6, B4 | 프로필별 다른 경로 | **완료** (원본에서 완료 처리, 2026-10-03 확인. 공개DEM 90m, 노약자 경사 기준선 1/18·1/12) |
@@ -39,33 +39,43 @@ A 작업 중 B와 맞물리는 것: **A7**(Day 3–6, 정적 데이터 적재)�
 B와 맞물리는 새 A·C 작업: A12(15–16 대피 응답 API, B12·B13 선행) · A13(17–18 취약 가구·민감정보 동의·방재단 권한, B13 선행) · A14(19–20 방문 기록, B13 필요) · C8(19–20 해상 경로 화면, B11 필요) · C7(17–18 접근성, B12 필요).
 원본 "확정 필요": 대피 확인 버튼 3종 문구, 상태 대시보드 범위, 방재단 계정 부여 방식, 취약 가구 등록 주체, 제출 기한이 28일과 맞는지.
 
-## 다음 세션 시작점 (2026-10-06 갱신, Day 14 — 28일판 기준)
-**현재 상태**: B1·B2·B3·B6·B7·B8 완료 / **B10** 완료 기준 달성(https://34-64-177-195.nip.io — Caddy·HTTPS·웹앱·Firebase 로그인)
-/ **B11** 1차 + 육지·방파제 통과 수정 / **C8**(B가 진행) 구현·VM 배포 / **B4** 선제 경고 메시지 함수만 남음 / **B5** 음성만 남음(나중에).
-**B4·B5·B10·J1·B11 완료 처리(라이브 타임라인 포함)는 사용자에게 먼저 묻는다** — 아직 답 없음.
-마지막 커밋 3d95de1 (VM `deploy.sh`·웹 `push_web.sh` 모두 반영됨, 2026-10-05 밤).
-테스트 기준: server 201 passed·8 skipped, route 58 passed(live 제외), ai 160, app — 기존 실패 8개(disaster_center 2·location 3·remote_mapping 1·route_and_places 2) 외 통과.
+## 다음 세션 시작점 (2026-10-08 갱신, Day 16 — 28일판 기준)
+**현재 상태**: B1·B2·B3·B6·B7·B8 완료 / **B10** 완료 기준 달성(https://34-64-177-195.nip.io) / **B11** 1차 + AI 연결(10-07) /
+**C8**(B가 진행) 배포 / **B4** 선제 경고 메시지 함수만 남음 + 지원·복구 agent 추가(10-08) / **B5** 음성만 남음(나중에).
+B4·B5·B10·J1·B11 완료 처리(라이브 타임라인 포함)는 사용자에게 먼저 묻는다 — 아직 답 없음.
+마지막 커밋 7c11d36 (VM `deploy.sh`·웹 `push_web.sh` 모두 반영, 2026-10-08 밤). VM 사용자 계정은 10-07에 모두 지웠고 새로 로그인한 계정만 있다.
+테스트 기준: server 212 passed·8 skipped, route 61 passed(live 제외), ai 207(live·db 제외),
+app 98개 중 기존 실패 7개(disaster_center "map options remain stable"·location 3·remote_mapping 1·route_and_places 2 — 1개는 10분 멈춤).
 
-**2026-10-05 한 일 (요약, 자세한 건 작업 기록)**: 실측 데이터화 + 시연 모드 스위치, 앱 정보 계정 동기화, 출발 위치 지정·길찾기(안전/가까운 비교),
-김다인 UI(de5cf30) 위에 실측 데이터, 지도 구룡포 한정, 첫 접속 로그인 오류 수정, C8·B11 배포, 방재단 시연 가구(서버 DB 14곳)·초대 코드,
-해상 경로 육지 통과 수정, 침수 격자 = 경로 서버가 피하는 영역과 같게, **시연 데이터 = 실제 센서 위치 + 시연 측정값**(아래).
+**2026-10-07~08 한 일 (자세한 건 작업 기록)**:
+- 경로: 가까운(회피 없음)·안전·오르막 회피 3종, 자동차 경로(GraphHopper car), 시연 산사태 범위 1등급.
+- 로그인 강제(익명 없음), VM 계정 전부 삭제(서버 기록만, 백업 `~/backups/db-before-user-wipe-20261007-1750.dump`).
+- **사용자 정보 = 서버 프로필 하나** (아래 구조), 'AI가 대화에서 수집한 정보' 창(서버 `care.profile_updates`).
+- **지원·복구 agent** (`ai/guardian_ai/recovery.py`), 로그인 채팅 500 오류(import 누락) 수정.
+- **앱 디자인 = web-prototype** (아래 구조).
 
-**시연 모드 구조 (2026-10-05, 다음 작업의 기준)**:
-- 앱: 프로필의 "시연 모드" 스위치(`app/lib/services/demo_mode.dart` — `DemoData.on`·`serverDemoProvider`). 켜면 같은 화면이 서버 `/api/v1/demo/*`를 부른다.
-  길찾기·재탐색은 `demo: true`를 보내 경로 서버가 시연 위험 영역을 피한다. `APP_MODE=mock`(서버 없음)은 앱 안 가상 화면.
-- 서버(`server/risk/demo.py`, 엔드포인트 `server/app/routers/dashboard.py`): `/demo/dashboard`·`/demo/risk/areas`·`/demo/layers/{flood_grid|stations}`·`/demo/households`.
-  실제 `stations` 행(좌표 그대로)에 시나리오 값(호우·침수 + 강풍: AWS 1시간 41.5mm·3시간 96mm·풍속 16.5m/s, DT 수위·맨홀은 `simulate.HEAVY_RAIN_FLOOD`)을 넣고
-  실측과 같은 판정 함수(`engine.evaluate`·`hazards.evaluate_*`)로 계산. **DB에 저장 안 함**, 60초 캐시, 범위는 실측처럼 구룡포 bbox.
-- VM 확인값: 시연 위험 영역 36곳(산사태 경보 26·침수 7·호우 경보 2·강풍 주의보 1), 경로 서버 회피 31곳, 침수 격자 66칸, 관측소 32/35 시연값, 상황판 "긴급". 실측 위험 영역은 0곳(영향 없음).
-- 침수 격자(`server/app/layers.py` `FLOOD_GRID_SQL`): 0.001° 칸을 위험 영역(주의 이상)으로 잘라낸 것 = 경로 서버가 피하는 영역과 같은 규칙.
+**사용자 정보 구조 (2026-10-08, 다음 작업의 기준)**:
+- 한 곳: 서버 `user_profiles`·`user_places`(+ `emergency_contacts`). AI·앱 프로필 화면·서버 경고가 모두 여기를 본다.
+- AI 읽기: 로그인 토큰 uid = 요청 user_id 일 때 `tools.get_user_profile`(읽기 전용 DB 계정). DB 기본값(보통·아니오)은 기준으로 쓰지 않음.
+- AI 쓰기: 답한 뒤 백그라운드 `OpenAIMemoryExtractor` → `profile_sync.ProfileWriter`가 **사용자 본인 토큰**으로 `POST /api/v1/user`·`/user/places`,
+  반영한 것은 `POST /api/v1/user/profile-updates`(`care.profile_updates`)에 기록. 값이 다르면 덮어씀(직업도 통째로 — 이월 항목). 시연 모드 대화도 반영.
+- 앱: `AccountSync.pullProfile`(앱 시작·프로필 화면·AI 대화 8·20초 뒤)로 서버 값을 화면 값으로, 올릴 때는 바뀐 칸만(`server_profile_base`).
+  `profilePatch`가 화면 값 → 판단용 칸(직업 코드 fisher 등, 시각·청각, 동반자, 혈액형, 비상 연락처). `ai_memory.store`는 쓰지 않음(데이터만 남김).
+
+**앱 디자인 구조 (2026-10-08)**: `app/lib/ui/gk_theme.dart`(GK 색·경보 4단계·테마)·`gk_widgets.dart`(GkCard·GkPill·GkSideNav…),
+Pretendard 줄인 글꼴(`app/assets/fonts`), 메뉴 4개(대시보드·AI 대화창·사용자·방재단 현황) + 119 + 머리줄(main.dart `Shell`·`StatusLine`).
+태풍·지원 및 복구는 대시보드 카드, 선제 경고는 알림 종. 배치까지 바꾼 화면: 대시보드·AI 대화창·사용자·대피 확인 창·로그인. 나머지는 테마만.
+화면 확인 방법: gstack `/browse` 스킬이 이 환경에 없음 → `npx -y playwright@1.48.2 screenshot --channel chrome --viewport-size "1440,900" --wait-for-timeout 7000 <URL> out.png`
+(크롬 headless `--screenshot`은 페이지 전환 중에 찍혀 화면이 밀려 보임). 예시 데이터 모드 웹: ASCII 복사본에서 `flutter build web` → `python3 -m http.server`.
 
 **다음 할 일 후보 (사용자에게 고르게)**:
-1. 웹에서 시연 모드 켬/끔 화면 확인(사용자) — 상황판·침수 격자·길찾기 회피·태풍·알림 모음.
-2. **팀 공유** (A·C 레인 코드를 사용자 허락으로 고침 — 이월 항목 "조하린·김다인 공유" 참고).
-3. B11 남은 것: 바다 범위 넓히기, 바다 위 GPS 처리(앱), AI 위치·경로 agent 연결(`request_sea_route`).
-4. B4 선제 경고 메시지 함수(A5용) / B13 방문 우선순위(Day 19–20, A12·A13 끝남 → 시작 가능) / B12 음성 대피 확인(음성 키 결정 필요).
-5. 작은 것: 시연 산사태 경보 26곳이 많아 보이면 줄이기(규칙 확인), "심각" 침수 칸만 보는 합성 보기(사용자 답 없음),
-   설정 화면 문구 "목업 모드에서는 주소와 구룡포 시연 좌표를 저장합니다" 고치기(제안만 함).
+1. **사용자 확인**: 웹에서 로그인 → 새 디자인(실시간 데이터 대시보드) · AI에게 "72살이고 무릎이 안 좋아요" → 20초 뒤 프로필·수집 정보 창 ·
+   "태풍 피해 지원받을 수 있어?"(직업 넣고) 확인.
+2. **팀 공유** (이월 항목 "조하린·김다인 공유" — 10-07~08분 추가됨, 특히 앱 디자인·메뉴 변경).
+3. 디자인 남은 것: 방재단 현황·태풍·길찾기 화면 배치, 앱 '지원 및 복구' 화면을 서버 `/support-programs`로(지금 목업), AI 답 카드(card) 표시.
+4. 지원·복구 데이터 보강(소상공인·어선 복구·피해 신고 절차 — 공식 출처로 시드 추가, A 레인 파일) — 사용자가 "일단 있는 데이터로" 결정했음.
+5. B4 선제 경고 메시지 함수(A5용) / B13 방문 우선순위 / B12 음성 대피 확인(음성 키 결정 필요) / B11 판정 마무리.
+6. 작은 것: 직업을 덮어쓰기 대신 추가로(사용자 결정 필요), 프로필 '자주 방문하는 장소' 글자 칸을 '내 장소'로 합치기(제안만 함).
 
 ### (이전) B7 마무리: 경사 규칙 확인, 완료 처리
 완료 기준(B7): **같은 목적지에 프로필별로 다른 경로를 반환한다.** 규칙·재계산·AI 연결 끝, 고도는 국토지리정보원
@@ -92,6 +102,17 @@ B와 맞물리는 새 A·C 작업: A12(15–16 대피 응답 API, B12·B13 선�
   (Let's Encrypt). VM `.env`에 `DEPLOY_DOMAIN`·`COMPOSE_PROFILES=deploy`·`CORS_ORIGINS`·`API_INTERNAL_TOKEN`·`KAKAO_REST_KEY`·`DATA_GO_KR_KEY` 추가.
 
 ## 이월 항목 (끝나면 지운다)
+- [ ] **로컬 Docker(OrbStack) 멈춤 (2026-10-08)**: `docker ps`가 응답 없음, `orbctl restart docker`로도 안 풀림. 세션 시작 때 확인 —
+      안 되면 OrbStack 앱을 껐다 켜기. 그동안 확인은 VM에서 했다(임시 api 컨테이너 `docker compose run -d --rm --no-deps --name api-e2e -e API_AUTH_MODE=dev api`
+      → ai 컨테이너에서 `API_URL=http://api-e2e:8000` 으로 시험, 끝나면 시험 사용자 DELETE·컨테이너 stop).
+- [ ] **실제 로그인으로 확인 안 한 것 (2026-10-08)**: 대화 → 서버 프로필·수집 기록 반영(테스트 계정·dev 토큰으로는 VM 확인함),
+      지원·복구 agent(웹), 새 디자인의 실시간 데이터 대시보드. 재난문자 카드는 SAFETY24 키 전이라 보통 위험 판정 경고/"수집 연결 전".
+- [ ] **조하린·김다인 공유 — 10-07~08 추가분**:
+      조하린(A) — `care.profile_updates` 표(`db/init/01m_v0_6_profile_updates.sql`)·API `/api/v1/user/profile-updates`(GET·POST·DELETE)·명세,
+      `alerts/messages.py` 어업 판단이 'fisher, other'도 인식, 앱이 이제 직업을 코드(fisher·merchant·farmer·office·student·other)로 보냄·비상 연락처를 `/user/contacts`로,
+      AI가 사용자 토큰으로 `POST /api/v1/user`·`/user/places`를 부름, `dashboard`·`geocode`가 `optional_user`(로그인 강제라 다시 막을지 결정 필요).
+      김다인(C) — **앱 디자인 전체 변경(web-prototype)**: 메뉴 4개로(태풍·선제 경고·지원 및 복구가 메뉴에서 빠짐), `lib/ui/`, Pretendard, 대시보드·AI·사용자 화면 배치,
+      로그인 강제·익명 없음, `account_sync.dart`(pullProfile·바뀐 칸만 올림·profilePatch 번역), 'AI가 기억한 정보' 카드·`ai_memory.dart` 삭제 → `profile_refresh.dart`.
 - [ ] **조하린·김다인 공유 (2026-10-05, 사용자 허락으로 A·C 코드 수정)**:
       조하린(A) — `server/risk/demo.py`(시연 계산, DB 저장 안 함)·`/api/v1/demo/*`·`app/widgets.py`(/dashboard 실데이터)·`/support-programs`·
       `hazards.py` AWS id 버그(`aws_816`)·`layers.py` 침수 격자 SQL·`households.list_demo`·`simulate.py` 시연 가구 14곳·`users.py` app_state·명세 갱신,
@@ -140,14 +161,18 @@ B와 맞물리는 새 A·C 작업: A12(15–16 대피 응답 API, B12·B13 선�
 - [ ] B3 환각 검증 테스트 결과를 보고 부족한 단계만 `gpt-6.1-sol`로 올릴지 결정 (지금 전 단계 gpt-6-luna)
 - [ ] A와 DB 조회 방식 합의 (읽기 전용 직접 조회 vs FastAPI 경유, `agent-design.md` 7절 3번) — 미배정
 - [ ] C와 카드형 표시 합의 — `/api/chat` 응답에 `card`(headline·chips·steps·sources·call_emergency)·`voice_text` 추가됨(B5, `agent-design.md` 8절). 앱 화면은 아직 글만
+      (새 디자인 AI 대화창도 글 + 경로 버튼만 — 프로토타입처럼 말풍선 안 카드로 보여 줄 수 있음)
 - [ ] **음성 대화 — 나중에** (사용자 결정 2026-10-03, B12 전에 다시 결정). 시작할 때 GCP 음성 키: Speech-to-Text·Text-to-Speech API 사용 설정 + 서비스 계정 키 → `secrets/gcp-voice.json`. VM에도 같은 파일(B10과 함께)
 - [ ] 조위(만조) 데이터: 기획서·목업은 쓰지만 수집 목록에 없음 → A에게 제안 (tools에는 `tide` 종류만 있음)
 - [ ] 조하린 GCP·GitHub 권한, 팀원 로컬 실행 확인 — 사용자가 직접 진행
 - [ ] **로그인(2026-10-04) 공유·확인**: C(김다인)에게 앱 ID `kr.guryong.guardian` 변경·`firebase_options.dart`·`login_screen.dart`, A(조하린)에게 `users.py` ENSURE_SQL(is_anonymous 갱신)·앱이 이제 `POST /api/v1/user` 호출. 안드로이드: 빌드 확인 못 함(맥에 SDK 없음) — Google 로그인 시험할 PC의 디버그 SHA-1을 Firebase 안드로이드 앱에 등록. 브라우저·시뮬레이터에서 Google 팝업 로그인 실제 확인 필요
 - [ ] **해커톤 끝나면 고정 IP 해제** — `gcloud compute addresses delete guryongpo-ip --region=asia-northeast3 --project=project-265888b6-2837-43d6-9d8` (VM을 지운 뒤 남겨 두면 요금)
 - [ ] **C에게 알리기**: 김다인 커밋(e2f6abf·629dccf) 이후 앱이 컴파일 안 되던 2곳을 B10 배포용으로 최소 수정(40b3faa, 사용자 승인). 앱 테스트 5개 실패(거리 추정 0.1→0.2, 경로 문구 '노약자', location_test 3개 StateError) — C 확인 필요
-- [ ] 사용자 기억 정식 서비스 전: 앱 동의 화면·"기억 보기/끄기/지우기"(C), Firebase 인증 연결(A 방식), 익명 로그인은 재설치 시 다른 사용자
-- [ ] A의 `users`·`user_profiles`와 AI 기억(`ai_memory`) 동기화 여부 — A와 결정
+- [ ] 사용자 정보 정식 서비스 전: 대화 내용을 프로필에 반영한다는 동의 문구(앱), `ai_memory` 스키마·`AI_MEM_DB_*` 계정 정리 여부(지금은 데이터만 남김, 사용자 결정)
+- [x] A의 `users`·`user_profiles`와 AI 기억 동기화 → **서버 프로필 하나로 결정·구현** (2026-10-08)
+- [ ] **AI가 직업을 들으면 통째로 덮어씀** (예: '어업, 자영업' + "학생이에요" → '학생'만) — 추가로 바꿀지 사용자 결정 필요
+- [ ] **지원·복구 데이터 부족**: `support_programs` 9건뿐 — 자영업(소상공인)·어선 피해 복구·피해 신고 절차 없음 → AI는 "등록된 제도 없음, 읍면동 문의".
+      앱 '지원 및 복구' 화면(`RecoveryScreen`)은 목업 문구 그대로라 AI 답과 다름
 - [x] 대피소 데이터: **지금 DB의 19곳만으로 진행** (사용자 결정 2026-10-02, A 레인 요청 안 함).
       지진해일 실외 17 + 지하주차장 2뿐이라 침수 때 실내 대피처가 없다 → 앱·AI는 위험 영역 안·침수 중 지하를 빼고 안내
 - [ ] 2026-10-02 QA 남은 것 (심각 1~3번은 해결): 노약자 경사 31% 구간(90m DEM 한계), 의료시설 5곳 모두 17~20km 밖(A),
@@ -255,6 +280,9 @@ B와 맞물리는 새 A·C 작업: A12(15–16 대피 응답 API, B12·B13 선�
   서버 지킴이 테스트 `server/tests/test_demo_scenario.py` (server 207 passed). AI 결함 #8 완화(지시문·근거) + 분류기 '대피소' 목적지 제외 + AI 근거에서 '[시연]' 표시 제거
   → 시연 질문 7/7. 도중 로컬 OrbStack 멈춤(메모리 부족 추정) → `orbctl restart docker` 뒤 스스로 회복, DB 유지. 로컬 DB 시드가 오래돼 demo 영역 500 → `docker compose run --rm loader`로 해결.
   배포(6dc0f1f·214752e): VM 시연 장면 5개 로컬과 같은 값. AI 시연 질문은 지시문만으로 5/7 → `flood.strip_deferrals`(남의 주제 '확인 불가' 문장 제거) 뒤 **VM 7/7, 재시도 0, 답 10~16초**. 웹앱은 바뀐 것 없음(push_web 안 함).
+- 2026-10-07 경로 3종(가까운 = 회피 없는 최단 `distance_influence` 5000 / 안전 / 오르막 회피 = 진행 방향 오르막만), 자동차 경로(GraphHopper `car`, turn_costs, 오르막 회피 없음),
+  시연 산사태 범위 1등급만(경보는 유지), 경로 화면 지도 = 대시보드 지도, 수위계 위치 표시·범례. AI 기억 → 앱 프로필 반영(덮어쓰기), 첫 설정 강제 제거,
+  로그인 강제(익명 없음), VM 계정 서버 기록 전부 삭제(백업 `~/backups/db-before-user-wipe-20261007-1750.dump`), 서비스 워커 끄기·Caddy no-cache, 앱 버전 표시.
 - 2026-10-08: 프로필 단일 기준화(사용자 결정) — `tools.get_user_profile` 실제 구현(users·user_profiles·user_places, 로그인 uid), 채팅에서 토큰 uid = user_id 면 서버 프로필이 기준·앱 값은 빈 칸 보충, 장기 기억은 메모·대화 요약만 근거로(프로필 항목은 앱을 거쳐 프로필로). 앱 계정 동기화 보행 능력 버그 수정(무엇을 골라도 limited → 가능 normal·어려움 unable). ai_memory 보강은 사용자가 나중으로 미룸. AI 185 passed.
 - 2026-10-08: 판단용 칸 = 화면 값 (사용자 요청 '판단용 칸을 app_state와 일치') — 앱 `AccountSync.profilePatch`: 시각·청각 '필요 없음'이 예로 가던 버그, 보호 동반자·혈액형 추가, 직업은 코드(fisher 등, 직접 입력은 글자), 지운 칸은 기본값으로, 비상 연락처 → `/user/contacts`, 번역 버전(`patchVersion`)이 바뀌면 로그인 때 한 번 다시 보냄. 서버(A) `messages.profile_tags` 어업 판단이 'fisher, other' 도 인식. AI는 직업 코드를 한글로. '자주 방문하는 장소' 글자 칸은 좌표가 없어 서버로 안 보냄(저장 장소는 이미 동기화).
 - 2026-10-08: 사용자 결정 '프로필 하나' — AI가 대화에서 들은 정보를 `profile_sync.ProfileWriter`로 사용자 본인 토큰을 써서 서버 프로필(POST /api/v1/user·places)에 바로 반영, 질문마다 서버 프로필을 읽음. `ai_memory` store는 읽기·쓰기 중단(데이터·계정 유지), 기억 API(/api/ai/memory*, /api/ai/me/memory) 삭제. 추출 항목에 시각·청각 추가, 기타 메모·대화 요약 중단. 앱: 'AI가 기억한 정보' 카드·AiMemoryService 삭제 → `AccountSync.pullProfile`(앱 시작·프로필 화면·AI 대화 8·20초 뒤)이 서버 프로필을 화면 값으로, 올릴 때는 바뀐 칸만(`server_profile_base`). AI 189 passed, 앱 account_sync 13 passed.
@@ -262,3 +290,7 @@ B와 맞물리는 새 A·C 작업: A12(15–16 대피 응답 API, B12·B13 선�
 - 2026-10-08: 'AI가 대화에서 수집한 정보' 창 — 서버 `care.profile_updates` 표(`db/init/01m_v0_6_profile_updates.sql`) + API `GET/POST /api/v1/user/profile-updates`, `DELETE …/{id}`(사용자 선택: 서버에 기록). AI `ProfileWriter`가 반영한 것만 기록(칸·값·사용자 말). 앱 프로필 화면 카드(`lib/profile_refresh.dart`). server 212, AI 195, 앱 account_sync 15 passed.
 - 2026-10-08: 지원·복구 안내 agent `recovery_support_agent` (`recovery.py`) — 기존 `support_programs` 9건만으로(사용자 결정) 공통 보험·공통 피해 신고·복구·내 직업 지원·복구. 전문 agent 병렬 층 6번째, `tools.get_support_programs`, 분류기 역할·키워드, 혼자 선택되면 행동 권고가 되묻지 않음, 재난 후 '보험·법률 정보 확인 안 됨' 메모 제거, 카드 출처. 앱 '지원 및 복구' 화면(목업)은 그대로. AI 207 passed.
 - 2026-10-08: 앱 디자인을 web-prototype으로 (사용자 요청, C 레인 코드) — `app/lib/ui/gk_theme.dart`·`gk_widgets.dart`, Pretendard 줄인 글꼴, 메뉴 4개 + 119 + 머리줄, 대시보드(빨간 재난문자·경보 칩·지도 카드·전체 화면·지표 카드 격자·지원/태풍 카드), AI 대화창(모리·말풍선·추천 질문·마이크), 사용자(내 정보 보기/수정·알림 스위치·내 장소·시연·안전 기능), 대피 확인 창·로그인 화면. 기능·데이터 연결은 그대로.
+- 2026-10-08: 로그인 채팅 500 수정(039ddb7) — 서버 프로필 읽기 lambda가 import 안 된 `T`를 써 b087cfa 배포(약 03:40)부터 로그인 사용자 채팅 전부 실패.
+  `service.server_profile` + 회귀 테스트. 지원·복구 agent 섞인 질문("태풍 피해 지원")이 강풍 agent의 '지원 정보 확인 불가' 문장으로 검증 실패 → `SUPPORT_TOPICS` 문장 제거(2906f1a), VM 12초·재시도 0.
+- 2026-10-08 디자인 작업 중 고친 것: 버튼 textStyle에 글꼴 빠지면 한글 □, 선택 칩 글자(WidgetStateColor), FilledButton 테마 색이 tonal 버튼까지 흰 글자, GkCard 바탕을 Material로(ListTile 물결·디버그 경고).
+  앱 테스트 기존 실패 8 → 7. 세션 정리: CLAUDE.md·ai/CLAUDE.md·이 파일 다음 세션 시작점·이월 항목 갱신.

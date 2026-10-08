@@ -4,8 +4,11 @@
 1. Read `.claude/docs/timeline.md` → status table, "다음 세션 시작점", "이월 항목", work log.
 2. From `코드/`: `git pull` (teammates push to `main`), then `docker compose up -d` and `docker compose ps`
    (db, api, ai all healthy). If `.env` changed since the ai container started: `docker compose up -d --force-recreate ai`.
-3. Baseline tests: `.venv/bin/python -m pytest -q` → **160 passed**. `-m db` → 4 passed (needs local db + `AI_DB_*`,
-   `AI_MEM_DB_*` in `.env`). `-m live` → 32 passed on gpt-6-luna (routing 13 + B3 injection 13 + memory extractor 6, ~7원).
+3. Baseline tests: `.venv/bin/python -m pytest -q` → **207 passed** (2026-10-08). `-m "db and not live"` needs local db + `AI_DB_*`
+   in `.env` (plain `-m db` also runs paid live tests). `-m live` calls real OpenAI (routing, B3 injection, extractor; a few 원).
+   If `docker compose ps` hangs, the local OrbStack is stuck (2026-10-08) — restart the OrbStack app; VM checks still work.
+   Other lanes' baselines: server 212 passed·8 skipped, route 61, app 98 with 7 known failures (see timeline "다음 세션 시작점";
+   run Flutter on an ASCII-path copy).
 3a. **OpenAI spend check — warn the user** (user's budget 200,000원/month, user request 2026-10-01): read
    `curl -s localhost:8001/api/ai/usage` (local container), the VM's same URL over ssh, and
    `.venv/bin/python -c "from guardian_ai.usage import UsageTracker; print(UsageTracker().summary())"` (local runs/live
@@ -15,7 +18,7 @@
    (https://claude.ai/artifact/H3ofVAbENCmCvRtAvaGLAi — 28-day version since 2026-10-03, Artifact tool `action: "read"`) and sync `timeline.md`.
    Its downloaded file may come wrapped in an extra host `<html>` shell — strip it before republishing.
 5. Check `docs/agent-design.md` §7 (open questions) and `docs/code_check_list.md` (#1–6 fixed, #7 mitigated — recheck in a demo scenario).
-6. Route work (B6·B7): `cd ../route && .venv/bin/python -m pytest -q` → **34 passed, 6 deselected** (live 6). Needs
+6. Route work (B6·B7): `cd ../route && .venv/bin/python -m pytest -q` → **61 passed** (live deselected). Needs
    `../graphhopper/data/guryongpo.osm.pbf` (`../graphhopper/fetch_osm.sh`).
 
 ## Session end (do this before finishing)
@@ -24,14 +27,19 @@
 - If code moved, fix file:line references here, in `architectural_patterns.md`, and in `../CLAUDE.md`.
 - Commit; if `git push` is blocked for Claude, ask the user to run `! git push`.
 
-## Current status (2026-10-06, Day 14)
+## Current status (2026-10-08, Day 16)
 - Timeline is 28 days (Day 1 = 2026-09-23; Day 21 = extra features integration). **Done: B1, B8, B2, B3, B6, B7.**
-  **B10** done criteria met (https://34-64-177-195.nip.io, Caddy + Firebase login + web). **B11** 1st pass + land/breakwater
-  crossing fixed; AI link (`request_sea_route`) not yet. **C8** (lane C, done by B on request) built and deployed.
-  **B4**: only the proactive alert message function for A5 is left. **B5**: voice deferred by the user (no GCP key → 503).
-  Marking B4/B5/B10/J1/B11 done (live artifact too) waits for the user. 2026-10-05 the user also had B fix lanes A and C
-  (real-data dashboard, demo mode `server/risk/demo.py` + app switch, login, routes UI) — sharing with 조하린·김다인 is pending.
-  Next: see `.claude/docs/timeline.md` "다음 세션 시작점" (candidates: web check of demo mode, team sharing, B11 rest, B4 alert fn, B13).
+  **B10** done criteria met (https://34-64-177-195.nip.io). **B11** 1st pass + AI link (`request_sea_route`, 10-07). **C8** built and deployed.
+  **B4**: only the proactive alert message function for A5 is left (+ recovery/support agent added 10-08). **B5**: voice deferred (no GCP key → 503).
+  Marking B4/B5/B10/J1/B11 done waits for the user. B also changed lanes A and C on the user's request (10-05~08: demo mode,
+  login forced, server profile as the single user-info store, `care.profile_updates`, **app redesign to `../web-prototype/`**) —
+  sharing with 조하린·김다인 is pending (timeline 이월 항목). Next: timeline "다음 세션 시작점".
+- User info (2026-10-08): the server profile (`user_profiles`·`user_places`) is the only store — read by `tools.get_user_profile`,
+  written after each signed-in answer by `profile_sync.ProfileWriter` with the user's own token (+ log `/api/v1/user/profile-updates`).
+  `ai_memory.store` is retired (data kept). Signed-in = token uid == request user_id (`api._signed_in`); demo chats also write.
+- Recovery/support agent (2026-10-08, `recovery.py`): 6th specialist; `support_programs` (9 rows) → [공통 보험]·[공통 피해 신고·복구]·
+  [내 직업 지원·복구] by the profile's occupation; only DB programs, else "등록된 제도 없음". Disaster agents must not write
+  "지원 정보 확인 불가" (`flood.SUPPORT_TOPICS` sentences are stripped) or mixed questions fail verification.
 - AI path: `POST /api/chat` → `ChatService.chat` (service.py) → graph. Real nodes: manager (`OpenAIClassifier`, keyword
   fallback), `rain_flood_agent` (`flood.py`: code collects DB data + builds Evidence incl. "기준 위치" and user memory,
   `OpenAIWriter` only phrases, template fallback), `hallucination_check` (`verify.py`: rule number check → `OpenAIFactChecker`).
@@ -39,7 +47,7 @@
   no underground shelters during floods, same rule as the app — + real route via `request_route`, `OpenAILocationWriter`;
   destination from the classifier's `destination` (keyword fallback) → `find_place` user places > DB names > Kakao
   (`KAKAO_REST_KEY`); hazardous destination → route to the safe shelter instead; route returned as `ChatResponse.route`).
-  Classifier's `mobility_limited` sets `user.walking_impaired` for the same question (memory still saves it for later).
+  Classifier's `mobility_limited` sets `user.walking_impaired` for the same question (the profile writer saves it to the server profile for later).
   `landslide_agent`·`wind_typhoon_agent`·`life_safety_agent` (`specialists.py`: same shape, `make_specialist` + `OpenAISpecialistWriter`;
   unavailable data also goes into evidence so the checker accepts "확인할 수 없음"). `action_advisor` (`action.py`): rule picks
   official guides (disaster·phase·targets) → `OpenAIActionWriter` personalizes "지금 할 일" from them only → guides go into
