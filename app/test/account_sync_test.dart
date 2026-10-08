@@ -139,6 +139,13 @@ void main() {
     expect(AccountSync.changedFields({'birth_year': 1950}, {}), {'birth_year': 1950});
   });
 
+  test('수집 기록 한 줄 읽기 — 말한 내용이 비면 null', () {
+    final u = ProfileUpdate.fromJson({'id': 7, 'field': 'age', 'label': '나이', 'value': '72세', 'quote': ' ',
+      'created_at': '2026-10-08T01:00:00+00:00'});
+    expect((u.id, u.label, u.value, u.quote), (7, '나이', '72세', null));
+    expect(u.createdAt!.toUtc(), DateTime.utc(2026, 10, 8, 1));
+  });
+
   test('아무것도 입력 안 했으면 보낼 칸 없음', () async {
     final prefs = await prefsWith({});
     expect(AccountSync.profilePatch(prefs), isEmpty);

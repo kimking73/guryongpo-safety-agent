@@ -254,6 +254,52 @@ paths:
       operationId: deleteContact
       responses:
         '204': { description: 삭제됨 }
+  /user/profile-updates:
+    get:
+      tags: [user]
+      summary: AI가 대화에서 수집해 프로필에 반영한 기록 (최신순, 2026-10-08)
+      operationId: listProfileUpdates
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 30, minimum: 1, maximum: 100 } }
+      responses:
+        '200':
+          description: 기록 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/ProfileUpdate' } }
+    post:
+      tags: [user]
+      summary: 프로필 수집 기록 추가 (AI가 사용자 본인 토큰으로)
+      operationId: addProfileUpdates
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items: { type: array, minItems: 1, maxItems: 20, items: { $ref: '#/components/schemas/ProfileUpdate' } }
+                source: { type: string, default: ai_chat }
+      responses:
+        '201':
+          description: 추가됨
+          content:
+            application/json:
+              schema: { type: object, properties: { added: { type: integer } } }
+  /user/profile-updates/{update_id}:
+    parameters:
+      - { name: update_id, in: path, required: true, schema: { type: integer } }
+    delete:
+      tags: [user]
+      summary: 프로필 수집 기록 하나 지우기 (프로필 값은 그대로)
+      operationId: deleteProfileUpdate
+      responses:
+        '204': { description: 삭제됨 }
   /user/checklist/{item_id}:
     parameters:
       - { name: item_id, in: path, required: true, schema: { type: integer } }
@@ -1400,6 +1446,18 @@ components:
         relation: { type: [string, 'null'] }
         phone: { type: string }
         priority: { type: integer, default: 1 }
+    ProfileUpdate:
+      type: object
+      description: AI가 대화에서 들은 사용자 정보로 프로필을 고친 기록 (care.profile_updates)
+      required: [field, label, value]
+      properties:
+        id: { type: integer, readOnly: true }
+        field: { type: string, description: 'age, walking_impaired, has_dependents, mobility, occupation, vision_impaired, hearing_impaired, home_address, frequent_place' }
+        label: { type: string, description: 화면 이름 (나이, 집 주소 …) }
+        value: { type: string, description: 사람이 읽는 값 }
+        quote: { type: [string, 'null'], description: 근거가 된 사용자 발언 }
+        source: { type: string, readOnly: true }
+        created_at: { type: string, format: date-time, readOnly: true }
 
     # ------------------------------------------------------------ dashboard
     LayerId:

@@ -84,6 +84,19 @@ class EmergencyContactInput(_In):
     priority: int = 1
 
 
+class ProfileUpdateItem(_In):
+    field: str = Field(min_length=1, max_length=40)
+    label: str = Field(min_length=1, max_length=40)
+    value: str = Field(min_length=1, max_length=300)
+    quote: Optional[str] = Field(default=None, max_length=500)
+
+
+class ProfileUpdatesInput(_In):
+    """AI가 대화에서 들은 내용으로 프로필을 고친 기록 (2026-10-08) — AI가 사용자 본인 토큰으로 보낸다"""
+    items: list[ProfileUpdateItem] = Field(min_length=1, max_length=20)
+    source: str = Field(default="ai_chat", max_length=40)
+
+
 class DeviceTokenInput(_In):
     token: str = Field(min_length=1)
     platform: Literal["ios", "android", "web"]

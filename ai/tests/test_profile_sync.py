@@ -56,8 +56,12 @@ def test_writer_updates_profile_and_adds_places_with_users_token():
     assert seen[0][:3] == ("POST", "/api/v1/user", "Bearer tok") and seen[0][3] == {"birth_year": 1956}
     assert seen[1][:2] == ("POST", "/api/v1/user/places")
     assert seen[1][3]["place_type"] == "home" and seen[1][3]["location"] == {"lat": 35.987, "lng": 129.553}
-    assert len(seen) == 2                                             # 좌표 못 찾은 곳은 넣지 않음
-    assert done["places"] == ["집(구룡포시장)"]
+    assert done["places"] == ["집(구룡포시장)"]                       # 좌표 못 찾은 곳은 넣지 않음
+    # 반영한 것만 수집 기록에 (앱 프로필 화면 'AI가 대화에서 수집한 정보')
+    assert seen[2][:2] == ("POST", "/api/v1/user/profile-updates") and len(seen) == 3
+    assert seen[2][3]["items"] == [{"field": "age", "label": "나이", "value": "70세", "quote": "70"},
+                                   {"field": "home_address", "label": "집 주소", "value": "구룡포시장", "quote": "구룡포시장"}]
+    assert done["recorded"] == 2
 
 
 def test_writer_moves_existing_home_and_skips_known_place():
@@ -65,13 +69,15 @@ def test_writer_moves_existing_home_and_skips_known_place():
     places = [{"id": "h1", "place_type": "home", "label": "우리집"}, {"id": "p1", "place_type": "frequent", "label": "구룡포시장"}]
     w = P.ProfileWriter(client=fake_api(seen, places), locate=FOUND.get)
     w.apply("tok", [fact("home_address", "호미로 152"), fact("frequent_place", "구룡포시장")])
-    assert [(m, p) for m, p, *_ in seen] == [("POST", "/api/v1/user"), ("PATCH", "/api/v1/user/places/h1")]
+    assert [(m, p) for m, p, *_ in seen] == [("POST", "/api/v1/user"), ("PATCH", "/api/v1/user/places/h1"),
+                                             ("POST", "/api/v1/user/profile-updates")]
+    assert [i["field"] for i in seen[2][3]["items"]] == ["home_address"]      # 이미 있던 자주 가는 곳은 기록 안 함
     assert seen[1][3]["label"] == "우리집"                            # 집 이름은 사용자가 붙인 그대로
 
 
 def test_writer_does_nothing_without_facts():
     seen = []
-    assert P.ProfileWriter(client=fake_api(seen)).apply("tok", []) == {"profile": {}, "places": []}
+    assert P.ProfileWriter(client=fake_api(seen)).apply("tok", []) == {"profile": {}, "places": [], "recorded": 0}
     assert seen == []
 
 
@@ -123,3 +129,20 @@ def test_chat_endpoint_passes_uid_and_token(monkeypatch):
     finally:
         app.dependency_overrides.clear()
     assert seen == [{}, {"verified_uid": "u9", "token": "dev:u9"}]
+
+
+def test_record_failure_keeps_profile_update():
+    def handle(request):
+        if request.url.path.endswith("profile-updates"):
+            return httpx.Response(503)
+        return httpx.Response(200, json={"places": []})
+    w = P.ProfileWriter(client=httpx.Client(base_url="http://api", transport=httpx.MockTransport(handle)))
+    done = w.apply("tok", [fact("walking_impaired", "true")])
+    assert done["profile"] == {"walking_ability": "limited"} and done["recorded"] == 0
+
+
+@pytest.mark.parametrize("field, value, shown", [
+    ("age", "72", "72세"), ("walking_impaired", "false", "보행 가능"), ("mobility", "wheelchair", "휠체어"),
+    ("hearing_impaired", "true", "지원 필요"), ("occupation", "어선 선장", "어선 선장")])
+def test_readable(field, value, shown):
+    assert P.readable(field, value) == shown

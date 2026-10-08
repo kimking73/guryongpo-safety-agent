@@ -62,7 +62,8 @@
 - Memory: short-term `InMemorySaver` (60 min after last turn or restart; expired/unknown/other users' ids → new
   conversation). User info = the server profile only (user decision 2026-10-08): after answering, a background thread runs
   `OpenAIMemoryExtractor` and `profile_sync.ProfileWriter` writes the facts to `POST /api/v1/user` + `/api/v1/user/places`
-  **with the user's own token** (no DB write grant for the AI); the app's profile screen reads the same rows
+  **with the user's own token** (no DB write grant for the AI), then logs each applied fact to `POST /api/v1/user/profile-updates`
+  (`care.profile_updates`, shown on the app's profile screen as 'AI가 대화에서 수집한 정보'); the app's profile screen reads the same rows
   (`app/lib/services/account_sync.dart` `pullProfile`). The old long-term store (`ai_memory` schema) is no longer read or
   written — data and the `AI_MEM_DB_*` role are kept; the memory APIs are gone. `state.user_memory` is always empty.
 - LLM: OpenAI `gpt-6-luna` (Responses API structured output; reasoning model → no `temperature`; classifier/writer

@@ -2,7 +2,8 @@
 
 실데이터: /user·장소·연락처·체크리스트·기기 토큰 (A5, users·user_profiles·user_places·emergency_contacts·user_devices),
           /user/role (초대 코드 확인 → users.role). dev 모드에서는 DEMO-* 코드도 허용 (DB 없이 화면 개발용),
-          /user/household (A13, care.households — 앱 동의 필수, 철회 = 삭제)"""
+          /user/household (A13, care.households — 앱 동의 필수, 철회 = 삭제),
+          /user/profile-updates (care.profile_updates — AI가 대화에서 수집해 프로필에 반영한 기록, 2026-10-08)"""
 import logging
 import uuid
 from typing import Optional
@@ -15,8 +16,9 @@ from ..auth import AuthUser, current_user, optional_user
 from ..config import settings
 from ..errors import ApiError
 from ..geocoding import geocode_road_address
+from ..mocks import iso
 from ..schemas import (AddressGeocodeInput, AppStateInput, DeviceTokenInput, EmergencyContactInput, PlaceInput, PlacePatch,
-                       ProfileInput, RoleClaim, SelfHouseholdInput)
+                       ProfileInput, ProfileUpdatesInput, RoleClaim, SelfHouseholdInput)
 
 router = APIRouter(tags=["user"])
 log = logging.getLogger(__name__)
@@ -150,6 +152,43 @@ def delete_contact(contact_id: uuid.UUID, u: AuthUser = Depends(current_user)):
     user_id = users.require_user_id(u)
     if not db.execute("DELETE FROM emergency_contacts WHERE id = %(cid)s AND user_id = %(uid)s",
                       {"cid": str(contact_id), "uid": user_id}):
+        raise ApiError("NOT_FOUND")
+    return Response(status_code=204)
+
+
+# AI 대화 → 프로필 수집 기록 (2026-10-08, care.profile_updates) — 앱 프로필 화면 'AI가 대화에서 수집한 정보'
+PROFILE_UPDATES_SQL = """
+SELECT id, field, label, value, quote, source, created_at FROM care.profile_updates
+WHERE user_id = %(uid)s ORDER BY created_at DESC, id DESC LIMIT %(limit)s
+"""
+
+
+def _profile_update_out(r: dict) -> dict:
+    return {"id": r["id"], "field": r["field"], "label": r["label"], "value": r["value"], "quote": r.get("quote"),
+            "source": r.get("source") or "ai_chat", "created_at": iso(r.get("created_at"))}
+
+
+@router.get("/user/profile-updates", summary="AI가 대화에서 수집해 프로필에 반영한 기록 (최신순)")
+def list_profile_updates(limit: int = 30, u: AuthUser = Depends(current_user)):
+    user_id = users.require_user_id(u)
+    rows = db.fetch_all(PROFILE_UPDATES_SQL, {"uid": user_id, "limit": max(1, min(limit, 100))})
+    return {"items": [_profile_update_out(r) for r in rows]}
+
+
+@router.post("/user/profile-updates", status_code=201, summary="프로필 수집 기록 추가 (AI가 사용자 토큰으로)")
+def add_profile_updates(body: ProfileUpdatesInput, u: AuthUser = Depends(current_user)):
+    user_id = users.require_user_id(u)
+    n = db.execute_many("""INSERT INTO care.profile_updates (user_id, field, label, value, quote, source)
+        VALUES (%(uid)s, %(field)s, %(label)s, %(value)s, %(quote)s, %(source)s)""",
+                        [{"uid": user_id, "source": body.source, **i.model_dump()} for i in body.items])
+    return JSONResponse({"added": n}, status_code=201)
+
+
+@router.delete("/user/profile-updates/{update_id}", status_code=204, summary="프로필 수집 기록 하나 지우기 (프로필 값은 그대로)")
+def delete_profile_update(update_id: int, u: AuthUser = Depends(current_user)):
+    user_id = users.require_user_id(u)
+    if not db.execute("DELETE FROM care.profile_updates WHERE id = %(id)s AND user_id = %(uid)s",
+                      {"id": update_id, "uid": user_id}):
         raise ApiError("NOT_FOUND")
     return Response(status_code=204)
 

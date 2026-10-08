@@ -92,6 +92,32 @@ class AccountSync {
     }
   }
 
+  /// AI가 대화에서 수집해 프로필에 반영한 기록 (최신순, GET /api/v1/user/profile-updates — care.profile_updates).
+  /// 로그인 안 함·서버 오류면 null
+  Future<List<ProfileUpdate>?> profileUpdates({int limit = 30}) async {
+    if (!enabled) return null;
+    try {
+      final r = await (await _dio()).get<Map<String, dynamic>>('/api/v1/user/profile-updates',
+          queryParameters: {'limit': limit});
+      return [
+        for (final j in (r.data?['items'] as List?) ?? const []) ProfileUpdate.fromJson(Map<String, dynamic>.from(j as Map))
+      ];
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 수집 기록 하나 지우기 (프로필 값은 그대로)
+  Future<bool> deleteProfileUpdate(int id) async {
+    if (!enabled) return false;
+    try {
+      await (await _dio()).delete<Object?>('/api/v1/user/profile-updates/$id');
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// AI 대화 뒤: AI가 답한 다음 백그라운드로 프로필을 고치므로(보통 수 초) 조금 뒤 두 번 내려받는다
   void pullAfterChat() {
     if (!enabled) return;
@@ -467,4 +493,19 @@ class AccountSync {
     await prefs.setString(_baseKey, jsonEncode(profilePatch(prefs, now: now)));
     return before != jsonEncode(snapshot(prefs));
   }
+}
+
+/// AI가 대화에서 들은 사용자 정보로 프로필을 고친 기록 한 줄 (서버 care.profile_updates)
+class ProfileUpdate {
+  const ProfileUpdate({required this.id, required this.label, required this.value, this.quote, this.createdAt});
+  final int id;
+  final String label, value;
+  final String? quote;
+  final DateTime? createdAt;
+  factory ProfileUpdate.fromJson(Map<String, dynamic> j) => ProfileUpdate(
+      id: (j['id'] as num).toInt(),
+      label: '${j['label'] ?? j['field'] ?? ''}',
+      value: '${j['value'] ?? ''}',
+      quote: (j['quote'] as String?)?.trim().isEmpty ?? true ? null : (j['quote'] as String).trim(),
+      createdAt: DateTime.tryParse('${j['created_at'] ?? ''}')?.toLocal());
 }
