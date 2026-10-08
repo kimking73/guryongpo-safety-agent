@@ -27,13 +27,15 @@
 - If code moved, fix file:line references here, in `architectural_patterns.md`, and in `../CLAUDE.md`.
 - Commit; if `git push` is blocked for Claude, ask the user to run `! git push`.
 
-## Current status (2026-10-08, Day 16)
+## Current status (2026-10-09, Day 17)
 - Timeline is 28 days (Day 1 = 2026-09-23; Day 21 = extra features integration). **Done: B1, B8, B2, B3, B6, B7.**
   **B10** done criteria met (https://34-64-177-195.nip.io). **B11** 1st pass + AI link (`request_sea_route`, 10-07). **C8** built and deployed.
+  **B13** (visit priority, `../server/app/priority.py`) + responder multi-stop visit route (`../route/guardian_route/visits.py`, app 'my visit route' card) built and deployed (10-08~09).
   **B4**: only the proactive alert message function for A5 is left (+ recovery/support agent added 10-08). **B5**: voice deferred (no GCP key → 503).
-  Marking B4/B5/B10/J1/B11 done waits for the user. B also changed lanes A and C on the user's request (10-05~08: demo mode,
-  login forced, server profile as the single user-info store, `care.profile_updates`, **app redesign to `../web-prototype/`**) —
-  sharing with 조하린·김다인 is pending (timeline 이월 항목). Next: timeline "다음 세션 시작점".
+  Marking B4/B5/B10/J1/B11/B13 done waits for the user. B also changed lanes A and C on the user's request (10-05~09: demo mode,
+  login forced, server profile as the single user-info store, `care.profile_updates`, app redesign to `../web-prototype/`, B13 in `server/`,
+  patrol screen) — sharing with 조하린·김다인 is pending (timeline 이월 항목). **A test incident (`b13_test`) is open on the VM — delete it after the user checks.**
+  Deployed: VM server 1b1affc, web 74a8f10 (2026-10-09). This Mac can ssh to the VM. Next: timeline "다음 세션 시작점".
 - User info (2026-10-08): the server profile (`user_profiles`·`user_places`) is the only store — read by `tools.get_user_profile`,
   written after each signed-in answer by `profile_sync.ProfileWriter` with the user's own token (+ log `/api/v1/user/profile-updates`).
   `ai_memory.store` is retired (data kept). Signed-in = token uid == request user_id (`api._signed_in`); demo chats also write.
