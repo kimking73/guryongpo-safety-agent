@@ -26,16 +26,19 @@ SKIP_POLISH_CHARS = 600
 SUMMARIZE_CHARS = 600
 MAX_CHIPS = 5
 AGENT_KO = {Specialist.RAIN_FLOOD: "호우·침수", Specialist.WIND_TYPHOON: "강풍·태풍", Specialist.LANDSLIDE: "산사태",
-            Specialist.LIFE_SAFETY: "생활안전", Specialist.LOCATION_ROUTE: "대피 경로"}
+            Specialist.LIFE_SAFETY: "생활안전", Specialist.LOCATION_ROUTE: "대피 경로", Specialist.RECOVERY_SUPPORT: "지원·복구"}
+# 위험 단계를 내지 않는 agent — 카드 제목의 '○○ 정상'에서 뺀다
+NO_LEVEL_AGENTS = {Specialist.LOCATION_ROUTE, Specialist.RECOVERY_SUPPORT}
 # 근거 키 → 칩 (앞에서부터 고른다). (근거 키에 들어 있는 말, 칩 이름)
 CHIP_RULES = [("침수 위험 단계", "침수"), ("호우 위험 단계", "호우"), ("산사태 위험 단계", "산사태"), ("태풍 위험 단계", "태풍"),
               ("강풍 위험 단계", "강풍"), ("풍랑 위험 단계", "풍랑"), ("침수심", "침수심"), ("1시간 강수량", "1시간 강수량"),
               ("순간최대풍속", "순간최대풍속"), ("풍속", "풍속"), ("경로 거리", "대피소까지"), ("도보 소요 시간", "도보"),
-              ("내일", "내일 예보"), ("자외선 등급", "자외선"), ("미세먼지 등급", "미세먼지")]
+              ("내일", "내일 예보"), ("자외선 등급", "자외선"), ("미세먼지 등급", "미세먼지"), ("사용자 직업", "내 직업")]
 SOURCE_KO = {"risk_assessments": "위험 판정(포항시 판정 엔진)", "observations": "실시간 관측(포항 디지털 트윈·기상청)",
              "forecasts": "기상청 예보", "weather_warnings": "기상청 특보", "disaster_messages": "긴급재난문자",
              "action_guides": "행동요령(포항시 재난안전)", "shelters": "대피소(생활안전지도)", "route": "경로(OpenStreetMap·GraphHopper)",
-             "hazard_zones": "산사태 취약지역(공공데이터포털)", "kakao": "장소 검색(카카오)"}
+             "hazard_zones": "산사태 취약지역(공공데이터포털)", "kakao": "장소 검색(카카오)",
+             "support_programs": "재난 지원·보험 제도(포항시 재난안전)", "user_profiles": "내 프로필"}
 
 
 def all_evidence(state: GuardianState) -> list[Evidence]:
@@ -55,7 +58,7 @@ def build_card(state: GuardianState) -> dict[str, Any]:
     """앱용 카드. 모든 값은 근거·판단 결과에서 그대로 (지어내지 않음)."""
     results = state.get("specialist_results", [])
     plan = state.get("action_plan")
-    top = max((r for r in results if r.agent != Specialist.LOCATION_ROUTE),
+    top = max((r for r in results if r.agent not in NO_LEVEL_AGENTS),
               key=lambda r: r.risk_level.rank, default=None)
     path = list(plan.decision_path) if plan is not None else []
     headline_parts = [p for p in path if p not in ("정보 안내",)]

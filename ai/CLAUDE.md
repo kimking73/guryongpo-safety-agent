@@ -102,6 +102,7 @@ Flutter app/web (teammate C). This lane (B) also owns GraphHopper routing and GC
 | `guardian_ai/flood.py` | Rain/flood agent: `collect` → `build_evidence` → writer or `template_summary`; `make_rain_flood_agent(writer, fetch)` |
 | `guardian_ai/verify.py` | Hallucination + intent check: `check_numbers` (rule), `make_hallucination_check(checker)` (checker may return (fact, intent)) |
 | `guardian_ai/specialists.py` | Landslide·wind/typhoon·life-safety agents (`make_specialist`) |
+| `guardian_ai/recovery.py` | Recovery/support agent (2026-10-08): `support_programs` → [공통 보험]·[공통 피해 신고·복구]·[내 직업 지원·복구] by the profile's occupation (`job_targets`), question hazard filter (`hazard_of`), `make_recovery_support_agent`; advisor skips the decision tree when it is the only agent |
 | `guardian_ai/location.py` | Location/route agent: safe shelter, `find_place` destination, route |
 | `guardian_ai/action.py` | Action advisor: `decide_phase`, decision tree `decide`, `pick_guides`, `make_action_advisor` |
 | `guardian_ai/polish.py` | B5: `build_card`, `fallback_voice`, `make_polish(polisher)` (LLM only > 600 chars), `make_final_check()` (rule → `polish_feedback`) |

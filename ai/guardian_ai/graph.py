@@ -96,6 +96,7 @@ _KEYWORDS = {
     Specialist.WIND_TYPHOON: ["바람", "강풍", "태풍", "파도"],
     Specialist.LIFE_SAFETY: ["미세먼지", "자외선", "공기"],
     Specialist.LOCATION_ROUTE: ["대피", "경로", "길", "가도", "어디"],
+    Specialist.RECOVERY_SUPPORT: ["보험", "지원금", "지원", "복구", "피해 신고", "보상", "구호"],
 }
 
 
@@ -410,7 +411,7 @@ def fallback(state: GuardianState) -> dict:
 # 노드 이름 → 함수 매핑. build_graph(overrides=...)로 일부만 바꿔 끼울 수 있다.
 DEFAULT_NODES: dict[str, Node] = {
     MANAGER: manager,
-    **{s.value: _specialist_stub(s) for s in Specialist},   # 전문 agent 5개
+    **{s.value: _specialist_stub(s) for s in Specialist},   # 전문 agent 6개 (지원·복구 2026-10-08)
     ACTION_ADVISOR: action_advisor,
     INTENT_CHECK: intent_check,
     HALLUCINATION_CHECK: hallucination_check,

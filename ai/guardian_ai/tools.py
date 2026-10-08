@@ -724,6 +724,27 @@ ORDER BY priority, id
 """
 
 
+# 재난 복구·지원 제도 (2026-10-08, 지원·복구 agent) — 서버 /api/v1/support-programs 와 같은 SQL
+SUPPORT_SQL = """
+SELECT id, category, hazards::text[] AS hazards, targets, name, summary, eligibility, how_to_apply, apply_period,
+       department, contact, url
+FROM support_programs
+WHERE %(h)s::text IS NULL OR cardinality(hazards) = 0 OR %(h)s::hazard_type = ANY (hazards)
+ORDER BY category, id
+"""
+
+
+def get_support_programs(hazard: str | None = None, fetch: Fetch | None = None) -> dict[str, Any]:
+    """보험·피해 복구·생계 지원 제도 (support_programs). hazard 가 있으면 그 재난에 해당하는 것만.
+    반환: {"available": True, "items": [{category, hazards, targets, name, summary, eligibility, how_to_apply, …}]}"""
+    try:
+        rows = _query(fetch, SUPPORT_SQL, {"h": hazard})
+    except Exception as e:  # noqa: BLE001
+        return _unavailable("support_programs", e)
+    items = [{**r, "hazards": list(r.get("hazards") or []), "targets": list(r.get("targets") or [])} for r in rows]
+    return {"available": True, "items": items, "source": "support_programs"}
+
+
 def get_action_guides(disaster: str, phase: Literal["before", "during", "after"], level: str = "advisory",
                       targets: list[str] | None = None, fetch: Fetch | None = None) -> dict[str, Any]:
     """행동요령 원문 (테이블: action_guides, A7 적재 — 포항시 재난안전 홈페이지 등). 우선순위 순.
@@ -751,4 +772,5 @@ AGENT_TOOLS: dict[str, list] = {
     "life_safety_agent": [get_life_safety],
     "location_route_agent": [get_risk_at, get_safe_shelters, find_place, hazards_at, request_route, request_sea_route],
     "action_advisor": [get_action_guides, get_facilities],
+    "recovery_support_agent": [get_support_programs, get_user_profile],
 }

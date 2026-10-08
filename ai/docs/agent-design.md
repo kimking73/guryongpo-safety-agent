@@ -14,9 +14,9 @@ flowchart TD
     IN([사용자 질문 · chat 모드]) --> M
     EV([Risk engine 경고 · alert 모드]) --> M
     M[관리자 agent<br/>재난 단계 판정 · agent 선택]
-    M -. 선택된 것만 병렬 .-> L[산사태] & R[강수·침수] & W[강풍·태풍] & S[생활안전] & P[위치·경로]
+    M -. 선택된 것만 병렬 .-> L[산사태] & R[강수·침수] & W[강풍·태풍] & S[생활안전] & P[위치·경로] & RS[지원·복구]
     M -. 선택 없음 .-> A
-    L & R & W & S & P --> A[행동 권고 agent<br/>규칙 트리 + 문장화]
+    L & R & W & S & P & RS --> A[행동 권고 agent<br/>규칙 트리 + 문장화]
     A -. chat .-> I[사용자 의도 검증]
     A --> H[환각 검증]
     I & H --> G{검증 합류}
@@ -50,6 +50,7 @@ flowchart TD
 | `wind_typhoon_agent` | 강풍·태풍 답변 (선박 보유자는 계류 등 포함) | 〃 | specialist_results | get_risk_at, get_observations, get_weather_warnings, get_disaster_messages | O |
 | `life_safety_agent` | 미세먼지·자외선 등급 (행동요령은 행동 권고가 원문으로) | current_location | specialist_results | get_life_safety | O |
 | `location_route_agent` | 위치 기반 경고, 대피소까지 안전 경로 (바다 위면 항구 경유) | user, current_location | specialist_results (route 포함) | get_risk_at, get_facilities, request_route, request_sea_route | O |
+| `recovery_support_agent` | 보험·피해 신고·복구 지원 제도를 [공통 보험]·[공통 피해 신고·복구]·[내 직업 지원·복구]로 안내 (2026-10-08, `recovery.py`). 직업 = 서버 프로필, 질문에 재난이 있으면 그 재난 제도만, DB에 없으면 "등록된 제도 없음" | question, user | specialist_results | get_support_programs | O |
 | `action_advisor` | 판단 트리로 행동 우선순위 결정 → 전문 agent 결과와 합쳐 초안 작성 | phase, specialist_results, user | action_plan, draft | get_action_guides, get_facilities | 문장화만 |
 | `intent_check` | 초안이 질문 의도에 답하는지 (chat만). 실제 서비스는 아래 `hallucination_check`와 한 번의 LLM 호출로 함께 (B5) | question, history, draft | checks.intent | - | O |
 | `hallucination_check` | 초안의 수치·사실이 evidence와 일치하는지 | draft, specialist_results[].evidence, action_plan | checks.hallucination | - | 숫자는 규칙 대조 + LLM |
@@ -172,6 +173,7 @@ A의 FastAPI는 앱·웹이 부르는 창구로 남고, AI는 거치지 않는�
 | `get_life_safety` | lat, lon | uv·pm10·pm25 각 value·grade (미세먼지는 수집 권한 전까지 None) | v_latest_observations |
 | `get_action_guides` | disaster, phase, level, targets | `ActionGuide`와 같은 키: id, min_level, targets, priority, title, content, voice_text, source_name | action_guides (51건) |
 | `get_user_profile` | 로그인 uid (Firebase) | {available, profile: UserProfile 키 중 서버에 있는 것} | **실제** (2026-10-08) — `users`·`user_profiles`·`user_places` (앱 프로필 화면과 AI(`profile_sync.py`)가 함께 고치는 한 곳). 채팅에서 로그인 토큰 uid = user_id 일 때 기준, 앱이 보낸 값은 빈 칸만 보충 (6-1절) |
+| `get_support_programs` | hazard=None | category(insurance·recovery·livelihood·legal·medical·fishery), hazards, targets(all·resident·fisher·farmer), name, summary, eligibility, how_to_apply, apply_period, department, contact, url | support_programs (9건, 서버 `/api/v1/support-programs`와 같은 SQL) |
 | `get_forecast` | lat, lon, hours=48 | periods(날짜별 최고 강수확률·강수형태·비 시간 수·1시간 최대 강수량·최대 풍속·파고), next_rain | v_latest_forecasts (기상청 초단기·단기, 구룡포 격자 2곳) |
 | `get_safe_shelters` | lat, lon, limit=8 | name, lat, lon, distance_m, is_indoor, underground, safe, excluded_reason(위험 영역 안·침수 중 지하) | shelters, risk_assessments (앱과 같은 규칙) |
 | `find_place` | query, user | available, name, lat, lon, kind(home·work·place·shelter·medical), source(user·db·kakao), address, out_of_area | profile 등록 장소, shelters·medical_facilities, 카카오 로컬 키워드 검색 |

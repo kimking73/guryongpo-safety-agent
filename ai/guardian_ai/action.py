@@ -281,11 +281,18 @@ def make_action_advisor(writer: ActionWriter | None = None, fetch: Fetch | None 
             return {"action_plan": plan, "draft": NOT_READY if results else NO_RISK}
 
         user = state.get("user")
+        if all(r.agent == Specialist.RECOVERY_SUPPORT for r in results):
+            # 지원·복구만 물은 질문 (2026-10-08): 판단 로직(동반자·피해 되묻기)을 타지 않고 제도 안내로 끝낸다
+            plan = ActionPlan(phase=phase, risk_level=RiskLevel.NORMAL, steps=[], decision_path=["지원·복구", "정보 안내"])
+            return {"action_plan": plan, "draft": "\n\n".join(parts)}
         if phase == Phase.NONE and not any(w in (state.get("question") or "") for w in ACTION_WORDS):
             # 평시에 정보만 묻는 질문("내일 비 와?")에는 행동 권고·질문을 붙이지 않는다
             plan = ActionPlan(phase=phase, risk_level=RiskLevel.NORMAL, steps=[], decision_path=["평시", "정보 안내"])
             return {"action_plan": plan, "draft": "\n\n".join(parts)}
         decision = decide(state, fetch=fetch, use_data=use_guides)
+        if any(r.agent == Specialist.RECOVERY_SUPPORT for r in results):
+            # 보험·복구 제도는 지원·복구 agent가 DB로 안내한다 → '확인되지 않음' 메모를 빼 서로 어긋나지 않게
+            decision.notes = [n for n in decision.notes if n.key != "보험·법률 정보"]
         main, guides = (pick_guides(results, decision.guide_phase, user, fetch) if use_guides
                         else (primary_result(results), []))
         route, route_ev = (None, [])

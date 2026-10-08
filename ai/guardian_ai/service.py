@@ -159,6 +159,7 @@ class ChatService:
                               OpenAIPolisher, OpenAISpecialistWriter, OpenAIWriter)
             from .polish import make_final_check, make_polish
             from .specialists import make_landslide_agent, make_life_safety_agent, make_wind_typhoon_agent
+            from .recovery import make_recovery_support_agent
             from .verify import make_hallucination_check
             from .llm import OpenAIMemoryExtractor
             classifier = OpenAIClassifier()
@@ -172,6 +173,8 @@ class ChatService:
                 S.Specialist.LANDSLIDE.value: make_landslide_agent(writer=OpenAISpecialistWriter(S.Specialist.LANDSLIDE)),
                 S.Specialist.WIND_TYPHOON.value: make_wind_typhoon_agent(writer=OpenAISpecialistWriter(S.Specialist.WIND_TYPHOON)),
                 S.Specialist.LIFE_SAFETY.value: make_life_safety_agent(writer=OpenAISpecialistWriter(S.Specialist.LIFE_SAFETY)),
+                S.Specialist.RECOVERY_SUPPORT.value: make_recovery_support_agent(
+                    writer=OpenAISpecialistWriter(S.Specialist.RECOVERY_SUPPORT)),
                 G.ACTION_ADVISOR: make_action_advisor(writer=OpenAIActionWriter()),
                 # 내용 검사 + 의도 검증을 한 호출로 (B5). intent_check 노드는 비워 둔다 — 같은 키를 두 노드가 쓰지 않게
                 G.HALLUCINATION_CHECK: make_hallucination_check(checker=OpenAIFactChecker(checks_intent=True)),

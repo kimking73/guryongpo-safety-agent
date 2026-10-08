@@ -57,6 +57,7 @@ class Specialist(str, Enum):
     WIND_TYPHOON = "wind_typhoon_agent"
     LIFE_SAFETY = "life_safety_agent"
     LOCATION_ROUTE = "location_route_agent"
+    RECOVERY_SUPPORT = "recovery_support_agent"     # 보험·피해 신고·복구 지원 (2026-10-08, recovery.py)
 
 
 class Mobility(str, Enum):
