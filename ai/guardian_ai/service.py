@@ -49,7 +49,7 @@ class ChatRequest(BaseModel):
     # 대화에서 들은 사용자 정보(나이·보행·직업·집 등)로 서버 프로필을 고칠지. 로그인한 본인일 때만 실제로 고친다 (api.py)
     remember: bool = True
     # 앱 시연 모드: 위험 판정·관측값·특보·재난문자·예보를 서버 시연 데이터로 읽고, 경로도 시연 위험 영역을 피한다 (demo.py).
-    # 시연 대화로는 프로필을 고치지 않는다.
+    # 시연 대화에서 들은 사용자 정보도 프로필에 반영한다 (사용자 결정 2026-10-08 — 재난 데이터만 시연 값이고 사용자는 실제 사람).
     demo: bool = False
 
 
@@ -253,7 +253,7 @@ class ChatService:
         logger.info("응답 시간 %.1fs%s %s", timings["total"], " [시연]" if req.demo else "",
                     {k: v for k, v in timings.items() if k != "total"})
         answer = result.get("final_answer", "")
-        if req.remember and token and self.extractor is not None and self.writer is not None and not req.demo:
+        if req.remember and token and self.extractor is not None and self.writer is not None:
             self.executor.submit(self._collect, token, req.user_id, req.question, answer, P.describe(profile))
         # 다음 질문의 지시어 해석("거기는?")에 쓰도록 이번 문답을 기록한다.
         self.app.update_state(config, {"history": [

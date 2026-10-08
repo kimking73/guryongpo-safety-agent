@@ -183,7 +183,7 @@ A의 FastAPI는 앱·웹이 부르는 창구로 남고, AI는 거치지 않는�
 `observations`, `weather_warnings`, `disaster_messages`, `v_latest_forecasts`, `ingest_runs`)를 같은 이름의 WITH 절로 가린 SQL을 보낸다.
 WITH 절은 api `/api/v1/demo/*`(server/risk/demo.py — 실제 센서 위치 + 시연 측정값, DB 저장 안 함)로 채운다. SQL·판단 규칙은 그대로,
 고정 자료(대피소·산사태 취약지역·행동요령)는 실제 표. 경로 tool은 `demo: true`를 붙인다. 시연 데이터를 못 받으면 실측으로 바꾸지 않고
-`available: False`. 시연 대화로는 프로필을 고치지 않는다.
+`available: False`. 시연 대화에서 들은 사용자 정보도 프로필에 반영한다 (2026-10-08).
 
 데이터에서 알게 된 것 (2026-10-01): 구룡포 대피소 19곳은 지진해일(17)·민방위(2)만 지정, **침수 지정 대피소 없음** →
 침수 안내는 `shelter_type=None`으로 가까운 대피소를 쓴다. 의료시설 5곳은 포항 시내 응급실(구룡포에서 약 20km).
@@ -216,7 +216,7 @@ A7이 `action_guides` 표에 적재한 형식을 그대로 쓴다 (2026-10-01, �
     프로필 값과 다르면 덮어쓴다(가장 최근에 말한 것·고친 것이 이긴다). 장소는 좌표를 찾은 것만 (카카오, 구룡포 일대).
   - 앱 프로필 화면도 같은 서버 프로필을 읽어 보여 준다 (`app/lib/services/account_sync.dart` `pullProfile`: 앱 시작·프로필 화면·AI 대화 뒤).
     앱은 바뀐 칸만 올려 AI가 고친 값을 덮어쓰지 않는다.
-  - 로그인 안 함·남의 uid·시연 모드·`remember=false` → 프로필을 읽지도 고치지도 않는다.
+  - 로그인 안 함·남의 uid·`remember=false` → 프로필을 읽지도 고치지도 않는다. 시연 모드도 프로필은 실제로 읽고 고친다 (2026-10-08 사용자 결정).
 - 예전 장기 기억(`ai_memory` 스키마의 LangGraph store, 사실·대화 요약)은 더 이상 읽지도 쓰지도 않는다. 데이터와 계정
   (`db/init/08_ai_memory.sh`)은 남겨 둔다. `/api/ai/memory*`·`/api/ai/me/memory` API는 없앴다.
 - 원칙: **재난 정보는 기억하지 않는다**(항상 DB 최신값), 추측은 저장하지 않는다.

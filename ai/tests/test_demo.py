@@ -125,7 +125,7 @@ def test_route_tools_send_demo_flag():
     assert "destination" not in sent[2]
 
 
-def test_chat_turns_demo_on_for_nodes_and_skips_memory(monkeypatch):
+def test_chat_turns_demo_on_for_nodes_and_still_updates_profile(monkeypatch):
     seen, extracted = [], []
 
     def node(state):
@@ -138,7 +138,7 @@ def test_chat_turns_demo_on_for_nodes_and_skips_memory(monkeypatch):
     svc.chat(ChatRequest(user_id="u1", question="침수 위험 있어?", demo=True), verified_uid="u1", token="t")
     svc.chat(ChatRequest(user_id="u1", question="침수 위험 있어?"), verified_uid="u1", token="t")
     assert seen == [True, False]
-    assert len(extracted) == 1          # 시연 대화로는 프로필을 고치지 않는다
+    assert len(extracted) == 2          # 시연 대화에서 들은 사용자 정보도 프로필에 반영 (2026-10-08)
     assert not D.is_active()
 
 
