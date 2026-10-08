@@ -111,7 +111,7 @@ Pretendard 줄인 글꼴(`app/assets/fonts`), 메뉴 4개(대시보드·AI 대�
       `routers/admin.py` `default_rank`·`STATUS_ORDER` 삭제 → `priority.rank`, GET 상세·지도에 `lat`·`lng` · 명세(PriorityReason 예시, IncidentTarget, 정렬 설명).
       영역 밖으로 이동한 앱 사용자는 명단에서 빠짐(요약 수는 그대로). 지적장애(cognitive)·의료기기·고령·독거는 '장애'에 안 넣음 — 사용자 결정.
       김다인(C) — `live_api.dart` `incident(id, lat, lng)`, `patrol_screens.dart` 내 위치(GPS·지도 선택일 때만) 전송·규칙 설명 줄·근거 대체 문구, `c8_test` 기대값.
-      + (10-09) **내 방문 경로** 카드(`patrol_screens.dart` `_visitCard`: 내가 맡은 대상 체크·출발점(내 위치/지도/주소)·도보/자동차 → route `/api/route/visits` 최단·우선순위 최단 탭, 지도에 경로선·방문 순서), `origin_picker.dart` `MapPickDialog`·`AddressDialog` 공개, `live_api.visitRoute`, `extraPolylines`.
+      + (10-09) **내 방문 경로** 카드(`patrol_screens.dart` `_visitCard`: 카드의 '경로에 추가'로 넣은 곳(이 기기에서만, '내가 맡기' 버튼·담당 표시는 사용자 요청으로 삭제 — 서버 assigned_to는 남음)·출발점(내 위치/지도/주소)·도보/자동차 → route `/api/route/visits` 최단·우선순위 최단 탭, 지도에 경로선·방문 순서), `origin_picker.dart` `MapPickDialog`·`AddressDialog` 공개, `live_api.visitRoute`, `extraPolylines`.
       + (10-09) 방재단 화면의 **지도 칸만** 대시보드 지도 카드로(`Dashboard(mapOnly: true, extraPolygons, extraMarkers)`, 나머지 배치는 그대로) + 지도 위 사람 아이콘(`_peopleMarkers`, 대상은 사람+순위 숫자), `_PatrolMap` 삭제.
 - [ ] **조하린·김다인 공유 — 10-07~08 추가분**:
       조하린(A) — `care.profile_updates` 표(`db/init/01m_v0_6_profile_updates.sql`)·API `/api/v1/user/profile-updates`(GET·POST·DELETE)·명세,
@@ -300,3 +300,4 @@ Pretendard 줄인 글꼴(`app/assets/fonts`), 메뉴 4개(대시보드·AI 대�
 - 2026-10-09: 사용자 정정 — 화면 전체가 아니라 **지도 칸만** 대시보드처럼. `DisasterDashboard.mapOnly`(지도 카드만), 방재단 화면 배치는 b67a497로 되돌리고 지도만 교체. 목업 웹 스크린샷 확인.
 - 2026-10-09: 방재단 다중 방문 경로 — route `POST /api/route/visits`(`visits.py`, 쌍 경로 + Held-Karp, 위험 구역 무조건 회피·집 있는 구역만 예외) + 앱 '내 방문 경로' 카드. route 76(새 8), 로컬 GraphHopper 실측 6곳 0.4~0.6초(도보 최단 2.5km/우선순위 4.7km), app 95+7(기존 실패), c8 17 통과.
 - 2026-10-09 01:16: VM 배포(deploy.sh·push_web.sh, 1b1affc) — 방문 경로. 공개 주소로 /api/route/visits 확인(4곳 최단 2.2km/우선순위 3.6km).
+- 2026-10-09: '내가 맡기' 삭제 → 카드에 '경로에 추가'/'경로에서 빼기'(최대 10곳, 기기 안 상태), 내 방문 경로는 넣은 곳만. c8 17 통과.

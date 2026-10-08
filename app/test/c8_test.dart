@@ -318,12 +318,14 @@ void main() {
     expect(result, isTrue);
   });
 
-  testWidgets('내 방문 경로: 내가 맡은 대상만 골라 최단·우선순위 최단 두 경로를 받는다 (2026-10-09)', (t) async {
-    Map<String, dynamic> mine(Map<String, dynamic> x, int tier) =>
-        {...x, 'assigned_to': {'user_id': 'u-me', 'nickname': '나', 'is_me': true}, 'priority_tier': tier};
+  testWidgets("내 방문 경로: '경로에 추가'한 곳만 최단·우선순위 최단 두 경로로 받는다 (2026-10-09)", (t) async {
     final d = _detail();
     final ts = [for (final x in d['targets'] as List) Map<String, dynamic>.from(x as Map)];
-    d['targets'] = [mine(ts[0], 4), mine(ts[1], 2), {...ts[0], 'id': 't-3', 'label': '[시연] 남이 맡은 댁', 'assigned_to': null}];
+    d['targets'] = [
+      {...ts[0], 'priority_tier': 4},
+      {...ts[1], 'priority_tier': 2},
+      {...ts[0], 'id': 't-3', 'label': '[시연] 안 넣은 댁', 'priority_rank': 3, 'priority_tier': 4},
+    ];
     Object? sent;
     Map<String, dynamic> plan(List<String> ids) => {
           'order': [for (var i = 0; i < ids.length; i++) {'id': ids[i], 'seq': i + 1, 'tier': 4, 'leg_distance_m': 300, 'leg_duration_s': 240}],
@@ -346,7 +348,17 @@ void main() {
     await _settle(t);
 
     expect(find.text('내 방문 경로'), findsOneWidget);
-    expect(find.text('2곳 경로 계산'), findsOneWidget);           // 남이 맡은 t-3은 빠짐
+    expect(find.text('경로에 추가한 곳이 없습니다'), findsOneWidget);
+    expect(find.text('내가 맡기'), findsNothing);
+    // 카드에서 박○○(2순위)·김○○(1순위) 순서로 넣는다 — t-3은 안 넣음
+    Finder addOn(String label) => find.descendant(
+        of: find.ancestor(of: find.text(label), matching: find.byType(Card)).first, matching: find.text('경로에 추가'));
+    await t.tap(addOn('[시연] 박○○ 댁'));
+    await _settle(t);
+    await t.tap(addOn('[시연] 김○○ 댁'));
+    await _settle(t);
+    expect(find.text('경로에서 빼기'), findsNWidgets(2));
+    expect(find.text('2곳 경로 계산'), findsOneWidget);
     await t.tap(find.text('2곳 경로 계산'));
     await _settle(t);
     final body = sent! as Map;
@@ -361,7 +373,7 @@ void main() {
     expect(y('[시연] 김○○ 댁'), lessThan(y('[시연] 박○○ 댁')));   // 우선순위: t-1 → t-2
 
     // 하나를 빼면 결과가 지워지고 1곳으로 다시 계산
-    await t.tap(find.widgetWithText(CheckboxListTile, '2순위 · [시연] 박○○ 댁'));
+    await t.tap(find.descendant(of: find.widgetWithText(ListTile, '2순위 · [시연] 박○○ 댁'), matching: find.byTooltip('경로에서 빼기')));
     await _settle(t);
     expect(find.text('1곳 경로 계산'), findsOneWidget);
     expect(find.text('우선순위 최단 경로'), findsNothing);

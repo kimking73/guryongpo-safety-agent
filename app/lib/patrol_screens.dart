@@ -548,8 +548,8 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
   HouseholdFilter filter = HouseholdFilter.all;
   Timer? poll;
 
-  // 내 방문 경로 (2026-10-09): 내가 맡은 대상 중 고른 곳을 모두 도는 길 — 최단 / 우선순위 최단
-  Set<String>? visitPick;            // null = 내가 맡은 대상 전부(최대 10곳)
+  // 내 방문 경로 (2026-10-09): 명단에서 '경로에 추가'한 곳(이 기기에서만)을 모두 도는 길 — 최단 / 우선순위 최단
+  Set<String> visitStops = {};
   LatLng? visitOrigin;               // null = 내 위치
   String visitOriginLabel = '내 위치';
   TravelMode visitMode = TravelMode.walk;
@@ -621,16 +621,6 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
     return ts;
   }
 
-  Future<void> _assign(Map<String, dynamic> t) async {
-    final mine = (t['assigned_to'] as Map?)?['is_me'] == true;
-    try {
-      await ref.read(liveApiProvider).patchTarget(incidentId!, '${t['id']}', {'assigned_to': mine ? null : 'me'});
-      await _loadDetail();
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(liveError(e))));
-    }
-  }
-
   Future<void> _visit(Map<String, dynamic> t) async {
     final ok = await showVisitSheet(context, ref, incidentId: incidentId!, target: t);
     if (ok) await _loadDetail();
@@ -691,7 +681,8 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
         if (detail != null && targets.isEmpty) const Card(child: ListTile(title: Text('이 대피 상황의 대상 가구가 없습니다'))),
         for (final t in [...targets.where((t) => '${t['id']}' == selected), ...targets.where((t) => '${t['id']}' != selected)])
           _TargetCard(t: t, selected: '${t['id']}' == selected, closed: detail?['closed_at'] != null,
-              onVisit: () => _visit(t), onAssign: () => _assign(t), onSelect: () => setState(() => selected = '${t['id']}')),
+              inRoute: visitStops.contains('${t['id']}'),
+              onVisit: () => _visit(t), onRoute: () => _toggleRoute(t), onSelect: () => setState(() => selected = '${t['id']}')),
         // 대피 대상이 아닌 등록 가구도 지도에서 눌러 볼 수 있게
         for (final h in _shownHouseholds.where((h) => '${h['id']}' == selected)) _HouseholdTile(h: h, selected: true),
       ],
@@ -751,16 +742,24 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
   void _clearVisit({bool pick = false}) {
     visitResult = null;
     visitError = null;
-    if (pick) visitPick = null;
+    if (pick) visitStops = {};
   }
 
-  /// 내가 맡은 대상 (명단 순서 = B13 순위)
-  List<Map<String, dynamic>> _mine(List<Map<String, dynamic>> targets) =>
-      [for (final t in targets) if ((t['assigned_to'] as Map?)?['is_me'] == true && latLng(t['location']) != null) t];
+  /// 경로에 추가한 대상 (명단 순서 = B13 순위). 대피 상황에서 빠진 대상은 저절로 빠진다
+  List<Map<String, dynamic>> _routeTargets(List<Map<String, dynamic>> targets) =>
+      [for (final t in targets) if (visitStops.contains('${t['id']}') && latLng(t['location']) != null) t];
 
-  Set<String> _picked(List<Map<String, dynamic>> mine) {
-    final ids = [for (final t in mine) '${t['id']}'];
-    return visitPick == null ? ids.take(maxVisitStops).toSet() : visitPick!.intersection(ids.toSet());
+  /// 카드의 '경로에 추가' / '경로에서 빼기'
+  void _toggleRoute(Map<String, dynamic> t) {
+    final id = '${t['id']}';
+    if (!visitStops.contains(id) && visitStops.length >= maxVisitStops) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('경로에는 한 번에 $maxVisitStops곳까지 넣을 수 있습니다.')));
+      return;
+    }
+    setState(() {
+      visitStops = visitStops.contains(id) ? ({...visitStops}..remove(id)) : {...visitStops, id};
+      _clearVisit();
+    });
   }
 
   Future<void> _chooseVisitOrigin(String how) async {
@@ -791,11 +790,9 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
     });
   }
 
-  Future<void> _calcVisit(List<Map<String, dynamic>> mine) async {
-    final picked = _picked(mine);
+  Future<void> _calcVisit(List<Map<String, dynamic>> picked) async {
     final stops = [
-      for (final t in mine)
-        if (picked.contains('${t['id']}'))
+      for (final t in picked)
           {
             'id': '${t['id']}',
             'lat': latLng(t['location'])!.latitude,
@@ -820,8 +817,7 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
   }
 
   Widget _visitCard(List<Map<String, dynamic>> targets) {
-    final mine = _mine(targets);
-    final picked = _picked(mine);
+    final picked = _routeTargets(targets);
     final label = {for (final t in targets) '${t['id']}': '${t['label']}'};
     final plan = _visitPlan;
     final me = ref.watch(userLocation);
@@ -836,35 +832,27 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
             SizedBox(width: 6),
             Text('내 방문 경로', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           ]),
-          Text('내가 맡은 대상 중 고른 곳을 모두 도는 길입니다. 위험 구역은 피하고, 방문할 집이 있는 구역만 들어갑니다.',
+          Text("아래 명단에서 '경로에 추가'한 곳을 모두 도는 길입니다. 위험 구역은 피하고, 방문할 집이 있는 구역만 들어갑니다.",
               style: Theme.of(context).textTheme.bodySmall),
-          if (mine.isEmpty)
+          if (picked.isEmpty)
             const ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: Icon(Icons.info_outline),
-                title: Text('맡은 대상이 없습니다'),
-                subtitle: Text("아래 명단에서 '내가 맡기'로 방문할 가구를 정하세요."))
+                title: Text('경로에 추가한 곳이 없습니다'),
+                subtitle: Text("아래 명단의 가구 카드에서 '경로에 추가'를 눌러 방문할 곳을 넣으세요."))
           else ...[
             const SizedBox(height: 6),
-            for (final t in mine)
-              CheckboxListTile(
+            Text('경로에 넣은 곳 ${picked.length}/$maxVisitStops', style: const TextStyle(fontWeight: FontWeight.bold)),
+            for (final t in picked)
+              ListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
-                controlAffinity: ListTileControlAffinity.leading,
-                value: picked.contains('${t['id']}'),
-                onChanged: !picked.contains('${t['id']}') && picked.length >= maxVisitStops
-                    ? null
-                    : (v) => setState(() {
-                          final next = {...picked};
-                          v == true ? next.add('${t['id']}') : next.remove('${t['id']}');
-                          visitPick = next;
-                          _clearVisit();
-                        }),
+                leading: const Icon(Icons.add_road_rounded, color: GK.navy),
                 title: Text('${t['priority_rank'] ?? '-'}순위 · ${t['label']}'),
                 subtitle: Text(priorityReason(t)),
+                trailing: IconButton(tooltip: '경로에서 빼기', icon: const Icon(Icons.close_rounded), onPressed: () => _toggleRoute(t)),
+                onTap: () => setState(() => selected = '${t['id']}'),
               ),
-            if (mine.length > maxVisitStops)
-              Text('한 번에 $maxVisitStops곳까지 고를 수 있습니다.', style: TextStyle(color: Colors.orange.shade800)),
             const SizedBox(height: 8),
             Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
               const Text('출발', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -888,7 +876,7 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
                 }),
               ),
               FilledButton.icon(
-                onPressed: visitLoading || picked.isEmpty ? null : () => _calcVisit(mine),
+                onPressed: visitLoading || picked.isEmpty ? null : () => _calcVisit(picked),
                 icon: visitLoading
                     ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                     : const Icon(Icons.alt_route_rounded),
@@ -1096,16 +1084,17 @@ String priorityReason(Map<String, dynamic> t) {
 }
 
 class _TargetCard extends StatelessWidget {
-  const _TargetCard({required this.t, required this.selected, required this.closed, required this.onVisit,
-      required this.onAssign, required this.onSelect});
+  const _TargetCard({required this.t, required this.selected, required this.closed, required this.inRoute, required this.onVisit,
+      required this.onRoute, required this.onSelect});
   final Map<String, dynamic> t;
   final bool selected, closed;
-  final VoidCallback onVisit, onAssign, onSelect;
+  /// 내 방문 경로에 넣었는지 (2026-10-09: '내가 맡기' 대신 '경로에 추가')
+  final bool inRoute;
+  final VoidCallback onVisit, onRoute, onSelect;
 
   @override
   Widget build(BuildContext c) {
     final status = t['status'] as String?;
-    final assigned = t['assigned_to'] as Map?;
     final visit = t['last_visit'] as Map?;
     final mins = t['minutes_since_alert'];
     return Card(
@@ -1134,13 +1123,14 @@ class _TargetCard extends StatelessWidget {
                     Text('마지막 방문 ${hhmm(visit['visited_at'])} · ${visitKo[visit['result']] ?? visit['result']}'
                         '${(visit['responder'] as Map?)?['nickname'] != null ? ' (${(visit['responder'] as Map)['nickname']})' : ''}',
                         style: Theme.of(c).textTheme.bodySmall),
-                  if (assigned != null)
-                    Text(assigned['is_me'] == true ? '내가 맡음' : '담당: ${assigned['nickname'] ?? '방재단'}',
-                        style: Theme.of(c).textTheme.bodySmall?.copyWith(color: Colors.indigo)),
+                  if (inRoute)
+                    Text('내 방문 경로에 넣음', style: Theme.of(c).textTheme.bodySmall?.copyWith(color: GK.navy, fontWeight: FontWeight.w700)),
                   Wrap(spacing: 4, children: [
                     if (!closed) FilledButton.tonalIcon(onPressed: onVisit, icon: const Icon(Icons.assignment_turned_in_outlined), label: const Text('방문 결과')),
                     if (!closed)
-                      TextButton(onPressed: onAssign, child: Text(assigned?['is_me'] == true ? '맡기 취소' : '내가 맡기')),
+                      inRoute
+                          ? OutlinedButton.icon(onPressed: onRoute, icon: const Icon(Icons.remove_road_rounded), label: const Text('경로에서 빼기'))
+                          : TextButton.icon(onPressed: onRoute, icon: const Icon(Icons.add_road_rounded), label: const Text('경로에 추가')),
                     if (t['phone'] != null)
                       IconButton(tooltip: '전화', icon: const Icon(Icons.phone), onPressed: () => launchUrl(Uri.parse('tel:${t['phone']}'))),
                   ]),
