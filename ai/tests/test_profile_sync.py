@@ -146,3 +146,14 @@ def test_record_failure_keeps_profile_update():
     ("hearing_impaired", "true", "지원 필요"), ("occupation", "어선 선장", "어선 선장")])
 def test_readable(field, value, shown):
     assert P.readable(field, value) == shown
+
+
+def test_real_service_user_source_calls_tools(monkeypatch):
+    """실제 서비스가 쓰는 user_source 가 tools.get_user_profile 을 부른다 (2026-10-08 NameError 로 로그인 채팅 500 재발 방지)"""
+    from guardian_ai import service as SV
+    from guardian_ai import tools as T
+    monkeypatch.setattr(T, "get_user_profile", lambda uid: {"available": True, "profile": {"age": 70}, "uid": uid})
+    assert SV.server_profile("u1") == {"available": True, "profile": {"age": 70}, "uid": "u1"}
+    svc = ChatService(classifier=G.keyword_classify)
+    svc.user_source = SV.server_profile
+    assert svc.chat(ChatRequest(user_id="u1", question="대피소 어디야"), verified_uid="u1", token="t").answer

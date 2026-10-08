@@ -150,7 +150,7 @@ class ChatService:
         phase_of = None             # 재난 단계 판정 (실제 서비스만 — DB를 읽는다)
         self.user_source = None   # 로그인 uid → 서버 프로필 (실제 서비스만; 테스트는 직접 넣는다)
         if classifier is None:
-            self.user_source = lambda uid: T.get_user_profile(uid)
+            self.user_source = server_profile
             # 키가 없는 테스트 환경에서 import 오류를 피하려고 여기서 import 한다
             from .action import decide_phase, make_action_advisor
             from .flood import make_rain_flood_agent
@@ -296,6 +296,13 @@ class ChatService:
             logger.info("프로필 반영 user=%s 칸 %s 장소 %s", user_id, sorted(done["profile"]), done["places"])
         except Exception:  # noqa: BLE001
             logger.exception("대화 내용 프로필 반영 실패")
+
+
+def server_profile(uid: str) -> dict:
+    """로그인 uid → 서버 프로필 (tools.get_user_profile). 실제 서비스의 user_source
+    (2026-10-08: 예전엔 lambda 안에서 import 안 된 이름을 불러 로그인 채팅이 모두 500 — test_profile_sync 가 지킨다)"""
+    from . import tools as T
+    return T.get_user_profile(uid)
 
 
 # 사람이 말한 위치 표현 ("구룡포시장 바로 뒤", "수협 앞") — 떼고 그 장소로 찾는다 (좌표는 그 장소 기준의 근사치)
