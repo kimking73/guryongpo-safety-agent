@@ -299,3 +299,4 @@ Pretendard 줄인 글꼴(`app/assets/fonts`), 메뉴 4개(대시보드·AI 대�
 - 2026-10-09 00:30: VM 배포(deploy.sh·push_web.sh, ef33e9c) — B13·방재단 현황 화면. 시험 대피 상황(note b13_test)·1회용 초대 코드 발급, VM에서 순위 확인(와상 도움요청 1위·지적장애 도움요청 2위·…·대피 완료 12위).
 - 2026-10-09: 사용자 정정 — 화면 전체가 아니라 **지도 칸만** 대시보드처럼. `DisasterDashboard.mapOnly`(지도 카드만), 방재단 화면 배치는 b67a497로 되돌리고 지도만 교체. 목업 웹 스크린샷 확인.
 - 2026-10-09: 방재단 다중 방문 경로 — route `POST /api/route/visits`(`visits.py`, 쌍 경로 + Held-Karp, 위험 구역 무조건 회피·집 있는 구역만 예외) + 앱 '내 방문 경로' 카드. route 76(새 8), 로컬 GraphHopper 실측 6곳 0.4~0.6초(도보 최단 2.5km/우선순위 4.7km), app 95+7(기존 실패), c8 17 통과.
+- 2026-10-09 01:16: VM 배포(deploy.sh·push_web.sh, 1b1affc) — 방문 경로. 공개 주소로 /api/route/visits 확인(4곳 최단 2.2km/우선순위 3.6km).
