@@ -32,7 +32,7 @@ Future<OriginSpy> boot(WidgetTester t, LocationService gps) async {
   final onError = FlutterError.onError;
   FlutterError.onError = (d) { if (d.library != 'image resource service') onError?.call(d); };
   addTearDown(() => FlutterError.onError = onError);
-  SharedPreferences.setMockInitialValues({'profile_setup_complete': true});
+  SharedPreferences.setMockInitialValues({'profile_setup_complete': true, 'onboarding_consent_v1': true, 'onboarding_done_v1': true});
   final spy = OriginSpy();
   await t.pumpWidget(ProviderScope(overrides: [repo.overrideWithValue(spy), locationService.overrideWithValue(gps)], child: const GuryongpoApp()));
   for (var i = 0; i < 10; i++) { await t.pump(const Duration(milliseconds: 300)); }

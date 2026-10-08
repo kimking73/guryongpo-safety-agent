@@ -631,22 +631,29 @@ final appRouter = GoRouter(
       if (!appBooted) {
         return loc == '/boot' ? null : Uri(path: '/boot', queryParameters: {'from': state.uri.toString()}).toString();
       }
-      // 로그인 강제 (사용자 결정 2026-10-08): 로그인 안 했으면 로그인 화면만. 로그인하면 가려던 화면으로. 목업 모드는 제외
+      final from = state.uri.queryParameters['from'];
+      String target() =>
+          from != null && from.startsWith('/') && !from.startsWith('/login') && !from.startsWith('/boot') && !from.startsWith('/setup')
+              ? from
+              : '/';
+      // 첫 화면 (2026-10-09 사용자 요청): 이 기기에서 아직 동의하지 않았으면 무조건 동의·로그인 화면(1/2)부터
+      if (!Onboarding.consented && loc != '/login') {
+        return Uri(path: '/login', queryParameters: {'from': state.uri.toString()}).toString();
+      }
+      // 로그인 강제 (사용자 결정 2026-10-08): 로그인 안 했으면 로그인 화면만. 목업 모드는 제외
       if (AuthService.enabled && !AuthService.signedIn && loc != '/login') {
         return Uri(path: '/login', queryParameters: {'from': state.uri.toString()}).toString();
       }
-      if (AuthService.signedIn && loc == '/login') {
-        final from = state.uri.queryParameters['from'];
-        final next = from != null && from.startsWith('/') && !from.startsWith('/login') && !from.startsWith('/boot') ? from : '/';
-        // 처음 로그인하면 온보딩 2단계(내 정보, 건너뛰기 가능)를 한 번 보여 준다
-        if (!Onboarding.done) return Uri(path: '/setup', queryParameters: {'from': next}).toString();
-        return next;
+      // 이미 동의한 사람이 다시 로그인하면 가려던 화면으로 (처음이면 '다음' 버튼이 2/2로 보낸다)
+      if (loc == '/login' && Onboarding.consented && (AuthService.signedIn || !AuthService.enabled)) {
+        if (!Onboarding.done) return Uri(path: '/setup', queryParameters: {'from': target()}).toString();
+        return target();
       }
       return null;
     },
     routes: [
   GoRoute(path: '/boot', builder: (_, s) => BootScreen(from: s.uri.queryParameters['from'])),
-  GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
+  GoRoute(path: '/login', builder: (_, s) => LoginScreen(from: s.uri.queryParameters['from'])),
   GoRoute(path: '/setup', builder: (_, s) => SetupScreen(from: s.uri.queryParameters['from'])),   // 로그인 후 이동은 위 redirect 가 한다
   GoRoute(path: '/location', builder: (_, __) => const InitialSetupScreen()),
   ShellRoute(builder: (_, __, child) => Shell(child: child), routes: [

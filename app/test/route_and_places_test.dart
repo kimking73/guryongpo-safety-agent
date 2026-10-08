@@ -145,7 +145,7 @@ void main() {
       if (d.library != 'image resource service') onError?.call(d);
     };
     addTearDown(() => FlutterError.onError = onError);
-    SharedPreferences.setMockInitialValues({'profile_setup_complete': true});
+    SharedPreferences.setMockInitialValues({'profile_setup_complete': true, 'onboarding_consent_v1': true, 'onboarding_done_v1': true});
     appRouter.go('/');
     final container = ProviderContainer(
         overrides: [repo.overrideWithValue(RouteAnsweringRepo())]);
@@ -225,7 +225,7 @@ void main() {
       if (d.library != 'image resource service') onError?.call(d);
     };
     addTearDown(() => FlutterError.onError = onError);
-    SharedPreferences.setMockInitialValues({'profile_setup_complete': true});
+    SharedPreferences.setMockInitialValues({'profile_setup_complete': true, 'onboarding_consent_v1': true, 'onboarding_done_v1': true});
     appRouter.go('/');
     await t.pumpWidget(ProviderScope(
         overrides: [repo.overrideWithValue(MockSafetyRepository())],
@@ -253,7 +253,7 @@ void main() {
         errors.add(d.exceptionAsString());
     };
     addTearDown(() => FlutterError.onError = onError);
-    SharedPreferences.setMockInitialValues({'profile_setup_complete': true});
+    SharedPreferences.setMockInitialValues({'profile_setup_complete': true, 'onboarding_consent_v1': true, 'onboarding_done_v1': true});
     appRouter.go('/');
     await t.pumpWidget(ProviderScope(
         overrides: [repo.overrideWithValue(MockSafetyRepository())],

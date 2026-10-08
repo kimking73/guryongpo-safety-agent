@@ -1,5 +1,8 @@
 // 디자인 개편 (2026-10-08): 날씨 6칸 값 뽑기, 탭바 3/4개, AI 추천 질문 → 덧붙일 카드
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:guryongpo_safety/main.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:guryongpo_safety/ai_chat.dart';
 import 'package:guryongpo_safety/app_shell.dart';
@@ -85,5 +88,43 @@ void main() {
     expect(evacStyle('evacuating').label, '대피 중');
     expect(evacStyle('evacuated').label, '대피 완료');
     expect(evacStyle('need_help').label, '도움 필요');
+  });
+
+  testWidgets('처음 들어온 기기: 동의 화면부터 → 두 동의 후 다음 → 내 정보(2/2)', (t) async {
+    t.view.physicalSize = const Size(390, 844);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.reset);
+    final onError = FlutterError.onError;
+    FlutterError.onError = (d) {
+      if (d.library != 'image resource service') onError?.call(d);
+    };
+    addTearDown(() => FlutterError.onError = onError);
+    SharedPreferences.setMockInitialValues({});
+    appBooted = false;
+    appRouter.go('/');
+    await t.pumpWidget(const ProviderScope(child: GuryongpoApp()));
+    for (var i = 0; i < 8; i++) {
+      await t.pump(const Duration(milliseconds: 300));
+    }
+    expect(find.text('구룡포 안전 비서'), findsOneWidget);
+    expect(find.text('1 / 2'), findsOneWidget);
+    expect(appRouter.state.matchedLocation, '/login');
+    // 동의 없이 다음 → 그대로
+    await t.tap(find.text('다음'));
+    await t.pump(const Duration(milliseconds: 300));
+    expect(appRouter.state.matchedLocation, '/login');
+    await t.tap(find.text('위치 정보 수집 동의', findRichText: true));
+    await t.tap(find.text('장애 정보(시각·청각·지체) 민감정보 수집 동의', findRichText: true));
+    await t.pump();
+    await t.ensureVisible(find.text('다음'));
+    await t.tap(find.text('다음'));
+    for (var i = 0; i < 6; i++) {
+      await t.pump(const Duration(milliseconds: 300));
+    }
+    expect(appRouter.state.matchedLocation, '/setup');
+    expect(find.text('2 / 2'), findsOneWidget);
+    expect((await SharedPreferences.getInstance()).getBool('onboarding_consent_v1'), isTrue);
+    await t.pumpWidget(const SizedBox());
+    await t.pump(const Duration(seconds: 1));
   });
 }
