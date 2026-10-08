@@ -1190,11 +1190,13 @@ class StatusLine extends ConsumerWidget {
 }
 
 class Dashboard extends ConsumerWidget {
-  const Dashboard({super.key, this.extraPolygons = const [], this.extraMarkers = const [], this.mapOnly = false});
+  const Dashboard(
+      {super.key, this.extraPolygons = const [], this.extraMarkers = const [], this.extraPolylines = const [], this.mapOnly = false});
 
   /// 방재단 현황(2026-10-09)이 대시보드 지도 칸만 쓸 때 (DisasterDashboard 참고)
   final List<Polygon> extraPolygons;
   final List<Marker> extraMarkers;
+  final List<Polyline> extraPolylines;
   final bool mapOnly;
   @override
   Widget build(BuildContext c, WidgetRef ref) {
@@ -1212,6 +1214,7 @@ class Dashboard extends ConsumerWidget {
     return DisasterDashboard(
       extraPolygons: extraPolygons,
       extraMarkers: extraMarkers,
+      extraPolylines: extraPolylines,
       mapOnly: mapOnly,
       demo: demo,
       floodGrids: demo ? null : ref.watch(floodGridProvider).valueOrNull,

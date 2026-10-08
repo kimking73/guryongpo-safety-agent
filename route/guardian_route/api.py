@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .gh import GraphHopperUnavailable, RouteNotFound
 from .sea import OutsideArea
+from . import visits
 from .service import (RouteCheckRequest, RouteCheckResponse, RouteRequest, RouteResponse, RouteService,
                       SeaRouteRequest, SeaRouteResponse)
 
@@ -82,4 +83,17 @@ def sea(req: SeaRouteRequest, service: RouteService = Depends(get_service)) -> S
         raise HTTPException(503, f"경로 안내를 일시적으로 사용할 수 없습니다. {e}") from e
     except RouteNotFound as e:
         log.info("경로 없음: %s", e)
+        raise HTTPException(404, f"구룡포 도로망에서 경로를 찾지 못했습니다. ({e})") from e
+
+
+@app.post("/api/route/visits", response_model=visits.VisitResponse)
+def visit_route(req: visits.VisitRequest, service: RouteService = Depends(get_service)) -> visits.VisitResponse:
+    """방재단 다중 방문 경로 (2026-10-09): 출발점 → 고른 집 1~10곳. 최단 순서와 우선순위(B13 단계) 순서를 함께 준다."""
+    try:
+        return visits.plan(service, req)
+    except GraphHopperUnavailable as e:
+        log.warning("경로 엔진 장애: %s", e)
+        raise HTTPException(503, f"경로 안내를 일시적으로 사용할 수 없습니다. {e}") from e
+    except RouteNotFound as e:
+        log.info("방문 경로 없음: %s", e)
         raise HTTPException(404, f"구룡포 도로망에서 경로를 찾지 못했습니다. ({e})") from e

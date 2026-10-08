@@ -44,7 +44,7 @@ B와 맞물리는 새 A·C 작업: A12(15–16 대피 응답 API, B12·B13 선�
 **C8**(B가 진행) 배포 / **B4** 선제 경고 메시지 함수만 남음 + 지원·복구 agent 추가(10-08) / **B5** 음성만 남음(나중에).
 B4·B5·B10·J1·B11 완료 처리(라이브 타임라인 포함)는 사용자에게 먼저 묻는다 — 아직 답 없음.
 마지막 앱 커밋 e47f177 (웹 `push_web.sh` 반영, 2026-10-08 23:25). 이 맥에서 VM ssh 됨(10-08 확인). VM 사용자 계정은 10-07에 모두 지웠고 새로 로그인한 계정만 있다.
-테스트 기준: server 220 passed·8 skipped, route 68 passed(live 제외), ai 208(live·db 제외),
+테스트 기준: server 220 passed·8 skipped, route 76 passed(live 제외), ai 208(live·db 제외),
 app 101개 중 기존 실패 7개(disaster_center "map options remain stable"·location 3·remote_mapping 1·route_and_places 2 — 1개는 10분 멈춤).
 
 **2026-10-07~08 한 일 (자세한 건 작업 기록)**:
@@ -111,6 +111,7 @@ Pretendard 줄인 글꼴(`app/assets/fonts`), 메뉴 4개(대시보드·AI 대�
       `routers/admin.py` `default_rank`·`STATUS_ORDER` 삭제 → `priority.rank`, GET 상세·지도에 `lat`·`lng` · 명세(PriorityReason 예시, IncidentTarget, 정렬 설명).
       영역 밖으로 이동한 앱 사용자는 명단에서 빠짐(요약 수는 그대로). 지적장애(cognitive)·의료기기·고령·독거는 '장애'에 안 넣음 — 사용자 결정.
       김다인(C) — `live_api.dart` `incident(id, lat, lng)`, `patrol_screens.dart` 내 위치(GPS·지도 선택일 때만) 전송·규칙 설명 줄·근거 대체 문구, `c8_test` 기대값.
+      + (10-09) **내 방문 경로** 카드(`patrol_screens.dart` `_visitCard`: 내가 맡은 대상 체크·출발점(내 위치/지도/주소)·도보/자동차 → route `/api/route/visits` 최단·우선순위 최단 탭, 지도에 경로선·방문 순서), `origin_picker.dart` `MapPickDialog`·`AddressDialog` 공개, `live_api.visitRoute`, `extraPolylines`.
       + (10-09) 방재단 화면의 **지도 칸만** 대시보드 지도 카드로(`Dashboard(mapOnly: true, extraPolygons, extraMarkers)`, 나머지 배치는 그대로) + 지도 위 사람 아이콘(`_peopleMarkers`, 대상은 사람+순위 숫자), `_PatrolMap` 삭제.
 - [ ] **조하린·김다인 공유 — 10-07~08 추가분**:
       조하린(A) — `care.profile_updates` 표(`db/init/01m_v0_6_profile_updates.sql`)·API `/api/v1/user/profile-updates`(GET·POST·DELETE)·명세,
@@ -297,3 +298,4 @@ Pretendard 줄인 글꼴(`app/assets/fonts`), 메뉴 4개(대시보드·AI 대�
 - 2026-10-09: 방재단 현황을 일반 대시보드 화면으로(사용자 요청) — 재난문자·특보·재난 지도·날씨 그대로, 지도 위 사람 아이콘(등록 가구: 장애인·어르신·기타, 대피 대상: 사람+우선순위 숫자·상태 색), 지도 앞 대피 상황 머리·필터·범례, 지도 뒤 방문 우선순위/등록 가구 명단. 목업 웹 스크린샷 확인, app 94+7(기존 실패).
 - 2026-10-09 00:30: VM 배포(deploy.sh·push_web.sh, ef33e9c) — B13·방재단 현황 화면. 시험 대피 상황(note b13_test)·1회용 초대 코드 발급, VM에서 순위 확인(와상 도움요청 1위·지적장애 도움요청 2위·…·대피 완료 12위).
 - 2026-10-09: 사용자 정정 — 화면 전체가 아니라 **지도 칸만** 대시보드처럼. `DisasterDashboard.mapOnly`(지도 카드만), 방재단 화면 배치는 b67a497로 되돌리고 지도만 교체. 목업 웹 스크린샷 확인.
+- 2026-10-09: 방재단 다중 방문 경로 — route `POST /api/route/visits`(`visits.py`, 쌍 경로 + Held-Karp, 위험 구역 무조건 회피·집 있는 구역만 예외) + 앱 '내 방문 경로' 카드. route 76(새 8), 로컬 GraphHopper 실측 6곳 0.4~0.6초(도보 최단 2.5km/우선순위 4.7km), app 95+7(기존 실패), c8 17 통과.

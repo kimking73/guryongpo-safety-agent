@@ -9,6 +9,10 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'live_screens.dart';
 import 'main.dart';
+import 'models/domain_models.dart';
+import 'origin_picker.dart';
+import 'services/geocoding_service.dart';
+import 'ui/gk_theme.dart';
 import 'services/live_api.dart';
 import 'services/location_service.dart';
 import 'services/polyline.dart';
@@ -544,6 +548,16 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
   HouseholdFilter filter = HouseholdFilter.all;
   Timer? poll;
 
+  // 내 방문 경로 (2026-10-09): 내가 맡은 대상 중 고른 곳을 모두 도는 길 — 최단 / 우선순위 최단
+  Set<String>? visitPick;            // null = 내가 맡은 대상 전부(최대 10곳)
+  LatLng? visitOrigin;               // null = 내 위치
+  String visitOriginLabel = '내 위치';
+  TravelMode visitMode = TravelMode.walk;
+  Map<String, dynamic>? visitResult;
+  String visitTab = 'shortest';
+  bool visitLoading = false;
+  String? visitError;
+
   @override
   void initState() {
     super.initState();
@@ -644,6 +658,7 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
                 incidentId = v;
                 detail = null;
                 selected = null;
+                _clearVisit(pick: true);
               });
               _loadDetail();
             }),
@@ -664,6 +679,8 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
               _MapPoint('${t['id']}', latLng(t['location'])!, (t['priority_rank'] as num?)?.toInt(), t['status'] as String?, '${t['label']}'),
         ], geoJsonRings(detail?['area'])),
         const _MapLegend(withTargets: true),
+        const SizedBox(height: 8),
+        _visitCard(targets),
         const SizedBox(height: 6),
         const Text('방문 우선순위', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
         // B13 규칙 (서버 priority.py, 사용자 결정 2026-10-08)
@@ -682,14 +699,240 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
   }
 
   /// 지도 = 대시보드 지도 칸 그대로(재난 층·전체 화면·등록 장소 위험) + 대피 영역(빨간 테두리) + 사람 아이콘 (2026-10-09 사용자 요청)
-  Widget _map(List<_MapPoint> points, List<List<LatLng>> rings) => Dashboard(
-        mapOnly: true,
-        extraPolygons: [
-          for (final r in rings)
-            Polygon(points: r, color: Colors.red.withValues(alpha: .10), borderColor: Colors.red.shade700, borderStrokeWidth: 2.5),
+  Widget _map(List<_MapPoint> points, List<List<LatLng>> rings) {
+    final plan = _visitPlan;
+    final line = plan == null ? const <LatLng>[] : decodePolyline('${plan['geometry']}');
+    final at = {for (final p in points) p.id: p.at};
+    return Dashboard(
+      mapOnly: true,
+      extraPolygons: [
+        for (final r in rings)
+          Polygon(points: r, color: Colors.red.withValues(alpha: .10), borderColor: Colors.red.shade700, borderStrokeWidth: 2.5),
+      ],
+      extraPolylines: [
+        if (line.length > 1) ...[
+          Polyline(points: line, color: Colors.white, strokeWidth: 10),
+          Polyline(points: line, color: GK.navy, strokeWidth: 6),
         ],
-        extraMarkers: _peopleMarkers(points, selected, (id) => setState(() => selected = id)),
-      );
+      ],
+      extraMarkers: [
+        ..._peopleMarkers(points, selected, (id) => setState(() => selected = id)),
+        if (plan != null) ...[
+          // 방문 순서: 사람 아이콘 왼쪽 아래 남색 번호 (오른쪽 위 흰 번호 = B13 순위)
+          for (final o in plan['order'] as List)
+            if (at['${o['id']}'] != null)
+              Marker(
+                point: at['${o['id']}']!,
+                width: 24,
+                height: 24,
+                alignment: const Alignment(-1.9, 1.9),
+                child: Container(
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(color: GK.navy, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
+                  child: Text('${o['seq']}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Colors.white)),
+                ),
+              ),
+          Marker(
+            point: _visitStart,
+            width: 40,
+            height: 40,
+            child: Tooltip(message: '출발: $visitOriginLabel', child: const Icon(Icons.flag_circle_rounded, color: GK.navy, size: 38)),
+          ),
+        ],
+      ],
+    );
+  }
+
+  // ------------------------------------------------------------------ 내 방문 경로
+  LatLng get _visitStart => visitOrigin ?? ref.read(userLocation).position;
+
+  Map<String, dynamic>? get _visitPlan => visitResult == null ? null : Map<String, dynamic>.from(visitResult![visitTab] as Map);
+
+  void _clearVisit({bool pick = false}) {
+    visitResult = null;
+    visitError = null;
+    if (pick) visitPick = null;
+  }
+
+  /// 내가 맡은 대상 (명단 순서 = B13 순위)
+  List<Map<String, dynamic>> _mine(List<Map<String, dynamic>> targets) =>
+      [for (final t in targets) if ((t['assigned_to'] as Map?)?['is_me'] == true && latLng(t['location']) != null) t];
+
+  Set<String> _picked(List<Map<String, dynamic>> mine) {
+    final ids = [for (final t in mine) '${t['id']}'];
+    return visitPick == null ? ids.take(maxVisitStops).toSet() : visitPick!.intersection(ids.toSet());
+  }
+
+  Future<void> _chooseVisitOrigin(String how) async {
+    if (how == 'me') {
+      setState(() {
+        visitOrigin = null;
+        visitOriginLabel = '내 위치';
+        _clearVisit();
+      });
+      return;
+    }
+    if (how == 'map') {
+      final p = await showDialog<LatLng>(context: context, builder: (_) => MapPickDialog(start: _visitStart));
+      if (p == null || !mounted) return;
+      setState(() {
+        visitOrigin = p;
+        visitOriginLabel = '지도에서 고른 위치';
+        _clearVisit();
+      });
+      return;
+    }
+    final r = await showDialog<GeocodedAddress>(context: context, builder: (_) => const AddressDialog());
+    if (r == null || !mounted) return;
+    setState(() {
+      visitOrigin = r.position;
+      visitOriginLabel = r.address;
+      _clearVisit();
+    });
+  }
+
+  Future<void> _calcVisit(List<Map<String, dynamic>> mine) async {
+    final picked = _picked(mine);
+    final stops = [
+      for (final t in mine)
+        if (picked.contains('${t['id']}'))
+          {
+            'id': '${t['id']}',
+            'lat': latLng(t['location'])!.latitude,
+            'lon': latLng(t['location'])!.longitude,
+            'tier': (t['priority_tier'] as num?)?.toInt() ?? 4,
+          },
+    ];
+    if (stops.isEmpty) return;
+    setState(() {
+      visitLoading = true;
+      visitError = null;
+    });
+    try {
+      final start = _visitStart;
+      final r = await ref.read(liveApiProvider).visitRoute(start.latitude, start.longitude, stops, mode: visitMode.api);
+      if (mounted) setState(() => visitResult = r);
+    } catch (e) {
+      if (mounted) setState(() => visitError = liveError(e));
+    } finally {
+      if (mounted) setState(() => visitLoading = false);
+    }
+  }
+
+  Widget _visitCard(List<Map<String, dynamic>> targets) {
+    final mine = _mine(targets);
+    final picked = _picked(mine);
+    final label = {for (final t in targets) '${t['id']}': '${t['label']}'};
+    final plan = _visitPlan;
+    final me = ref.watch(userLocation);
+    String km(num m) => m >= 1000 ? '${(m / 1000).toStringAsFixed(1)}km' : '${m.round()}m';
+    String min(num s) => '${(s / 60).ceil()}분';
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Row(children: [
+            Icon(Icons.route_rounded, color: GK.navy),
+            SizedBox(width: 6),
+            Text('내 방문 경로', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          ]),
+          Text('내가 맡은 대상 중 고른 곳을 모두 도는 길입니다. 위험 구역은 피하고, 방문할 집이 있는 구역만 들어갑니다.',
+              style: Theme.of(context).textTheme.bodySmall),
+          if (mine.isEmpty)
+            const ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.info_outline),
+                title: Text('맡은 대상이 없습니다'),
+                subtitle: Text("아래 명단에서 '내가 맡기'로 방문할 가구를 정하세요."))
+          else ...[
+            const SizedBox(height: 6),
+            for (final t in mine)
+              CheckboxListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                value: picked.contains('${t['id']}'),
+                onChanged: !picked.contains('${t['id']}') && picked.length >= maxVisitStops
+                    ? null
+                    : (v) => setState(() {
+                          final next = {...picked};
+                          v == true ? next.add('${t['id']}') : next.remove('${t['id']}');
+                          visitPick = next;
+                          _clearVisit();
+                        }),
+                title: Text('${t['priority_rank'] ?? '-'}순위 · ${t['label']}'),
+                subtitle: Text(priorityReason(t)),
+              ),
+            if (mine.length > maxVisitStops)
+              Text('한 번에 $maxVisitStops곳까지 고를 수 있습니다.', style: TextStyle(color: Colors.orange.shade800)),
+            const SizedBox(height: 8),
+            Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
+              const Text('출발', style: TextStyle(fontWeight: FontWeight.bold)),
+              ChoiceChip(
+                  label: Text(me.fromGps ? '내 위치' : '내 위치 (예시 위치)'),
+                  selected: visitOrigin == null,
+                  onSelected: (_) => _chooseVisitOrigin('me')),
+              ActionChip(avatar: const Icon(Icons.map_outlined, size: 18), label: const Text('지도에서 고르기'), onPressed: () => _chooseVisitOrigin('map')),
+              ActionChip(avatar: const Icon(Icons.search, size: 18), label: const Text('주소로 찾기'), onPressed: () => _chooseVisitOrigin('address')),
+            ]),
+            if (visitOrigin != null)
+              Padding(padding: const EdgeInsets.only(top: 4), child: Text('출발: $visitOriginLabel', style: Theme.of(context).textTheme.bodySmall)),
+            const SizedBox(height: 8),
+            Wrap(spacing: 10, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+              SegmentedButton<TravelMode>(
+                segments: [for (final m in TravelMode.values) ButtonSegment(value: m, label: Text(m.label))],
+                selected: {visitMode},
+                onSelectionChanged: (v) => setState(() {
+                  visitMode = v.first;
+                  _clearVisit();
+                }),
+              ),
+              FilledButton.icon(
+                onPressed: visitLoading || picked.isEmpty ? null : () => _calcVisit(mine),
+                icon: visitLoading
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.alt_route_rounded),
+                label: Text('${picked.length}곳 경로 계산'),
+              ),
+            ]),
+            if (visitError != null) Padding(padding: const EdgeInsets.only(top: 6), child: Text(visitError!, style: const TextStyle(color: Colors.red))),
+            if (plan != null) ...[
+              const SizedBox(height: 10),
+              SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(value: 'shortest', label: Text('최단 경로')),
+                  ButtonSegment(value: 'priority', label: Text('우선순위 최단 경로')),
+                ],
+                selected: {visitTab},
+                onSelectionChanged: (v) => setState(() => visitTab = v.first),
+              ),
+              const SizedBox(height: 6),
+              Text('${visitMode.label} · 총 ${km(plan['distance_m'] as num)} · 약 ${min(plan['duration_s'] as num)}',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              Text(visitTab == 'priority' ? '순위 단계(도움 요청+장애 → 도움 요청 → 응답 없음+장애 → …)를 지키고, 같은 단계 안에서 가장 짧게' : '순위와 상관없이 가장 짧게',
+                  style: Theme.of(context).textTheme.bodySmall),
+              for (final o in plan['order'] as List)
+                ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: CircleAvatar(radius: 13, backgroundColor: GK.navy,
+                      child: Text('${o['seq']}', style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.bold))),
+                  title: Text(label['${o['id']}'] ?? '${o['id']}'),
+                  subtitle: Text('앞 지점에서 ${km(o['leg_distance_m'] as num)} · ${min(o['leg_duration_s'] as num)}'),
+                  onTap: () => setState(() => selected = '${o['id']}'),
+                ),
+              if ((plan['still_inside'] as List? ?? const []).isNotEmpty)
+                Text('⚠ 위험 구역 ${(plan['still_inside'] as List).length}곳을 지납니다 (방문할 집이 구역 안에 있거나 다른 길이 없음).',
+                    style: TextStyle(color: Colors.deepOrange.shade800)),
+              if ((visitResult!['blocked_zones'] as List? ?? const []).isNotEmpty)
+                Text('⚠ 막아야 할 위험 구역을 지나지 않고는 갈 수 없는 곳이 있어, 그 구역을 지나는 길로 계산했습니다.',
+                    style: TextStyle(color: Colors.red.shade800)),
+            ],
+          ],
+        ]),
+      ),
+    );
+  }
 
   /// 필터에 맞는 등록 가구 (선택한 가구를 맨 앞으로)
   List<Map<String, dynamic>> get _shownHouseholds {
@@ -789,6 +1032,9 @@ class _MapPoint {
   final VulnerableKind? kind;   // 등록 가구(대피 대상 아님)면 장애인·독거노인·기타
   final String? detail;
 }
+
+/// 방문 경로 한 번에 고를 수 있는 곳 (route 서버 visits.MAX_STOPS와 같게)
+const maxVisitStops = 10;
 
 /// 대시보드 지도 위 사람 아이콘 (2026-10-09): 대피 대상은 사람 + 우선순위 번호(색 = 대피 상태),
 /// 등록 취약 가구는 장애인·독거노인·기타 사람 아이콘. 누르면 그 대상 카드가 명단 맨 위로

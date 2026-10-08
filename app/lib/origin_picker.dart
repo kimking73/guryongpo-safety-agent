@@ -152,7 +152,7 @@ Future<void> showOriginPicker(BuildContext c, WidgetRef ref) async {
             title: const Text('지도에서 고르기'),
             onTap: () async {
               Navigator.pop(sheet);
-              final p = await showDialog<LatLng>(context: c, builder: (_) => _MapPickDialog(start: ref.read(userLocation).position));
+              final p = await showDialog<LatLng>(context: c, builder: (_) => MapPickDialog(start: ref.read(userLocation).position));
               if (p != null) await pick(p, '지도에서 고른 위치');
             }),
         ListTile(
@@ -161,7 +161,7 @@ Future<void> showOriginPicker(BuildContext c, WidgetRef ref) async {
             subtitle: const Text('도로명 주소 (예: 구룡포읍 호미로 152)'),
             onTap: () async {
               Navigator.pop(sheet);
-              final r = await showDialog<GeocodedAddress>(context: c, builder: (_) => const _AddressDialog());
+              final r = await showDialog<GeocodedAddress>(context: c, builder: (_) => const AddressDialog());
               if (r != null) await pick(r.position, r.address, address: r.address);
             }),
       ]),
@@ -169,14 +169,15 @@ Future<void> showOriginPicker(BuildContext c, WidgetRef ref) async {
   );
 }
 
-class _MapPickDialog extends StatefulWidget {
-  const _MapPickDialog({required this.start});
+/// 지도에서 위치 고르기 (출발 위치·방재단 방문 경로 출발점 공용, 2026-10-09 공개)
+class MapPickDialog extends StatefulWidget {
+  const MapPickDialog({required this.start});
   final LatLng start;
   @override
-  State<_MapPickDialog> createState() => _MapPickDialogState();
+  State<MapPickDialog> createState() => MapPickDialogState();
 }
 
-class _MapPickDialogState extends State<_MapPickDialog> {
+class MapPickDialogState extends State<MapPickDialog> {
   LatLng? picked;
   @override
   Widget build(BuildContext c) => Dialog.fullscreen(
@@ -202,13 +203,14 @@ class _MapPickDialogState extends State<_MapPickDialog> {
               ])));
 }
 
-class _AddressDialog extends StatefulWidget {
-  const _AddressDialog();
+/// 도로명 주소로 찾기 → GeocodedAddress (서버 /api/v1/user/geocode, 카카오)
+class AddressDialog extends StatefulWidget {
+  const AddressDialog();
   @override
-  State<_AddressDialog> createState() => _AddressDialogState();
+  State<AddressDialog> createState() => AddressDialogState();
 }
 
-class _AddressDialogState extends State<_AddressDialog> {
+class AddressDialogState extends State<AddressDialog> {
   final address = TextEditingController();
   bool busy = false;
   String? error;

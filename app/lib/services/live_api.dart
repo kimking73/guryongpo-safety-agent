@@ -71,6 +71,17 @@ class LiveApi {
         if (DemoData.on) 'demo': true,
       }));
 
+  // ---- 방재단 다중 방문 경로 (2026-10-09, route 서버 /api/route/visits) ----
+  /// 출발점 → 고른 집 1~10곳. 응답 shortest·priority 두 경로 (order[id·seq·tier·leg_distance_m·leg_duration_s], distance_m,
+  /// duration_s, geometry, still_inside), blocked_zones. stops = [{id, lat, lon, tier}] (이름 등 개인정보는 보내지 않는다)
+  Future<Map<String, dynamic>> visitRoute(double lat, double lon, List<Map<String, dynamic>> stops, {String mode = 'walk'}) =>
+      _send(_route.post<Map<String, dynamic>>('/api/route/visits', data: {
+        'origin': {'lat': lat, 'lon': lon},
+        'stops': stops,
+        'mode': mode,
+        if (DemoData.on) 'demo': true,
+      }));
+
   // ---- 내 취약 가구 등록 (동의 필수) ----
   Future<Map<String, dynamic>?> myHousehold() async {
     try {

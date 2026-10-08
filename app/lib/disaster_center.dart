@@ -262,6 +262,7 @@ class DisasterDashboard extends StatefulWidget {
     this.onRefresh,
     this.extraPolygons = const [],
     this.extraMarkers = const [],
+    this.extraPolylines = const [],
     this.mapOnly = false,
   });
 
@@ -308,6 +309,8 @@ class DisasterDashboard extends StatefulWidget {
   /// 지도 위에 더 올릴 영역(대피 상황)·표식(사람 아이콘, 맨 위 층)
   final List<Polygon> extraPolygons;
   final List<Marker> extraMarkers;
+  /// 지도 위에 더 그릴 선 (방재단 다중 방문 경로, 2026-10-09)
+  final List<Polyline> extraPolylines;
   final bool mapOnly;
 
   @override
@@ -626,6 +629,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                 if (widget.riskAreas.isNotEmpty)
                   PolygonLayer(polygons: hazardAreaPolygons(widget.riskAreas)),
                 if (widget.extraPolygons.isNotEmpty) PolygonLayer(polygons: widget.extraPolygons),
+                if (widget.extraPolylines.isNotEmpty) PolylineLayer(polylines: widget.extraPolylines),
                 if (route != null && route.polylinePoints.length > 1)
                   PolylineLayer(polylines: [
                     Polyline(

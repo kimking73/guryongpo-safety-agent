@@ -315,14 +315,16 @@ class RouteService:
         return self.source(demo).hazards()
 
 
-def build_model(rules: dict[str, Any], zones: list[Hazard]) -> dict[str, Any] | None:
-    """GraphHopper custom_model: 사용자 유형 규칙 + 위험 구역 회피. 더할 게 없으면 None (기본 도보 모델)."""
+def build_model(rules: dict[str, Any], zones: list[Hazard], block: frozenset[str] = frozenset()) -> dict[str, Any] | None:
+    """GraphHopper custom_model: 사용자 유형 규칙 + 위험 구역 회피. 더할 게 없으면 None (기본 도보 모델).
+    block = 완전히 막을 구역 id (우선순위 0, 방재단 방문 경로의 '무조건 회피' — visits.py). 나머지는 AVOID_PRIORITY."""
     priority = list(rules.get("priority", []))
     speed = list(rules.get("speed", []))
     model: dict[str, Any] = {}
     if zones:
-        # 구역마다 area를 만들고 그 안의 길 우선순위를 AVOID_PRIORITY배로 낮춘다
-        priority += [{"if": f"in_{area_id(z.id)}", "multiply_by": str(AVOID_PRIORITY)} for z in zones]
+        # 구역마다 area를 만들고 그 안의 길 우선순위를 AVOID_PRIORITY배로 낮춘다 (block 구역은 0 = 통행 불가)
+        priority += [{"if": f"in_{area_id(z.id)}", "multiply_by": "0" if z.id in block else str(AVOID_PRIORITY)}
+                     for z in zones]
         model["areas"] = {"type": "FeatureCollection", "features": [
             {"type": "Feature", "id": area_id(z.id), "properties": {}, "geometry": mapping(z.geometry)}
             for z in zones]}

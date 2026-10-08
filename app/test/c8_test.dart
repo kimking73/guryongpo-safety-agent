@@ -317,4 +317,54 @@ void main() {
     await t.pumpAndSettle();
     expect(result, isTrue);
   });
+
+  testWidgets('내 방문 경로: 내가 맡은 대상만 골라 최단·우선순위 최단 두 경로를 받는다 (2026-10-09)', (t) async {
+    Map<String, dynamic> mine(Map<String, dynamic> x, int tier) =>
+        {...x, 'assigned_to': {'user_id': 'u-me', 'nickname': '나', 'is_me': true}, 'priority_tier': tier};
+    final d = _detail();
+    final ts = [for (final x in d['targets'] as List) Map<String, dynamic>.from(x as Map)];
+    d['targets'] = [mine(ts[0], 4), mine(ts[1], 2), {...ts[0], 'id': 't-3', 'label': '[시연] 남이 맡은 댁', 'assigned_to': null}];
+    Object? sent;
+    Map<String, dynamic> plan(List<String> ids) => {
+          'order': [for (var i = 0; i < ids.length; i++) {'id': ids[i], 'seq': i + 1, 'tier': 4, 'leg_distance_m': 300, 'leg_duration_s': 240}],
+          'distance_m': 1200, 'duration_s': 900, 'geometry': '_p~iF~ps|U_ulLnnqC', 'still_inside': <String>[],
+        };
+    final s = FakeServer({
+      'GET /api/v1/admin/incidents': (_) => [_incident],
+      'GET /api/v1/admin/households': (_) => <Object>[],
+      'GET /api/v1/admin/incidents/inc-1': (_) => d,
+      'POST /api/route/visits': (o) {
+        sent = o.data;
+        return {'mode': 'walk', 'shortest': plan(['t-2', 't-1']), 'priority': plan(['t-1', 't-2']), 'blocked_zones': <String>[], 'hazards_ok': true};
+      },
+    });
+    _tall(t);
+    await t.pumpWidget(_app(const LiveResponderScreen(), [
+      liveApiProvider.overrideWithValue(s.api()),
+      meProvider.overrideWith((_) async => {'role': 'responder'}),
+    ]));
+    await _settle(t);
+
+    expect(find.text('내 방문 경로'), findsOneWidget);
+    expect(find.text('2곳 경로 계산'), findsOneWidget);           // 남이 맡은 t-3은 빠짐
+    await t.tap(find.text('2곳 경로 계산'));
+    await _settle(t);
+    final body = sent! as Map;
+    expect([for (final x in body['stops'] as List) (x['id'], x['tier'])], [('t-1', 2), ('t-2', 4)]);   // 명단(순위) 순서로 보냄
+    expect(body['mode'], 'walk');
+
+    expect(find.text('도보 · 총 1.2km · 약 15분'), findsOneWidget);
+    double y(String label) => t.getTopLeft(find.descendant(of: find.byType(ListTile), matching: find.text(label)).first).dy;
+    expect(y('[시연] 박○○ 댁'), lessThan(y('[시연] 김○○ 댁')));   // 최단: t-2 → t-1
+    await t.tap(find.text('우선순위 최단 경로'));
+    await _settle(t);
+    expect(y('[시연] 김○○ 댁'), lessThan(y('[시연] 박○○ 댁')));   // 우선순위: t-1 → t-2
+
+    // 하나를 빼면 결과가 지워지고 1곳으로 다시 계산
+    await t.tap(find.widgetWithText(CheckboxListTile, '2순위 · [시연] 박○○ 댁'));
+    await _settle(t);
+    expect(find.text('1곳 경로 계산'), findsOneWidget);
+    expect(find.text('우선순위 최단 경로'), findsNothing);
+    await t.pumpWidget(const SizedBox.shrink());
+  });
 }
