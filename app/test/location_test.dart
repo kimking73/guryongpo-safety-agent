@@ -51,7 +51,7 @@ void main() {
     const here = LatLng(35.9930, 129.5560);
     final spy = await boot(t, FakeGps([here]));
     expect(spy.origins.last, here);
-    expect(find.textContaining('GPS 위치 기준'), findsOneWidget);
+    expect(find.textContaining('현위치 · GPS'), findsOneWidget); // 지도 카드 아래 경로 요약 (디자인 개편)
     await done(t);
   });
 

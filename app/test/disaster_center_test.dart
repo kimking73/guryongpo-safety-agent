@@ -44,14 +44,15 @@ void main() {
     };
     addTearDown(() => FlutterError.onError = previousErrorHandler);
 
-    await tester.pumpWidget(const MaterialApp(
-      home: Scaffold(body: DisasterDashboard()),
+    // 지도 층 칩·범례는 지도 전체화면에 있다 (디자인 개편 2026-10-08)
+    await tester.pumpWidget(const ProviderScope(
+      child: MaterialApp(home: Scaffold(body: DisasterDashboard(fullScreen: true))),
     ));
     await tester.pump(const Duration(milliseconds: 100));
 
     final floodChip = find.widgetWithText(FilterChip, '침수 격자');
     final windChip = find.widgetWithText(FilterChip, '강풍 화살표·풍속');
-    final slideChip = find.widgetWithText(FilterChip, '산사태 위험 안내');
+    final slideChip = find.widgetWithText(FilterChip, '산사태 위험 지역');
     final overallChip = find.widgetWithText(FilterChip, '전체 재난 표시');
     expect(tester.widget<FilterChip>(overallChip).selected, isTrue);
     expect(tester.widget<FilterChip>(floodChip).selected, isFalse);
@@ -131,23 +132,23 @@ void main() {
     FlutterError.onError =
         (details) => flutterErrors.add(details.exceptionAsString());
 
-    await tester.pumpWidget(const MaterialApp(
-      home: Scaffold(body: DisasterDashboard()),
+    await tester.pumpWidget(const ProviderScope(
+      child: MaterialApp(home: Scaffold(body: DisasterDashboard())),
     ));
     await tester.pump(const Duration(milliseconds: 100));
     errors.add(tester.takeException());
     final initialDashboard =
         find.byType(DisasterDashboard).evaluate().isNotEmpty;
 
-    await tester.pumpWidget(const MaterialApp(
-      home: Scaffold(body: TyphoonScreen(initialLocal: true)),
+    await tester.pumpWidget(const ProviderScope(
+      child: MaterialApp(home: Scaffold(body: TyphoonScreen(initialLocal: true))),
     ));
     await tester.pump(const Duration(milliseconds: 100));
     errors.add(tester.takeException());
     final openedTyphoon = find.byType(TyphoonScreen).evaluate().isNotEmpty;
 
-    await tester.pumpWidget(const MaterialApp(
-      home: Scaffold(body: DisasterDashboard()),
+    await tester.pumpWidget(const ProviderScope(
+      child: MaterialApp(home: Scaffold(body: DisasterDashboard())),
     ));
     await tester.pump(const Duration(milliseconds: 100));
     errors.add(tester.takeException());

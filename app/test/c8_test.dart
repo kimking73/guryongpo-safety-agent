@@ -248,8 +248,9 @@ void main() {
 
     expect(find.text('구룡포 침수 경보'), findsOneWidget);
     // 서버 순위대로: 1순위 김○○(도움 필요)가 2순위 박○○보다 위
-    final first = t.getTopLeft(find.text('[시연] 김○○ 댁')).dy;
-    final second = t.getTopLeft(find.text('[시연] 박○○ 댁')).dy;
+    // 같은 이름이 '우선 확인 가구'와 '배정 현황' 카드에 함께 나온다 — 순서는 배정 현황 카드(마지막)로 본다
+    final first = t.getTopLeft(find.text('[시연] 김○○ 댁').last).dy;
+    final second = t.getTopLeft(find.text('[시연] 박○○ 댁').last).dy;
     expect(first, lessThan(second));
     expect(find.text('순위 근거: 도움 요청'), findsOneWidget);
 

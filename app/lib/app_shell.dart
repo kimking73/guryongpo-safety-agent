@@ -195,6 +195,16 @@ class _ShellState extends ConsumerState<Shell> {
         bottom: false,
         child: Column(children: [
           TopChipBar(team: here == '/team'),
+          // GPS를 못 쓰는 이유 (권한 없음·구룡포 밖) — 위험도·경로가 예시 위치 기준임을 알린다
+          if (ref.watch(gpsNote) case final note?)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 2, 20, 0),
+              child: Row(children: [
+                const FaIcon(FontAwesomeIcons.locationCrosshairs, size: 12, color: Ds.muted),
+                const SizedBox(width: 6),
+                Expanded(child: Text(note, style: dsText(12, color: Ds.muted))),
+              ]),
+            ),
           Expanded(child: widget.child),
         ]),
       ),
@@ -242,8 +252,7 @@ class TopChipBar extends ConsumerWidget {
     final children = <Widget>[net, const SizedBox(width: 8)];
     if (team) {
       children.addAll([
-        const Flexible(
-            child: PillChip('방재단원(나)', icon: FontAwesomeIcons.idBadge)),
+        const PillChip('방재단원(나)', icon: FontAwesomeIcons.idBadge),
         const Spacer(),
         Container(
           height: 36,

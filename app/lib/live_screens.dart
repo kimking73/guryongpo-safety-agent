@@ -98,11 +98,11 @@ class LivePage extends StatelessWidget {
   @override
   Widget build(BuildContext c) {
     final list = ListView(padding: const EdgeInsets.all(16), children: [
-      Row(children: [
-        Expanded(child: Text(title, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold))),
-        if (onRefresh != null) IconButton(tooltip: '새로고침', onPressed: onRefresh, icon: const Icon(Icons.refresh)),
-      ]),
-      const SizedBox(height: 8),
+      // 제목은 화면 위 뒤로 버튼 옆에 있다 (app_shell.dart PageHeader) — 여기서는 새로고침만
+      if (onRefresh != null)
+        Align(
+            alignment: Alignment.centerRight,
+            child: IconButton(tooltip: '새로고침', onPressed: onRefresh, icon: const Icon(Icons.refresh))),
       ...children,
       const SizedBox(height: 24),
     ]);

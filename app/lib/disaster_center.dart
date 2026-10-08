@@ -2344,10 +2344,6 @@ class _TyphoonScreenState extends State<TyphoonScreen> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        const Text(
-          '태풍 정보',
-          style: TextStyle(fontSize: 30, fontWeight: FontWeight.bold),
-        ),
         if (widget.demo) const _DemoBanner(),
         Card(
           child: Padding(
@@ -2806,8 +2802,6 @@ class _AlertHubScreenState extends State<AlertHubScreen> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        const Text('선제 경고·알림', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
         const Text('사용자 맞춤형 선제 경고', style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold)),
         _WeatherBulletins(warnings: _widget('warnings') ?? const {}, forecast: _widget('forecast') ?? const {}),
         if (widget.alerts.isEmpty && places.isEmpty)
@@ -2944,10 +2938,6 @@ class _AlertHubScreenState extends State<AlertHubScreen> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        const Text(
-          '선제 경고·알림',
-          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-        ),
         const SizedBox(height: 8),
         const _DemoBanner(),
         const Text(
@@ -3137,10 +3127,6 @@ class _RecoveryScreenState extends State<RecoveryScreen> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        const Text(
-          '지원 및 복구',
-          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-        ),
         const _DemoBanner(),
         const Text(
           '목업 안내입니다. 실제 제도·자격·지원 금액은 관할 기관에 확인하세요.',

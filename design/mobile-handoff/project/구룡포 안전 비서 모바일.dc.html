@@ -48,7 +48,40 @@ input::placeholder{color:#8A93AE}
 <span style="font-size:13px;font-weight:700;color:#14225B;background:#E8EBF5;padding:5px 10px;border-radius:999px">필수</span>
 </button>
 </div>
-<label style="margin:24px 0 8px;font-size:17px;font-weight:800">나이 <span style="font-weight:500;color:#4A5578">(선택)</span></label>
+<div style="display:flex;align-items:center;gap:10px;margin:26px 0 12px">
+<span style="font-size:17px;font-weight:800">로그인</span><span style="font-size:13px;font-weight:700;color:#14225B;background:#E8EBF5;padding:5px 10px;border-radius:999px">필수</span>
+<div style="flex:1;height:1px;background:#E3E6F0"></div>
+</div>
+<sc-if value="{{ obLoggedIn }}">
+<div style="min-height:60px;border-radius:20px;background:#E3F3EA;display:flex;align-items:center;gap:12px;padding:10px 14px">
+<span style="width:36px;height:36px;border-radius:50%;background:#178A4C;color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;flex:none"><i class="fa-solid fa-check"></i></span>
+<span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:1px"><span style="font-size:16px;font-weight:800;color:#0F5C33">로그인했어요</span><span style="font-size:14px;color:#2A5A40;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ email }}</span></span>
+</div>
+</sc-if>
+<sc-if value="{{ obNotLoggedIn }}" hint-placeholder-val="{{ true }}">
+<div style="display:flex;flex-direction:column;gap:10px">
+<label style="display:flex;flex-direction:column;gap:6px;font-size:15px;font-weight:800">이메일
+<input type="email" value="{{ email }}" onChange="{{ onEmail }}" placeholder="example@email.com" autoComplete="email" style="height:54px;border-radius:999px;border:2px solid #D5DAE8;background:#F3F4F9;padding:0 18px;font-size:17px;font-weight:500;color:#111A3A;outline:none"></label>
+<label style="display:flex;flex-direction:column;gap:6px;font-size:15px;font-weight:800">비밀번호
+<input type="password" value="{{ pw }}" onChange="{{ onPw }}" onKeyDown="{{ onPwKey }}" placeholder="비밀번호 입력" autoComplete="current-password" style="height:54px;border-radius:999px;border:2px solid #D5DAE8;background:#F3F4F9;padding:0 18px;font-size:17px;font-weight:500;color:#111A3A;outline:none"></label>
+<sc-if value="{{ emailErr }}"><p role="alert" style="margin:0 4px;font-size:14px;font-weight:700;color:#D9342B;display:flex;align-items:center;gap:6px"><i class="fa-solid fa-circle-exclamation"></i>{{ emailErr }}</p></sc-if>
+<button onClick="{{ submitEmail }}" style="height:52px;border-radius:999px;border:2px solid #14225B;background:#fff;color:#14225B;font-size:17px;font-weight:800;cursor:pointer;font-family:inherit">로그인</button>
+</div>
+</sc-if>
+<div style="flex:1;min-height:28px"></div>
+<button onClick="{{ next1 }}" style="height:60px;border-radius:999px;border:none;background:{{ nextBg }};color:#fff;font-size:20px;font-weight:800;cursor:pointer;font-family:inherit">다음</button>
+</div>
+</sc-if>
+
+<sc-if value="{{ isOb2 }}">
+<div data-screen-label="온보딩 2" style="flex:1;min-height:0;margin:8px 0 0;background:#fff;border-radius:32px 32px 0 0;overflow-y:auto;padding:28px 20px 32px;display:flex;flex-direction:column">
+<div style="display:flex;align-items:center;justify-content:space-between">
+<button onClick="{{ back1 }}" style="width:48px;height:48px;border-radius:50%;border:none;background:#F3F4F9;color:#14225B;font-size:18px;cursor:pointer"><i class="fa-solid fa-arrow-left"></i></button>
+<span style="font-size:15px;font-weight:700;color:#4A5578">2 / 2</span>
+</div>
+<h1 style="margin:18px 0 6px;font-size:30px;font-weight:800;letter-spacing:-0.02em">내 정보</h1>
+<p style="margin:0 0 22px;font-size:17px;line-height:1.5;color:#4A5578;text-wrap:pretty">나에게 맞는 대피 안내를 위해 몇 가지만 알려주세요.</p>
+<label style="margin:0 0 8px;font-size:17px;font-weight:800">나이 <span style="font-weight:500;color:#4A5578">(선택)</span></label>
 <input value="{{ age }}" onChange="{{ onAge }}" inputmode="numeric" placeholder="예: 72" style="height:56px;width:60%;border-radius:999px;border:2px solid #D5DAE8;padding:0 20px;font-size:18px;color:#111A3A;outline:none">
 <label style="margin:22px 0 8px;font-size:17px;font-weight:800">장애 유형 <span style="font-weight:500;color:#4A5578">(선택 · 중복 가능)</span></label>
 <div style="display:flex;flex-wrap:wrap;gap:8px">
@@ -62,20 +95,7 @@ input::placeholder{color:#8A93AE}
 <button onClick="{{ o.onClick }}" style="height:52px;padding:0 20px;border-radius:999px;border:2px solid #14225B;background:{{ o.bg }};color:{{ o.fg }};font-size:17px;font-weight:700;display:flex;align-items:center;gap:8px;cursor:pointer;font-family:inherit"><i class="fa-solid {{ o.i }}"></i>{{ o.l }}</button>
 </sc-for>
 </div>
-<div style="flex:1;min-height:28px"></div>
-<button onClick="{{ next1 }}" style="height:60px;border-radius:999px;border:none;background:{{ nextBg }};color:#fff;font-size:20px;font-weight:800;cursor:pointer;font-family:inherit">다음</button>
-</div>
-</sc-if>
-
-<sc-if value="{{ isOb2 }}">
-<div data-screen-label="온보딩 2" style="flex:1;min-height:0;margin:8px 0 0;background:#fff;border-radius:32px 32px 0 0;overflow-y:auto;padding:28px 20px 32px;display:flex;flex-direction:column">
-<div style="display:flex;align-items:center;justify-content:space-between">
-<button onClick="{{ back1 }}" style="width:48px;height:48px;border-radius:50%;border:none;background:#F3F4F9;color:#14225B;font-size:18px;cursor:pointer"><i class="fa-solid fa-arrow-left"></i></button>
-<span style="font-size:15px;font-weight:700;color:#4A5578">2 / 2</span>
-</div>
-<h1 style="margin:18px 0 6px;font-size:30px;font-weight:800;letter-spacing:-0.02em">자주 있는 곳</h1>
-<p style="margin:0 0 22px;font-size:17px;line-height:1.5;color:#4A5578">집과 내 장소 기준으로 가까운 대피소를 알려드려요.</p>
-<label style="margin:0 0 8px;font-size:17px;font-weight:800;display:flex;align-items:center;gap:8px"><i class="fa-solid fa-house" style="color:#14225B"></i>집</label>
+<label style="margin:22px 0 8px;font-size:17px;font-weight:800;display:flex;align-items:center;gap:8px"><i class="fa-solid fa-house" style="color:#14225B"></i>집 주소</label>
 <input value="{{ home }}" onChange="{{ onHome }}" placeholder="예: 구룡포읍 호미로" style="height:56px;border-radius:999px;border:2px solid #D5DAE8;padding:0 20px;font-size:18px;color:#111A3A;outline:none">
 <label style="margin:20px 0 8px;font-size:17px;font-weight:800;display:flex;align-items:center;gap:8px"><i class="fa-solid fa-bookmark" style="color:#14225B"></i>내 장소 <span style="font-weight:500;color:#4A5578">(선택)</span></label>
 <input value="{{ place0 }}" onChange="{{ onPlace0 }}" placeholder="예: 구룡포 시장" style="height:56px;border-radius:999px;border:2px solid #D5DAE8;padding:0 20px;font-size:18px;color:#111A3A;outline:none">
@@ -290,7 +310,7 @@ input::placeholder{color:#8A93AE}
 <span style="position:absolute;left:{{ p.x }}%;top:{{ p.y }}%;height:28px;padding:0 9px 0 5px;border-radius:999px;background:#fff;border:2px solid #14225B;color:#14225B;font-size:11px;font-weight:800;display:flex;align-items:center;gap:4px;white-space:nowrap"><i class="fa-solid fa-house-flag" style="font-size:11px"></i>{{ p.n }}</span>
 </sc-for>
 <sc-for list="{{ priorityPins }}" as="p" hint-placeholder-count="0">
-<span style="position:absolute;left:{{ p.x }}%;top:{{ p.y }}%;width:26px;height:26px;border-radius:50%;background:{{ p.c }};border:2px solid #fff;color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.25)"><i class="fa-solid fa-house"></i></span>
+<span style="position:absolute;left:{{ p.x }}%;top:{{ p.y }}%;width:26px;height:26px;border-radius:50%;background:{{ p.c }};border:2px solid #fff;color:#fff;font-size:11px;font-weight:900;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.25)">{{ p.no }}</span>
 </sc-for>
 <span style="position:absolute;right:8px;bottom:8px;height:24px;padding:0 10px;border-radius:999px;background:#fff;color:#4A5578;font-size:11px;display:flex;align-items:center">예시 위치 · 실제 지도 연결 전</span>
 </div>
@@ -298,14 +318,14 @@ input::placeholder{color:#8A93AE}
 
 <div style="background:#fff;border-radius:22px;padding:14px 16px">
 <h2 style="margin:0 0 4px;font-size:19px;font-weight:800">우선 확인 가구</h2>
-<p style="margin:0 0 10px;font-size:12px;line-height:1.5;color:#4A5578"><span style="color:#B42318;font-weight:800">위험지역 안</span> · 도움 필요+장애 › 도움 필요 › 응답 없음+장애 › 응답 없음</p>
+<p style="margin:0 0 10px;font-size:12px;line-height:1.5;color:#4A5578"><span style="color:#B42318;font-weight:800">위험지역 안</span> 가구만 · 도움 필요+장애 › 도움 필요 › 응답 없음+장애 › 응답 없음</p>
 <sc-if value="{{ noPriority }}"><div style="min-height:52px;border-radius:14px;background:#F3F4F9;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;color:#4A5578">위험지역 안에 급한 가구가 없어요</div></sc-if>
 <div style="display:flex;flex-direction:column;gap:6px">
 <sc-for list="{{ priority }}" as="h" hint-placeholder-count="0">
 <div style="min-height:56px;border-radius:14px;background:{{ h.bg }};display:flex;align-items:center;gap:10px;padding:8px 10px">
-<span style="height:26px;padding:0 9px;border-radius:999px;background:{{ h.c }};color:#fff;font-size:12px;font-weight:800;display:flex;align-items:center;flex:none">{{ h.st }}</span>
-<span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:1px"><span style="font-size:15px;font-weight:800">{{ h.n }}</span><span style="font-size:12px;color:#4A5578;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ h.a }}{{ h.tag }}</span></span>
-<span style="font-size:12px;font-weight:700;color:#4A5578;flex:none">{{ h.who }}</span>
+<span style="width:26px;height:26px;border-radius:50%;background:{{ h.c }};color:#fff;font-size:13px;font-weight:900;display:flex;align-items:center;justify-content:center;flex:none">{{ h.no }}</span>
+<span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"><span style="display:flex;align-items:center;gap:6px;min-width:0"><span style="font-size:15px;font-weight:800;white-space:nowrap">{{ h.n }}</span><span style="font-size:11px;font-weight:800;color:{{ h.c }};white-space:nowrap">{{ h.st }}</span></span><span style="font-size:12px;color:#4A5578;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ h.a }}</span></span>
+<span style="font-size:12px;font-weight:800;color:{{ h.whoC }};flex:none">{{ h.who }}</span>
 </div>
 </sc-for>
 </div>
@@ -407,7 +427,7 @@ input::placeholder{color:#8A93AE}
 <div style="display:flex;align-items:center;gap:12px">
 <span style="width:48px;height:48px;border-radius:50%;background:#14225B;color:#fff;display:flex;align-items:center;justify-content:center;font-size:19px;flex:none"><i class="fa-solid fa-id-badge"></i></span>
 <span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"><span style="font-size:17px;font-weight:800">방재단 로그인</span><span style="font-size:14px;color:#4A5578;line-height:1.4">{{ codeSub }}</span></span>
-<sc-if value="{{ codeOk }}"><span style="height:32px;padding:0 12px;border-radius:999px;background:#E3F3EA;color:#178A4C;font-size:13px;font-weight:800;display:flex;align-items:center;gap:5px;flex:none"><i class="fa-solid fa-check"></i>로그인됨</span></sc-if>
+<sc-if value="{{ codeOk }}"><button onClick="{{ logoutCode }}" style="height:40px;padding:0 14px;border-radius:999px;border:none;background:#F3F4F9;color:#14225B;font-size:14px;font-weight:800;display:flex;align-items:center;gap:6px;cursor:pointer;font-family:inherit;flex:none"><i class="fa-solid fa-right-from-bracket" style="font-size:12px"></i>로그아웃</button></sc-if>
 </div>
 <sc-if value="{{ codeNotOk }}" hint-placeholder-val="{{ true }}">
 <label style="display:flex;flex-direction:column;gap:6px;font-size:14px;font-weight:800;color:#2A3354">방재단 전용 코드
@@ -418,7 +438,7 @@ input::placeholder{color:#8A93AE}
 </label>
 <sc-if value="{{ codeErr }}"><p role="alert" style="margin:-4px 4px 0;font-size:14px;font-weight:700;color:#D9342B;display:flex;align-items:center;gap:6px"><i class="fa-solid fa-circle-exclamation"></i>{{ codeErr }}</p></sc-if>
 </sc-if>
-<sc-if value="{{ codeOk }}"><button onClick="{{ logoutCode }}" style="height:46px;border-radius:999px;border:none;background:#F3F4F9;color:#14225B;font-size:15px;font-weight:800;cursor:pointer;font-family:inherit">로그아웃</button></sc-if>
+
 </div>
 </div>
 </sc-if>
@@ -454,7 +474,7 @@ input::placeholder{color:#8A93AE}
 
 <div style="flex:none;background:#14225B;padding:8px 10px 26px;display:grid;grid-template-columns:repeat({{ tabCols }},minmax(0,1fr));gap:6px">
 <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="4">
-<button onClick="{{ t.onClick }}" style="height:62px;border-radius:18px;border:none;background:{{ t.bg }};color:{{ t.fg }};display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;cursor:pointer;font-family:inherit"><i class="fa-solid {{ t.i }}" style="font-size:20px"></i><span style="font-size:14px;font-weight:800">{{ t.l }}</span></button>
+<button onClick="{{ t.onClick }}" style="height:62px;border-radius:18px;border:none;background:{{ t.bg }};color:{{ t.fg }};display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;cursor:pointer;font-family:inherit"><span style="width:24px;height:24px;display:flex;align-items:center;justify-content:center;flex:none"><sc-if value="{{ t.grid }}"><span style="width:20px;height:20px;display:grid;grid-template-columns:1fr 1fr;gap:3px"><span style="border-radius:3px;background:currentColor"></span><span style="border-radius:3px;background:currentColor"></span><span style="border-radius:3px;background:currentColor"></span><span style="border-radius:3px;background:currentColor"></span></span></sc-if><sc-if value="{{ t.fa }}"><i class="fa-solid {{ t.i }}" style="font-size:21px;line-height:1"></i></sc-if></span><span style="font-size:14px;font-weight:800">{{ t.l }}</span></button>
 </sc-for>
 </div>
 
@@ -533,7 +553,7 @@ input::placeholder{color:#8A93AE}
 <span style="position:absolute;left:{{ p.x }}%;top:{{ p.fy }}%;height:34px;padding:0 12px 0 7px;border-radius:999px;background:#fff;border:2px solid #14225B;color:#14225B;font-size:13px;font-weight:800;display:flex;align-items:center;gap:5px;white-space:nowrap"><i class="fa-solid fa-house-flag"></i>{{ p.n }}</span>
 </sc-for>
 <sc-for list="{{ priorityPins }}" as="p" hint-placeholder-count="0">
-<span style="position:absolute;left:{{ p.x }}%;top:{{ p.fy }}%;width:34px;height:34px;border-radius:50%;background:{{ p.c }};border:3px solid #fff;color:#fff;font-size:13px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.25)"><i class="fa-solid fa-house"></i></span>
+<span style="position:absolute;left:{{ p.x }}%;top:{{ p.fy }}%;width:34px;height:34px;border-radius:50%;background:{{ p.c }};border:3px solid #fff;color:#fff;font-size:14px;font-weight:900;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.25)">{{ p.no }}</span>
 </sc-for>
 <div style="position:absolute;left:16px;right:16px;top:56px;display:flex;align-items:center;gap:8px">
 <span style="height:44px;padding:0 16px;border-radius:999px;background:#fff;font-size:17px;font-weight:800;display:flex;align-items:center;box-shadow:0 4px 14px rgba(20,34,91,.15)">지도</span>
@@ -612,6 +632,26 @@ input::placeholder{color:#8A93AE}
 </div>
 </sc-if>
 
+<sc-if value="{{ emailOpen }}">
+<div onClick="{{ closeEmail }}" style="position:absolute;inset:0;z-index:28;background:rgba(20,34,91,.55);display:flex;align-items:center;justify-content:center;padding:16px">
+<div data-screen-label="이메일 로그인" onClick="{{ stop }}" role="dialog" aria-label="이메일로 로그인" style="width:100%;background:#fff;border-radius:28px;padding:20px 18px 18px;display:flex;flex-direction:column">
+<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+<span style="width:44px;height:44px;border-radius:50%;background:#14225B;color:#fff;display:flex;align-items:center;justify-content:center;font-size:17px;flex:none"><i class="fa-solid fa-envelope"></i></span>
+<h2 style="margin:0;flex:1;font-size:22px;font-weight:800;letter-spacing:-0.02em">이메일로 로그인</h2>
+<button onClick="{{ closeEmail }}" aria-label="닫기" style="width:44px;height:44px;border-radius:50%;border:none;background:#F3F4F9;color:#14225B;font-size:17px;cursor:pointer;flex:none"><i class="fa-solid fa-xmark"></i></button>
+</div>
+<label style="display:flex;flex-direction:column;gap:6px;font-size:15px;font-weight:800">이메일
+<input type="email" value="{{ email }}" onChange="{{ onEmail }}" placeholder="example@email.com" autoComplete="email" style="height:54px;border-radius:999px;border:2px solid #D5DAE8;background:#F3F4F9;padding:0 18px;font-size:17px;font-weight:500;color:#111A3A;outline:none"></label>
+<label style="display:flex;flex-direction:column;gap:6px;font-size:15px;font-weight:800;margin-top:14px">비밀번호
+<input type="password" value="{{ pw }}" onChange="{{ onPw }}" onKeyDown="{{ onPwKey }}" placeholder="비밀번호 입력" autoComplete="current-password" style="height:54px;border-radius:999px;border:2px solid #D5DAE8;background:#F3F4F9;padding:0 18px;font-size:17px;font-weight:500;color:#111A3A;outline:none"></label>
+<sc-if value="{{ emailErr }}"><p role="alert" style="margin:10px 4px 0;font-size:14px;font-weight:700;color:#D9342B;display:flex;align-items:center;gap:6px"><i class="fa-solid fa-circle-exclamation"></i>{{ emailErr }}</p></sc-if>
+<button onClick="{{ submitEmail }}" style="margin-top:18px;height:58px;border-radius:999px;border:none;background:#14225B;color:#fff;font-size:19px;font-weight:800;cursor:pointer;font-family:inherit">로그인</button>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ flashing }}">
+<div aria-hidden="true" style="position:absolute;inset:0;z-index:35;pointer-events:none;background:#D9342B;opacity:{{ flashOp }};box-shadow:inset 0 0 0 10px #fff;transition:opacity .12s"></div>
+</sc-if>
 <sc-if value="{{ hasToast }}">
 <div style="position:absolute;left:16px;right:16px;bottom:120px;background:#111A3A;color:#fff;border-radius:18px;padding:16px 18px;font-size:16px;font-weight:700;text-align:center;z-index:30;box-shadow:0 8px 20px rgba(0,0,0,.2)">{{ toast }}</div>
 </sc-if>
@@ -645,13 +685,14 @@ class Component extends DCLogic {
   componentDidMount(){
     this.onNet = ()=>this.setState({net:navigator.onLine});
     this.onNet(); window.addEventListener('online',this.onNet); window.addEventListener('offline',this.onNet);
+    this.fl = setInterval(()=>{ const on=this.state.evac&&this.state.tg.flash; if(on||this.state.flashPh) this.setState(s=>({flashPh:on?!s.flashPh:false})); },450);
     this.timer = setInterval(()=>{
       if(!this.state.evac) return;
       if(this.state.cd<=1){ this.setEs('help'); this.setState({evac:false,cd:600}); this.goSos(); }
       else this.setState(s=>({cd:s.cd-1}));
     },1000);
   }
-  componentWillUnmount(){ window.removeEventListener('online',this.onNet); window.removeEventListener('offline',this.onNet); clearInterval(this.timer); clearTimeout(this.tt); clearTimeout(this.st); clearInterval(this.ri); }
+  componentWillUnmount(){ clearInterval(this.fl); window.removeEventListener('online',this.onNet); window.removeEventListener('offline',this.onNet); clearInterval(this.timer); clearTimeout(this.tt); clearTimeout(this.st); clearInterval(this.ri); }
   componentDidUpdate(pp,ps){
     const el=this.scrollRef.current || document.querySelector('[data-app-scroll]'); if(!el) return;
     const go=(top)=>{ const start=el.scrollTop; const end=Math.max(0,Math.min(top,el.scrollHeight-el.clientHeight)); const t0=performance.now(); const step=(now)=>{ const p=Math.min(1,(now-t0)/380); const e=1-Math.pow(1-p,3); el.scrollTop=start+(end-start)*e; if(p<1) requestAnimationFrame(step); }; requestAnimationFrame(step); };
@@ -677,31 +718,32 @@ class Component extends DCLogic {
   stopRec(){ clearInterval(this.ri); this.setState({rec:false,input:'대피할 때 뭘 해야 해?'}); }
   setEs(k){ const d=new Date(); this.setState({es:k,esTime:`${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`}); }
   HH = [
-    {id:'kim',n:'김O순',a:'호미로 해안가',who:'김방재',stage:4},
-    {id:'park',n:'박O호',a:'구룡포항 앞',who:'김방재',stage:4},
-    {id:'lee',n:'이O자',a:'하천변 주택',who:'이현장',stage:4},
-    {id:'choi',n:'최O식',a:'구룡포시장 뒤',who:'박안전',stage:4},
-    {id:'han',n:'한O수',a:'삼정리 해안',who:'최구조',stage:4},
-    {id:'jung',n:'정O례',a:'병포리 언덕길',who:'이현장',stage:4},
-    {id:'yoon',n:'윤O길',a:'석병리 해안',who:'박안전',stage:3}
+    {id:'kim',n:'김O순',a:'호미로 해안가',who:'김방재',stage:1,res:'help',dis:true,zone:true},
+    {id:'park',n:'박O호',a:'구룡포항 앞',who:'',stage:0,res:'help',dis:false,zone:true},
+    {id:'lee',n:'이O자',a:'하천변 주택',who:'',stage:0,res:'noresp',dis:true,zone:true},
+    {id:'choi',n:'최O식',a:'구룡포시장 뒤',who:'박안전',stage:1,res:'noresp',dis:false,zone:true},
+    {id:'han',n:'한O수',a:'삼정리 해안',who:'최구조',stage:3,res:'moving',dis:false,zone:true},
+    {id:'jung',n:'정O례',a:'병포리 언덕길',who:'',stage:0,res:'noresp',dis:true,zone:false},
+    {id:'yoon',n:'윤O길',a:'석병리 해안',who:'이현장',stage:4,res:'done',dis:false,zone:true}
   ];
   STAGES = [{l:'미배정',c:'#D9342B'},{l:'가는 중',c:'#EF7F1A'},{l:'방문 중',c:'#14225B'},{l:'대피 중',c:'#5B6690'},{l:'대피 완료',c:'#1FA05A'}];
   teamVals(s,N){
     const ms=s.myStage||0, who=s.myWho||'';
-    const me={id:'me',n:'내 가구 (시연)',a:s.home||'주소 미등록',who,stage:ms};
-    const resOf=h=> h.id==='me' ? (ms>=4?'done':(s.es||'noresp')) : (h.stage>=4?'done':'moving');
-    const all=[...this.HH,me];
+    const hasDis=!!(s.dis.length&&!s.dis.includes('none'));
+    const me={id:'me',n:'내 가구 (시연)',a:s.home||'주소 미등록',who,stage:ms,dis:hasDis,zone:true};
+    const resOf=h=> h.id==='me' ? (ms>=4?'done':(s.es||'noresp')) : h.res;
+    const all=[...this.HH];
     const cnt=k=>all.filter(h=>resOf(h)===k).length;
     const actL=['내가 맡기','방문 도착','대피 동행 시작','대피 완료 처리'];
     const advance=()=>{ if(ms===0) this.setState({myWho:'나',myStage:1}); else this.setState({myStage:Math.min(4,ms+1)}); if(ms===3) this.showToast('내 가구 대피 완료로 기록했어요'); };
     const households=[...all].sort((a,b)=>a.stage-b.stage).map(h=>{ const st=this.STAGES[h.stage]; return {
       n:h.n,a:h.a,who:h.who,hasWho:!!h.who,sl:st.l,c:st.c,
       steps:['출발','방문','대피 동행','완료'].map((l,i)=>({l,c:i<h.stage?st.c:'#DDE1EC',w:i<h.stage?800:600,fc:i<h.stage?'#111A3A':'#8A93AE'})),
-      canAct:h.id==='me'&&h.stage<4, actL:h.id==='me'?actL[h.stage]:'', act:advance }; });
-    const rank={help:0,noresp:1};
-    const hasDis=s.dis.length&&!s.dis.includes('none');
-    const priority=all.filter(h=>rank[resOf(h)]!==undefined).sort((a,b)=>rank[resOf(a)]-rank[resOf(b)]).map(h=>{ const r=resOf(h); return {
-      n:h.n,a:h.a,tag:(h.id==='me'&&hasDis)?' · 장애':'',st:r==='help'?'도움 필요':'응답 없음',c:r==='help'?'#D9342B':'#8E2A1E',bg:r==='help'?'#FDECEA':'#F8EDEB',who:h.who?`${h.who} 배정`:'미배정'}; });
+      canAct:false, actL:h.id==='me'?actL[h.stage]:'', act:advance }; });
+    const rankOf=h=>{ const r=resOf(h); if(!h.zone) return -1; if(r==='help') return h.dis?0:1; if(r==='noresp') return h.dis?2:3; return -1; };
+    const RL=[{l:'도움 필요 · 장애',c:'#B42318',bg:'#FDECEA'},{l:'도움 필요',c:'#D9342B',bg:'#FDECEA'},{l:'응답 없음 · 장애',c:'#8E2A1E',bg:'#F8EDEB'},{l:'응답 없음',c:'#6B3A33',bg:'#F5EFEE'}];
+    const priority=all.filter(h=>rankOf(h)>=0).sort((a,b)=>rankOf(a)-rankOf(b)).map((h,i)=>{ const k=rankOf(h); return {
+      no:i+1,n:h.n,a:h.a,st:RL[k].l,c:RL[k].c,bg:RL[k].bg,who:h.who?`${h.who} 배정`:'미배정',whoC:h.who?'#4A5578':'#D9342B'}; });
     const assigned=all.filter(h=>h.stage>0).length;
     const d=new Date();
     return {
@@ -709,13 +751,19 @@ class Component extends DCLogic {
       nowTime:`${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`,
       teamStats:[{l:'도움 필요',n:cnt('help'),c:'#D9342B',i:'fa-life-ring'},{l:'응답 없음',n:cnt('noresp'),c:'#8E2A1E',i:'fa-headset'},{l:'대피 중',n:cnt('moving'),c:'#C25A0C',i:'fa-person-walking'},{l:'대피 완료',n:cnt('done'),c:'#178A4C',i:'fa-check'}],
       shelters:[{n:'구룡포읍 행정복지센터',x:44,y:22,fy:28},{n:'구룡포초등학교',x:52,y:42,fy:42},{n:'구룡포종합사회복지관',x:50,y:62,fy:58},{n:'구룡포중학교',x:36,y:82,fy:72}],
-      priorityPins:priority.map((p,i)=>({x:14+i*8,y:50+i*6,fy:46+i*5,c:p.c})),
+      priorityPins:priority.map((p,i)=>({x:8+(i%3)*13,y:44+Math.floor(i/3)*20+(i%2)*7,fy:38+Math.floor(i/3)*12+(i%2)*5,c:p.c,no:p.no})),
       teamMapFull:!!s.teamMapFull, openTeamMap:()=>this.setState({teamMapFull:true}), closeTeamMap:()=>this.setState({teamMapFull:false}),
       priority, noPriority:!priority.length,
       assignSummary:`배정 ${assigned}가구 · 미배정 ${all.length-assigned}가구`,
       stageLegend:this.STAGES.map((st,i)=>({l:st.l,c:st.c,n:all.filter(h=>h.stage===i).length})),
       households
     };
+  }
+  submitEmail(){
+    const e=(this.state.email||'').trim(), p=this.state.pw||'';
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)){ this.setState({emailErr:'이메일 주소를 확인해 주세요'}); return; }
+    if(p.length<4){ this.setState({emailErr:'비밀번호를 4자리 이상 입력해 주세요'}); return; }
+    this.setState({emailOpen:false,pw:'',emailIn:true,emailErr:''}); this.showToast('로그인했어요');
   }
   loginCodeFn(){
     const c=(this.state.code||'').trim();
@@ -734,9 +782,10 @@ class Component extends DCLogic {
   }
   toggleMove(k){ this.setState(s=>({move: s.move.includes(k)? s.move.filter(x=>x!==k) : [...s.move,k]})); }
   toggleTg(k){
+    if(k==='team'){ const t=!this.state.codeOk; this.setState({codeOk:t,tab:t?'team':'user'}); if(t) this.scrollChat('top'); return; }
     const on=!this.state.tg[k];
     this.setState(s=>({tg:{...s.tg,[k]:on}}));
-    if(k==='hin' && on) this.setState({evac:true,cd:600});
+    if(k==='hin' && on){ this.setState({evac:true,cd:600}); if(this.state.tg.vib && navigator.vibrate) navigator.vibrate([400,200,400,200,400]); }
     if(k==='sim' && on) this.showToast('가상 태풍 상황으로 시연하고 있어요');
   }
   reply(q){
@@ -776,13 +825,14 @@ class Component extends DCLogic {
     const originData=[{k:'home',l:'집',addr:s.home||'입력 안 함',i:'fa-house'},{k:'cur',l:'현위치',addr:'구룡포항 근처',i:'fa-location-crosshairs'},{k:'place',l:'내 장소',addr:s.places[0]||'입력 안 함',i:'fa-bookmark'}];
     const oLabel={cur:'현위치',home:'집',place:'내 장소'}[s.origin];
     const r=this.ROUTES[s.origin];
-    const toggleRow=(x)=>{const on=s.tg[x.k];return {...x,track:on?N:'#C9CFE3',knob:on?21:3,onClick:()=>this.toggleTg(x.k)};};
+    const toggleRow=(x)=>{const on=x.k==='team'?!!s.codeOk:s.tg[x.k];return {...x,track:on?N:'#C9CFE3',knob:on?21:3,onClick:()=>this.toggleTg(x.k)};};
     const done=s.checks.filter(Boolean).length;
     const mm=Math.floor(s.cd/60), ss=String(s.cd%60).padStart(2,'0');
     const wd=s.wd?wc(this.WEATHER.find(w=>w.k===s.wd)):null;
     const isOnline = s.net!==false && !this.props.forceOffline;
     return {
       online:isOnline, offline:!isOnline,
+      flashing:!!(s.evac&&s.tg.flash), flashOp:s.flashPh?0.55:0,
       dragStart:e=>{ if(e.pointerType!=='mouse') return; this.drag={el:e.currentTarget,x:e.clientX,sl:e.currentTarget.scrollLeft}; e.currentTarget.style.cursor='grabbing'; },
       dragMove:e=>{ const d=this.drag; if(!d) return; const dx=e.clientX-d.x; if(Math.abs(dx)>4) d.moved=true; d.el.scrollLeft=d.sl-dx; },
       dragEnd:e=>{ if(this.drag){ this.dragMoved=!!this.drag.moved; this.drag.el.style.cursor='grab'; this.drag=null; setTimeout(()=>{this.dragMoved=false;},0); } },
@@ -798,8 +848,8 @@ class Component extends DCLogic {
       age:s.age, onAge:e=>this.setState({age:e.target.value.replace(/[^0-9]/g,'').slice(0,3)}),
       disOpts:[{k:'see',l:'시각',i:'fa-eye'},{k:'hear',l:'청각',i:'fa-ear-listen'},{k:'body',l:'지체',i:'fa-wheelchair-move'},{k:'none',l:'해당 없음',i:'fa-ban'}].map(o=>({...o,...pill(s.dis.includes(o.k)),onClick:()=>this.toggleDis(o.k)})),
       moveOpts:[{k:'walk',l:'도보',i:'fa-person-walking'},{k:'car',l:'자동차',i:'fa-car'}].map(o=>({...o,...pill(s.move.includes(o.k)),onClick:()=>this.toggleMove(o.k)})),
-      nextBg:(s.cLoc&&s.cDis)?N:'#9CA5C2',
-      next1:()=>{ if(s.cLoc&&s.cDis) this.setState({screen:'ob2'}); else this.showToast('필수 동의 항목을 모두 선택해 주세요'); },
+      nextBg:(s.cLoc&&s.cDis&&s.emailIn)?N:'#9CA5C2',
+      next1:()=>{ if(!(s.cLoc&&s.cDis)) this.showToast('필수 동의 항목을 모두 선택해 주세요'); else if(!s.emailIn) this.showToast('로그인을 먼저 해 주세요'); else this.setState({screen:'ob2'}); },
       back1:()=>this.setState({screen:'ob1'}),
       home:s.home, onHome:e=>this.setState({home:e.target.value}),
       place0:s.places[0]||'', onPlace0:e=>{const v=e.target.value;this.setState(st=>({places:[v,...st.places.slice(1)]}));},
@@ -862,10 +912,17 @@ class Component extends DCLogic {
         {k:'flash',t:'화면 점멸',s:'청각 장애 선택 시 자동으로 켜져요',i:'fa-bolt'}
       ].map(toggleRow).map((x,i)=>({...x,bt:i?'1px solid #EDEFF5':'none'})),
       simRows:[
-        {k:'sim',t:'태풍 발생',s:'가상 태풍 상황으로 화면을 시연해요',i:'fa-hurricane'},
+        {k:'team',t:'방재단 대피현황',s:s.codeOk?'방재단원 화면을 보고 있어요':'코드 없이 방재단원 화면을 시연해요',i:'fa-user-shield'},
         {k:'hin',t:'과거 힌남노 태풍 시연',s:s.tg.hin?'현위치(구룡포항 근처)는 위험 지역이에요':'2022년 태풍 힌남노 기록을 바탕으로 재현해요',i:'fa-clock-rotate-left'}
       ].map(toggleRow).map(x=>{ const hl=s.tg[x.k]&&x.k==='hin'; return {...x,hlBg:hl?'#FFF4EA':'transparent',hlRing:hl?'inset 0 0 0 1.5px #EF7F1A':'none',subC:hl?'#B4500A':'#4A5578',subW:hl?700:400}; }),
-      loginEmail:()=>this.showToast('이메일 로그인 화면으로 이동해요'),
+      loginEmail:()=>this.setState({emailOpen:true,emailErr:''}),
+      obLoggedIn:!!s.emailIn, obNotLoggedIn:!s.emailIn,
+      emailOpen:!!s.emailOpen, closeEmail:()=>this.setState({emailOpen:false}),
+      email:s.email||'', onEmail:e=>this.setState({email:e.target.value,emailErr:''}),
+      pw:s.pw||'', onPw:e=>this.setState({pw:e.target.value,emailErr:''}),
+      emailErr:s.emailErr||'',
+      onPwKey:e=>{ if(e.key==='Enter') this.submitEmail(); },
+      submitEmail:()=>this.submitEmail(),
       code:s.code||'', codeErr:s.codeErr||'', codeOk:!!s.codeOk, codeNotOk:!s.codeOk,
       codeSub: s.codeOk?'방재단원으로 로그인했어요':'방재단원은 전용 코드로 로그인하세요',
       codeBorder: s.codeErr?'2px solid #D9342B':'2px solid #D5DAE8',
@@ -873,9 +930,9 @@ class Component extends DCLogic {
       onCode:e=>this.setState({code:e.target.value.slice(0,12),codeErr:''}),
       onCodeKey:e=>{ if(e.key==='Enter') this.loginCodeFn(); },
       loginCode:()=>this.loginCodeFn(),
-      logoutCode:()=>this.setState({codeOk:false,code:'',tab:'user'}),
+      logoutCode:()=>{ this.setState({codeOk:false,code:'',tab:'user'}); this.showToast('방재단에서 로그아웃했어요'); },
       ...this.teamVals(s,N),
-      tabs:[{k:'dash',l:'대시보드',i:'fa-table-cells-large'},{k:'chat',l:'AI 대화창',i:'fa-comment'},...(s.codeOk?[{k:'team',l:'방재단 현황',i:'fa-user-shield'}]:[]),{k:'user',l:'사용자',i:'fa-user'}].map(t=>({...t,bg:t.k===s.tab?'#fff':'transparent',fg:t.k===s.tab?N:'#fff',onClick:()=>{ this.setState({tab:t.k}); this.scrollChat(t.k==='chat'?'instant-bottom':'top'); }})),
+      tabs:[{k:'dash',l:'대시보드',i:'',grid:true},{k:'chat',l:'AI 대화창',i:'fa-message'},...(s.codeOk?[{k:'team',l:'방재단 현황',i:'fa-user-shield'}]:[]),{k:'user',l:'사용자',i:'fa-user'}].map(t=>({...t,grid:!!t.grid,fa:!t.grid,bg:t.k===s.tab?'#fff':'transparent',fg:t.k===s.tab?N:'#fff',onClick:()=>{ this.setState({tab:t.k}); this.scrollChat(t.k==='chat'?'instant-bottom':'top'); }})),
       fabBottom: s.tab==='chat'?232:110,
       open119:()=>this.setState({call:true}), close119:()=>this.setState({call:false}), call:s.call,
       backApp:()=>this.setState({screen:'app'}),

@@ -854,7 +854,7 @@ class EvacuationAlertDialog extends ConsumerStatefulWidget {
 class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
   bool _busy = false;
   late int _left = evacuationResponseTimeout.inSeconds;
-  Timer? _countdown, _flash;
+  Timer? _countdown, _flash, _vibrate;
   bool _flashOn = false;
   int _flashTicks = 0;
 
@@ -882,12 +882,14 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
       });
     }
     if (a.strongVibration) {
-      for (var i = 0; i < evacuationHapticPulseLimit; i++) {
-        Future<void>.delayed(Duration(milliseconds: 450 * i),
-            () => HapticFeedback.vibrate().catchError((Object _) {}));
-      }
+      var pulses = 0;
+      _vibrate = Timer.periodic(const Duration(milliseconds: 450), (t) {
+        if (++pulses >= evacuationHapticPulseLimit) t.cancel();
+        HapticFeedback.vibrate().catchError((Object _) {});
+      });
     }
-    if (a.voicePrompts || ref.read(autoVoiceAlerts)) {
+    // 음성: 사용자 탭 '음성 안내 자동 재생'을 켰거나 시각 지원을 고른 사람만 (시연 화면과 같은 기준)
+    if (ref.read(autoVoiceAlerts) || (a.visionSupport && a.voicePrompts)) {
       unawaited(DemoSpeech.instance.speak(
           '대피 확인 경보입니다. 지금 계신 곳은 위험해요. 대피 완료, 대피 중, 도움 필요 중에서 골라 주세요.'));
     }
@@ -897,6 +899,7 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
   void dispose() {
     _countdown?.cancel();
     _flash?.cancel();
+    _vibrate?.cancel();
     super.dispose();
   }
 

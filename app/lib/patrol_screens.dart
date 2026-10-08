@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
@@ -12,6 +13,8 @@ import 'main.dart';
 import 'services/live_api.dart';
 import 'services/location_service.dart';
 import 'services/polyline.dart';
+import 'ui/tokens.dart';
+import 'ui/widgets.dart';
 
 /// C8 (2026-10-05) 실측 화면: 취약 가구 등록 + 민감정보 동의(별도 화면), 방재단 대시보드(우선순위 명단·지도),
 /// 방문 결과 입력, 방재단 대리 등록, 해상 → 최근접 항 → 육상 경로(B11 /api/route/sea).
@@ -625,58 +628,170 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
     if (incidents == null) return const DashboardLoading();
     final targets = _targets;
     final incident = detail ?? incidents!.cast<Map<String, dynamic>?>().firstWhere((i) => i?['id'] == incidentId, orElse: () => null);
-    return LivePage(title: '방재단 대시보드', onRefresh: _load, children: [
-      Row(children: [
-        Expanded(child: Text('가까운 위험 가구부터 확인하세요. 명단은 ${incidentId == null ? '' : '10초마다 '}새로 고칩니다.')),
-        IconButton(tooltip: '가구 대리 등록', onPressed: () => c.push('/household/delegate'), icon: const Icon(Icons.person_add_alt_1)),
-      ]),
-      if (error != null) Text(error!, style: const TextStyle(color: Colors.red)),
-      if (incidents!.length > 1)
-        DropdownButton<String>(
-            isExpanded: true,
-            value: incidentId,
-            items: [for (final i in incidents!) DropdownMenuItem(value: '${i['id']}', child: Text('${i['title']}'))],
-            onChanged: (v) {
-              setState(() {
-                incidentId = v;
-                detail = null;
-                selected = null;
-              });
-              _loadDetail();
-            }),
-      _FilterBar(households: households ?? const [], filter: filter, onChanged: (f) => setState(() => filter = f)),
-      if (incidentId == null) ...[
-        const Card(child: ListTile(leading: Icon(Icons.check_circle_outline), title: Text('진행 중인 대피 상황이 없습니다'),
-            subtitle: Text('평시에도 장애인·독거노인 가구를 지도에서 확인할 수 있습니다. 대피 상황이 생기면 대상 가구가 번호(우선순위)로 바뀝니다.'))),
-        _PatrolMap(points: _householdPoints(const {}), rings: const [], selected: selected, onTap: (id) => setState(() => selected = id)),
-        const _MapLegend(withTargets: false),
-        for (final h in _shownHouseholds) _HouseholdTile(h: h, selected: selected == '${h['id']}'),
-        if (_shownHouseholds.isEmpty) const Card(child: ListTile(title: Text('조건에 맞는 등록 가구가 없습니다'))),
-      ] else ...[
-        if (incident != null) _IncidentHeader(incident: incident),
-        _PatrolMap(points: [
-          ..._householdPoints({for (final t in targets) if (t['household_id'] != null) '${t['household_id']}'}),
-          for (final t in targets)
-            if (latLng(t['location']) != null)
-              _MapPoint('${t['id']}', latLng(t['location'])!, (t['priority_rank'] as num?)?.toInt(), t['status'] as String?, '${t['label']}'),
-        ], rings: geoJsonRings(detail?['area']), selected: selected, onTap: (id) => setState(() => selected = id),
-            focus: [
-              for (final t in targets)
-                if (latLng(t['location']) != null) latLng(t['location'])!,
-              for (final r in geoJsonRings(detail?['area'])) ...r,
+    final inTab = GoRouter.maybeOf(c)?.state.uri.path == '/team';
+    final now = DateTime.now();
+    final points = incidentId == null
+        ? _householdPoints(const {})
+        : [
+            ..._householdPoints({for (final t in targets) if (t['household_id'] != null) '${t['household_id']}'}),
+            for (final t in targets)
+              if (latLng(t['location']) != null)
+                _MapPoint('${t['id']}', latLng(t['location'])!, (t['priority_rank'] as num?)?.toInt(), t['status'] as String?, '${t['label']}'),
+          ];
+    final rings = incidentId == null ? const <List<LatLng>>[] : geoJsonRings(detail?['area']);
+    final focus = incidentId == null
+        ? null
+        : [
+            for (final t in targets)
+              if (latLng(t['location']) != null) latLng(t['location'])!,
+            for (final r in rings) ...r,
+          ];
+    Widget map({double height = 240}) => _PatrolMap(
+        points: points,
+        rings: rings,
+        selected: selected,
+        onTap: (id) => setState(() => selected = id),
+        focus: focus,
+        height: height);
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 120), children: [
+        if (inTab) const ScreenTitle('주민 대피 현황'),
+        Row(children: [
+          Expanded(
+              child: Text('구룡포읍 자율방재단 · ${incidentId == null ? '' : '10초마다 '}갱신 ${now.hour}:${'${now.minute}'.padLeft(2, '0')}',
+                  style: dsText(14, color: Ds.muted))),
+          CircleButton(FontAwesomeIcons.userPlus,
+              size: 40, tooltip: '가구 대리 등록', onPressed: () => c.push('/household/delegate')),
+        ]),
+        if (error != null) ErrorLine(error!),
+        if (incidents!.length > 1)
+          DropdownButton<String>(
+              isExpanded: true,
+              value: incidentId,
+              items: [for (final i in incidents!) DropdownMenuItem(value: '${i['id']}', child: Text('${i['title']}'))],
+              onChanged: (v) {
+                setState(() {
+                  incidentId = v;
+                  detail = null;
+                  selected = null;
+                });
+                _loadDetail();
+              }),
+        const SizedBox(height: 8),
+        if (incidentId != null && incident != null) ...[
+          _IncidentHeader(incident: incident),
+          const SizedBox(height: 12),
+        ],
+        // 지도 (누르면 전체화면)
+        AppCard(
+          padding: const EdgeInsets.all(12),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 2, 4, 10),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                Text('지도', style: dsText(19, weight: FontWeight.w800)),
+                const SizedBox(width: 8),
+                Expanded(
+                    child: Text(incidentId == null ? '등록 취약 가구' : '우선 확인 가구 · 대피 영역',
+                        style: dsText(13, color: Ds.muted))),
+                CircleButton(FontAwesomeIcons.expand,
+                    size: 34,
+                    bg: Ds.bg,
+                    tooltip: '지도 전체화면으로 보기',
+                    onPressed: () => showGeneralDialog<void>(
+                        context: c,
+                        barrierDismissible: false,
+                        pageBuilder: (dc, __, ___) => Scaffold(
+                              body: Stack(children: [
+                                Positioned.fill(child: StatefulBuilder(builder: (_, __) => map(height: double.infinity))),
+                                Positioned(
+                                  left: 16,
+                                  right: 16,
+                                  top: MediaQuery.paddingOf(dc).top + 12,
+                                  child: Row(children: [
+                                    PillChip('지도', height: 44, fontSize: 17, fg: Ds.ink),
+                                    const SizedBox(width: 8),
+                                    if (rings.isNotEmpty)
+                                      const PillChip('대피 영역', height: 32, fontSize: 13, fg: Ds.dangerDeep),
+                                    const Spacer(),
+                                    CircleButton(FontAwesomeIcons.compress,
+                                        size: 44, bg: Ds.navy, fg: Colors.white, tooltip: '전체화면 닫기',
+                                        onPressed: () => Navigator.of(dc).pop()),
+                                  ]),
+                                ),
+                              ]),
+                            ))),
+              ]),
+            ),
+            ClipRRect(borderRadius: BorderRadius.circular(16), child: map()),
+            const SizedBox(height: 8),
+            _FilterBar(households: households ?? const [], filter: filter, onChanged: (f) => setState(() => filter = f)),
+            _MapLegend(withTargets: incidentId != null),
+          ]),
+        ),
+        const SizedBox(height: 12),
+        if (incidentId == null) ...[
+          AppCard(
+            child: Row(children: [
+              const IconCircle(FontAwesomeIcons.circleCheck, size: 40, iconSize: 17, bg: Ds.goodSoft, fg: Ds.goodDeep),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('진행 중인 대피 상황이 없습니다', style: dsText(16, weight: FontWeight.w800)),
+                  Text('평시에도 장애인·독거노인 가구를 지도에서 확인할 수 있어요. 대피 상황이 생기면 대상 가구가 번호(우선순위)로 바뀌어요.',
+                      style: dsText(13, color: Ds.muted, height: 1.45)),
+                ]),
+              ),
             ]),
-        const _MapLegend(withTargets: true),
-        const SizedBox(height: 6),
-        const Text('방문 우선순위', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-        if (detail == null) const LinearProgressIndicator(),
-        if (detail != null && targets.isEmpty) const Card(child: ListTile(title: Text('이 대피 상황의 대상 가구가 없습니다'))),
-        for (final t in [...targets.where((t) => '${t['id']}' == selected), ...targets.where((t) => '${t['id']}' != selected)])
-          _TargetCard(t: t, selected: '${t['id']}' == selected, closed: detail?['closed_at'] != null,
-              onVisit: () => _visit(t), onAssign: () => _assign(t), onSelect: () => setState(() => selected = '${t['id']}')),
-        // 대피 대상이 아닌 등록 가구도 지도에서 눌러 볼 수 있게
-        for (final h in _shownHouseholds.where((h) => '${h['id']}' == selected)) _HouseholdTile(h: h, selected: true),
-      ],
-    ]);
+          ),
+          const SizedBox(height: 8),
+          for (final h in _shownHouseholds) _HouseholdTile(h: h, selected: selected == '${h['id']}'),
+          if (_shownHouseholds.isEmpty)
+            AppCard(child: Text('조건에 맞는 등록 가구가 없습니다', style: dsText(15, weight: FontWeight.w700))),
+        ] else ...[
+          _PriorityCard(targets: targets, onSelect: (id) => setState(() => selected = id)),
+          const SizedBox(height: 12),
+          AppCard(
+            padding: const EdgeInsets.fromLTRB(12, 14, 12, 12),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+                child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                  Expanded(child: Text('방재단 배정 현황', style: dsText(19, weight: FontWeight.w800))),
+                  Text(
+                      '배정 ${targets.where((t) => t['assigned_to'] != null).length}가구 · 미배정 ${targets.where((t) => t['assigned_to'] == null).length}가구',
+                      style: dsText(12, weight: FontWeight.w700, color: Ds.muted)),
+                ]),
+              ),
+              HScroll(fade: false, children: [
+                for (final (i, st) in patrolStages.indexed)
+                  Container(
+                    height: 32,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    decoration: BoxDecoration(color: Ds.bg, borderRadius: BorderRadius.circular(Ds.pill)),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Container(width: 10, height: 10, decoration: BoxDecoration(color: st.$2, shape: BoxShape.circle)),
+                      const SizedBox(width: 6),
+                      Text('${st.$1} ${targets.where((t) => patrolStage(t) == i).length}',
+                          style: dsText(13, weight: FontWeight.w800)),
+                    ]),
+                  ),
+              ]),
+              const SizedBox(height: 10),
+              if (detail == null) const LinearProgressIndicator(),
+              if (detail != null && targets.isEmpty)
+                Text('이 대피 상황의 대상 가구가 없습니다', style: dsText(15, weight: FontWeight.w700)),
+              for (final t in [...targets.where((t) => '${t['id']}' == selected), ...targets.where((t) => '${t['id']}' != selected)])
+                _TargetCard(t: t, selected: '${t['id']}' == selected, closed: detail?['closed_at'] != null,
+                    onVisit: () => _visit(t), onAssign: () => _assign(t), onSelect: () => setState(() => selected = '${t['id']}')),
+              // 대피 대상이 아닌 등록 가구도 지도에서 눌러 볼 수 있게
+              for (final h in _shownHouseholds.where((h) => '${h['id']}' == selected)) _HouseholdTile(h: h, selected: true),
+            ]),
+          ),
+        ],
+      ]),
+    );
   }
 
   /// 필터에 맞는 등록 가구 (선택한 가구를 맨 앞으로)
@@ -742,28 +857,120 @@ class _IncidentHeader extends StatelessWidget {
   @override
   Widget build(BuildContext c) {
     final s = Map<String, dynamic>.from(incident['summary'] as Map? ?? const {});
-    Widget chip(String label, Object? n, Color color) => Chip(
-        avatar: CircleAvatar(backgroundColor: color, radius: 6), label: Text('$label ${n ?? 0}'), visualDensity: VisualDensity.compact);
-    return Card(
-        child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                Icon(Icons.campaign, color: levelColor(incident['level'] as String?)),
-                const SizedBox(width: 6),
-                Expanded(child: Text('${incident['title']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
-                Text('${hhmm(incident['started_at'])} 시작', style: Theme.of(c).textTheme.bodySmall),
-              ]),
-              const SizedBox(height: 6),
-              Wrap(spacing: 6, runSpacing: 4, children: [
-                chip('대상', s['total'], Colors.blueGrey),
-                chip('도움 필요', s['need_help'], statusColor('need_help')),
-                chip('미응답', s['no_response'], statusColor('no_response')),
-                chip('대피 중', s['evacuating'], statusColor('evacuating')),
-                chip('대피 완료', s['evacuated'], statusColor('evacuated')),
-                chip('방문함', s['visited'], Colors.indigo),
-              ]),
-            ])));
+    final tiles = [
+      ('도움 필요', s['need_help'], Ds.danger, FontAwesomeIcons.lifeRing),
+      ('미응답', s['no_response'], Ds.noResp, FontAwesomeIcons.headset),
+      ('대피 중', s['evacuating'], Ds.warnDeep, FontAwesomeIcons.personWalking),
+      ('대피 완료', s['evacuated'], Ds.goodDeep, FontAwesomeIcons.check),
+    ];
+    Widget tile((String, Object?, Color, FaIconData) t) => Container(
+          padding: const EdgeInsets.fromLTRB(10, 10, 12, 10),
+          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18)),
+          child: Row(children: [
+            IconCircle(t.$4, size: 36, iconSize: 14, bg: t.$3, fg: Colors.white),
+            const SizedBox(width: 8),
+            Expanded(child: Text(t.$1, maxLines: 1, style: dsText(14, weight: FontWeight.w800))),
+            Text('${t.$2 ?? 0}', style: dsText(26, weight: FontWeight.w800, color: t.$3, height: 1)),
+          ]),
+        );
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Row(children: [
+        FaIcon(FontAwesomeIcons.bullhorn, size: 15, color: levelColor(incident['level'] as String?)),
+        const SizedBox(width: 6),
+        Expanded(child: Text('${incident['title']}', style: dsText(16, weight: FontWeight.w800))),
+        Text('${hhmm(incident['started_at'])} 시작 · 대상 ${s['total'] ?? 0} · 방문 ${s['visited'] ?? 0}',
+            style: dsText(12, color: Ds.muted)),
+      ]),
+      const SizedBox(height: 8),
+      Row(children: [Expanded(child: tile(tiles[0])), const SizedBox(width: 8), Expanded(child: tile(tiles[1]))]),
+      const SizedBox(height: 8),
+      Row(children: [Expanded(child: tile(tiles[2])), const SizedBox(width: 8), Expanded(child: tile(tiles[3]))]),
+    ]);
+  }
+}
+
+/// 방재단 배정 단계 (디자인: 미배정 → 가는 중 → 방문 중 → 대피 중 → 대피 완료)
+const patrolStages = [
+  ('미배정', Ds.danger),
+  ('가는 중', Ds.warnDeep),
+  ('방문 중', Ds.navy),
+  ('대피 중', Color(0xFF5B6690)),
+  ('대피 완료', Ds.goodDeep),
+];
+
+int patrolStage(Map<String, dynamic> t) {
+  if (t['status'] == 'evacuated') return 4;
+  if (t['status'] == 'evacuating') return 3;
+  if (t['last_visit'] != null) return 2;
+  if (t['assigned_to'] != null) return 1;
+  return 0;
+}
+
+/// 우선 확인 가구: 도움 필요·미응답 대상만 우선순위 순서로
+class _PriorityCard extends StatelessWidget {
+  const _PriorityCard({required this.targets, required this.onSelect});
+  final List<Map<String, dynamic>> targets;
+  final ValueChanged<String> onSelect;
+
+  @override
+  Widget build(BuildContext c) {
+    final urgent = targets.where((t) => t['status'] == 'need_help' || t['status'] == 'no_response').toList();
+    return AppCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text('우선 확인 가구', style: dsText(19, weight: FontWeight.w800)),
+        const SizedBox(height: 4),
+        Text('도움 필요 › 미응답 · 장애·고령 가구 먼저 (서버 우선순위)', style: dsText(12, color: Ds.muted, height: 1.5)),
+        const SizedBox(height: 10),
+        if (urgent.isEmpty)
+          Container(
+            height: 52,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(color: Ds.bg, borderRadius: BorderRadius.circular(14)),
+            child: Text('급한 가구가 없어요', style: dsText(15, weight: FontWeight.w700, color: Ds.muted)),
+          ),
+        for (final t in urgent)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Material(
+              color: statusColor(t['status'] as String?).withValues(alpha: .09),
+              borderRadius: BorderRadius.circular(14),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: () => onSelect('${t['id']}'),
+                child: Container(
+                  constraints: const BoxConstraints(minHeight: 56),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  child: Row(children: [
+                    Container(
+                      width: 26,
+                      height: 26,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(color: statusColor(t['status'] as String?), shape: BoxShape.circle),
+                      child: Text('${t['priority_rank'] ?? '-'}',
+                          style: dsText(13, weight: FontWeight.w900, color: Colors.white)),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text.rich(TextSpan(children: [
+                          TextSpan(text: '${t['label']}  ', style: dsText(15, weight: FontWeight.w800)),
+                          TextSpan(
+                              text: [statusKo[t['status']] ?? '', if ((t['needs'] as List?)?.isNotEmpty ?? false) needsText(t['needs'])].join(' · '),
+                              style: dsText(11, weight: FontWeight.w800, color: statusColor(t['status'] as String?))),
+                        ]), maxLines: 1, overflow: TextOverflow.ellipsis),
+                        if (t['address'] != null)
+                          Text('${t['address']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: dsText(12, color: Ds.muted)),
+                      ]),
+                    ),
+                    Text(t['assigned_to'] == null ? '미배정' : '${(t['assigned_to'] as Map)['is_me'] == true ? '내가' : (t['assigned_to'] as Map)['nickname'] ?? '방재단'} 배정',
+                        style: dsText(12, weight: FontWeight.w800, color: t['assigned_to'] == null ? Ds.danger : Ds.muted)),
+                  ]),
+                ),
+              ),
+            ),
+          ),
+      ]),
+    );
   }
 }
 
@@ -780,13 +987,14 @@ class _MapPoint {
 
 /// 방재단 지도: 대피 대상은 번호(우선순위)·색(대피 상태), 등록 취약 가구는 장애인·독거노인·기타 아이콘. 대피 영역은 붉은 다각형
 class _PatrolMap extends StatefulWidget {
-  const _PatrolMap({required this.points, required this.rings, required this.selected, required this.onTap, this.focus});
+  const _PatrolMap({required this.points, required this.rings, required this.selected, required this.onTap, this.focus, this.height = 320});
   final List<_MapPoint> points;
   final List<List<LatLng>> rings;
   final String? selected;
   final ValueChanged<String> onTap;
   /// 처음 화면에 맞출 좌표 (대피 상황이면 대상 가구·영역, 없으면 전체 점)
   final List<LatLng>? focus;
+  final double height;
 
   @override
   State<_PatrolMap> createState() => _PatrolMapState();
@@ -820,10 +1028,8 @@ class _PatrolMapState extends State<_PatrolMap> {
   @override
   Widget build(BuildContext c) {
     final points = widget.points, rings = widget.rings, selected = widget.selected, onTap = widget.onTap;
-    return Card(
-        clipBehavior: Clip.antiAlias,
-        child: SizedBox(
-            height: 320,
+    return SizedBox(
+            height: widget.height,
             child: FlutterMap(
                 mapController: controller,
                 options: MapOptions(
@@ -861,7 +1067,7 @@ class _PatrolMapState extends State<_PatrolMap> {
                                           : Text('${p.rank ?? '-'}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)))))),
                   ]),
                   _osm,
-                ])));
+                ]));
   }
 }
 
@@ -886,43 +1092,95 @@ class _TargetCard extends StatelessWidget {
     final assigned = t['assigned_to'] as Map?;
     final visit = t['last_visit'] as Map?;
     final mins = t['minutes_since_alert'];
-    return Card(
-        shape: selected ? RoundedRectangleBorder(side: BorderSide(color: Theme.of(c).colorScheme.primary, width: 2), borderRadius: BorderRadius.circular(12)) : null,
+    final stage = patrolStage(t);
+    final st = patrolStages[stage];
+    final small = dsText(12, color: Ds.muted, height: 1.45);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: Ds.bg,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: selected ? const BorderSide(color: Ds.navy, width: 2) : BorderSide.none),
+        clipBehavior: Clip.antiAlias,
         child: InkWell(
-            onTap: onSelect,
-            child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 8, 4),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Row(children: [
-                    CircleAvatar(radius: 15, backgroundColor: statusColor(status),
-                        child: Text('${t['priority_rank'] ?? '-'}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
-                    const SizedBox(width: 10),
-                    Expanded(child: Text('${t['label']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
-                    Text(statusKo[status] ?? '$status', style: TextStyle(color: statusColor(status), fontWeight: FontWeight.bold)),
-                  ]),
-                  const SizedBox(height: 4),
-                  Text([
-                    if (t['address'] != null) '${t['address']}',
-                    if ((t['needs'] as List?)?.isNotEmpty ?? false) needsText(t['needs']),
-                    if (mins is num) '경고 후 $mins분',
-                    if (t['escalated'] == true) '재알림 ${t['reminder_count'] ?? ''}회 무응답',
-                  ].join(' · ')),
-                  Text('순위 근거: ${priorityReason(t)}', style: Theme.of(c).textTheme.bodySmall),
-                  if (visit != null)
-                    Text('마지막 방문 ${hhmm(visit['visited_at'])} · ${visitKo[visit['result']] ?? visit['result']}'
-                        '${(visit['responder'] as Map?)?['nickname'] != null ? ' (${(visit['responder'] as Map)['nickname']})' : ''}',
-                        style: Theme.of(c).textTheme.bodySmall),
-                  if (assigned != null)
-                    Text(assigned['is_me'] == true ? '내가 맡음' : '담당: ${assigned['nickname'] ?? '방재단'}',
-                        style: Theme.of(c).textTheme.bodySmall?.copyWith(color: Colors.indigo)),
-                  Wrap(spacing: 4, children: [
-                    if (!closed) FilledButton.tonalIcon(onPressed: onVisit, icon: const Icon(Icons.assignment_turned_in_outlined), label: const Text('방문 결과')),
-                    if (!closed)
-                      TextButton(onPressed: onAssign, child: Text(assigned?['is_me'] == true ? '맡기 취소' : '내가 맡기')),
-                    if (t['phone'] != null)
-                      IconButton(tooltip: '전화', icon: const Icon(Icons.phone), onPressed: () => launchUrl(Uri.parse('tel:${t['phone']}'))),
-                  ]),
-                ]))));
+          onTap: onSelect,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Container(
+                  width: 26,
+                  height: 26,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(color: statusColor(status), shape: BoxShape.circle),
+                  child: Text('${t['priority_rank'] ?? '-'}', style: dsText(12, weight: FontWeight.w900, color: Colors.white)),
+                ),
+                const SizedBox(width: 8),
+                Expanded(child: Text('${t['label']}', style: dsText(16, weight: FontWeight.w800))),
+                if (assigned != null) ...[
+                  const FaIcon(FontAwesomeIcons.idBadge, size: 11, color: Ds.navy),
+                  const SizedBox(width: 4),
+                  Text(assigned['is_me'] == true ? '내가 맡음' : '담당: ${assigned['nickname'] ?? '방재단'}',
+                      style: dsText(13, weight: FontWeight.w800, color: Ds.navy)),
+                  const SizedBox(width: 6),
+                ],
+                Container(
+                  height: 26,
+                  padding: const EdgeInsets.symmetric(horizontal: 9),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(color: statusColor(status), borderRadius: BorderRadius.circular(Ds.pill)),
+                  child: Text(statusKo[status] ?? '$status', style: dsText(12, weight: FontWeight.w800, color: Colors.white)),
+                ),
+              ]),
+              const SizedBox(height: 4),
+              Text([
+                if (t['address'] != null) '${t['address']}',
+                if ((t['needs'] as List?)?.isNotEmpty ?? false) needsText(t['needs']),
+                if (mins is num) '경고 후 $mins분',
+                if (t['escalated'] == true) '재알림 ${t['reminder_count'] ?? ''}회 무응답',
+              ].join(' · '), style: dsText(13, color: Ds.sub, height: 1.45)),
+              Text('순위 근거: ${priorityReason(t)}', style: small),
+              if (visit != null)
+                Text('마지막 방문 ${hhmm(visit['visited_at'])} · ${visitKo[visit['result']] ?? visit['result']}'
+                    '${(visit['responder'] as Map?)?['nickname'] != null ? ' (${(visit['responder'] as Map)['nickname']})' : ''}',
+                    style: small),
+              const SizedBox(height: 8),
+              // 출발 → 방문 → 대피 동행 → 완료
+              Row(children: [
+                for (final (i, l) in const ['출발', '방문', '대피 동행', '완료'].indexed) ...[
+                  if (i > 0) const SizedBox(width: 4),
+                  Expanded(
+                    child: Column(children: [
+                      Container(
+                          height: 6,
+                          decoration: BoxDecoration(
+                              color: i < stage ? st.$2 : const Color(0xFFDDE1EC), borderRadius: BorderRadius.circular(3))),
+                      const SizedBox(height: 4),
+                      Text(l,
+                          style: dsText(11,
+                              weight: i < stage ? FontWeight.w800 : FontWeight.w600,
+                              color: i < stage ? Ds.ink : Ds.faint)),
+                    ]),
+                  ),
+                ]
+              ]),
+              const SizedBox(height: 4),
+              Wrap(spacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                if (!closed)
+                  FilledButton.icon(
+                      onPressed: onVisit,
+                      icon: const FaIcon(FontAwesomeIcons.clipboardCheck, size: 14),
+                      label: const Text('방문 결과')),
+                if (!closed) TextButton(onPressed: onAssign, child: Text(assigned?['is_me'] == true ? '맡기 취소' : '내가 맡기')),
+                if (t['phone'] != null)
+                  IconButton(tooltip: '전화', icon: const FaIcon(FontAwesomeIcons.phone, size: 16), onPressed: () => launchUrl(Uri.parse('tel:${t['phone']}'))),
+              ]),
+            ]),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -932,7 +1190,8 @@ class _HouseholdTile extends StatelessWidget {
   final bool selected;
   @override
   Widget build(BuildContext c) => Card(
-      color: selected ? Theme.of(c).colorScheme.primaryContainer : null,
+      margin: const EdgeInsets.only(bottom: 8),
+      color: selected ? Ds.soft : Colors.white,
       child: ListTile(
           leading: Icon(kindIcon[vulnerableKind(h['needs'])], color: kindColor[vulnerableKind(h['needs'])]),
           title: Text('${h['label']}'),

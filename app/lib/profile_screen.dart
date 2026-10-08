@@ -296,7 +296,7 @@ class _AlertSettingsCardState extends ConsumerState<_AlertSettingsCard> {
           subtitle: '시각 장애 선택 시 자동으로 켜져요',
           trailing: NavySwitch(
               label: '음성 안내 자동 재생',
-              value: a.voicePrompts && ref.watch(autoVoiceAlerts),
+              value: ref.watch(autoVoiceAlerts) || (a.visionSupport && a.voicePrompts),
               onChanged: (v) {
                 ref.read(autoVoiceAlerts.notifier).state = v;
                 set(a.copyWith(voicePrompts: v));

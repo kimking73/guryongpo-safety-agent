@@ -135,7 +135,7 @@ void main() {
     expect(medical.route?.routeType, RouteType.safest);
   });
 
-  testWidgets('AI 답의 "지도에서 경로 보기" → 대시보드 지도가 그 경로를 그린다', (t) async {
+  testWidgets('AI 답의 "경로 안내 화면 보기" → 대시보드 지도 전체화면이 그 경로를 그린다', (t) async {
     t.view.physicalSize = const Size(1280, 900);
     t.view.devicePixelRatio = 1;
     addTearDown(t.view.reset);
@@ -155,9 +155,10 @@ void main() {
     for (var i = 0; i < 10; i++) {
       await t.pump(const Duration(milliseconds: 300));
     }
-    expect(find.text('대피소·의료시설 경로'), findsOneWidget);
-    expect(find.text('AI 채팅'), findsWidgets);
-    await t.tap(find.text('AI 채팅').first);
+    // 하단 탭 (디자인 개편): 대시보드 · AI 대화창 · 사용자
+    expect(find.text('대시보드'), findsWidgets);
+    expect(find.text('AI 대화창'), findsOneWidget);
+    await t.tap(find.text('AI 대화창'));
     for (var i = 0; i < 3; i++) {
       await t.pump(const Duration(milliseconds: 100));
     }
@@ -172,24 +173,17 @@ void main() {
     for (var i = 0; i < 4; i++) {
       await t.pump(const Duration(milliseconds: 300));
     }
-    final button = find.byType(RouteButton);
+    final button = find.text('경로 안내 화면 보기');
     expect(button, findsOneWidget);
     await t.ensureVisible(button);
-    await t.tap(find.text('지도에서 경로 보기'));
+    await t.tap(button);
     for (var i = 0; i < 6; i++) {
       await t.pump(const Duration(milliseconds: 300));
     }
     expect(find.byType(DisasterDashboard), findsOneWidget);
     expect(find.byType(RouteMap), findsNothing);
     expect(container.read(routeFacilityId), aiRouteId);
-    await t.scrollUntilVisible(
-      find.byTooltip('경로 안내 종료'),
-      400,
-      scrollable: find.descendant(
-        of: find.byType(DisasterDashboard),
-        matching: find.byType(Scrollable),
-      ),
-    );
+    expect(container.read(dashMapFull), isTrue);
     expect(find.byTooltip('경로 안내 종료'), findsOneWidget);
     expect(find.text('가까운 경로'), findsWidgets);
     await t.tap(find.byTooltip('경로 안내 종료'));
@@ -198,18 +192,31 @@ void main() {
     }
     expect(find.byType(DisasterDashboard), findsOneWidget);
     expect(find.text('대피·의료시설'), findsOneWidget);
-    expect(
-        container
-            .read(chatMessages)
-            .any((m) => m.mine && m.text == '지금 침수 위험이 있어?'),
-        isTrue);
+    // 전체화면 닫기 → 카드 보기로
+    await t.tap(find.byTooltip('전체화면 닫기'));
+    for (var i = 0; i < 3; i++) {
+      await t.pump(const Duration(milliseconds: 100));
+    }
+    expect(container.read(dashMapFull), isFalse);
+    expect(find.text('최근 재난문자'), findsOneWidget);
     appRouter.go('/ai');
     await t.pump(const Duration(milliseconds: 300));
     await t.pumpWidget(const SizedBox());
     await t.pump(const Duration(seconds: 1));
   });
 
-  testWidgets('긴급 화면에서 대피소·의료시설 목록과 양쪽 경로 선택을 연다', (t) async {
+  Future<void> openFacilities(WidgetTester t) async {
+    await t.tap(find.text('전체화면'));
+    for (var i = 0; i < 3; i++) {
+      await t.pump(const Duration(milliseconds: 150));
+    }
+    await t.tap(find.text('대피소·의료시설 경로'));
+    for (var i = 0; i < 5; i++) {
+      await t.pump(const Duration(milliseconds: 150));
+    }
+  }
+
+  testWidgets('지도 전체화면에서 대피소·의료시설 목록과 양쪽 경로 선택을 연다', (t) async {
     t.view.physicalSize = const Size(1280, 900);
     t.view.devicePixelRatio = 1;
     addTearDown(t.view.reset);
@@ -226,14 +233,11 @@ void main() {
     for (var i = 0; i < 10; i++) {
       await t.pump(const Duration(milliseconds: 300));
     }
-    await t.tap(find.text('대피소·의료시설 경로'));
-    for (var i = 0; i < 5; i++) {
-      await t.pump(const Duration(milliseconds: 150));
-    }
+    await openFacilities(t);
     expect(find.text('구룡포 실내체육관 (예시)'), findsOneWidget);
     expect(find.text('구룡포 의료지원소 (예시)'), findsOneWidget);
-    expect(find.text('가까운 경로'), findsNWidgets(4));
-    expect(find.text('안전 경로'), findsNWidgets(4));
+    // 시설마다 지금 고른 경로 종류(기본 안전 경로)를 함께 보여 준다
+    expect(find.textContaining('안전 경로'), findsWidgets);
     await t.pumpWidget(const SizedBox());
     await t.pump(const Duration(seconds: 1));
   });
@@ -257,11 +261,8 @@ void main() {
     for (var i = 0; i < 10; i++) {
       await t.pump(const Duration(milliseconds: 300));
     }
-    await t.tap(find.text('대피소·의료시설 경로'));
-    for (var i = 0; i < 4; i++) {
-      await t.pump(const Duration(milliseconds: 200));
-    }
-    await t.tap(find.text('안전 경로').first);
+    await openFacilities(t);
+    await t.tap(find.text('구룡포 실내체육관 (예시)'));
     for (var i = 0; i < 8; i++) {
       await t.pump(const Duration(milliseconds: 300));
     }

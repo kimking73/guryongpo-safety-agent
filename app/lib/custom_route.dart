@@ -185,7 +185,7 @@ class _CustomRouteScreenState extends ConsumerState<CustomRouteScreen> {
     }
     return ListView(padding: const EdgeInsets.all(16), children: [
       Row(children: [
-        const Expanded(child: Text('길찾기', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold))),
+        const Spacer(),
         IconButton(tooltip: '출발·도착 바꾸기', icon: const Icon(Icons.swap_vert), onPressed: () {
           setState(() {
             final t = fromText.text, s = from;

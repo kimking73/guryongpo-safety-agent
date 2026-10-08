@@ -28,6 +28,28 @@ iOS 빌드는 macOS와 Xcode가 있는 환경에서만 가능합니다.
 flutter run -d ios
 ```
 
+## 화면 디자인 (2026-10-08 개편)
+
+디자인 원본: `design/mobile-handoff/project/구룡포 안전 비서 모바일.dc.html` (Claude Design, 대화 기록은 `design/mobile-handoff/chats/`).
+
+- 색·모서리·글자 크기는 `lib/ui/tokens.dart`(`Ds`), 공통 위젯(카드·pill 버튼·토글·칩)은 `lib/ui/widgets.dart`. 화면 코드에 색을 직접 쓰지 않는다.
+- 글꼴 Pretendard(`assets/fonts`, SIL OFL), 아이콘 Font Awesome(`font_awesome_flutter` 11), 마스코트 `assets/images/mascot.png`.
+- **배포·릴리스 빌드는 `--no-tree-shake-icons`** 가 필요하다 (빼면 Font Awesome 아이콘이 네모로 보인다). `deploy/push_web.sh`에 들어 있다.
+- 탭: 대시보드 · AI 대화창 · 사용자 (+ 방재단 역할이면 방재단 현황). 앱 틀은 `lib/app_shell.dart`.
+- 탭에서 빠진 화면은 그대로 있다: 태풍 정보·지원 및 복구·선제 경고·가구 등록·해상 경로·접근성 설정은 사용자 탭 '더 보기',
+  태풍·지원은 AI 추천 질문 카드, 경로 종류·목적지 변경·길찾기·이동 중 안내·지도 층은 대시보드 지도 '전체화면'.
+- 첫 화면: `/login`(1/2 필수 동의 + 로그인) → `/setup`(2/2 내 정보, 건너뛰기 가능, 한 번만).
+
+| 디자인 | 코드 |
+|---|---|
+| 상단 칩 줄(온라인·대피 현황·알림)·하단 탭바 | `app_shell.dart` |
+| 대시보드 카드(재난문자·경보·날씨 6칸·경로 요약) | `dashboard_cards.dart`, 배치는 `disaster_center.dart` `DisasterDashboard` |
+| AI 대화창(추천 질문·녹음 파형·체크리스트·태풍 카드) | `ai_chat.dart` |
+| 사용자 탭·내 정보 수정 | `profile_screen.dart` |
+| 온보딩 | `login_screen.dart` |
+| 대피 확인 모달·SOS | `main.dart` `EvacuationAlertDialog`, `evac_sos.dart` |
+| 방재단 현황 | `patrol_screens.dart` `_PatrolDashboard` |
+
 ## 실제 서버에 연결해서 보기 (APP_MODE=remote)
 
 코드 루트에서 `docker compose up -d` 로 서버를 켠 뒤:
