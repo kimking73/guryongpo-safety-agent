@@ -1190,14 +1190,12 @@ class StatusLine extends ConsumerWidget {
 }
 
 class Dashboard extends ConsumerWidget {
-  const Dashboard(
-      {super.key, this.title = '대시보드', this.extraPolygons = const [], this.extraMarkers = const [], this.beforeMap, this.afterMap});
+  const Dashboard({super.key, this.extraPolygons = const [], this.extraMarkers = const [], this.mapOnly = false});
 
-  /// 방재단 현황(2026-10-08)이 같은 대시보드를 쓸 때: 제목·지도 위 영역·표식·지도 앞뒤 내용 (DisasterDashboard 참고)
-  final String title;
+  /// 방재단 현황(2026-10-09)이 대시보드 지도 칸만 쓸 때 (DisasterDashboard 참고)
   final List<Polygon> extraPolygons;
   final List<Marker> extraMarkers;
-  final Widget? beforeMap, afterMap;
+  final bool mapOnly;
   @override
   Widget build(BuildContext c, WidgetRef ref) {
     final route = ref.watch(routeFacilityId);
@@ -1212,11 +1210,9 @@ class Dashboard extends ConsumerWidget {
     final destination = route == null ? null : routeDestination(ref, route);
     final live = demo ? null : ref.watch(liveDashboardProvider).valueOrNull;
     return DisasterDashboard(
-      title: title,
       extraPolygons: extraPolygons,
       extraMarkers: extraMarkers,
-      beforeMap: beforeMap,
-      afterMap: afterMap,
+      mapOnly: mapOnly,
       demo: demo,
       floodGrids: demo ? null : ref.watch(floodGridProvider).valueOrNull,
       riskItems: liveRiskItems(live),

@@ -111,7 +111,7 @@ Pretendard 줄인 글꼴(`app/assets/fonts`), 메뉴 4개(대시보드·AI 대�
       `routers/admin.py` `default_rank`·`STATUS_ORDER` 삭제 → `priority.rank`, GET 상세·지도에 `lat`·`lng` · 명세(PriorityReason 예시, IncidentTarget, 정렬 설명).
       영역 밖으로 이동한 앱 사용자는 명단에서 빠짐(요약 수는 그대로). 지적장애(cognitive)·의료기기·고령·독거는 '장애'에 안 넣음 — 사용자 결정.
       김다인(C) — `live_api.dart` `incident(id, lat, lng)`, `patrol_screens.dart` 내 위치(GPS·지도 선택일 때만) 전송·규칙 설명 줄·근거 대체 문구, `c8_test` 기대값.
-      + (10-09) 방재단 현황 화면 = 일반 대시보드(`Dashboard`/`DisasterDashboard`에 `title`·`extraPolygons`·`extraMarkers`·`beforeMap`·`afterMap` 추가) + 지도 위 사람 아이콘(`_peopleMarkers`, 대상은 사람+순위 숫자), `_PatrolMap` 삭제.
+      + (10-09) 방재단 화면의 **지도 칸만** 대시보드 지도 카드로(`Dashboard(mapOnly: true, extraPolygons, extraMarkers)`, 나머지 배치는 그대로) + 지도 위 사람 아이콘(`_peopleMarkers`, 대상은 사람+순위 숫자), `_PatrolMap` 삭제.
 - [ ] **조하린·김다인 공유 — 10-07~08 추가분**:
       조하린(A) — `care.profile_updates` 표(`db/init/01m_v0_6_profile_updates.sql`)·API `/api/v1/user/profile-updates`(GET·POST·DELETE)·명세,
       `alerts/messages.py` 어업 판단이 'fisher, other'도 인식, 앱이 이제 직업을 코드(fisher·merchant·farmer·office·student·other)로 보냄·비상 연락처를 `/user/contacts`로,
@@ -296,3 +296,4 @@ Pretendard 줄인 글꼴(`app/assets/fonts`), 메뉴 4개(대시보드·AI 대�
   도움요청+청각장애 1위·지적장애 가구는 2위(장애 아님), 위치 주면 거리순 확인 후 시험 데이터·dev 사용자 삭제. server 220·app 94+7(기존 실패) 통과. VM 배포 전.
 - 2026-10-09: 방재단 현황을 일반 대시보드 화면으로(사용자 요청) — 재난문자·특보·재난 지도·날씨 그대로, 지도 위 사람 아이콘(등록 가구: 장애인·어르신·기타, 대피 대상: 사람+우선순위 숫자·상태 색), 지도 앞 대피 상황 머리·필터·범례, 지도 뒤 방문 우선순위/등록 가구 명단. 목업 웹 스크린샷 확인, app 94+7(기존 실패).
 - 2026-10-09 00:30: VM 배포(deploy.sh·push_web.sh, ef33e9c) — B13·방재단 현황 화면. 시험 대피 상황(note b13_test)·1회용 초대 코드 발급, VM에서 순위 확인(와상 도움요청 1위·지적장애 도움요청 2위·…·대피 완료 12위).
+- 2026-10-09: 사용자 정정 — 화면 전체가 아니라 **지도 칸만** 대시보드처럼. `DisasterDashboard.mapOnly`(지도 카드만), 방재단 화면 배치는 b67a497로 되돌리고 지도만 교체. 목업 웹 스크린샷 확인.

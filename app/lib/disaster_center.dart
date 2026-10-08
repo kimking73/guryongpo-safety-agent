@@ -260,11 +260,9 @@ class DisasterDashboard extends StatefulWidget {
     this.statusText,
     this.updatedText,
     this.onRefresh,
-    this.title = '대시보드',
     this.extraPolygons = const [],
     this.extraMarkers = const [],
-    this.beforeMap,
-    this.afterMap,
+    this.mapOnly = false,
   });
 
   final bool routeActive;
@@ -306,12 +304,11 @@ class DisasterDashboard extends StatefulWidget {
   final String? statusText, updatedText;
   final VoidCallback? onRefresh;
 
-  /// 같은 대시보드를 다른 화면에 쓸 때 (2026-10-08 방재단 현황): 제목, 지도 위에 더 올릴 영역·표식(맨 위 층),
-  /// 지도 카드 앞·뒤에 끼울 내용 (대피 상황 머리·필터 / 방문 우선순위 명단)
-  final String title;
+  /// 방재단 현황(2026-10-09)이 대시보드 지도 칸만 쓸 때: mapOnly = 지도 카드만 그린다,
+  /// 지도 위에 더 올릴 영역(대피 상황)·표식(사람 아이콘, 맨 위 층)
   final List<Polygon> extraPolygons;
   final List<Marker> extraMarkers;
-  final Widget? beforeMap, afterMap;
+  final bool mapOnly;
 
   @override
   State<DisasterDashboard> createState() => _DisasterDashboardState();
@@ -1187,22 +1184,8 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
         levelAt: widget.demo ? null : _levelAt,
       ),
     ]);
-    return ListView(
-      padding: gkPagePadding(context),
-      children: [
-        GkPageTitle(widget.title,
-            subtitle: widget.statusText,
-            trailing: widget.onRefresh == null
-                ? null
-                : IconButton(
-                    tooltip: '새로고침', onPressed: widget.onRefresh, icon: const Icon(Icons.refresh_rounded, size: 30))),
-        if (widget.demo) const _DemoBanner() else if (widget.liveTop != null) widget.liveTop!,
-        const SizedBox(height: 12),
-        GkColumns(minWidth: 440, children: [_messageCard(context), _warningsCard(context)]),
-        const SizedBox(height: 20),
-        if (widget.beforeMap != null) ...[widget.beforeMap!, const SizedBox(height: 12)],
-        // 지도 카드 — 재난 지도 / 대피 경로
-        GkCard(
+    // 지도 카드 — 재난 지도 / 대피 경로 (방재단 현황은 이 카드만 쓴다: mapOnly)
+    final mapCard = GkCard(
           padding: EdgeInsets.all(narrow ? 12 : 16),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
@@ -1247,8 +1230,22 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
               ),
             ],
           ]),
-        ),
-        if (widget.afterMap != null) ...[const SizedBox(height: 12), widget.afterMap!],
+        );
+    if (widget.mapOnly) return mapCard;
+    return ListView(
+      padding: gkPagePadding(context),
+      children: [
+        GkPageTitle('대시보드',
+            subtitle: widget.statusText,
+            trailing: widget.onRefresh == null
+                ? null
+                : IconButton(
+                    tooltip: '새로고침', onPressed: widget.onRefresh, icon: const Icon(Icons.refresh_rounded, size: 30))),
+        if (widget.demo) const _DemoBanner() else if (widget.liveTop != null) widget.liveTop!,
+        const SizedBox(height: 12),
+        GkColumns(minWidth: 440, children: [_messageCard(context), _warningsCard(context)]),
+        const SizedBox(height: 20),
+        mapCard,
         _personalizedMockAlerts(context),
         const SizedBox(height: 28),
         Wrap(spacing: 12, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
