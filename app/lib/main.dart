@@ -1,4 +1,5 @@
 import 'profile_refresh.dart';
+import 'services/account_sync.dart';
 import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -204,8 +205,14 @@ Future<void> refreshAlertFeed(WidgetRef ref, {bool fullRefresh = true}) async {
 /// AI 답의 "지도에서 경로 보기"로 고른 경로 (routeFacilityId == aiRouteId일 때 지도에 그린다)
 const aiRouteId = 'ai';
 final aiRoute = StateProvider<ChatAnswer?>((_) => null);
-final placesProvider =
-    FutureProvider<List<SavedPlace>>((_) => AccountService().places());
+/// 등록 장소. 서버 프로필을 내려받아 바뀌면(AI가 대화에서 들은 장소를 더함 등, AccountSync.updated) 다시 읽는다 —
+/// 프로필 화면 목록·지도 표시가 바로 갱신되게 (2026-10-08)
+final placesProvider = FutureProvider<List<SavedPlace>>((ref) {
+  void reload() => ref.invalidateSelf();
+  AccountSync.updated.addListener(reload);
+  ref.onDispose(() => AccountSync.updated.removeListener(reload));
+  return AccountService().places();
+});
 final routeProvider =
     FutureProvider.family<SafetyRoute, String>((ref, facilityId) async {
   if (facilityId == aiRouteId) {
