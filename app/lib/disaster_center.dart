@@ -967,27 +967,12 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
               : [for (final i in widget.riskItems) _liveRiskCard(context, i)],
     );
     if (full) return _fullScreen(context, map, routeMode, visible);
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
-      children: [
-        const ScreenTitle('대시보드'),
-        if (widget.demo) ...[
-          const _DemoBanner(),
-          const SizedBox(height: 14),
-        ] else if (widget.liveTop != null) ...[
-          widget.liveTop!,
-          const SizedBox(height: 10),
-        ],
-        DisasterMessageCard(demo: widget.demo),
-        const SizedBox(height: 14),
-        WarningsCard(demo: widget.demo, riskJudgment: riskCards),
-        const SizedBox(height: 14),
-        AppCard(
+    Widget mapCard(double height) => AppCard(
           radius: Ds.rCardLg,
           padding: const EdgeInsets.all(12),
           child: Column(children: [
             SizedBox(
-              height: 210,
+              height: height,
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(20),
                 child: Stack(children: [
@@ -1017,40 +1002,88 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
               const ErrorLine('경로를 불러오지 못했어요. 전체화면에서 다시 찾을 수 있어요.'),
             ],
           ]),
-        ),
-        const SizedBox(height: 24),
-        WeatherSection(demo: widget.demo),
-        const SizedBox(height: 24),
-        Text('내 장소 위험', style: dsText(21, weight: FontWeight.w800)),
+        );
+    final top = <Widget>[
+      if (widget.demo) ...[
+        const _DemoBanner(),
+        const SizedBox(height: 14),
+      ] else if (widget.liveTop != null) ...[
+        widget.liveTop!,
         const SizedBox(height: 10),
-        _SavedPlaceSummary(
-          currentLocation: widget.currentLocation,
-          onFocus: (p) {
-            widget.onFullScreenChanged?.call(true);
-            WidgetsBinding.instance.addPostFrameCallback((_) => focusOn(p));
-          },
-          levelAt: widget.demo ? null : _levelAt,
-        ),
-        _personalizedMockAlerts(context),
-        const SizedBox(height: 16),
-        AppCard(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: ExpansionTile(
-            shape: const Border(),
-            collapsedShape: const Border(),
-            title: Text(widget.demo ? '실시간 정보 자세히' : '실시간 관측·예보 자세히',
-                style: dsText(17, weight: FontWeight.w800)),
-            subtitle: Text(
-                widget.demo ? '각 지점은 서로 다른 측정 위치의 가상 자료' : '기상청 · 포항 디지털 트윈',
-                style: dsText(13, color: Ds.muted)),
-            childrenPadding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
-            children: [
-              if (widget.demo) const _RealtimeCards() else if (widget.liveBottom != null) widget.liveBottom!,
-            ],
-          ),
-        ),
       ],
-    );
+    ];
+    final alerts = <Widget>[
+      DisasterMessageCard(demo: widget.demo),
+      const SizedBox(height: 14),
+      WarningsCard(demo: widget.demo, riskJudgment: riskCards),
+    ];
+    final rest = <Widget>[
+      WeatherSection(demo: widget.demo),
+      const SizedBox(height: 24),
+      Text('내 장소 위험', style: dsText(21, weight: FontWeight.w800)),
+      const SizedBox(height: 10),
+      _SavedPlaceSummary(
+        currentLocation: widget.currentLocation,
+        onFocus: (p) {
+          widget.onFullScreenChanged?.call(true);
+          WidgetsBinding.instance.addPostFrameCallback((_) => focusOn(p));
+        },
+        levelAt: widget.demo ? null : _levelAt,
+      ),
+      _personalizedMockAlerts(context),
+      const SizedBox(height: 16),
+      AppCard(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: ExpansionTile(
+          shape: const Border(),
+          collapsedShape: const Border(),
+          title: Text(widget.demo ? '실시간 정보 자세히' : '실시간 관측·예보 자세히',
+              style: dsText(17, weight: FontWeight.w800)),
+          subtitle: Text(
+              widget.demo ? '각 지점은 서로 다른 측정 위치의 가상 자료' : '기상청 · 포항 디지털 트윈',
+              style: dsText(13, color: Ds.muted)),
+          childrenPadding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+          children: [
+            if (widget.demo) const _RealtimeCards() else if (widget.liveBottom != null) widget.liveBottom!,
+          ],
+        ),
+      ),
+    ];
+    return LayoutBuilder(builder: (context, box) {
+      // 넓은 화면(웹): 왼쪽 재난문자·경보·날씨, 오른쪽 큰 지도 (2026-10-09 사용자 요청 — 웹은 웹 배치로)
+      if (box.maxWidth >= 900) {
+        return SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 40),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            const ScreenTitle('대시보드'),
+            ...top,
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Expanded(
+                  flex: 5,
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    ...alerts,
+                    const SizedBox(height: 24),
+                    ...rest,
+                  ])),
+              const SizedBox(width: 20),
+              Expanded(flex: 6, child: mapCard(560)),
+            ]),
+          ]),
+        );
+      }
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
+        children: [
+          const ScreenTitle('대시보드'),
+          ...top,
+          ...alerts,
+          const SizedBox(height: 14),
+          mapCard(210),
+          const SizedBox(height: 24),
+          ...rest,
+        ],
+      );
+    });
   }
 
   /// 지도 전체화면: 위 '출발 → 도착' 바·보기 전환·지도 층, 아래 경로 패널 (경로 종류·목적지 변경·길찾기·이동 중 안내)

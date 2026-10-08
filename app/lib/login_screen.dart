@@ -4,6 +4,7 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'app_shell.dart' show WebWidth;
 import 'profile_screen.dart';
 import 'services/auth_service.dart';
 import 'ui/tokens.dart';
@@ -52,13 +53,11 @@ class _ObSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        backgroundColor: Ds.navy,
+        backgroundColor: Colors.white,
         body: SafeArea(
           bottom: false,
-          child: Container(
-            margin: const EdgeInsets.only(top: 8),
-            decoration: const BoxDecoration(
-                color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
+          child: WebWidth(
+            maxWidth: 600,
             child: ListView(padding: const EdgeInsets.fromLTRB(20, 28, 20, 32), children: [
               Row(children: [
                 onBack != null
@@ -204,13 +203,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     // 예시 데이터 모드(서버 없음)는 로그인을 쓰지 않으니 동의만 하면 된다
     final loggedIn = !AuthService.enabled || signedIn;
     final ready = consented && loggedIn;
+    // 흰 바탕 한 장 (그림대로). 넓은 화면(웹)은 가운데 600px
     return Scaffold(
-      backgroundColor: Ds.navy,
+      backgroundColor: Colors.white,
       body: SafeArea(
         bottom: false,
-        child: Container(
-          margin: const EdgeInsets.only(top: 8),
-          decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
+        child: WebWidth(
+          maxWidth: 600,
           child: LayoutBuilder(
             builder: (_, box) => SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(20, 28, 20, 32),

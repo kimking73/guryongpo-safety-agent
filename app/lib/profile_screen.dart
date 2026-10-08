@@ -56,7 +56,8 @@ class ProfileScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext c, WidgetRef ref) {
     final demo = ref.watch(showDemoProvider);
-    return ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 120), children: [
+    final wide = MediaQuery.sizeOf(c).width >= wideBreakpoint;
+    return WebWidth(enabled: wide, maxWidth: 820, child: ListView(padding: EdgeInsets.fromLTRB(16, 8, 16, wide ? 40 : 120), children: [
       const ScreenTitle('사용자'),
       const _MyInfoCard(),
       const SizedBox(height: 14),
@@ -77,7 +78,7 @@ class ProfileScreen extends ConsumerWidget {
           padding: const EdgeInsets.symmetric(vertical: 16),
           child: Text('앱 버전 ${AppConfig.build}',
               textAlign: TextAlign.center, style: dsText(11, color: Ds.faint))),
-    ]);
+    ]));
   }
 }
 

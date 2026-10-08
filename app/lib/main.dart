@@ -614,7 +614,6 @@ class GuryongpoApp extends StatelessWidget {
         scaffoldMessengerKey: rootMessengerKey,
         debugShowCheckedModeBanner: false,
         theme: buildAppTheme(),
-        builder: (_, child) => PhoneFrame(child: child),
         routerConfig: appRouter,
       );
 }

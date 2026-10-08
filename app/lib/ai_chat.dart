@@ -7,6 +7,7 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'app_shell.dart' show WebWidth, wideBreakpoint;
 import 'dashboard_cards.dart';
 import 'dashboard_parts.dart' show VoiceButton;
 import 'live_screens.dart';
@@ -251,7 +252,10 @@ class _AiScreenState extends ConsumerState<AiScreen> {
     final messages = ref.watch(chatMessages);
     final cards = ref.watch(chatCards);
     final lastBot = messages.lastIndexWhere((m) => !m.mine);
-    return Column(children: [
+    return WebWidth(
+        enabled: MediaQuery.sizeOf(c).width >= wideBreakpoint,
+        maxWidth: 900,
+        child: Column(children: [
       Expanded(
         child: ListView(
           controller: scroll,
@@ -346,7 +350,7 @@ class _AiScreenState extends ConsumerState<AiScreen> {
           ),
         ]),
       ),
-    ]);
+    ]));
   }
 
   Widget _inputBar() => Container(

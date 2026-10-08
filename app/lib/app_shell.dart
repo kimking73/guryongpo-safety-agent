@@ -171,6 +171,8 @@ class _ShellState extends ConsumerState<Shell> {
     final here = GoRouterState.of(c).uri.path;
     final responder = ref.watch(isResponderProvider);
     final isTab = tabPaths.contains(here) && (here != '/team' || responder);
+    // 넓은 화면(웹)은 웹 배치: 왼쪽 남색 메뉴 + 넓은 본문 (2026-10-09 사용자 요청), 좁은 화면은 하단 탭
+    final wide = MediaQuery.sizeOf(c).width >= wideBreakpoint;
     // 대시보드 지도 전체화면: 위 칩 줄·탭바 없이 지도만
     if (here == '/' && ref.watch(dashMapFull)) {
       return Scaffold(
@@ -181,34 +183,124 @@ class _ShellState extends ConsumerState<Shell> {
         backgroundColor: Ds.bg,
         body: SafeArea(
           bottom: false,
-          child: Column(children: [
-            PageHeader(_pageTitles[here] ?? '구룡포 안전',
-                onBack: () => c.canPop() ? c.pop() : c.go('/')),
-            Expanded(child: widget.child),
+          child: WebWidth(
+            enabled: wide,
+            child: Column(children: [
+              PageHeader(_pageTitles[here] ?? '구룡포 안전',
+                  onBack: () => c.canPop() ? c.pop() : c.go('/')),
+              Expanded(child: widget.child),
+            ]),
+          ),
+        ),
+      );
+    }
+    final body = Column(children: [
+      TopChipBar(team: here == '/team'),
+      // GPS를 못 쓰는 이유 (권한 없음·구룡포 밖) — 위험도·경로가 예시 위치 기준임을 알린다
+      if (ref.watch(gpsNote) case final note?)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 2, 20, 0),
+          child: Row(children: [
+            const FaIcon(FontAwesomeIcons.locationCrosshairs, size: 12, color: Ds.muted),
+            const SizedBox(width: 6),
+            Expanded(child: Text(note, style: dsText(12, color: Ds.muted))),
           ]),
         ),
+      Expanded(child: widget.child),
+    ]);
+    if (wide) {
+      return Scaffold(
+        backgroundColor: Ds.bg,
+        body: Row(children: [
+          DsSideNav(current: here, responder: responder),
+          Expanded(child: SafeArea(child: WebWidth(child: body))),
+        ]),
       );
     }
     return Scaffold(
       backgroundColor: Ds.bg,
-      body: SafeArea(
-        bottom: false,
-        child: Column(children: [
-          TopChipBar(team: here == '/team'),
-          // GPS를 못 쓰는 이유 (권한 없음·구룡포 밖) — 위험도·경로가 예시 위치 기준임을 알린다
-          if (ref.watch(gpsNote) case final note?)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 2, 20, 0),
-              child: Row(children: [
-                const FaIcon(FontAwesomeIcons.locationCrosshairs, size: 12, color: Ds.muted),
-                const SizedBox(width: 6),
-                Expanded(child: Text(note, style: dsText(12, color: Ds.muted))),
-              ]),
-            ),
-          Expanded(child: widget.child),
-        ]),
-      ),
+      body: SafeArea(bottom: false, child: body),
       bottomNavigationBar: DsTabBar(current: here, responder: responder),
+    );
+  }
+}
+
+/// 이 폭 이상이면 웹 배치 (왼쪽 메뉴)
+const wideBreakpoint = 840.0;
+
+/// 웹에서 본문이 너무 넓어지지 않게 가운데 최대 폭
+class WebWidth extends StatelessWidget {
+  const WebWidth({super.key, required this.child, this.enabled = true, this.maxWidth = 1240});
+  final Widget child;
+  final bool enabled;
+  final double maxWidth;
+  @override
+  Widget build(BuildContext context) => !enabled
+      ? child
+      : Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(constraints: BoxConstraints(maxWidth: maxWidth), child: child));
+}
+
+/// 웹 왼쪽 남색 메뉴 (하단 탭과 같은 항목)
+class DsSideNav extends StatelessWidget {
+  const DsSideNav({super.key, required this.current, required this.responder});
+  final String current;
+  final bool responder;
+
+  @override
+  Widget build(BuildContext context) {
+    final tabs = <(String, String, FaIconData)>[
+      ('/', '대시보드', FontAwesomeIcons.tableCellsLarge),
+      ('/ai', 'AI 대화창', FontAwesomeIcons.solidMessage),
+      if (responder) ('/team', '방재단 현황', FontAwesomeIcons.userShield),
+      ('/profile', '사용자', FontAwesomeIcons.solidUser),
+    ];
+    return Container(
+      width: 232,
+      color: Ds.navy,
+      padding: const EdgeInsets.fromLTRB(14, 24, 14, 24),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          const IconCircle(FontAwesomeIcons.shield, size: 40, iconSize: 17, bg: Colors.white, fg: Ds.navy),
+          const SizedBox(width: 10),
+          Expanded(
+              child: Text('구룡포 안전 비서',
+                  style: dsText(17, weight: FontWeight.w800, color: Colors.white))),
+        ]),
+        const SizedBox(height: 28),
+        for (final t in tabs)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Semantics(
+              selected: t.$1 == current,
+              button: true,
+              label: t.$2,
+              excludeSemantics: true,
+              child: Material(
+                color: t.$1 == current ? Colors.white : Colors.transparent,
+                borderRadius: BorderRadius.circular(16),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: () => context.go(t.$1),
+                  child: SizedBox(
+                    height: 54,
+                    child: Row(children: [
+                      const SizedBox(width: 16),
+                      SizedBox(
+                          width: 24,
+                          child: Center(
+                              child: FaIcon(t.$3, size: 19, color: t.$1 == current ? Ds.navy : Colors.white))),
+                      const SizedBox(width: 12),
+                      Text(t.$2,
+                          style: dsText(16, weight: FontWeight.w800, color: t.$1 == current ? Ds.navy : Colors.white)),
+                    ]),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ]),
     );
   }
 }
@@ -439,32 +531,6 @@ class _GridIcon extends StatelessWidget {
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [cell(), cell()]),
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [cell(), cell()]),
       ]),
-    );
-  }
-}
-
-/// 넓은 화면(웹·태블릿)에서는 가운데 휴대폰 폭으로 보여 준다
-class PhoneFrame extends StatelessWidget {
-  const PhoneFrame({super.key, required this.child});
-  final Widget? child;
-  static const maxWidth = 480.0;
-
-  @override
-  Widget build(BuildContext context) {
-    final w = MediaQuery.sizeOf(context).width;
-    if (w <= maxWidth + 40) return child ?? const SizedBox();
-    return ColoredBox(
-      color: const Color(0xFFDDE1EC),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: maxWidth),
-          child: MediaQuery(
-            data: MediaQuery.of(context)
-                .copyWith(size: Size(maxWidth, MediaQuery.sizeOf(context).height)),
-            child: ClipRect(child: child ?? const SizedBox()),
-          ),
-        ),
-      ),
     );
   }
 }
