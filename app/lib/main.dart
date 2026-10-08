@@ -30,6 +30,8 @@ import 'services/demo_notifications.dart';
 import 'services/prototype_safety_store.dart';
 import 'services/fcm_notification_service.dart';
 import 'services/evacuation_response_queue.dart';
+import 'ui/tokens.dart';
+import 'ui/widgets.dart';
 
 /// APP_MODE=remote면 실제 서버, 아니면 예시 데이터
 final repo = Provider<SafetyRepository>((_) =>
@@ -603,10 +605,7 @@ class GuryongpoApp extends StatelessWidget {
         title: '구룡포 안전',
         scaffoldMessengerKey: rootMessengerKey,
         debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-            useMaterial3: true,
-            colorScheme:
-                ColorScheme.fromSeed(seedColor: const Color(0xff006b73))),
+        theme: buildAppTheme(),
         routerConfig: appRouter,
       );
 }
