@@ -583,7 +583,10 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
     final id = incidentId;
     if (id == null) return;
     try {
-      final d = await ref.read(liveApiProvider).incident(id);
+      // 내 위치(GPS·지도에서 고른 곳, 구룡포 안)일 때만 보낸다 — 예시 위치로 거리를 재면 순서가 틀어진다
+      final me = ref.read(userLocation);
+      final d = await ref.read(liveApiProvider).incident(id,
+          lat: me.fromGps ? me.position.latitude : null, lng: me.fromGps ? me.position.longitude : null);
       if (!mounted || id != incidentId) return;
       setState(() {
         detail = d;
@@ -668,6 +671,10 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
         const _MapLegend(withTargets: true),
         const SizedBox(height: 6),
         const Text('방문 우선순위', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        // B13 규칙 (서버 priority.py, 사용자 결정 2026-10-08)
+        Text('위험지역 안 대상만 · 도움 요청+장애 → 도움 요청 → 응답 없음+장애 → 응답 없음 → 대피 중 → 대피 완료. '
+            '장애 = 시각·청각·지체. 같은 순위는 ${ref.watch(userLocation).fromGps ? '내 위치에서 가까운 순' : '오래 기다린 순 (내 위치를 켜면 가까운 순)'}',
+            style: Theme.of(context).textTheme.bodySmall),
         if (detail == null) const LinearProgressIndicator(),
         if (detail != null && targets.isEmpty) const Card(child: ListTile(title: Text('이 대피 상황의 대상 가구가 없습니다'))),
         for (final t in [...targets.where((t) => '${t['id']}' == selected), ...targets.where((t) => '${t['id']}' != selected)])
@@ -865,12 +872,11 @@ class _PatrolMapState extends State<_PatrolMap> {
   }
 }
 
-/// 우선순위 근거: 서버 priority_reasons(B13) 가 있으면 그대로, 없으면 지금 쓰는 대체 순서(상태 → 필요 항목 수)를 밝힌다
+/// 우선순위 근거: 서버 priority_reasons(B13 — 상태·장애·거리 또는 기다린 시간)를 그대로 잇는다. 없으면(예전 서버) 상태만
 String priorityReason(Map<String, dynamic> t) {
   final reasons = [for (final r in t['priority_reasons'] as List? ?? const []) if (r is Map) '${r['label'] ?? r['factor']}'];
   if (reasons.isNotEmpty) return reasons.join(' · ');
-  final n = (t['needs'] as List?)?.length ?? 0;
-  return '${statusKo[t['status']] ?? t['status']} 우선${n > 0 ? ' · 도움 필요한 점 $n개' : ''}';
+  return '${statusKo[t['status']] ?? t['status']}';
 }
 
 class _TargetCard extends StatelessWidget {

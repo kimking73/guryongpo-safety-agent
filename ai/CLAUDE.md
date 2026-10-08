@@ -7,7 +7,7 @@
 3. Baseline tests: `.venv/bin/python -m pytest -q` → **208 passed** (2026-10-08). `-m "db and not live"` needs local db + `AI_DB_*`
    in `.env` (plain `-m db` also runs paid live tests). `-m live` calls real OpenAI (routing, B3 injection, extractor; a few 원).
    If `docker compose ps` hangs, restart the OrbStack app (happened 2026-10-08); VM checks still work.
-   Other lanes' baselines: server 212 passed·8 skipped, route 68, app 101 with 7 known failures (see timeline "다음 세션 시작점";
+   Other lanes' baselines: server 220 passed·8 skipped, route 68, app 101 with 7 known failures (see timeline "다음 세션 시작점";
    run Flutter on an ASCII-path copy).
 3a. **OpenAI spend check — warn the user** (user's budget 200,000원/month, user request 2026-10-01): read
    `curl -s localhost:8001/api/ai/usage` (local container), the VM's same URL over ssh, and

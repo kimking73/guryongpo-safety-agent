@@ -201,9 +201,9 @@ void main() {
     expect(dashes, hasLength(5));
   });
 
-  test('우선순위 근거: 서버 근거가 없으면 지금 순서 규칙을 밝힌다', () {
+  test('우선순위 근거: 서버 근거(B13)를 잇고, 없으면(예전 서버) 상태만', () {
     expect(priorityReason(_detail()['targets'][1] as Map<String, dynamic>), '도움 요청');
-    expect(priorityReason(_detail()['targets'][0] as Map<String, dynamic>), '미응답 우선 · 도움 필요한 점 1개');
+    expect(priorityReason(_detail()['targets'][0] as Map<String, dynamic>), '미응답');
   });
 
   for (final role in ['resident', 'caregiver']) {

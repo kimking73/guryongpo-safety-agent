@@ -4,6 +4,7 @@
   caregiver 는 담당 가구(households.caregiver_user_id) 대상만 보고, 대피 상황 시작·종료는 못 한다.
 dev 모드 시험: 'Authorization: Bearer dev:responder-1' (uid 앞부분이 역할), 'dev:test-uid' 는 resident → 403.
 """
+import functools
 import json
 import uuid
 from typing import Literal, Optional
@@ -11,30 +12,23 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, Query, Response
 from fastapi.responses import JSONResponse
 
-from .. import db, households, incidents, layers, mocks, users
+from .. import db, households, incidents, layers, mocks, priority, users
 from ..auth import AuthUser, StaffUser, require_staff
 from ..errors import ApiError
 from ..schemas import HouseholdInput, HouseholdPatch, IncidentCircle, IncidentInput, TargetPatch, VisitInput
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
-STATUS_ORDER = {"need_help": 0, "no_response": 1, "evacuating": 2, "evacuated": 3}   # B13 점수가 없을 때 기본 순서
 # 방문 결과 → 대상 상태 (status_after 를 보내면 그 값). 부재·거부·기타는 상태를 바꾸지 않고 기록만 —
 # 목록에 '최근 방문: 부재'로 남아 다시 갈 곳으로 보인다 (2026-10-04 결정)
 VISIT_STATUS = {"evacuated_with_help": "evacuated", "already_evacuated": "evacuated", "transported": "evacuated",
                 "refused": None, "not_home": None, "other": None}
 
 
-def default_rank(targets: list[dict]) -> list[dict]:
-    """B13 점수가 있으면 점수 내림차순, 없으면 상태 순서 → 사정(needs) 많은 순. priority_rank 를 1부터 다시 매김"""
-    def key(t):
-        if t.get("priority_score") is not None:
-            return (0, -t["priority_score"], 0)
-        return (1, STATUS_ORDER.get(t["status"], 9), -len(t.get("needs") or []))
-    out = sorted(targets, key=key)
-    for i, t in enumerate(out, 1):
-        t["priority_rank"] = i
-    return out
+def _ranker(lat: Optional[float], lng: Optional[float], keep_outside: bool = False):
+    """B13 명단 순서 (priority.rank) — 방재단원 위치(lat·lng)가 있으면 같은 순위 안에서 가까운 순"""
+    origin = (lat, lng) if lat is not None and lng is not None else None
+    return functools.partial(priority.rank, origin=origin, keep_outside=keep_outside)
 
 
 def _me(staff: StaffUser) -> str:
@@ -94,19 +88,22 @@ def create_incident(body: IncidentInput, staff: StaffUser = Depends(require_staf
         raise ApiError("VALIDATION_ERROR", "영역(area) 도형이 올바르지 않습니다.", detail=type(e).__name__)
     iid = str(row["id"])
     dispatch.start_manual(iid, body.hazard, body.level, body.title, body.message)
-    return JSONResponse(incidents.detail(iid, me, None, default_rank), status_code=201)
+    return JSONResponse(incidents.detail(iid, me, None, _ranker(None, None)), status_code=201)
 
 
 @router.get("/incidents/{incident_id}", summary="대피 현황 (10초 폴링)")
-def get_incident(incident_id: uuid.UUID, staff: StaffUser = Depends(require_staff)):
+def get_incident(incident_id: uuid.UUID, staff: StaffUser = Depends(require_staff),
+                 lat: Optional[float] = Query(None, ge=-90, le=90, description="방재단원 위치 — 같은 순위 안 가까운 순"),
+                 lng: Optional[float] = Query(None, ge=-180, le=180)):
     me = _me(staff)
-    return incidents.detail(str(incident_id), me, _caregiver(staff, me), default_rank)
+    return incidents.detail(str(incident_id), me, _caregiver(staff, me), _ranker(lat, lng))
 
 
 @router.get("/incidents/{incident_id}/map", summary="대피 현황 지도")
-def get_incident_map(incident_id: uuid.UUID, staff: StaffUser = Depends(require_staff)):
+def get_incident_map(incident_id: uuid.UUID, staff: StaffUser = Depends(require_staff),
+                     lat: Optional[float] = Query(None, ge=-90, le=90), lng: Optional[float] = Query(None, ge=-180, le=180)):
     me = _me(staff)
-    d = incidents.detail(str(incident_id), me, _caregiver(staff, me), default_rank)
+    d = incidents.detail(str(incident_id), me, _caregiver(staff, me), _ranker(lat, lng))
     feats = [{"type": "Feature", "geometry": d["area"],
               "properties": {"kind": "area", "incident_id": d["id"], "hazard": d["hazard"], "level": d["level"]}}]
     feats += [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [t["location"]["lng"], t["location"]["lat"]]},
@@ -143,7 +140,7 @@ def update_target(incident_id: uuid.UUID, target_id: uuid.UUID, body: TargetPatc
     if "note" in data and not data.get("status"):
         db.execute("UPDATE care.incident_targets SET note = %(n)s, updated_at = now() WHERE id = %(tid)s",
                    {"n": data["note"], "tid": tid})
-    d = incidents.detail(iid, me, _caregiver(staff, me), default_rank)
+    d = incidents.detail(iid, me, _caregiver(staff, me), _ranker(None, None, keep_outside=True))
     return next(x for x in d["targets"] if x["id"] == tid)
 
 

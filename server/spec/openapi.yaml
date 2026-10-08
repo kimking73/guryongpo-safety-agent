@@ -772,9 +772,15 @@ paths:
       summary: 대피 현황 — 상태별 수 + 대상 목록(방문 우선순위 순) · 10초 폴링
       description: |
         범위(2026-10-03 확정): **위험 영역 안 대상만** 목록으로, 전체 수는 `summary` 와 `/admin/overview` 로.
-        정렬: `priority_rank` 오름차순. B13 점수가 없으면 기본 순서 — 도움 필요 > 미응답 > 대피 중 > 대피 완료,
-        같은 상태 안에서는 사정(needs) 개수가 많은 순.
+        영역 밖으로 이동한 앱 사용자(마지막 위치)도 목록에서 뺀다 (B13, 2026-10-08).
+        정렬 (B13, 사용자 결정 2026-10-08, `server/app/priority.py`): `priority_rank` 오름차순 —
+        1 도움 필요+장애 · 2 도움 필요 · 3 응답 없음+장애 · 4 응답 없음 · 5 대피 중 · 6 대피 완료.
+        장애 = 시각·청각·지체(가구 needs `vision`·`hearing`·`wheelchair`·`bedridden`·`mobility_limited`, 앱 사용자는 서버 프로필).
+        같은 순위 안에서는 `lat`·`lng`(방재단원 위치)에서 가까운 순, 없으면 오래 기다린 순. 근거는 `priority_reasons`.
       operationId: getIncident
+      parameters:
+        - { name: lat, in: query, required: false, schema: { type: number, minimum: -90, maximum: 90 }, description: '방재단원 위치 — 같은 순위 안 가까운 순' }
+        - { name: lng, in: query, required: false, schema: { type: number, minimum: -180, maximum: 180 } }
       responses:
         '200':
           description: OK  (mock/admin.incident.json)
@@ -795,6 +801,8 @@ paths:
       operationId: getIncidentMap
       parameters:
         - { name: incident_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: lat, in: query, required: false, schema: { type: number, minimum: -90, maximum: 90 }, description: '방재단원 위치 — priority_rank 가 상세와 같도록' }
+        - { name: lng, in: query, required: false, schema: { type: number, minimum: -180, maximum: 180 } }
       responses:
         '200':
           description: OK  (mock/admin.incident-map.geojson)
@@ -1842,9 +1850,9 @@ components:
       type: object
       required: [factor, points, label]
       properties:
-        factor: { type: string, examples: [need_help, no_response, living_alone, mobility_limited, landslide_zone, level] }
+        factor: { type: string, examples: [need_help, no_response, evacuating, evacuated, disability, distance, waiting, outside_area] }
         points: { type: number }
-        label: { type: string, examples: ['도움 요청', '독거', '산사태 위험지도 1등급 40m'] }
+        label: { type: string, examples: ['도움 요청', '휠체어·시각장애', '320m', '12분째'] }
     IncidentTarget:
       type: object
       required: [id, kind, label, location, status, priority_rank]
@@ -1866,11 +1874,13 @@ components:
         escalated: { type: boolean, description: '미응답·도움 필요로 방재단에게 넘어옴' }
         assigned_to: { oneOf: [ { type: 'null' }, { type: object, properties: { user_id: { type: string, format: uuid }, nickname: { type: [string, 'null'] }, is_me: { type: boolean } } } ] }
         priority_rank: { type: integer, minimum: 1, description: '1 = 가장 먼저 방문' }
-        priority_score: { type: [number, 'null'], description: 'B13 점수 (없으면 기본 순서)' }
+        priority_score: { type: [number, 'null'], description: 'B13 순서 점수 (높을수록 먼저, 명단 안에서만 의미)' }
         priority_reasons: { type: array, items: { $ref: '#/components/schemas/PriorityReason' } }
         last_location: { oneOf: [ { $ref: '#/components/schemas/LatLng' }, { type: 'null' } ] }
         note: { type: [string, 'null'] }
         last_visit: { oneOf: [ { $ref: '#/components/schemas/VisitLog' }, { type: 'null' } ] }
+        in_area: { type: boolean, description: 'B13: 상황 영역 안인지 (가구는 집, 앱 사용자는 마지막 위치)' }
+        disabilities: { type: array, items: { type: string }, description: "B13: 시각·청각·지체장애 이름 (예: '휠체어')" }
     IncidentDetail:
       allOf:
         - $ref: '#/components/schemas/Incident'

@@ -9,7 +9,7 @@ import json
 from datetime import datetime, timezone
 from typing import Optional
 
-from . import db
+from . import db, priority
 from .errors import ApiError
 from .mocks import iso
 
@@ -48,12 +48,17 @@ SELECT t.id, t.household_id, t.user_id, t.status::text AS status, t.status_via::
        ST_X(COALESCE(h.geom, t.last_location, a.location, ST_PointOnSurface(i.area))) AS lng,
        ST_Y(t.last_location) AS last_lat, ST_X(t.last_location) AS last_lng,
        a.created_at AS alert_at, au.nickname AS assigned_nickname,
-       lv.v_id, lv.v_at, lv.v_result, lv.v_status_after, lv.v_note, lv.v_responder, lv.v_responder_nick
+       lv.v_id, lv.v_at, lv.v_result, lv.v_status_after, lv.v_note, lv.v_responder, lv.v_responder_nick,
+       -- B13 우선순위: 위험지역 안인지(가구는 집, 앱 사용자는 마지막 위치 → 경고 받은 위치), 앱 사용자 장애 칸
+       ST_Intersects(i.area, COALESCE(h.geom, t.last_location, a.location)) AS in_area,
+       up.vision_impaired AS up_vision, up.hearing_impaired AS up_hearing,
+       up.mobility::text AS up_mobility, up.walking_ability::text AS up_walking
 FROM care.incident_targets t
 JOIN care.incidents i ON i.id = t.incident_id
 LEFT JOIN care.households h ON h.id = t.household_id
 LEFT JOIN user_alerts a ON a.id = t.alert_id
 LEFT JOIN users au ON au.id = t.assigned_to
+LEFT JOIN user_profiles up ON up.user_id = t.user_id AND t.household_id IS NULL
 LEFT JOIN LATERAL (
   SELECT v.id AS v_id, v.visited_at AS v_at, v.result AS v_result, v.status_after::text AS v_status_after, v.note AS v_note,
          v.responder_id AS v_responder, ru.nickname AS v_responder_nick
@@ -107,6 +112,10 @@ def target_out(r: dict, me: Optional[str], now: datetime) -> dict:
         "priority_score": r.get("priority_score"), "priority_reasons": _json(r.get("priority_reasons"), []),
         "last_location": {"lat": r["last_lat"], "lng": r["last_lng"]} if r.get("last_lat") is not None else None,
         "note": r.get("note"), "last_visit": visit,
+        # B13 (priority.py): 위험지역 안인지 (NULL = 위치 없음 → 안으로 봄) · 시각·청각·지체장애
+        "in_area": r.get("in_area") is not False,
+        "disabilities": priority.disabilities({"kind": "household" if hh else "app_user", "needs": r.get("needs") if hh else [],
+                                               **{k: r.get(k) for k in ("up_vision", "up_hearing", "up_mobility", "up_walking")}}),
     }
 
 
@@ -124,7 +133,7 @@ def get_incident(incident_id: str) -> dict:
 
 
 def detail(incident_id: str, me: Optional[str], caregiver: Optional[str], rank) -> dict:
-    """IncidentDetail — rank: 대상 정렬 함수 (admin.default_rank, B13 점수 우선)"""
+    """IncidentDetail — rank: 대상 정렬 함수 (priority.rank, B13)"""
     from alerts.evacuation import RULES
     r = db.fetch_one(INCIDENTS_SQL, {"iid": incident_id, "state": "all", "cg": caregiver})
     if not r:
