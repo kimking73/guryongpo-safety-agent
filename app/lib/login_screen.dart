@@ -36,6 +36,17 @@ class Onboarding {
     } catch (_) {}
   }
 
+  /// 처음 화면(동의·로그인·내 정보)을 다시 보기 — 시연용. 입력한 내 정보·로그인은 그대로 둔다
+  static Future<void> reset() async {
+    consented = false;
+    done = false;
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.remove(_consentKey);
+      await p.remove(_doneKey);
+    } catch (_) {}
+  }
+
   static Future<void> setDone() async {
     done = true;
     try {

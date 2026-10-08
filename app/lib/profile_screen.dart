@@ -55,7 +55,6 @@ class ProfileScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext c, WidgetRef ref) {
-    final demo = ref.watch(showDemoProvider);
     final wide = MediaQuery.sizeOf(c).width >= wideBreakpoint;
     return WebWidth(enabled: wide, maxWidth: 820, child: ListView(padding: EdgeInsets.fromLTRB(16, 8, 16, wide ? 40 : 120), children: [
       const ScreenTitle('사용자'),
@@ -65,10 +64,8 @@ class ProfileScreen extends ConsumerWidget {
       const SizedBox(height: 14),
       const _AlertSettingsCard(),
       const SizedBox(height: 14),
-      if (AppConfig.isRemote || demo) ...[
-        const _DemoCard(),
-        const SizedBox(height: 14),
-      ],
+      const _DemoCard(),
+      const SizedBox(height: 14),
       const _AccountCard(),
       const SizedBox(height: 14),
       const _TeamLoginCard(),
@@ -367,9 +364,19 @@ class _DemoCard extends ConsumerWidget {
             trailing: NavySwitch(
                 label: '시연 모드', value: demo, onChanged: (v) => ref.read(demoModeProvider.notifier).set(v)),
           ),
+        SettingRow(
+          topBorder: AppConfig.isRemote,
+          icon: FontAwesomeIcons.rotateLeft,
+          title: '처음 화면 다시 보기',
+          subtitle: '필수 동의 · 로그인 · 내 정보 입력 화면부터 다시 시작해요 (입력한 정보는 그대로)',
+          trailing: PillChip('보기', height: 36, bg: Ds.soft, onTap: () async {
+            await Onboarding.reset();
+            if (context.mounted) context.go('/login');
+          }),
+        ),
         if (demo) ...[
           SettingRow(
-            topBorder: AppConfig.isRemote,
+            topBorder: true,
             icon: FontAwesomeIcons.userShield,
             title: '방재단 대피현황',
             subtitle: team ? '방재단원 화면을 보고 있어요' : '코드 없이 방재단원 화면을 시연해요',

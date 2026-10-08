@@ -127,4 +127,32 @@ void main() {
     await t.pumpWidget(const SizedBox());
     await t.pump(const Duration(seconds: 1));
   });
+
+  testWidgets('동의만 하고 내 정보를 끝내지 않았으면 대시보드 대신 내 정보(2/2)부터', (t) async {
+    t.view.physicalSize = const Size(390, 844);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.reset);
+    final onError = FlutterError.onError;
+    FlutterError.onError = (d) {
+      if (d.library != 'image resource service') onError?.call(d);
+    };
+    addTearDown(() => FlutterError.onError = onError);
+    SharedPreferences.setMockInitialValues({'onboarding_consent_v1': true});
+    appBooted = false;
+    appRouter.go('/');
+    await t.pumpWidget(const ProviderScope(child: GuryongpoApp()));
+    for (var i = 0; i < 8; i++) {
+      await t.pump(const Duration(milliseconds: 300));
+    }
+    expect(appRouter.state.matchedLocation, '/setup');
+    await t.ensureVisible(find.text('나중에 입력할게요'));
+    await t.pump();
+    await t.tap(find.text('나중에 입력할게요'));
+    for (var i = 0; i < 6; i++) {
+      await t.pump(const Duration(milliseconds: 300));
+    }
+    expect(appRouter.state.matchedLocation, '/');
+    await t.pumpWidget(const SizedBox());
+    await t.pump(const Duration(seconds: 1));
+  });
 }

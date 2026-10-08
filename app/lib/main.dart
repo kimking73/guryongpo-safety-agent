@@ -643,6 +643,10 @@ final appRouter = GoRouter(
       if (AuthService.enabled && !AuthService.signedIn && loc != '/login') {
         return Uri(path: '/login', queryParameters: {'from': state.uri.toString()}).toString();
       }
+      // 2/2 내 정보: '시작하기'나 '나중에 입력할게요'를 누를 때까지 먼저 보여 준다
+      if (!Onboarding.done && loc != '/login' && loc != '/setup') {
+        return Uri(path: '/setup', queryParameters: {'from': state.uri.toString()}).toString();
+      }
       // 이미 동의한 사람이 다시 로그인하면 가려던 화면으로 (처음이면 '다음' 버튼이 2/2로 보낸다)
       if (loc == '/login' && Onboarding.consented && (AuthService.signedIn || !AuthService.enabled)) {
         if (!Onboarding.done) return Uri(path: '/setup', queryParameters: {'from': target()}).toString();
