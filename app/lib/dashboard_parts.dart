@@ -7,7 +7,6 @@ import 'package:latlong2/latlong.dart';
 import 'disaster_center.dart';
 import 'main.dart';
 import 'models/domain_models.dart';
-import 'repositories/remote_repository.dart' show RemoteError;
 import 'services/app_config.dart';
 import 'services/demo_mode.dart';
 import 'services/voice_service.dart';
@@ -958,8 +957,11 @@ class AiPanel extends ConsumerStatefulWidget {
 class _AiPanelState extends ConsumerState<AiPanel> {
   final input = TextEditingController();
   final scroll = ScrollController();
-  bool loading = false, recording = false;
+  bool recording = false;
   VoiceRecorder? recorder;
+
+  /// 답 기다리는 중 — 앱 전체 상태 (AI 대화창과 같은 대화, 다른 메뉴에 갔다 와도 이어짐)
+  bool get loading => ref.watch(chatLoading);
 
   void scrollToEnd() => WidgetsBinding.instance.addPostFrameCallback((_) {
         if (scroll.hasClients)
@@ -967,12 +969,9 @@ class _AiPanelState extends ConsumerState<AiPanel> {
               duration: const Duration(milliseconds: 180), curve: Curves.easeOut);
       });
 
-  void addMessages(List<ChatMessage> m) =>
-      ref.read(chatMessages.notifier).state = [...ref.read(chatMessages), ...m];
-
   /// 마이크: 누르면 녹음 시작, 다시 누르면(또는 28초가 지나면) 서버로 보내 받아쓴 질문·답을 보여 주고 답 음성을 바로 재생
   Future<void> toggleMic() async {
-    if (loading) return;
+    if (ref.read(chatLoading)) return;
     if (recording) return finishVoice();
     await VoicePlayer.instance.stop();
     recorder ??= VoiceRecorder();
@@ -987,57 +986,28 @@ class _AiPanelState extends ConsumerState<AiPanel> {
 
   Future<void> finishVoice() async {
     if (!recording) return;
-    setState(() { recording = false; loading = true; });
+    final chat = ref.read(chatController), loadingNotifier = ref.read(chatLoading.notifier);
+    setState(() => recording = false);
+    loadingNotifier.state = true;
     final wav = await recorder!.stop();
+    loadingNotifier.state = false;
     if (wav == null) {
-      if (mounted) setState(() => loading = false);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('녹음이 너무 짧습니다. 버튼을 누르고 말씀한 뒤 다시 눌러 주세요.')));
       return;
     }
-    ChatAnswer? answer;
-    try {
-      final v = await ref.read(repo).askVoice(wav, UserMode.user, ref.read(userLocation).position);
-      answer = v.answer;
-      if (mounted) addMessages([ChatMessage('🎤 ${v.transcript}', true), ChatMessage(v.answer.text, false, answer: v.answer)]);
-    } catch (e) {
-      if (mounted) addMessages([ChatMessage(e is RemoteError ? e.message : '음성 질문을 처리하지 못했습니다. 다시 시도해 주세요.', false)]);
-    }
-    if (mounted) setState(() => loading = false);
-    scrollToEnd();
-    if (answer?.audio != null) {
-      try {
-        await VoicePlayer.instance.play(answer!.audio!);
-      } catch (_) {}
-    }
+    await chat.askVoice(wav); // 보내기·답 붙이기는 화면 밖(chatController) — 다른 메뉴로 가도 이어짐
   }
 
   Future<void> ask(String question) async {
-    if (question.trim().isEmpty) return;
-    ref.read(chatMessages.notifier).state = [
-      ...ref.read(chatMessages),
-      ChatMessage(question, true)
-    ];
-    setState(() => loading = true);
-    final answer = await ref
-        .read(repo)
-        .ask(question, UserMode.user, ref.read(userLocation).position);
     const personaGuide = '사용자 예시 안내: 등록한 장소와 현재 위치를 확인하고 안전한 실내로 이동하세요.';
-    if (mounted)
-      ref.read(chatMessages.notifier).state = [
-        ...ref.read(chatMessages),
-        ChatMessage(
-            AppConfig.isRemote
-                ? answer.text
-                : '${answer.text}\n$personaGuide\n예시 AI 안내',
-            false,
-            answer: answer)
-      ];
-    if (mounted) setState(() => loading = false);
-    scrollToEnd();
+    await ref.read(chatController).ask(question,
+        decorate: (a) => AppConfig.isRemote ? a.text : '${a.text}\n$personaGuide\n예시 AI 안내');
   }
 
   @override
-  Widget build(BuildContext context) => Card(
+  Widget build(BuildContext context) {
+    ref.listen(chatMessages, (_, __) => scrollToEnd()); // 답은 chatController가 붙인다
+    return Card(
       child: SizedBox(
           height: 470,
           child:
@@ -1111,6 +1081,8 @@ class _AiPanelState extends ConsumerState<AiPanel> {
               const Padding(padding: EdgeInsets.only(left: 12, bottom: 8),
                   child: Text('듣고 있어요… 말씀이 끝나면 빨간 버튼을 눌러 주세요.', style: TextStyle(color: Colors.red, fontSize: 12))),
           ])));
+  }
+
   @override
   void dispose() {
     input.dispose();

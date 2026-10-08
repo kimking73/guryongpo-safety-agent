@@ -3,6 +3,7 @@ import 'ui/gk_theme.dart';
 import 'ui/gk_widgets.dart';
 import 'services/account_sync.dart';
 import 'dart:async';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -92,6 +93,59 @@ final profileRevision = StateProvider<int>((_) => 0);
 /// 도보·자동차 (2026-10-07). 경로 provider 가 watch → 바꾸면 경로를 다시 받는다
 final travelMode = StateProvider<TravelMode>((_) => TravelMode.walk);
 final chatMessages = StateProvider<List<ChatMessage>>((_) => []);
+
+/// AI 답을 기다리는 중 — 화면이 아니라 앱 전체에 둔다 (대화창을 떠났다 돌아와도 '확인하고 있습니다'가 이어짐)
+final chatLoading = StateProvider<bool>((_) => false);
+
+/// 질문 보내기·답 붙이기를 화면 State 밖에서 한다 (2026-10-08): 답을 만드는 중에 프로필 등 다른 메뉴로 가도
+/// 요청이 끝까지 가고, 답은 대화 기록(chatMessages)에 붙는다. 대화창(AiScreen)·대시보드 AiPanel이 함께 쓴다.
+final chatController = Provider<ChatController>((ref) => ChatController(ref));
+
+class ChatController {
+  ChatController(this._ref);
+  final Ref _ref;
+
+  bool get busy => _ref.read(chatLoading);
+
+  void add(List<ChatMessage> m) => _ref.read(chatMessages.notifier).state = [..._ref.read(chatMessages), ...m];
+
+  /// 글 질문. [decorate]는 답 문구를 바꿀 때(대시보드 예시 모드)
+  Future<void> ask(String question, {String Function(ChatAnswer)? decorate}) async {
+    if (question.trim().isEmpty || busy) return;
+    add([ChatMessage(question, true)]);
+    _ref.read(chatLoading.notifier).state = true;
+    try {
+      final answer = await _ref.read(repo).ask(question, UserMode.user, _ref.read(userLocation).position);
+      add([ChatMessage(decorate?.call(answer) ?? answer.text, false, answer: answer)]);
+    } catch (_) {
+      const answer = ChatAnswer('AI 서비스에 연결하지 못했습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.', isError: true);
+      add([ChatMessage(answer.text, false, answer: answer)]);
+    } finally {
+      _ref.read(chatLoading.notifier).state = false;
+    }
+  }
+
+  /// 음성 질문 (녹음이 끝난 wav). 받아쓴 질문·답을 붙이고 답 음성을 재생한다 — 다른 메뉴에 있어도 재생
+  Future<void> askVoice(Uint8List wav) async {
+    _ref.read(chatLoading.notifier).state = true;
+    ChatAnswer? answer;
+    try {
+      final v = await _ref.read(repo).askVoice(wav, UserMode.user, _ref.read(userLocation).position);
+      answer = v.answer;
+      add([ChatMessage('🎤 ${v.transcript}', true), ChatMessage(v.answer.text, false, answer: v.answer)]);
+    } catch (e) {
+      add([ChatMessage(e is RemoteError ? e.message : '음성 질문을 처리하지 못했습니다. 다시 시도해 주세요.', false)]);
+    } finally {
+      _ref.read(chatLoading.notifier).state = false;
+    }
+    if (answer?.audio != null) {
+      try {
+        await VoicePlayer.instance.play(answer!.audio!);
+      } catch (_) {}
+    }
+  }
+}
+
 final userOccupation = StateProvider<String>((_) => '');
 final autoVoiceAlerts = StateProvider<bool>((_) => false);
 final voiceLanguage = StateProvider<String>((_) => '한국어');
@@ -2373,15 +2427,22 @@ class AiScreen extends ConsumerStatefulWidget {
 class _AiScreenState extends ConsumerState<AiScreen> {
   final input = TextEditingController();
   final scroll = ScrollController();
-  bool loading = false, recording = false;
+  bool recording = false;
   VoiceRecorder? recorder;
   bool walkingImpaired = false, hasJob = false;
+
+  /// 답을 기다리는 중 (앱 전체 상태 — 다른 메뉴에 갔다 와도 이어짐)
+  bool get loading => ref.watch(chatLoading);
+  late final ChatController _chat;
 
   @override
   void initState() {
     super.initState();
+    _chat = ref.read(chatController);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || ref.read(chatMessages).isNotEmpty) return;
+      if (!mounted) return;
+      // 다른 메뉴에 있는 동안 답이 왔을 수 있으니 돌아오면 마지막 말풍선으로
+      if (ref.read(chatMessages).isNotEmpty) return _scrollToEnd();
       ref.read(chatMessages.notifier).state = [
         ChatMessage(
           AppConfig.isRemote
@@ -2412,35 +2473,17 @@ class _AiScreenState extends ConsumerState<AiScreen> {
         }
       });
 
-  void _add(List<ChatMessage> m) {
-    ref.read(chatMessages.notifier).state = [...ref.read(chatMessages), ...m];
-    _scrollToEnd();
-  }
-
+  /// 보내기는 chatController가 한다 — 이 화면을 떠나도 답이 대화 기록에 붙는다
   Future<void> send([String? q]) async {
     final question = q ?? input.text;
-    if (question.trim().isEmpty || loading) return;
-    _add([ChatMessage(question, true)]);
-    setState(() {
-      loading = true;
-      input.clear();
-    });
-    try {
-      final answer = await ref.read(repo).ask(question, UserMode.user, ref.read(userLocation).position);
-      if (mounted) _add([ChatMessage(answer.text, false, answer: answer)]);
-    } catch (_) {
-      if (mounted) {
-        const answer = ChatAnswer('AI 서비스에 연결하지 못했습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.', isError: true);
-        _add([ChatMessage(answer.text, false, answer: answer)]);
-      }
-    } finally {
-      if (mounted) setState(() => loading = false);
-    }
+    if (question.trim().isEmpty || ref.read(chatLoading)) return;
+    input.clear();
+    await _chat.ask(question);
   }
 
   /// 마이크: 누르면 녹음, 다시 누르면(또는 28초) 서버로 보내 받아쓴 질문·답을 보여 주고 답 음성을 재생 (대시보드 AiPanel과 같은 흐름)
   Future<void> toggleMic() async {
-    if (loading) return;
+    if (ref.read(chatLoading)) return;
     if (recording) return finishVoice();
     await VoicePlayer.instance.stop();
     recorder ??= VoiceRecorder();
@@ -2454,35 +2497,22 @@ class _AiScreenState extends ConsumerState<AiScreen> {
     setState(() => recording = true);
   }
 
+  /// 녹음은 이 화면에서 끝내고, 서버로 보내 답 받기는 chatController가 한다 (화면을 떠나도 이어짐)
   Future<void> finishVoice() async {
     if (!recording) return;
-    setState(() {
-      recording = false;
-      loading = true;
-    });
+    final loadingNotifier = ref.read(chatLoading.notifier);
+    setState(() => recording = false);
+    loadingNotifier.state = true;
     final wav = await recorder!.stop();
+    loadingNotifier.state = false;
     if (wav == null) {
       if (mounted) {
-        setState(() => loading = false);
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('녹음이 너무 짧습니다. 버튼을 누르고 말씀한 뒤 다시 눌러 주세요.')));
       }
       return;
     }
-    ChatAnswer? answer;
-    try {
-      final v = await ref.read(repo).askVoice(wav, UserMode.user, ref.read(userLocation).position);
-      answer = v.answer;
-      if (mounted) _add([ChatMessage('🎤 ${v.transcript}', true), ChatMessage(v.answer.text, false, answer: v.answer)]);
-    } catch (e) {
-      if (mounted) _add([ChatMessage(e is RemoteError ? e.message : '음성 질문을 처리하지 못했습니다. 다시 시도해 주세요.', false)]);
-    }
-    if (mounted) setState(() => loading = false);
-    if (answer?.audio != null) {
-      try {
-        await VoicePlayer.instance.play(answer!.audio!);
-      } catch (_) {}
-    }
+    await _chat.askVoice(wav);
   }
 
   List<String> get suggestions => [
@@ -2541,6 +2571,8 @@ class _AiScreenState extends ConsumerState<AiScreen> {
   @override
   Widget build(BuildContext c) {
     final messages = ref.watch(chatMessages);
+    // 답은 chatController가 붙인다 — 이 화면에 있을 때 붙으면 아래로
+    ref.listen(chatMessages, (_, __) => _scrollToEnd());
     final narrow = MediaQuery.sizeOf(c).width < 600;
     final pad = gkPagePadding(c);
     return Align(
@@ -2651,6 +2683,13 @@ class _AiScreenState extends ConsumerState<AiScreen> {
 
   @override
   void dispose() {
+    // 녹음 중에 다른 메뉴로 가면 거기까지 녹음한 것으로 질문한다 (답은 대화 기록에 붙음)
+    if (recording) {
+      recording = false; // 28초 제한(onLimit)이 사라진 화면의 finishVoice를 부르지 않게
+      recorder!.stop().then((wav) {
+        if (wav != null) _chat.askVoice(wav);
+      });
+    }
     input.dispose();
     scroll.dispose();
     super.dispose();
