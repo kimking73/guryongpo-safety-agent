@@ -260,6 +260,11 @@ class DisasterDashboard extends StatefulWidget {
     this.statusText,
     this.updatedText,
     this.onRefresh,
+    this.title = '대시보드',
+    this.extraPolygons = const [],
+    this.extraMarkers = const [],
+    this.beforeMap,
+    this.afterMap,
   });
 
   final bool routeActive;
@@ -300,6 +305,13 @@ class DisasterDashboard extends StatefulWidget {
   /// 제목 아래 한 줄 (판정 시각 등) · '지금 구룡포 날씨' 옆 갱신 시각 · 새로고침
   final String? statusText, updatedText;
   final VoidCallback? onRefresh;
+
+  /// 같은 대시보드를 다른 화면에 쓸 때 (2026-10-08 방재단 현황): 제목, 지도 위에 더 올릴 영역·표식(맨 위 층),
+  /// 지도 카드 앞·뒤에 끼울 내용 (대피 상황 머리·필터 / 방문 우선순위 명단)
+  final String title;
+  final List<Polygon> extraPolygons;
+  final List<Marker> extraMarkers;
+  final Widget? beforeMap, afterMap;
 
   @override
   State<DisasterDashboard> createState() => _DisasterDashboardState();
@@ -616,6 +628,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                           severeOnly: compositeView)),
                 if (widget.riskAreas.isNotEmpty)
                   PolygonLayer(polygons: hazardAreaPolygons(widget.riskAreas)),
+                if (widget.extraPolygons.isNotEmpty) PolygonLayer(polygons: widget.extraPolygons),
                 if (route != null && route.polylinePoints.length > 1)
                   PolylineLayer(polylines: [
                     Polyline(
@@ -829,6 +842,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                     ),
                   ],
                 ),
+                if (widget.extraMarkers.isNotEmpty) MarkerLayer(markers: widget.extraMarkers),
                 mapLegendButton(context,
                     routeMode: routeMode,
                     visible: visible,
@@ -1176,7 +1190,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
     return ListView(
       padding: gkPagePadding(context),
       children: [
-        GkPageTitle('대시보드',
+        GkPageTitle(widget.title,
             subtitle: widget.statusText,
             trailing: widget.onRefresh == null
                 ? null
@@ -1186,6 +1200,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
         const SizedBox(height: 12),
         GkColumns(minWidth: 440, children: [_messageCard(context), _warningsCard(context)]),
         const SizedBox(height: 20),
+        if (widget.beforeMap != null) ...[widget.beforeMap!, const SizedBox(height: 12)],
         // 지도 카드 — 재난 지도 / 대피 경로
         GkCard(
           padding: EdgeInsets.all(narrow ? 12 : 16),
@@ -1233,6 +1248,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
             ],
           ]),
         ),
+        if (widget.afterMap != null) ...[const SizedBox(height: 12), widget.afterMap!],
         _personalizedMockAlerts(context),
         const SizedBox(height: 28),
         Wrap(spacing: 12, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [

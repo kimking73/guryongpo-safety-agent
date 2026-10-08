@@ -12,6 +12,7 @@ import 'main.dart';
 import 'services/live_api.dart';
 import 'services/location_service.dart';
 import 'services/polyline.dart';
+import 'ui/gk_widgets.dart';
 
 /// C8 (2026-10-05) 실측 화면: 취약 가구 등록 + 민감정보 동의(별도 화면), 방재단 대시보드(우선순위 명단·지도),
 /// 방문 결과 입력, 방재단 대리 등록, 해상 → 최근접 항 → 육상 경로(B11 /api/route/sea).
@@ -628,62 +629,84 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
     if (incidents == null) return const DashboardLoading();
     final targets = _targets;
     final incident = detail ?? incidents!.cast<Map<String, dynamic>?>().firstWhere((i) => i?['id'] == incidentId, orElse: () => null);
-    return LivePage(title: '방재단 대시보드', onRefresh: _load, children: [
-      Row(children: [
-        Expanded(child: Text('가까운 위험 가구부터 확인하세요. 명단은 ${incidentId == null ? '' : '10초마다 '}새로 고칩니다.')),
-        IconButton(tooltip: '가구 대리 등록', onPressed: () => c.push('/household/delegate'), icon: const Icon(Icons.person_add_alt_1)),
-      ]),
-      if (error != null) Text(error!, style: const TextStyle(color: Colors.red)),
-      if (incidents!.length > 1)
-        DropdownButton<String>(
-            isExpanded: true,
-            value: incidentId,
-            items: [for (final i in incidents!) DropdownMenuItem(value: '${i['id']}', child: Text('${i['title']}'))],
-            onChanged: (v) {
-              setState(() {
-                incidentId = v;
-                detail = null;
-                selected = null;
-              });
-              _loadDetail();
-            }),
-      _FilterBar(households: households ?? const [], filter: filter, onChanged: (f) => setState(() => filter = f)),
-      if (incidentId == null) ...[
-        const Card(child: ListTile(leading: Icon(Icons.check_circle_outline), title: Text('진행 중인 대피 상황이 없습니다'),
-            subtitle: Text('평시에도 장애인·독거노인 가구를 지도에서 확인할 수 있습니다. 대피 상황이 생기면 대상 가구가 번호(우선순위)로 바뀝니다.'))),
-        _PatrolMap(points: _householdPoints(const {}), rings: const [], selected: selected, onTap: (id) => setState(() => selected = id)),
-        const _MapLegend(withTargets: false),
-        for (final h in _shownHouseholds) _HouseholdTile(h: h, selected: selected == '${h['id']}'),
-        if (_shownHouseholds.isEmpty) const Card(child: ListTile(title: Text('조건에 맞는 등록 가구가 없습니다'))),
-      ] else ...[
-        if (incident != null) _IncidentHeader(incident: incident),
-        _PatrolMap(points: [
-          ..._householdPoints({for (final t in targets) if (t['household_id'] != null) '${t['household_id']}'}),
-          for (final t in targets)
-            if (latLng(t['location']) != null)
-              _MapPoint('${t['id']}', latLng(t['location'])!, (t['priority_rank'] as num?)?.toInt(), t['status'] as String?, '${t['label']}'),
-        ], rings: geoJsonRings(detail?['area']), selected: selected, onTap: (id) => setState(() => selected = id),
-            focus: [
-              for (final t in targets)
-                if (latLng(t['location']) != null) latLng(t['location'])!,
-              for (final r in geoJsonRings(detail?['area'])) ...r,
-            ]),
-        const _MapLegend(withTargets: true),
-        const SizedBox(height: 6),
-        const Text('방문 우선순위', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-        // B13 규칙 (서버 priority.py, 사용자 결정 2026-10-08)
-        Text('위험지역 안 대상만 · 도움 요청+장애 → 도움 요청 → 응답 없음+장애 → 응답 없음 → 대피 중 → 대피 완료. '
-            '장애 = 시각·청각·지체. 같은 순위는 ${ref.watch(userLocation).fromGps ? '내 위치에서 가까운 순' : '오래 기다린 순 (내 위치를 켜면 가까운 순)'}',
-            style: Theme.of(context).textTheme.bodySmall),
-        if (detail == null) const LinearProgressIndicator(),
-        if (detail != null && targets.isEmpty) const Card(child: ListTile(title: Text('이 대피 상황의 대상 가구가 없습니다'))),
-        for (final t in [...targets.where((t) => '${t['id']}' == selected), ...targets.where((t) => '${t['id']}' != selected)])
-          _TargetCard(t: t, selected: '${t['id']}' == selected, closed: detail?['closed_at'] != null,
-              onVisit: () => _visit(t), onAssign: () => _assign(t), onSelect: () => setState(() => selected = '${t['id']}')),
-        // 대피 대상이 아닌 등록 가구도 지도에서 눌러 볼 수 있게
-        for (final h in _shownHouseholds.where((h) => '${h['id']}' == selected)) _HouseholdTile(h: h, selected: true),
+    final inIncident = incidentId != null;
+    final points = inIncident
+        ? [
+            ..._householdPoints({for (final t in targets) if (t['household_id'] != null) '${t['household_id']}'}),
+            for (final t in targets)
+              if (latLng(t['location']) != null)
+                _MapPoint('${t['id']}', latLng(t['location'])!, (t['priority_rank'] as num?)?.toInt(), t['status'] as String?, '${t['label']}'),
+          ]
+        : _householdPoints(const {});
+    // 화면 = 일반 대시보드 그대로(재난문자·특보·재난 지도·날씨) + 지도 위에 사람 아이콘 + 지도 아래 방문 우선순위 (2026-10-08 사용자 요청)
+    return Dashboard(
+      title: '방재단 현황',
+      extraPolygons: [
+        for (final r in geoJsonRings(detail?['area']))
+          Polygon(points: r, color: Colors.red.withValues(alpha: .10), borderColor: Colors.red.shade700, borderStrokeWidth: 2.5),
       ],
-    ]);
+      extraMarkers: _peopleMarkers(points, selected, (id) => setState(() => selected = id)),
+      beforeMap: GkCard(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const GkCircleIcon(Icons.shield_rounded, size: 40),
+            const SizedBox(width: 10),
+            Expanded(
+                child: Text('가까운 위험 가구부터 확인하세요. 지도의 사람 아이콘 = 등록 가구·대피 대상${inIncident ? ' · 명단은 10초마다 새로 고칩니다' : ''}.',
+                    style: const TextStyle(fontSize: 16))),
+            IconButton(tooltip: '새로고침', onPressed: _load, icon: const Icon(Icons.refresh_rounded)),
+            IconButton(tooltip: '가구 대리 등록', onPressed: () => c.push('/household/delegate'), icon: const Icon(Icons.person_add_alt_1)),
+          ]),
+          if (error != null) Text(error!, style: const TextStyle(color: Colors.red)),
+          if (incidents!.length > 1)
+            DropdownButton<String>(
+                isExpanded: true,
+                value: incidentId,
+                items: [for (final i in incidents!) DropdownMenuItem(value: '${i['id']}', child: Text('${i['title']}'))],
+                onChanged: (v) {
+                  setState(() {
+                    incidentId = v;
+                    detail = null;
+                    selected = null;
+                  });
+                  _loadDetail();
+                }),
+          if (inIncident && incident != null) _IncidentHeader(incident: incident),
+          if (!inIncident)
+            const ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.check_circle_outline),
+                title: Text('진행 중인 대피 상황이 없습니다'),
+                subtitle: Text('평시에도 장애인·독거노인 가구를 지도에서 확인할 수 있습니다. 대피 상황이 생기면 대상 가구가 번호(우선순위)로 바뀝니다.')),
+          _FilterBar(households: households ?? const [], filter: filter, onChanged: (f) => setState(() => filter = f)),
+          _MapLegend(withTargets: inIncident),
+        ]),
+      ),
+      afterMap: GkCard(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          if (!inIncident) ...[
+            const Text('등록 취약 가구', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 8),
+            for (final h in _shownHouseholds) _HouseholdTile(h: h, selected: selected == '${h['id']}'),
+            if (_shownHouseholds.isEmpty) const ListTile(title: Text('조건에 맞는 등록 가구가 없습니다')),
+          ] else ...[
+            const Text('방문 우선순위', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+            // B13 규칙 (서버 priority.py, 사용자 결정 2026-10-08)
+            Text('위험지역 안 대상만 · 도움 요청+장애 → 도움 요청 → 응답 없음+장애 → 응답 없음 → 대피 중 → 대피 완료. '
+                '장애 = 시각·청각·지체. 같은 순위는 ${ref.watch(userLocation).fromGps ? '내 위치에서 가까운 순' : '오래 기다린 순 (내 위치를 켜면 가까운 순)'}',
+                style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 8),
+            if (detail == null) const LinearProgressIndicator(),
+            if (detail != null && targets.isEmpty) const ListTile(title: Text('이 대피 상황의 대상 가구가 없습니다')),
+            for (final t in [...targets.where((t) => '${t['id']}' == selected), ...targets.where((t) => '${t['id']}' != selected)])
+              _TargetCard(t: t, selected: '${t['id']}' == selected, closed: detail?['closed_at'] != null,
+                  onVisit: () => _visit(t), onAssign: () => _assign(t), onSelect: () => setState(() => selected = '${t['id']}')),
+            // 대피 대상이 아닌 등록 가구도 지도에서 눌러 볼 수 있게
+            for (final h in _shownHouseholds.where((h) => '${h['id']}' == selected)) _HouseholdTile(h: h, selected: true),
+          ],
+        ]),
+      ),
+    );
   }
 
   /// 필터에 맞는 등록 가구 (선택한 가구를 맨 앞으로)
@@ -731,11 +754,11 @@ class _MapLegend extends StatelessWidget {
   @override
   Widget build(BuildContext c) {
     Widget item(Widget mark, String label) => Row(mainAxisSize: MainAxisSize.min, children: [mark, const SizedBox(width: 4), Text(label)]);
-    Widget icon(VulnerableKind k) => Icon(kindIcon[k], size: 18, color: kindColor[k]);
+    Widget icon(VulnerableKind k) => CircleAvatar(radius: 10, backgroundColor: kindColor[k], child: Icon(personIcon(k), size: 14, color: Colors.white));
     return Wrap(spacing: 14, runSpacing: 4, children: [
       if (withTargets)
-        item(CircleAvatar(radius: 8, backgroundColor: statusColor('need_help'),
-            child: const Text('1', style: TextStyle(fontSize: 10, color: Colors.white))), '대피 대상 (번호 = 우선순위, 색 = 상태)'),
+        item(CircleAvatar(radius: 10, backgroundColor: statusColor('need_help'), child: const Icon(Icons.person_rounded, size: 14, color: Colors.white)),
+            '대피 대상 (숫자 = 우선순위, 색 = 상태)'),
       item(icon(VulnerableKind.disabled), '장애인 가구'),
       item(icon(VulnerableKind.elderlyAlone), '독거노인 가구'),
       item(icon(VulnerableKind.other), '기타 취약 가구'),
@@ -785,92 +808,57 @@ class _MapPoint {
   final String? detail;
 }
 
-/// 방재단 지도: 대피 대상은 번호(우선순위)·색(대피 상태), 등록 취약 가구는 장애인·독거노인·기타 아이콘. 대피 영역은 붉은 다각형
-class _PatrolMap extends StatefulWidget {
-  const _PatrolMap({required this.points, required this.rings, required this.selected, required this.onTap, this.focus});
-  final List<_MapPoint> points;
-  final List<List<LatLng>> rings;
-  final String? selected;
-  final ValueChanged<String> onTap;
-  /// 처음 화면에 맞출 좌표 (대피 상황이면 대상 가구·영역, 없으면 전체 점)
-  final List<LatLng>? focus;
+/// 대시보드 지도 위 사람 아이콘 (2026-10-08): 대피 대상은 사람 + 우선순위 번호(색 = 대피 상태),
+/// 등록 취약 가구는 장애인·독거노인·기타 사람 아이콘. 누르면 그 대상 카드가 명단 맨 위로
+List<Marker> _peopleMarkers(List<_MapPoint> points, String? selected, ValueChanged<String> onTap) => [
+      for (final p in points)
+        Marker(
+          point: p.at,
+          width: p.id == selected ? 50 : 42,
+          height: p.id == selected ? 50 : 42,
+          child: GestureDetector(
+            onTap: () => onTap(p.id),
+            child: Tooltip(
+              message: p.kind != null
+                  ? '${p.label} · ${kindKo[p.kind]}${p.detail?.isNotEmpty ?? false ? ' (${p.detail})' : ''}'
+                  : '${p.rank != null ? '${p.rank}순위 ' : ''}${p.label} · ${statusKo[p.status] ?? '대피 대상'}',
+              child: Stack(clipBehavior: Clip.none, children: [
+                Positioned.fill(
+                  child: Container(
+                    decoration: BoxDecoration(
+                        color: p.kind != null ? kindColor[p.kind] : statusColor(p.status),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: p.id == selected ? 3 : 2),
+                        boxShadow: const [BoxShadow(blurRadius: 4, color: Colors.black38)]),
+                    child: Icon(personIcon(p.kind), color: Colors.white, size: p.id == selected ? 30 : 26),
+                  ),
+                ),
+                if (p.rank != null)
+                  Positioned(
+                    right: -6,
+                    top: -6,
+                    child: Container(
+                      constraints: const BoxConstraints(minWidth: 22),
+                      height: 22,
+                      padding: const EdgeInsets.symmetric(horizontal: 5),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                          color: Colors.white, borderRadius: BorderRadius.circular(11), border: Border.all(color: statusColor(p.status), width: 2)),
+                      child: Text('${p.rank}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: statusColor(p.status))),
+                    ),
+                  ),
+              ]),
+            ),
+          ),
+        ),
+    ];
 
-  @override
-  State<_PatrolMap> createState() => _PatrolMapState();
-}
-
-class _PatrolMapState extends State<_PatrolMap> {
-  final controller = MapController();
-
-  List<LatLng> get _focus =>
-      widget.focus ?? [for (final p in widget.points) p.at, for (final r in widget.rings) ...r];
-
-  /// 지도가 준비된 뒤 화면을 맞춘다. initialCameraFit으로 맞추면 웹에서 처음 타일을 안 받아 회색으로 남았다 (2026-10-05)
-  void _fit() {
-    final f = _focus;
-    if (f.length >= 2) {
-      controller.fitCamera(CameraFit.coordinates(coordinates: f, padding: const EdgeInsets.all(36), maxZoom: 16.5));
-    } else if (f.length == 1) {
-      controller.move(f.first, 16);
-    }
-  }
-
-  @override
-  void didUpdateWidget(covariant _PatrolMap old) {
-    super.didUpdateWidget(old);
-    // 대피 상황이 바뀌거나 점 개수가 바뀌면 다시 맞춘다 (10초 갱신마다 움직이지 않게 개수로만 본다)
-    if (old.focus?.length != widget.focus?.length || old.points.length != widget.points.length) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => mounted ? _fit() : null);
-    }
-  }
-
-  @override
-  Widget build(BuildContext c) {
-    final points = widget.points, rings = widget.rings, selected = widget.selected, onTap = widget.onTap;
-    return Card(
-        clipBehavior: Clip.antiAlias,
-        child: SizedBox(
-            height: 320,
-            child: FlutterMap(
-                mapController: controller,
-                options: MapOptions(
-                    initialCenter: const LatLng(35.987, 129.552),
-                    initialZoom: 14.5,
-                    onMapReady: _fit),
-                children: [
-                  _tiles(),
-                  if (rings.isNotEmpty)
-                    PolygonLayer(polygons: [
-                      for (final r in rings)
-                        Polygon(points: r, color: Colors.red.withValues(alpha: .12), borderColor: Colors.red.shade700, borderStrokeWidth: 2),
-                    ]),
-                  MarkerLayer(markers: [
-                    for (final p in points)
-                      Marker(
-                          point: p.at,
-                          width: p.id == selected ? 40 : 30,
-                          height: p.id == selected ? 40 : 30,
-                          child: GestureDetector(
-                              onTap: () => onTap(p.id),
-                              child: Tooltip(
-                                  message: p.kind != null
-                                      ? '${p.label} · ${kindKo[p.kind]}${p.detail?.isNotEmpty ?? false ? ' (${p.detail})' : ''}'
-                                      : '${p.rank != null ? '${p.rank}순위 ' : ''}${p.label} · ${statusKo[p.status] ?? '대피 대상'}',
-                                  child: Container(
-                                      alignment: Alignment.center,
-                                      decoration: BoxDecoration(
-                                          color: p.kind != null ? kindColor[p.kind] : statusColor(p.status),
-                                          shape: BoxShape.circle,
-                                          border: Border.all(color: Colors.white, width: p.id == selected ? 3 : 2),
-                                          boxShadow: const [BoxShadow(blurRadius: 3, color: Colors.black38)]),
-                                      child: p.kind != null
-                                          ? Icon(kindIcon[p.kind], color: Colors.white, size: 18)
-                                          : Text('${p.rank ?? '-'}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)))))),
-                  ]),
-                  _osm,
-                ])));
-  }
-}
+/// 지도 사람 아이콘 모양: 대피 대상(kind 없음)은 사람, 등록 가구는 장애인·어르신·사람
+IconData personIcon(VulnerableKind? kind) => switch (kind) {
+      VulnerableKind.disabled => Icons.accessible_rounded,
+      VulnerableKind.elderlyAlone => Icons.elderly_rounded,
+      _ => Icons.person_rounded,
+    };
 
 /// 우선순위 근거: 서버 priority_reasons(B13 — 상태·장애·거리 또는 기다린 시간)를 그대로 잇는다. 없으면(예전 서버) 상태만
 String priorityReason(Map<String, dynamic> t) {
