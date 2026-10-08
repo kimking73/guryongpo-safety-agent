@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart' hide Path;
@@ -12,7 +13,12 @@ import 'services/app_config.dart';
 import 'services/demo_mode.dart';
 import 'services/geocoding_service.dart';
 import 'models/domain_models.dart';
-import 'prototype_safety_screens.dart';
+import 'dashboard_cards.dart';
+import 'ui/tokens.dart';
+import 'ui/widgets.dart';
+
+void _openLandslideMap() => launchUrl(Uri.parse(
+    'https://sansatai.forest.go.kr/mhms_pub/mhms/lndsInfo/lndsMapViewPage.do'));
 
 const demoTime = '시연 기준 시각 · 가상 시나리오 당일 14:00';
 const guryongpo = LatLng(35.9910, 129.5530);
@@ -251,6 +257,9 @@ class DisasterDashboard extends StatefulWidget {
     this.liveTop,
     this.liveBottom,
     this.routeExtras,
+    this.fullScreen = false,
+    this.onFullScreenChanged,
+    this.routeSummary,
   });
 
   final bool routeActive;
@@ -282,6 +291,11 @@ class DisasterDashboard extends StatefulWidget {
   final Widget? liveTop, liveBottom;
   /// 경로 패널에 붙일 것 (출발 위치·길찾기·이동 중 안내)
   final Widget? routeExtras;
+  /// 지도 전체화면 (디자인: 지도 카드의 '전체화면' 버튼 · 대피 중 응답 · AI 경로 카드)
+  final bool fullScreen;
+  final ValueChanged<bool>? onFullScreenChanged;
+  /// 지도 카드 아래 2줄 경로 요약 (출발지·이동 수단·목적지·시간)
+  final Widget? routeSummary;
 
   @override
   State<DisasterDashboard> createState() => _DisasterDashboardState();
@@ -296,6 +310,8 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
   double mapZoom = 13;
   bool zoomUpdateScheduled = false;
   final MapController mapController = MapController();
+  /// 카드 ↔ 전체화면을 오갈 때 지도(FlutterMap)를 다시 만들지 않고 옮긴다
+  final GlobalKey _mapKey = GlobalKey();
   Map<String, String> savedProfile = {};
   List<SavedPlace> savedPlaces = [];
   String? fittedRouteKey;
@@ -584,75 +600,9 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
     final legendTitle = compositeView || legendParts.isEmpty
         ? '지도 범례'
         : '${legendParts.join('·')} 범례';
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        Row(
-          children: [
-            const Expanded(
-              child: Text(
-                '대시보드',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-              ),
-            ),
-            IconButton(
-              tooltip: '프로필 설정',
-              onPressed: () => context.push('/profile'),
-              icon: const Icon(Icons.tune),
-            ),
-          ],
-        ),
-        SegmentedButton<_DashboardMode>(
-          segments: const [
-            ButtonSegment(
-              value: _DashboardMode.emergency,
-              icon: Icon(Icons.dashboard_outlined),
-              label: Text('긴급 재난 종합'),
-            ),
-            ButtonSegment(
-              value: _DashboardMode.facilities,
-              icon: Icon(Icons.directions_walk),
-              label: Text('대피소·의료시설 경로'),
-            ),
-          ],
-          selected: {dashboardMode},
-          onSelectionChanged: (selection) => setDashboardMode(selection.first),
-        ),
-        const SizedBox(height: 12),
-        if (!routeMode) ...[
-          if (widget.demo) ...[
-            const _DemoBanner(),
-            const SizedBox(height: 10),
-            const PrototypeFeatureLinks(),
-          ] else if (widget.liveTop != null)
-            widget.liveTop!,
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            children: widget.demo
-                ? [
-                    _riskCard(context, demoHazards[0]),
-                    _riskCard(context, demoHazards[1]),
-                    _riskCard(context, demoHazards[2]),
-                    _riskCard(context, demoHazards[3]),
-                  ]
-                : widget.riskItems.isEmpty
-                    ? [_liveRiskCard(context, null)]
-                    : [for (final i in widget.riskItems) _liveRiskCard(context, i)],
-          ),
-          const SizedBox(height: 12),
-          _emergencyLayerControls(visible),
-          const SizedBox(height: 8),
-        ] else ...[
-          _integratedRoutePanel(context),
-          const SizedBox(height: 8),
-        ],
-        SizedBox(
-          height: 390,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(14),
-            child: FlutterMap(
+    final full = widget.fullScreen;
+    final map = FlutterMap(
+              key: _mapKey,
               mapController: mapController,
               options: mapOptions,
               children: [
@@ -879,15 +829,17 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                     ),
                   ],
                 ),
+                if (full)
                 mapLegendButton(context,
+                    top: 150,
                     routeMode: routeMode,
                     visible: visible,
                     hasRoute: route != null,
                     hasSea: (route?.seaPoints.length ?? 0) > 1),
-                if (!routeMode)
+                if (!routeMode && full)
                   Positioned(
                     left: 8,
-                    top: 8,
+                    top: 150,
                     child: Card(
                       child: Padding(
                         padding: const EdgeInsets.all(9),
@@ -930,12 +882,13 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                     ),
                   ),
                 if (!routeMode &&
+                    full &&
                     !compositeView &&
                     (visible.contains(HazardKind.flood) ||
                         visible.contains(HazardKind.wind)))
                   Positioned(
                     right: 8,
-                    bottom: 8,
+                    bottom: 90,
                     child: Card(
                       child: ConstrainedBox(
                         constraints: const BoxConstraints(maxWidth: 230),
@@ -1003,46 +956,189 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                     ),
                   ),
               ],
-            ),
-          ),
-        ),
-        if (!routeMode) ...[
-          if (visible.contains(HazardKind.slide))
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.terrain, color: Colors.brown),
-                title: const Text('산림청 산사태 위험지도(2025)'),
-                subtitle: const Text(
-                    '공식 산사태 위험지도 열기 · 위험등급 1~5(1등급이 가장 높음). 앱 지도에는 판정된 산사태 위험 영역만 표시합니다.'),
-                trailing: const Icon(Icons.open_in_new),
-                onTap: () => launchUrl(Uri.parse(
-                  'https://sansatai.forest.go.kr/mhms_pub/mhms/lndsInfo/lndsMapViewPage.do',
-                )),
+            );
+    final riskCards = Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      children: widget.demo
+          ? [for (final h in demoHazards) _riskCard(context, h)]
+          : widget.riskItems.isEmpty
+              ? [_liveRiskCard(context, null)]
+              : [for (final i in widget.riskItems) _liveRiskCard(context, i)],
+    );
+    if (full) return _fullScreen(context, map, routeMode, visible);
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
+      children: [
+        const ScreenTitle('대시보드'),
+        if (widget.demo) ...[
+          const _DemoBanner(),
+          const SizedBox(height: 14),
+        ] else if (widget.liveTop != null) ...[
+          widget.liveTop!,
+          const SizedBox(height: 10),
+        ],
+        DisasterMessageCard(demo: widget.demo),
+        const SizedBox(height: 14),
+        WarningsCard(demo: widget.demo, riskJudgment: riskCards),
+        const SizedBox(height: 14),
+        AppCard(
+          radius: Ds.rCardLg,
+          padding: const EdgeInsets.all(12),
+          child: Column(children: [
+            SizedBox(
+              height: 210,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: Stack(children: [
+                  Positioned.fill(child: map),
+                  Positioned(
+                    top: 10,
+                    right: 10,
+                    child: Container(
+                      decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(Ds.pill),
+                          boxShadow: const [
+                            BoxShadow(color: Color(0x2614225B), blurRadius: 8, offset: Offset(0, 2))
+                          ]),
+                      child: PillChip('전체화면',
+                          icon: FontAwesomeIcons.expand,
+                          height: 44,
+                          fontSize: 15,
+                          onTap: () => widget.onFullScreenChanged?.call(true)),
+                    ),
+                  ),
+                ]),
               ),
             ),
-          const SizedBox(height: 14),
-          const Text(
-            '등록 장소 위험 요약',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            if (widget.routeSummary != null) widget.routeSummary!,
+            if (routeMode && widget.routeError != null) ...[
+              const SizedBox(height: 8),
+              const ErrorLine('경로를 불러오지 못했어요. 전체화면에서 다시 찾을 수 있어요.'),
+            ],
+          ]),
+        ),
+        const SizedBox(height: 24),
+        WeatherSection(demo: widget.demo),
+        const SizedBox(height: 24),
+        Text('내 장소 위험', style: dsText(21, weight: FontWeight.w800)),
+        const SizedBox(height: 10),
+        _SavedPlaceSummary(
+          currentLocation: widget.currentLocation,
+          onFocus: (p) {
+            widget.onFullScreenChanged?.call(true);
+            WidgetsBinding.instance.addPostFrameCallback((_) => focusOn(p));
+          },
+          levelAt: widget.demo ? null : _levelAt,
+        ),
+        _personalizedMockAlerts(context),
+        const SizedBox(height: 16),
+        AppCard(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: ExpansionTile(
+            shape: const Border(),
+            collapsedShape: const Border(),
+            title: Text(widget.demo ? '실시간 정보 자세히' : '실시간 관측·예보 자세히',
+                style: dsText(17, weight: FontWeight.w800)),
+            subtitle: Text(
+                widget.demo ? '각 지점은 서로 다른 측정 위치의 가상 자료' : '기상청 · 포항 디지털 트윈',
+                style: dsText(13, color: Ds.muted)),
+            childrenPadding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+            children: [
+              if (widget.demo) const _RealtimeCards() else if (widget.liveBottom != null) widget.liveBottom!,
+            ],
           ),
-          _SavedPlaceSummary(
-            currentLocation: widget.currentLocation,
-            onFocus: (p) => focusOn(p),
-            levelAt: widget.demo ? null : _levelAt,
-          ),
-          _personalizedMockAlerts(context),
-          const SizedBox(height: 8),
-          Text(
-            widget.demo
-                ? '실시간 정보 · 각 지점은 서로 다른 측정 위치의 가상 자료'
-                : '실시간 관측·예보 · 기상청·포항 디지털 트윈',
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-          if (widget.demo) const _RealtimeCards() else if (widget.liveBottom != null) widget.liveBottom!,
-          const SizedBox(height: 20),
-        ],
+        ),
       ],
     );
+  }
+
+  /// 지도 전체화면: 위 '출발 → 도착' 바·보기 전환·지도 층, 아래 경로 패널 (경로 종류·목적지 변경·길찾기·이동 중 안내)
+  Widget _fullScreen(BuildContext context, Widget map, bool routeMode, Set<HazardKind> visible) {
+    final dest = widget.selectedDestination;
+    final route = widget.safetyRoute;
+    const shadow = [BoxShadow(color: Color(0x2614225B), blurRadius: 14, offset: Offset(0, 4))];
+    return Stack(children: [
+      Positioned.fill(child: map),
+      Positioned(
+        left: 16,
+        right: 16,
+        top: 12,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 6, 6, 6),
+            decoration: BoxDecoration(
+                color: Colors.white, borderRadius: BorderRadius.circular(Ds.pill), boxShadow: shadow),
+            child: Row(children: [
+              Text(routeMode ? '출발' : '지도', style: dsText(16, weight: FontWeight.w800)),
+              if (routeMode) ...[
+                const SizedBox(width: 6),
+                const FaIcon(FontAwesomeIcons.arrowRight, size: 14, color: Ds.navy),
+                const SizedBox(width: 6),
+                Expanded(
+                    child: Text(dest?.name ?? '목적지를 고르세요',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: dsText(16, weight: FontWeight.w800))),
+              ] else
+                const Spacer(),
+              CircleButton(FontAwesomeIcons.compress,
+                  size: 44,
+                  bg: Ds.navy,
+                  fg: Colors.white,
+                  tooltip: '전체화면 닫기',
+                  onPressed: () => widget.onFullScreenChanged?.call(false)),
+            ]),
+          ),
+          const SizedBox(height: 8),
+          HScroll(fade: false, children: [
+            Container(
+              decoration:
+                  BoxDecoration(borderRadius: BorderRadius.circular(Ds.pill), boxShadow: shadow),
+              child: SegmentedPill<_DashboardMode>(
+                expand: false,
+                bg: Colors.white,
+                items: const [
+                  (_DashboardMode.emergency, '긴급 재난 종합', FontAwesomeIcons.layerGroup),
+                  (_DashboardMode.facilities, '대피소·의료시설 경로', FontAwesomeIcons.personWalking),
+                ],
+                value: dashboardMode,
+                onChanged: setDashboardMode,
+              ),
+            ),
+          ]),
+          if (!routeMode) ...[
+            const SizedBox(height: 8),
+            HScroll(fade: false, children: [_emergencyLayerControls(visible)]),
+          ],
+        ]),
+      ),
+      Positioned(
+        left: 16,
+        right: 16,
+        bottom: 16,
+        child: routeMode
+            ? ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * .42),
+                child: SingleChildScrollView(child: _integratedRoutePanel(context)))
+            : Row(children: [
+                if (visible.contains(HazardKind.slide))
+                  const PillChip('산림청 산사태 위험지도',
+                      icon: FontAwesomeIcons.mountain, height: 44, onTap: _openLandslideMap),
+                const Spacer(),
+                if (route != null)
+                  Container(
+                    height: 52,
+                    padding: const EdgeInsets.symmetric(horizontal: 18),
+                    decoration: BoxDecoration(
+                        color: Ds.navy, borderRadius: BorderRadius.circular(Ds.pill), boxShadow: shadow),
+                    alignment: Alignment.center,
+                    child: Text('${route.estimatedMinutes}분',
+                        style: dsText(20, weight: FontWeight.w800, color: Colors.white)),
+                  ),
+              ]),
+      ),
+    ]);
   }
 
   Widget _riskCard(BuildContext context, DemoHazard h) => SizedBox(
@@ -1391,10 +1487,11 @@ Widget mapLegendButton(BuildContext context,
         required Set<HazardKind> visible,
         required bool hasRoute,
         required bool hasSea,
-        bool showPlaces = true}) =>
+        bool showPlaces = true,
+        double top = 8}) =>
     Positioned(
       right: 8,
-      top: 8,
+      top: top,
       child: FilledButton.tonalIcon(
         style: FilledButton.styleFrom(
             visualDensity: VisualDensity.compact,

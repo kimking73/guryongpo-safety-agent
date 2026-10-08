@@ -35,7 +35,7 @@ class CardTitle extends StatelessWidget {
   const CardTitle(this.title, {super.key, this.trailing, this.icon, this.size = 19});
   final String title;
   final Widget? trailing;
-  final IconData? icon;
+  final FaIconData? icon;
   final double size;
 
   @override
@@ -59,7 +59,7 @@ class IconCircle extends StatelessWidget {
       this.iconSize = 15,
       this.bg = Ds.soft,
       this.fg = Ds.navy});
-  final IconData icon;
+  final FaIconData icon;
   final double size, iconSize;
   final Color bg, fg;
 
@@ -87,7 +87,7 @@ class PillButton extends StatelessWidget {
       this.expand = true});
   final String label;
   final VoidCallback? onPressed;
-  final IconData? icon;
+  final FaIconData? icon;
   final double height, fontSize;
   final Color bg, fg;
   final bool outlined, expand;
@@ -141,7 +141,7 @@ class PillChip extends StatelessWidget {
       this.fontSize = 14,
       this.onTap});
   final String label;
-  final IconData? icon;
+  final FaIconData? icon;
   final Color bg, fg;
   final Color? iconBg;
   final double height, fontSize;
@@ -187,7 +187,7 @@ class SegmentedPill<T> extends StatelessWidget {
       this.height = 38,
       this.expand = true,
       this.bg = Ds.bg});
-  final List<(T, String?, IconData?)> items; // (값, 글자, 아이콘)
+  final List<(T, String?, FaIconData?)> items; // (값, 글자, 아이콘)
   final T value;
   final ValueChanged<T> onChanged;
   final double height;
@@ -196,7 +196,7 @@ class SegmentedPill<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Widget seg((T, String?, IconData?) it) {
+    Widget seg((T, String?, FaIconData?) it) {
       final on = it.$1 == value;
       final fg = on ? Colors.white : Ds.sub;
       return Material(
@@ -301,7 +301,7 @@ class SettingRow extends StatelessWidget {
       this.onTap,
       this.subtitleColor = Ds.muted,
       this.highlight = false});
-  final IconData icon;
+  final FaIconData icon;
   final String title;
   final String? subtitle;
   final Widget? trailing;
@@ -385,7 +385,7 @@ class CircleButton extends StatelessWidget {
       this.tooltip,
       this.shadow = false,
       this.iconSize});
-  final IconData icon;
+  final FaIconData icon;
   final VoidCallback? onPressed;
   final double size;
   final double? iconSize;

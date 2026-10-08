@@ -137,7 +137,8 @@ ThemeData buildAppTheme() {
                 fontFamily: Ds.fontFamily, fontWeight: FontWeight.w700))),
     chipTheme: base.chipTheme.copyWith(
         backgroundColor: Colors.white,
-        selectedColor: Ds.navy,
+        selectedColor: Ds.soft,
+        checkmarkColor: Ds.navy,
         side: const BorderSide(color: Ds.line),
         shape: pillShape,
         labelStyle: const TextStyle(

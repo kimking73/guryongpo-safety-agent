@@ -8,12 +8,12 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'disaster_center.dart';
 import 'main.dart';
-import 'origin_picker.dart';
 import 'patrol_screens.dart';
 import 'services/app_config.dart';
 import 'services/demo_mode.dart';
 import 'services/demo_live_api.dart';
 import 'services/live_api.dart';
+import 'ui/tokens.dart';
 
 /// 실측 데이터 화면 (2026-10-05). 시연 모드를 끄면(기본) 이 화면들이, 켜면 disaster_center.dart·prototype_safety_screens.dart의
 /// 가상 시나리오 화면이 나온다. 자료가 없으면 지어내지 않고 "자료 없음 · 사유"를 보여 준다.
@@ -190,7 +190,6 @@ class LiveDashboardTop extends ConsumerWidget {
   Widget build(BuildContext c, WidgetRef ref) {
     final d = ref.watch(liveDashboardProvider).valueOrNull;
     final point = Map<String, dynamic>.from(d?['point_risk'] as Map? ?? const {});
-    final headline = d?['headline'] as Map?;
     final demo = d?['demo'] as Map?;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       if (ref.watch(serverDemoProvider))
@@ -208,26 +207,11 @@ class LiveDashboardTop extends ConsumerWidget {
               ? '실시간 정보를 불러오는 중…'
               : '${demo != null ? '시연 데이터' : '실시간 데이터'} · 위험 판정 ${hhmm(point['computed_at'])} 기준'
                   '${point['data_stale'] == true ? ' · 판정이 30분 넘게 갱신되지 않았습니다' : ''}',
-          style: Theme.of(c).textTheme.bodySmall),
+          style: dsText(13, color: Ds.muted)),
       if (ref.watch(liveDashboardProvider).hasError)
         Text('실시간 정보를 불러오지 못했습니다: ${liveError(ref.watch(liveDashboardProvider).error!)}',
             style: TextStyle(color: Theme.of(c).colorScheme.error)),
-      const SizedBox(height: 6),
-      Wrap(spacing: 8, runSpacing: 6, children: [
-        const OriginChip(),
-        ActionChip(avatar: const Icon(Icons.alt_route, size: 18), label: const Text('길찾기'), onPressed: () => c.push('/route-search')),
-        ActionChip(avatar: const Icon(Icons.chat_bubble_outline, size: 18), label: const Text('AI 채팅'), onPressed: () => c.go('/ai')),
-        ActionChip(
-            avatar: const Icon(Icons.refresh, size: 18),
-            label: const Text('새로고침'),
-            onPressed: () {
-              ref.invalidate(liveDashboardProvider);
-              ref.invalidate(riskAreasProvider);
-              ref.invalidate(floodGridProvider);
-              ref.invalidate(windPointsProvider);
-            }),
-      ]),
-      if (headline != null) ...[const SizedBox(height: 8), _Headline(headline: Map<String, dynamic>.from(headline))],
+      // 출발 위치·길찾기·바로가기는 지도 카드 아래 경로 요약과 전체화면으로, 판정 머리글은 '경보·주의보' 카드로 옮김 (디자인 개편)
     ]);
   }
 }
@@ -282,38 +266,6 @@ class LiveAlertHubRoute extends ConsumerWidget {
         alerts: ref.watch(alertCenterProvider).reversed.toList(),
         areas: ref.watch(riskAreasProvider).valueOrNull ?? const [],
       );
-}
-
-class _Headline extends ConsumerWidget {
-  const _Headline({required this.headline});
-  final Map<String, dynamic> headline;
-  @override
-  Widget build(BuildContext c, WidgetRef ref) {
-    final risk = Map<String, dynamic>.from(headline['risk'] as Map? ?? const {});
-    final action = headline['action'];
-    return Card(
-        color: levelColor(risk['level'] as String?),
-        child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(children: [
-              const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 32),
-              const SizedBox(width: 10),
-              Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('${headline['title']}',
-                    style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
-                if (risk['reason'] != null) Text('${risk['reason']}', style: const TextStyle(color: Colors.white)),
-              ])),
-              if (action == 'open_route')
-                TextButton(
-                    onPressed: () => startRouteToShelter(ref, nearestShelterId(ref)),
-                    child: const Text('대피 경로', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)))
-              else if (action == 'open_chat')
-                TextButton(
-                    onPressed: () => c.go('/ai'),
-                    child: const Text('행동 요령', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
-            ])));
-  }
 }
 
 class LiveWidgetCard extends StatelessWidget {

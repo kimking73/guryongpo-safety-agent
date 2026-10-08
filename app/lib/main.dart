@@ -1,8 +1,9 @@
-import 'profile_refresh.dart';
 import 'services/account_sync.dart';
 import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -30,6 +31,11 @@ import 'services/demo_notifications.dart';
 import 'services/prototype_safety_store.dart';
 import 'services/fcm_notification_service.dart';
 import 'services/evacuation_response_queue.dart';
+import 'ai_chat.dart';
+import 'app_shell.dart';
+import 'profile_screen.dart';
+import 'dashboard_cards.dart';
+import 'evac_sos.dart';
 import 'ui/tokens.dart';
 import 'ui/widgets.dart';
 
@@ -325,9 +331,10 @@ Future<void> _recordPrototypeEvacuationResponse(
       }
       startRouteToShelter(ref, nearestShelterId(ref),
           routeType: RouteType.nearest);
+      ref.read(dashMapFull.notifier).state = true;
       appRouter.go('/');
     } else if (status == EvacuationResponseStatus.needHelp) {
-      _showResponseMessage('방재단에게 도움을 요청했습니다');
+      appRouter.push('/sos');
     }
   } catch (error) {
     _showResponseMessage('응답을 저장하지 못했습니다. $error');
@@ -361,7 +368,7 @@ Future<void> _afterResponseSuccess(
     WidgetRef ref, String alertId, String status) async {
   _setAlertResponse(ref, alertId, status);
   if (status == 'need_help') {
-    _showResponseMessage('방재단에게 도움을 요청했습니다');
+    appRouter.push('/sos');
   } else if (status == 'evacuating') {
     try {
       await ref.read(facilitiesProvider.future);
@@ -370,6 +377,7 @@ Future<void> _afterResponseSuccess(
     }
     startRouteToShelter(ref, nearestShelterId(ref),
         routeType: RouteType.nearest);
+    ref.read(dashMapFull.notifier).state = true;
     appRouter.go('/');
   }
 }
@@ -606,6 +614,7 @@ class GuryongpoApp extends StatelessWidget {
         scaffoldMessengerKey: rootMessengerKey,
         debugShowCheckedModeBanner: false,
         theme: buildAppTheme(),
+        builder: (_, child) => PhoneFrame(child: child),
         routerConfig: appRouter,
       );
 }
@@ -628,13 +637,17 @@ final appRouter = GoRouter(
       }
       if (AuthService.signedIn && loc == '/login') {
         final from = state.uri.queryParameters['from'];
-        return from != null && from.startsWith('/') && !from.startsWith('/login') && !from.startsWith('/boot') ? from : '/';
+        final next = from != null && from.startsWith('/') && !from.startsWith('/login') && !from.startsWith('/boot') ? from : '/';
+        // 처음 로그인하면 온보딩 2단계(내 정보, 건너뛰기 가능)를 한 번 보여 준다
+        if (!Onboarding.done) return Uri(path: '/setup', queryParameters: {'from': next}).toString();
+        return next;
       }
       return null;
     },
     routes: [
   GoRoute(path: '/boot', builder: (_, s) => BootScreen(from: s.uri.queryParameters['from'])),
-  GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),   // 로그인 후 이동은 위 redirect 가 한다
+  GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
+  GoRoute(path: '/setup', builder: (_, s) => SetupScreen(from: s.uri.queryParameters['from'])),   // 로그인 후 이동은 위 redirect 가 한다
   GoRoute(path: '/location', builder: (_, __) => const InitialSetupScreen()),
   ShellRoute(builder: (_, __, child) => Shell(child: child), routes: [
     GoRoute(path: '/', builder: (_, __) => const Dashboard()),
@@ -642,6 +655,7 @@ final appRouter = GoRouter(
     GoRoute(path: '/alerts', builder: (_, __) => const AlertsScreen()),
     GoRoute(path: '/ai', builder: (_, __) => const AiScreen()),
     GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
+    GoRoute(path: '/profile/edit', builder: (_, __) => const ProfileEditScreen()),
     GoRoute(
         path: '/typhoon',
         builder: (_, s) => DemoSwitch(
@@ -680,6 +694,10 @@ final appRouter = GoRouter(
             demo: DemoPatrolScope(child: LiveDelegatedHouseholdScreen()),
             live: LiveDelegatedHouseholdScreen())),
     GoRoute(
+        path: '/team',
+        builder: (_, __) => const DemoSwitch(
+            demo: DemoPatrolScope(child: LiveResponderScreen()), live: LiveResponderScreen())),
+    GoRoute(
         path: '/responder',
         // 시연 모드: 실제 방재단 화면 + 앱 안 시연 가구 12곳 (DemoLiveApi)
         builder: (_, __) => const DemoSwitch(
@@ -689,6 +707,7 @@ final appRouter = GoRouter(
         builder: (_, __) => const DemoSwitch(
             demo: SeaRouteDemoScreen(), live: LiveSeaRouteScreen())),
   ]),
+  GoRoute(path: '/sos', builder: (_, __) => const SosScreen()),
   GoRoute(
       path: '/facility/:id',
       builder: (_, s) => FacilityScreen(id: s.pathParameters['id']!)),
@@ -724,6 +743,7 @@ class _BootScreenState extends ConsumerState<BootScreen> {
 
   Future<void> start() async {
     final a = await AuthService().initialize();
+    await Onboarding.load();
     // 프로필에서 '직접 지정'한 출발 위치가 있으면 그 위치로 시작 (계정 정보를 내려받은 뒤)
     await restoreSavedOrigin(ref);
     await AccountService().clearLegacyMode();
@@ -741,16 +761,21 @@ class _BootScreenState extends ConsumerState<BootScreen> {
 
   @override
   Widget build(BuildContext c) => Scaffold(
+          backgroundColor: Ds.navy,
           body: Center(
               child: Column(mainAxisSize: MainAxisSize.min, children: [
-        const Icon(Icons.health_and_safety_outlined, size: 72),
-        const SizedBox(height: 16),
-        const Text('구룡포 안전',
-            style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        Text(text),
+        const IconCircle(FontAwesomeIcons.shield,
+            size: 88, iconSize: 38, bg: Colors.white, fg: Ds.navy),
         const SizedBox(height: 20),
-        const CircularProgressIndicator()
+        Text('구룡포 안전',
+            style: dsText(30, weight: FontWeight.w800, color: Colors.white)),
+        const SizedBox(height: 4),
+        Text('구룡포 재난 지킴이',
+            style: dsText(17, color: Colors.white.withValues(alpha: .8))),
+        const SizedBox(height: 12),
+        Text(text, style: dsText(14, color: Colors.white.withValues(alpha: .8))),
+        const SizedBox(height: 24),
+        const CircularProgressIndicator(color: Colors.white)
       ])));
 }
 
@@ -787,118 +812,32 @@ class LocationScreen extends StatelessWidget {
                   ]))));
 }
 
-class Shell extends ConsumerStatefulWidget {
-  const Shell({super.key, required this.child});
-  final Widget child;
+/// 대시보드 지도 전체화면 (대피 중 응답·AI 경로 카드가 켠다)
+final dashMapFull = StateProvider<bool>((_) => false);
 
-  @override
-  ConsumerState<Shell> createState() => _ShellState();
+/// 대피 확인 모달을 띄운다 — 전체 화면 덮개(남색 반투명) + 가운데 카드, 접근성 설정이면 화면 점멸·진동
+Future<void> showEvacuationAlert(BuildContext context, AlertItem alert,
+        {Future<void> Function(String status)? onRespond}) =>
+    showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      barrierLabel: '대피 상태 확인',
+      barrierColor: const Color(0x9914225B),
+      pageBuilder: (_, __, ___) =>
+          EvacuationAlertDialog(alert: alert, onRespond: onRespond),
+    );
+
+/// 위쪽 '대피 현황' 칩: 응답할 경보가 있으면 그 경보, 시연이면 시연 경보, 아니면 안내
+Future<void> openEvacuationCheck(BuildContext context, WidgetRef ref) async {
+  final alerts = ref.read(alertCenterProvider);
+  final alert = alerts.reversed.where((a) => a.responseRequired).firstOrNull;
+  if (alert != null) return showEvacuationAlert(context, alert);
+  if (ref.read(showDemoProvider)) return showEvacuationAlertDemo(context, ref);
+  showDsToast(context, '지금 응답할 대피 경보가 없어요');
 }
 
-class _ShellState extends ConsumerState<Shell> {
-  bool _showingEvacuationAlert = false;
-  final Set<String> _shownAlertIds = {};
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _presentNextAlert());
-  }
-
-  void _scheduleAlertCheck() {
-    WidgetsBinding.instance.addPostFrameCallback((_) => _presentNextAlert());
-  }
-
-  Future<void> _presentNextAlert() async {
-    if (!mounted || _showingEvacuationAlert) return;
-    final pending = ref.read(pendingResponseIdsProvider);
-    final alert = ref
-        .read(alertCenterProvider)
-        .where((item) =>
-            item.responseRequired &&
-            item.myStatus == null &&
-            !pending.contains(item.id) &&
-            !_shownAlertIds.contains(item.id))
-        .firstOrNull;
-    if (alert == null) return;
-    _showingEvacuationAlert = true;
-    _shownAlertIds.add(alert.id);
-    try {
-      await showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => EvacuationAlertDialog(alert: alert),
-      );
-    } finally {
-      _showingEvacuationAlert = false;
-      _scheduleAlertCheck();
-    }
-  }
-
-  @override
-  Widget build(BuildContext c) {
-    ref.listen<List<AlertItem>>(
-        alertCenterProvider, (_, __) => _scheduleAlertCheck());
-    ref.listen<Set<String>>(pendingResponseIdsProvider, (previous, next) {
-      for (final id in previous ?? const <String>{}) {
-        if (!next.contains(id) &&
-            ref.read(alertCenterProvider).any((item) =>
-                item.id == id &&
-                item.responseRequired &&
-                item.myStatus == null)) {
-          _shownAlertIds.remove(id);
-        }
-      }
-      _scheduleAlertCheck();
-    });
-    const nav = [
-      ('대시보드', Icons.dashboard_outlined, '/'),
-      ('태풍 정보', Icons.cyclone, '/typhoon'),
-      ('선제 경고·알림', Icons.notifications_active_outlined, '/alerts-hub'),
-      ('지원 및 복구', Icons.health_and_safety_outlined, '/support'),
-      ('프로필', Icons.person_outline, '/profile'),
-      ('AI 채팅', Icons.chat_bubble_outline, '/ai'),
-    ];
-    final wide = MediaQuery.sizeOf(c).width >= 840;
-    final destinations = nav;
-    final here = GoRouterState.of(c).uri.path;
-    final selected = destinations
-        .indexWhere((x) => x.$3 == here)
-        .clamp(0, destinations.length - 1) as int;
-    ref.watch(gpsTracker);
-    final body =
-        Column(children: [const StatusLine(), Expanded(child: widget.child)]);
-    return Scaffold(
-        appBar: wide
-            ? null
-            : AppBar(
-                title: const Text('구룡포 안전'),
-              ),
-        body: wide
-            ? Row(children: [
-                NavigationRail(
-                    selectedIndex: selected,
-                    labelType: NavigationRailLabelType.all,
-                    onDestinationSelected: (i) => c.go(destinations[i].$3),
-                    destinations: destinations
-                        .map((x) => NavigationRailDestination(
-                            icon: Icon(x.$2), label: Text(x.$1)))
-                        .toList()),
-                const VerticalDivider(width: 1),
-                Expanded(child: body)
-              ])
-            : body,
-        bottomNavigationBar: wide
-            ? null
-            : NavigationBar(
-                selectedIndex: selected,
-                onDestinationSelected: (i) => c.go(nav[i].$3),
-                destinations: nav
-                    .map((x) =>
-                        NavigationDestination(icon: Icon(x.$2), label: x.$1))
-                    .toList()));
-  }
-}
+/// 응답이 없을 때 방재단에 알리기까지 기다리는 시간 (디자인 10분)
+const evacuationResponseTimeout = Duration(minutes: 10);
 
 class EvacuationAlertDialog extends ConsumerStatefulWidget {
   const EvacuationAlertDialog({super.key, required this.alert, this.onRespond});
@@ -914,6 +853,52 @@ class EvacuationAlertDialog extends ConsumerStatefulWidget {
 
 class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
   bool _busy = false;
+  late int _left = evacuationResponseTimeout.inSeconds;
+  Timer? _countdown, _flash;
+  bool _flashOn = false;
+  int _flashTicks = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _countdown = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || _busy) return;
+      if (_left <= 1) {
+        _countdown?.cancel();
+        _respond('need_help'); // 응답이 없으면 도움 필요로 방재단에 알린다 (디자인)
+      } else {
+        setState(() => _left--);
+      }
+    });
+    final a = ref.read(prototypeSafetyProvider).accessibility;
+    if (a.screenFlash) {
+      _flash = Timer.periodic(evacuationFlashTransitionInterval, (t) {
+        if (!mounted || _flashTicks >= 60) {
+          t.cancel();
+          if (mounted) setState(() => _flashOn = false);
+          return;
+        }
+        setState(() => _flashOn = ++_flashTicks % 2 == 1);
+      });
+    }
+    if (a.strongVibration) {
+      for (var i = 0; i < evacuationHapticPulseLimit; i++) {
+        Future<void>.delayed(Duration(milliseconds: 450 * i),
+            () => HapticFeedback.vibrate().catchError((Object _) {}));
+      }
+    }
+    if (a.voicePrompts || ref.read(autoVoiceAlerts)) {
+      unawaited(DemoSpeech.instance.speak(
+          '대피 확인 경보입니다. 지금 계신 곳은 위험해요. 대피 완료, 대피 중, 도움 필요 중에서 골라 주세요.'));
+    }
+  }
+
+  @override
+  void dispose() {
+    _countdown?.cancel();
+    _flash?.cancel();
+    super.dispose();
+  }
 
   Future<void> _respond(String status) async {
     if (_busy) return;
@@ -934,143 +919,170 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
     setState(() => _busy = false);
   }
 
+  Widget _choice(String status, String title, String sub, Color circle,
+      Widget icon, {bool red = false}) {
+    final fg = red ? Colors.white : Ds.ink;
+    return Material(
+      color: red ? Ds.danger : Ds.bg,
+      borderRadius: BorderRadius.circular(38),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: _busy ? null : () => _respond(status),
+        child: SizedBox(
+          height: 76,
+          child: Row(children: [
+            const SizedBox(width: 10),
+            Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(color: circle, shape: BoxShape.circle),
+                alignment: Alignment.center,
+                child: icon),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: dsText(20, weight: FontWeight.w800, color: fg)),
+                    Text(sub,
+                        style: dsText(15, color: red ? Colors.white : Ds.sub)),
+                  ]),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
   @override
-  Widget build(BuildContext context) => AlertDialog(
-        icon: const Icon(Icons.warning_amber_rounded,
-            color: Colors.red, size: 38),
-        title: const Text('지금 당장 대피해야 합니다'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(widget.alert.title,
-                  style: const TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              Text(widget.alert.summary),
-              if (widget.alert.guide.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text(widget.alert.guide),
-              ],
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: _busy ? null : () => _respond('evacuating'),
-                  icon: const Icon(Icons.directions_run),
-                  label: const Text('대피 중'),
-                ),
-              ),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: _busy ? null : () => _respond('evacuated'),
-                  icon: const Icon(Icons.check_circle_outline),
-                  label: const Text('대피 완료'),
-                ),
-              ),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.tonalIcon(
-                  onPressed: _busy ? null : () => _respond('need_help'),
-                  icon: const Icon(Icons.support_agent),
-                  label: const Text('도움 필요'),
-                ),
-              ),
-              if (_busy)
-                const Center(
-                    child: Padding(
-                  padding: EdgeInsets.all(8),
-                  child: CircularProgressIndicator(),
-                )),
-            ],
+  Widget build(BuildContext context) {
+    final shelters = [
+      ...?ref.watch(facilitiesProvider).valueOrNull
+    ].where((f) => f.type == FacilityType.shelter);
+    final nearestId = shelters.isEmpty ? null : nearestShelterId(ref);
+    final nearest = shelters.where((f) => f.id == nearestId).firstOrNull;
+    final mm = _left ~/ 60, ss = '${_left % 60}'.padLeft(2, '0');
+    final card = Container(
+      margin: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
+      decoration: BoxDecoration(
+          color: Colors.white, borderRadius: BorderRadius.circular(30)),
+      child: SingleChildScrollView(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const IconCircle(FontAwesomeIcons.personRunning,
+              size: 68, iconSize: 30, bg: Ds.danger, fg: Colors.white),
+          const SizedBox(height: 14),
+          Text(widget.alert.title,
+              textAlign: TextAlign.center,
+              style: dsText(14, weight: FontWeight.w800, color: Ds.danger)),
+          const SizedBox(height: 6),
+          Text('지금 당장 대피해야 합니다',
+              textAlign: TextAlign.center,
+              style: dsText(25, weight: FontWeight.w800, height: 1.3, spacing: -.5)),
+          const SizedBox(height: 4),
+          Text('지금 계신 곳은 위험해요. 대피소로 이동하세요.',
+              textAlign: TextAlign.center,
+              style: dsText(16, weight: FontWeight.w700, color: Ds.sub)),
+          if (nearest != null) ...[
+            const SizedBox(height: 10),
+            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              const FaIcon(FontAwesomeIcons.houseFlag, size: 15, color: Ds.navy),
+              const SizedBox(width: 6),
+              Flexible(
+                  child: Text(
+                      '${nearest.name} · ${nearest.distanceKm.toStringAsFixed(1)}km',
+                      style: dsText(16, weight: FontWeight.w600, color: Ds.sub))),
+            ]),
+          ],
+          if (widget.alert.summary.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(widget.alert.summary,
+                textAlign: TextAlign.center,
+                maxLines: 5,
+                overflow: TextOverflow.ellipsis,
+                style: dsText(14, color: Ds.muted, height: 1.45)),
+          ],
+          if (widget.alert.guide.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(widget.alert.guide,
+                textAlign: TextAlign.center,
+                style: dsText(14, weight: FontWeight.w700, color: Ds.sub, height: 1.45)),
+          ],
+          const SizedBox(height: 14),
+          Text('지금 상태를 알려주세요', style: dsText(18, weight: FontWeight.w800)),
+          const SizedBox(height: 4),
+          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            const FaIcon(FontAwesomeIcons.stopwatch, size: 13, color: Ds.danger),
+            const SizedBox(width: 6),
+            Flexible(
+                child: Text('응답이 없으면 $mm분 $ss초 뒤 방재단에 연락해요',
+                    style: dsText(14, color: Ds.sub))),
+          ]),
+          const SizedBox(height: 14),
+          _choice('evacuated', '대피 완료', '대피소에 도착했어요', Ds.good,
+              const FaIcon(FontAwesomeIcons.check, size: 22, color: Colors.white)),
+          const SizedBox(height: 8),
+          _choice('evacuating', '대피 중', '지금 대피소로 가고 있어요', Ds.warn,
+              const FaIcon(FontAwesomeIcons.personWalking, size: 22, color: Colors.white)),
+          const SizedBox(height: 8),
+          _choice('need_help', '도움 필요', '혼자 이동하기 어려워요', Colors.white,
+              Text('SOS', style: dsText(17, weight: FontWeight.w900, color: Ds.danger)),
+              red: true),
+          if (_busy)
+            const Padding(
+                padding: EdgeInsets.all(8), child: CircularProgressIndicator()),
+        ]),
+      ),
+    );
+    return Material(
+      type: MaterialType.transparency,
+      child: Stack(children: [
+        Positioned.fill(
+          child: IgnorePointer(
+            child: AnimatedOpacity(
+              key: const ValueKey('evacuation-flash'),
+              duration: const Duration(milliseconds: 120),
+              opacity: _flashOn ? .55 : 0,
+              child: Container(
+                  decoration: BoxDecoration(
+                      color: Ds.danger,
+                      border: Border.all(color: Colors.white, width: 10))),
+            ),
           ),
         ),
-      );
+        SafeArea(child: Center(child: card)),
+      ]),
+    );
+  }
 }
 
 /// 시연: 실제 대피 확인 경보와 같은 팝업을 띄운다 (2026-10-05 사용자 요청). 응답은 서버로 보내지 않고 기기의
 /// 시연 기록(prototypeSafetyProvider)에만 남는다 — '대피 중'이면 실제처럼 가까운 대피소 경로 안내를 시작한다
 const _demoEvacuationAlert = AlertItem(
   id: prototypeEvacuationAlertId,
-  title: '[대피 확인] 호우 경보 · 현재 위치 (시연)',
+  title: '대피 필요 · 호우 경보 · 현재 위치 (시연)',
   level: 'warning',
   time: '',
   summary: '구룡포읍행정복지센터 강우량계 시간당 38.5mm · 포항 DT 4단계(경보) (시연 — 실제 경보가 아닙니다). '
-      '지금 계신 곳이 위험 영역 안입니다. 하천·해안가·비탈면 가까이 가지 말고 안전한 실내에 머무르세요. '
-      '대피를 시작하셨으면 \'대피 중\', 대피소에 도착하셨으면 \'대피 완료\', 혼자 움직이기 어려우면 \'도움 필요\'를 눌러 주세요.',
-  guide: '즉시 안전한 실내나 지정 대피소로 이동하고, 물이 고인 도로·해안가·맨홀 주변에 접근하지 마세요.',
+      '하천·해안가·비탈면 가까이 가지 마세요.',
+  guide: '물이 고인 도로·해안가·맨홀 주변에 접근하지 마세요.',
   responseRequired: true,
 );
 
-Future<void> showEvacuationAlertDemo(BuildContext context, WidgetRef ref) => showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => EvacuationAlertDialog(
-        alert: _demoEvacuationAlert,
-        onRespond: (status) async {
-          final s = EvacuationResponseStatusLabel.fromWireValue(status);
-          if (s == null) return;
-          await _recordPrototypeEvacuationResponse(ref, s);
-          _showResponseMessage('시연 응답: ${s.label} (기기에만 기록, 서버로 보내지 않음)');
-        },
-      ),
+Future<void> showEvacuationAlertDemo(BuildContext context, WidgetRef ref) =>
+    showEvacuationAlert(
+      context,
+      _demoEvacuationAlert,
+      onRespond: (status) async {
+        final s = EvacuationResponseStatusLabel.fromWireValue(status);
+        if (s == null) return;
+        await _recordPrototypeEvacuationResponse(ref, s);
+        if (s == EvacuationResponseStatus.evacuated) {
+          _showResponseMessage('대피 완료를 기록했어요 (시연 — 기기에만 기록, 서버로 보내지 않음)');
+        }
+      },
     );
-
-class StatusLine extends ConsumerWidget {
-  const StatusLine({super.key});
-  @override
-  Widget build(BuildContext c, WidgetRef ref) {
-    final isOffline = ref.watch(offline);
-    final here = ref.watch(userLocation);
-    final prototypeResponse = ref
-        .watch(prototypeSafetyProvider)
-        .responseFor(prototypeEvacuationAlertId)
-        ?.wireValue;
-    final responseStatus = ref
-        .watch(alertCenterProvider)
-        .reversed
-        .map((alert) => alert.myStatus)
-        .where((status) =>
-            status == 'evacuating' ||
-            status == 'evacuated' ||
-            status == 'need_help')
-        .firstOrNull;
-    final status = prototypeResponse ??
-        responseStatus ??
-        (ref.watch(alertEvacuationProvider)?['status'] as String?);
-    final statusLabel = switch (status) {
-      'evacuating' => '대피 중',
-      'evacuated' => '대피 완료',
-      'need_help' => '도움 필요',
-      _ => null,
-    };
-    return Material(
-        color: isOffline ? Colors.amber.shade100 : Colors.teal.shade50,
-        child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(children: [
-              Icon(isOffline ? Icons.cloud_off : Icons.cloud_done, size: 18),
-              const SizedBox(width: 8),
-              Expanded(
-                  child: Text(isOffline
-                      ? '오프라인 · 저장된 예시 정보 · 10:42'
-                      : '온라인 · ${AppConfig.dataLabel}${AppConfig.isRemote ? '' : ' · 10:42'} · ${here.fromGps ? (here.manual ? (ref.watch(originLabelProvider) ?? '지도에서 고른 위치') : 'GPS 위치') : (AppConfig.isRemote ? '구룡포 기본 위치' : '예시 위치')} 기준${!here.fromGps && ref.watch(gpsNote) != null ? ' (${ref.watch(gpsNote)})' : ''}')),
-              if (statusLabel != null) ...[
-                Chip(
-                  avatar: const Icon(Icons.directions_run, size: 16),
-                  label: Text(statusLabel),
-                  visualDensity: VisualDensity.compact,
-                ),
-                const SizedBox(width: 4),
-              ],
-              TextButton(
-                  onPressed: () =>
-                      ref.read(offline.notifier).state = !isOffline,
-                  child: Text(isOffline ? '다시 연결' : '오프라인 보기'))
-            ])));
-  }
-}
 
 class Dashboard extends ConsumerWidget {
   const Dashboard({super.key});
@@ -1113,6 +1125,9 @@ class Dashboard extends ConsumerWidget {
               onPressed: () => c.push('/route-follow')),
       ]),
       routeActive: route != null,
+      fullScreen: ref.watch(dashMapFull),
+      onFullScreenChanged: (v) => ref.read(dashMapFull.notifier).state = v,
+      routeSummary: const RouteSummaryRows(),
       facilities: facilities,
       riskAreas: ref.watch(riskAreasProvider).valueOrNull ?? const <RiskArea>[],
       // 길찾기 경로는 사용자가 정한 출발지에서 그린다
@@ -2286,252 +2301,6 @@ class AlertScreen extends ConsumerWidget {
                       onPressed: () => c.go('/ai'),
                       child: const Text('AI에게 묻기'))
                 ])));
-  }
-}
-
-class AiScreen extends ConsumerStatefulWidget {
-  const AiScreen({super.key});
-  @override
-  ConsumerState<AiScreen> createState() => _AiScreenState();
-}
-
-class _AiScreenState extends ConsumerState<AiScreen> {
-  final input = TextEditingController();
-  bool loading = false;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || ref.read(chatMessages).isNotEmpty) return;
-      ref.read(chatMessages.notifier).state = [
-        ChatMessage(
-          AppConfig.isRemote
-              ? '구룡가디언 AI입니다. 현재 위험과 대피소, 가고 싶은 곳까지의 길을 물어보세요.'
-              : '예시 AI 안내입니다. 현재 위험과 대피소에 대해 물어보세요.',
-          false,
-        )
-      ];
-    });
-  }
-
-  Future<void> send([String? q]) async {
-    final question = q ?? input.text;
-    if (question.trim().isEmpty || loading) return;
-    ref.read(chatMessages.notifier).state = [
-      ...ref.read(chatMessages),
-      ChatMessage(question, true),
-    ];
-    setState(() {
-      loading = true;
-      input.clear();
-    });
-    try {
-      final answer = await ref
-          .read(repo)
-          .ask(question, UserMode.user, ref.read(userLocation).position);
-      if (mounted) {
-        ref.read(chatMessages.notifier).state = [
-          ...ref.read(chatMessages),
-          ChatMessage(answer.text, false, answer: answer),
-        ];
-      }
-    } catch (_) {
-      if (mounted) {
-        const answer = ChatAnswer(
-          'AI 서비스에 연결하지 못했습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.',
-          isError: true,
-        );
-        ref.read(chatMessages.notifier).state = [
-          ...ref.read(chatMessages),
-          ChatMessage(answer.text, false, answer: answer),
-        ];
-      }
-    } finally {
-      if (mounted) setState(() => loading = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext c) {
-    final messages = ref.watch(chatMessages);
-    return Column(children: [
-      Padding(
-          padding: const EdgeInsets.all(12),
-          child: Text(AppConfig.isRemote
-              ? '실시간 데이터 기반 AI 답변 · 공식 재난 안내를 함께 확인하세요.'
-              : '목업 데이터 기반 답변 · 실제 재난 지시가 아닙니다.')),
-      Expanded(
-          child: ListView(padding: const EdgeInsets.all(16), children: [
-        Wrap(
-            spacing: 8,
-            children: ['가까운 대피소는 어디야?', '지금 침수 위험이 있어?', '도보로 안전하게 갈 수 있어?']
-                .map(
-                    (q) => ActionChip(label: Text(q), onPressed: () => send(q)))
-                .toList()),
-        const SizedBox(height: 14),
-        ...List.generate(messages.length, (index) {
-          final m = messages[index];
-          String? retryQuestion;
-          if (m.answer?.isError == true) {
-            for (var i = index - 1; i >= 0; i--) {
-              if (messages[i].mine) {
-                retryQuestion = messages[i].text;
-                break;
-              }
-            }
-          }
-          return Align(
-            alignment: m.mine ? Alignment.centerRight : Alignment.centerLeft,
-            child: Card(
-                child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(m.text),
-                    if (retryQuestion != null)
-                      TextButton.icon(
-                          onPressed: loading ? null : () => send(retryQuestion),
-                          icon: const Icon(Icons.refresh),
-                          label: const Text('다시 시도')),
-                    if (m.answer?.route != null)
-                      RouteButton(onPressed: () {
-                        showAiRoute(ref, m.answer!);
-                        context.go('/');
-                      }),
-                  ]),
-            )),
-          );
-        }),
-        if (loading)
-          const Padding(
-              padding: EdgeInsets.all(12),
-              child:
-                  Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2)),
-                SizedBox(width: 8),
-                Text('구룡포 정보를 확인하고 있습니다…')
-              ])),
-      ])),
-      Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(children: [
-            Expanded(
-                child: TextField(
-                    controller: input,
-                    onSubmitted: send,
-                    decoration: const InputDecoration(
-                        border: OutlineInputBorder(), hintText: '메시지 입력…'))),
-            IconButton(
-                onPressed: loading ? null : send,
-                icon: loading
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.send))
-          ]))
-    ]);
-  }
-
-  @override
-  void dispose() {
-    input.dispose();
-    super.dispose();
-  }
-}
-
-class ProfileScreen extends ConsumerWidget {
-  const ProfileScreen({super.key});
-  @override
-  Widget build(BuildContext c, WidgetRef ref) {
-    return ListView(padding: const EdgeInsets.all(16), children: [
-      Text('사용자 정보', style: Theme.of(c).textTheme.headlineSmall),
-      ProfileDetailsCard(key: ValueKey('profile-${ref.watch(profileRevision)}')),
-      const SizedBox(height: 12),
-      const ServerProfileRefresh(),
-      const SizedBox(height: 12),
-      const AccountCard(),
-      if (AppConfig.isRemote) const DemoModeSwitch(),
-      // 시연 모드면 가상 시나리오 기능 모음, 아니면 실제 서버 기능만 (2026-10-05)
-      if (ref.watch(showDemoProvider)) ...[
-        const PrototypeFeatureLinks(),
-        const DemoRoleClaimCard(),
-      ] else
-        const LiveFeatureLinks(),
-      const FcmPushSettingsCard(),
-      if (ref.watch(showDemoProvider))
-        Card(
-            child: Column(children: const [
-          ListTile(title: Text('이동수단'), subtitle: Text('도보')),
-          ListTile(title: Text('접근성'), subtitle: Text('휠체어 접근 우선 (예시)'))
-        ])),
-      Card(
-          child: Column(children: [
-        ListTile(
-            title: const Text('음성 안내 설정'),
-            subtitle: Text('언어: ${ref.watch(voiceLanguage)} · 접근성 기능')),
-        SwitchListTile(
-            value: ref.watch(autoVoiceAlerts),
-            title: const Text('재난 경고 자동 음성 재생'),
-            subtitle: const Text('기본값: 꺼짐 · 사용자가 설정한 경우에만 자동 재생'),
-            onChanged: (v) => ref.read(autoVoiceAlerts.notifier).state = v),
-        SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(value: '한국어', label: Text('한국어')),
-              ButtonSegment(value: 'English', label: Text('English'))
-            ],
-            selected: {
-              ref.watch(voiceLanguage)
-            },
-            onSelectionChanged: (v) =>
-                ref.read(voiceLanguage.notifier).state = v.first),
-        const SizedBox(height: 10),
-      ])),
-      Card(
-          child: Column(children: [
-        const ListTile(
-            title: Text('등록 장소'),
-            subtitle:
-                Text('지도에 표시하고, AI에게 "집까지", "직장까지"처럼 물을 수 있어요. 이 기기에만 저장됩니다.')),
-        for (final p
-            in ref.watch(placesProvider).valueOrNull ?? const <SavedPlace>[])
-          ListTile(
-              leading: Icon(p.type == '집'
-                  ? Icons.home
-                  : p.type == '직장'
-                      ? Icons.business
-                      : Icons.place),
-              title: Text(p.type == '기타' ? p.name : '${p.type} · ${p.name}'),
-              subtitle: Text(
-                  '${p.address.isEmpty ? '주소 없음' : p.address} · 알림 ${p.alert ? '켜짐' : '꺼짐'}'),
-              trailing: IconButton(
-                  tooltip: '삭제',
-                  icon: const Icon(Icons.delete_outline),
-                  onPressed: () async {
-                    await AccountService().removePlace(p.id);
-                    ref.invalidate(placesProvider);
-                  })),
-        ListTile(
-            leading: const Icon(Icons.add_location_alt_outlined),
-            title: const Text('장소 등록'),
-            subtitle: const Text('장소명 · 유형 · 도로명 주소 · 알림 설정'),
-            onTap: () => showModalBottomSheet<void>(
-                context: c,
-                showDragHandle: true,
-                isScrollControlled: true,
-                builder: (_) => const _PlaceForm())),
-      ])),
-      OptionalDetailsCard(key: ValueKey('optional-${ref.watch(profileRevision)}')),
-      Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          child: Text('앱 버전 ${AppConfig.build}',
-              textAlign: TextAlign.center, style: const TextStyle(fontSize: 11, color: Colors.black45))),
-    ]);
   }
 }
 

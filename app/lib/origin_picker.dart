@@ -61,6 +61,11 @@ Future<String?> _useGps(WidgetRef ref) async {
   }
 }
 
+/// 대시보드 출발지 선택(집·현위치·내 장소)에서 쓰는 공개 함수
+Future<void> chooseOrigin(WidgetRef ref, LatLng p, String label, {String address = ''}) =>
+    _choose(ref, p, label, address: address);
+Future<String?> useGpsOrigin(WidgetRef ref) => _useGps(ref);
+
 /// 지금 출발 위치를 보여 주고, 누르면 바꾸는 칩
 class OriginChip extends ConsumerWidget {
   const OriginChip({super.key});
