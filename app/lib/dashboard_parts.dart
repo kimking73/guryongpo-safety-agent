@@ -13,6 +13,7 @@ import 'services/demo_mode.dart';
 import 'services/voice_service.dart';
 import 'services/account_service.dart';
 import 'services/location_service.dart';
+import 'ui/gk_theme.dart';
 
 Color riskColor(String level) => switch (level) {
       '주의' || 'advisory' || 'watch' => const Color(0xffe7ac16),
@@ -161,11 +162,14 @@ class RouteButton extends StatelessWidget {
   final VoidCallback onPressed;
   @override
   Widget build(BuildContext context) => Padding(
-      padding: const EdgeInsets.only(top: 6),
-      child: FilledButton.tonalIcon(
-          onPressed: onPressed,
-          icon: const Icon(Icons.map_outlined),
-          label: const Text('지도에서 경로 보기')));
+      padding: const EdgeInsets.only(top: 10),
+      child: SizedBox(
+        width: double.infinity,
+        child: FilledButton.icon(
+            onPressed: onPressed,
+            icon: const Icon(Icons.directions_rounded, size: 24),
+            label: const Text('지도에서 경로 보기')),
+      ));
 }
 
 class ServiceMap extends StatelessWidget {
@@ -539,7 +543,7 @@ class _RouteMapState extends ConsumerState<RouteMap> with WidgetsBindingObserver
                         FilledButton.tonal(
                             style: FilledButton.styleFrom(
                                 backgroundColor: routeType == t
-                                    ? const Color(0xff16803c)
+                                    ? GK.navy
                                     : Colors.grey.shade100,
                                 foregroundColor: routeType == t
                                     ? Colors.white
@@ -918,7 +922,7 @@ class _SupportCardState extends State<SupportCard> {
       for (final entry in selected)
         Card(
             child: ExpansionTile(
-          leading: Icon(entry.$1, color: const Color(0xff16803c)),
+          leading: Icon(entry.$1, color: GK.navy),
           title: Text(entry.$2),
           subtitle: const Text('목업 안내 · 실제 자격과 지원 범위는 기관 확인 필요'),
           children: [
@@ -937,7 +941,7 @@ class _Detail extends StatelessWidget {
   Widget build(BuildContext c) => Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Icon(Icons.check_circle, color: Color(0xff16803c), size: 17),
+        const Icon(Icons.check_circle, color: GK.navy, size: 17),
         const SizedBox(width: 7),
         Expanded(
             child: Text('$title\n$text', style: const TextStyle(fontSize: 12)))
@@ -1121,7 +1125,7 @@ class _FloodChatLoader extends StatelessWidget {
   @override
   Widget build(BuildContext c) =>
       Row(mainAxisSize: MainAxisSize.min, children: [
-        const Icon(Icons.waves, color: Color(0xff16803c)),
+        const Icon(Icons.waves, color: GK.navy),
         const SizedBox(width: 7),
         const Text('침수 정보를 분석하고 있습니다.', style: TextStyle(fontSize: 12)),
         const SizedBox(width: 7),
@@ -1129,6 +1133,6 @@ class _FloodChatLoader extends StatelessWidget {
             width: 18,
             height: 18,
             child: CircularProgressIndicator(
-                strokeWidth: 2, color: Color(0xff16803c)))
+                strokeWidth: 2, color: GK.navy))
       ]);
 }

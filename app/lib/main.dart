@@ -1,4 +1,6 @@
 import 'profile_refresh.dart';
+import 'ui/gk_theme.dart';
+import 'ui/gk_widgets.dart';
 import 'services/account_sync.dart';
 import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -17,6 +19,7 @@ import 'services/account_service.dart';
 import 'services/location_service.dart';
 import 'services/geocoding_service.dart';
 import 'services/demo_speech.dart';
+import 'services/voice_service.dart';
 import 'dashboard_parts.dart';
 import 'disaster_center.dart';
 import 'live_screens.dart';
@@ -603,10 +606,8 @@ class GuryongpoApp extends StatelessWidget {
         title: '구룡포 안전',
         scaffoldMessengerKey: rootMessengerKey,
         debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-            useMaterial3: true,
-            colorScheme:
-                ColorScheme.fromSeed(seedColor: const Color(0xff006b73))),
+        // 디자인 = web-prototype (2026-10-08) — ui/gk_theme.dart
+        theme: gkTheme(),
         routerConfig: appRouter,
       );
 }
@@ -852,52 +853,39 @@ class _ShellState extends ConsumerState<Shell> {
       }
       _scheduleAlertCheck();
     });
-    const nav = [
-      ('대시보드', Icons.dashboard_outlined, '/'),
-      ('태풍 정보', Icons.cyclone, '/typhoon'),
-      ('선제 경고·알림', Icons.notifications_active_outlined, '/alerts-hub'),
-      ('지원 및 복구', Icons.health_and_safety_outlined, '/support'),
-      ('프로필', Icons.person_outline, '/profile'),
-      ('AI 채팅', Icons.chat_bubble_outline, '/ai'),
+    // 메뉴 4개 = web-prototype (2026-10-08 사용자 결정): 대시보드 · AI 대화창 · 사용자 · (방재단·관리자·시연) 방재단 현황.
+    // 태풍 정보·선제 경고·지원 및 복구는 메뉴에서 빠지고 대시보드 카드·알림 종으로 간다 (주소는 그대로)
+    final role = '${ref.watch(meProvider).valueOrNull?['role'] ?? ''}';
+    final crew = isPatrolRole(role) || ref.watch(showDemoProvider);
+    final List<GkNavItem> nav = [
+      ('대시보드', Icons.grid_view_rounded, '/'),
+      ('AI 대화창', Icons.chat_bubble_rounded, '/ai'),
+      if (crew) ('방재단 현황', Icons.shield_rounded, '/responder'),
+      ('사용자', Icons.person_rounded, '/profile'),
     ];
     final wide = MediaQuery.sizeOf(c).width >= 840;
-    final destinations = nav;
     final here = GoRouterState.of(c).uri.path;
-    final selected = destinations
-        .indexWhere((x) => x.$3 == here)
-        .clamp(0, destinations.length - 1) as int;
+    final found = nav.indexWhere((x) => x.$3 == here);
     ref.watch(gpsTracker);
-    final body =
-        Column(children: [const StatusLine(), Expanded(child: widget.child)]);
+    final body = Column(children: [StatusLine(compact119: !wide), Expanded(child: widget.child)]);
+    if (wide) {
+      return Scaffold(
+          body: Row(children: [
+        GkSideNav(
+            items: nav,
+            selected: found,
+            onTap: (i) => c.go(nav[i].$3),
+            bottom: GkEmergencyCall(onCall: () => call119(c))),
+        Expanded(child: body),
+      ]));
+    }
     return Scaffold(
-        appBar: wide
-            ? null
-            : AppBar(
-                title: const Text('구룡포 안전'),
-              ),
-        body: wide
-            ? Row(children: [
-                NavigationRail(
-                    selectedIndex: selected,
-                    labelType: NavigationRailLabelType.all,
-                    onDestinationSelected: (i) => c.go(destinations[i].$3),
-                    destinations: destinations
-                        .map((x) => NavigationRailDestination(
-                            icon: Icon(x.$2), label: Text(x.$1)))
-                        .toList()),
-                const VerticalDivider(width: 1),
-                Expanded(child: body)
-              ])
-            : body,
-        bottomNavigationBar: wide
-            ? null
-            : NavigationBar(
-                selectedIndex: selected,
-                onDestinationSelected: (i) => c.go(nav[i].$3),
-                destinations: nav
-                    .map((x) =>
-                        NavigationDestination(icon: Icon(x.$2), label: x.$1))
-                    .toList()));
+        body: SafeArea(bottom: false, child: body),
+        bottomNavigationBar: NavigationBar(
+            selectedIndex: found < 0 ? 0 : found,
+            indicatorColor: found < 0 ? Colors.transparent : null,
+            onDestinationSelected: (i) => c.go(nav[i].$3),
+            destinations: [for (final x in nav) NavigationDestination(icon: Icon(x.$2), label: x.$1)]));
   }
 }
 
@@ -935,56 +923,74 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
     setState(() => _busy = false);
   }
 
+  /// 상태 버튼 (프로토타입 EvacModal: 원 아이콘 + 이름·설명, 도움 필요만 빨강)
+  Widget _choice(String status, IconData icon, String label, String desc, Color color) {
+    final help = status == 'need_help';
+    return Material(
+      color: help ? GK.red : GK.bg,
+      shape: const StadiumBorder(),
+      child: InkWell(
+        customBorder: const StadiumBorder(),
+        onTap: _busy ? null : () => _respond(status),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 10, 22, 10),
+          child: Row(children: [
+            GkCircleIcon(icon, size: 52, bg: help ? Colors.white : color, fg: help ? GK.red : Colors.white),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(label, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: help ? Colors.white : GK.ink)),
+                Text(desc, style: TextStyle(fontSize: 15, color: help ? Colors.white.withValues(alpha: .9) : GK.muted)),
+              ]),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  /// 대피 확인 경보 = web-prototype EvacModal (2026-10-08)
   @override
-  Widget build(BuildContext context) => AlertDialog(
-        icon: const Icon(Icons.warning_amber_rounded,
-            color: Colors.red, size: 38),
-        title: const Text('지금 당장 대피해야 합니다'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(widget.alert.title,
-                  style: const TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              Text(widget.alert.summary),
+  Widget build(BuildContext context) => Dialog(
+        insetPadding: const EdgeInsets.all(20),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(36)),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 640),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(26, 28, 26, 24),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              const Center(child: GkCircleIcon(Icons.directions_run_rounded, size: 72, bg: GK.red, fg: Colors.white)),
+              const SizedBox(height: 10),
+              Text('대피 필요 · ${widget.alert.title}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: GK.red)),
+              const SizedBox(height: 6),
+              const Text('지금 당장 대피해야 합니다',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800, height: 1.25, letterSpacing: -0.6)),
+              const SizedBox(height: 12),
+              Text(widget.alert.summary, style: const TextStyle(fontSize: 16, height: 1.5, color: GK.ink)),
               if (widget.alert.guide.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text(widget.alert.guide),
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(color: GK.orangeTint, borderRadius: BorderRadius.circular(20)),
+                  child: Text(widget.alert.guide,
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: GK.orangeInk, height: 1.45)),
+                ),
               ],
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: _busy ? null : () => _respond('evacuating'),
-                  icon: const Icon(Icons.directions_run),
-                  label: const Text('대피 중'),
-                ),
-              ),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: _busy ? null : () => _respond('evacuated'),
-                  icon: const Icon(Icons.check_circle_outline),
-                  label: const Text('대피 완료'),
-                ),
-              ),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.tonalIcon(
-                  onPressed: _busy ? null : () => _respond('need_help'),
-                  icon: const Icon(Icons.support_agent),
-                  label: const Text('도움 필요'),
-                ),
-              ),
+              const SizedBox(height: 18),
+              const Text('지금 상태를 알려주세요',
+                  textAlign: TextAlign.center, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 12),
+              _choice('evacuated', Icons.check_circle_rounded, '대피 완료', '대피소에 도착했어요', GK.green),
+              const SizedBox(height: 10),
+              _choice('evacuating', Icons.directions_walk_rounded, '대피 중', '지금 대피소로 가고 있어요', GK.orange),
+              const SizedBox(height: 10),
+              _choice('need_help', Icons.sos_rounded, '도움 필요', '혼자 이동하기 어려워요', GK.red),
               if (_busy)
-                const Center(
-                    child: Padding(
-                  padding: EdgeInsets.all(8),
-                  child: CircularProgressIndicator(),
-                )),
-            ],
+                const Center(child: Padding(padding: EdgeInsets.all(10), child: CircularProgressIndicator())),
+            ]),
           ),
         ),
       );
@@ -1018,19 +1024,21 @@ Future<void> showEvacuationAlertDemo(BuildContext context, WidgetRef ref) => sho
       ),
     );
 
+/// 위쪽 머리줄 = web-prototype ResidentHeader (2026-10-08): 온라인/오프라인 배지 · 현재 위치 알약 · 대피 상태/대피 필요 칩 ·
+/// 알림 종(선제 경고·알림 화면) · 좁은 화면이면 119
 class StatusLine extends ConsumerWidget {
-  const StatusLine({super.key});
+  const StatusLine({super.key, this.compact119 = false});
+  final bool compact119;
   @override
   Widget build(BuildContext c, WidgetRef ref) {
     final isOffline = ref.watch(offline);
     final here = ref.watch(userLocation);
+    final alerts = ref.watch(alertCenterProvider);
     final prototypeResponse = ref
         .watch(prototypeSafetyProvider)
         .responseFor(prototypeEvacuationAlertId)
         ?.wireValue;
-    final responseStatus = ref
-        .watch(alertCenterProvider)
-        .reversed
+    final responseStatus = alerts.reversed
         .map((alert) => alert.myStatus)
         .where((status) =>
             status == 'evacuating' ||
@@ -1040,36 +1048,90 @@ class StatusLine extends ConsumerWidget {
     final status = prototypeResponse ??
         responseStatus ??
         (ref.watch(alertEvacuationProvider)?['status'] as String?);
-    final statusLabel = switch (status) {
-      'evacuating' => '대피 중',
-      'evacuated' => '대피 완료',
-      'need_help' => '도움 필요',
-      _ => null,
+    // 대피 상태 칩 (프로토타입 EVAC 색)
+    final (statusLabel, statusIcon, statusColor) = switch (status) {
+      'evacuating' => ('대피 중', Icons.directions_walk_rounded, GK.orange),
+      'evacuated' => ('대피 완료', Icons.check_circle_rounded, GK.green),
+      'need_help' => ('도움 필요', Icons.sos_rounded, GK.red),
+      _ => (null, null, null),
     };
-    return Material(
-        color: isOffline ? Colors.amber.shade100 : Colors.teal.shade50,
-        child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(children: [
-              Icon(isOffline ? Icons.cloud_off : Icons.cloud_done, size: 18),
-              const SizedBox(width: 8),
-              Expanded(
-                  child: Text(isOffline
-                      ? '오프라인 · 저장된 예시 정보 · 10:42'
-                      : '온라인 · ${AppConfig.dataLabel}${AppConfig.isRemote ? '' : ' · 10:42'} · ${here.fromGps ? (here.manual ? (ref.watch(originLabelProvider) ?? '지도에서 고른 위치') : 'GPS 위치') : (AppConfig.isRemote ? '구룡포 기본 위치' : '예시 위치')} 기준${!here.fromGps && ref.watch(gpsNote) != null ? ' (${ref.watch(gpsNote)})' : ''}')),
-              if (statusLabel != null) ...[
-                Chip(
-                  avatar: const Icon(Icons.directions_run, size: 16),
-                  label: Text(statusLabel),
-                  visualDensity: VisualDensity.compact,
+    final pending = ref.watch(pendingResponseIdsProvider);
+    final needEvac = alerts
+        .where((a) => a.responseRequired && a.myStatus == null && !pending.contains(a.id))
+        .firstOrNull;
+    final unread = alerts.where((a) => !a.read).length;
+    final place = here.fromGps
+        ? (here.manual ? (ref.watch(originLabelProvider) ?? '지도에서 고른 위치') : 'GPS 위치')
+        : (AppConfig.isRemote ? '구룡포 기본 위치' : '예시 위치');
+    final note = !here.fromGps && ref.watch(gpsNote) != null ? ' (${ref.watch(gpsNote)})' : '';
+    final narrow = MediaQuery.sizeOf(c).width < 600;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(narrow ? 12 : 40, narrow ? 10 : 20, narrow ? 12 : 40, narrow ? 6 : 12),
+      child: Row(children: [
+        Expanded(
+          child: Wrap(spacing: 10, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+            // 온라인 배지 — 누르면 오프라인 화면 보기 (예전 '오프라인 보기'·'다시 연결')
+            Tooltip(
+              message: isOffline ? '다시 연결' : '오프라인 보기 · ${AppConfig.dataLabel}',
+              child: GkPill(isOffline ? '오프라인' : '온라인',
+                  icon: isOffline ? Icons.cloud_off_rounded : Icons.cloud_done_rounded,
+                  bg: isOffline ? GK.orange : Colors.white,
+                  fg: isOffline ? Colors.white : GK.navy,
+                  onTap: () => ref.read(offline.notifier).state = !isOffline),
+            ),
+            Container(
+              padding: const EdgeInsets.fromLTRB(10, 8, 16, 8),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(999)),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.my_location_rounded, size: 22, color: GK.navy),
+                const SizedBox(width: 6),
+                if (!narrow) ...[
+                  const Text('현재 위치', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: GK.navy)),
+                  const SizedBox(width: 6),
+                ],
+                Flexible(
+                  child: Text(isOffline ? '저장된 예시 정보 · 10:42' : '$place 기준$note',
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: GK.muted)),
                 ),
-                const SizedBox(width: 4),
-              ],
-              TextButton(
-                  onPressed: () =>
-                      ref.read(offline.notifier).state = !isOffline,
-                  child: Text(isOffline ? '다시 연결' : '오프라인 보기'))
-            ])));
+              ]),
+            ),
+          ]),
+        ),
+        const SizedBox(width: 10),
+        if (needEvac != null)
+          GkPill('대피 필요',
+              icon: Icons.directions_run_rounded,
+              filled: true,
+              bg: GK.red,
+              big: !narrow,
+              onTap: () => showDialog<void>(
+                  context: c, barrierDismissible: false, builder: (_) => EvacuationAlertDialog(alert: needEvac)))
+        else if (statusLabel != null)
+          GkPill(statusLabel, icon: statusIcon, filled: true, bg: statusColor, big: !narrow),
+        const SizedBox(width: 10),
+        if (compact119) ...[GkEmergencyCall(compact: true, onCall: () => call119(c)), const SizedBox(width: 8)],
+        // 알림 종 → 선제 경고·알림 화면 (메뉴에서 빠짐, 2026-10-08)
+        Tooltip(
+          message: '받은 알림',
+          child: Badge(
+            isLabelVisible: unread > 0,
+            label: Text('$unread'),
+            backgroundColor: GK.navy,
+            child: Material(
+              color: Colors.white,
+              shape: const CircleBorder(),
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: () => c.push('/alerts-hub'),
+                child: const SizedBox(
+                    width: 52, height: 52, child: Icon(Icons.notifications_rounded, color: GK.navy, size: 28)),
+              ),
+            ),
+          ),
+        ),
+      ]),
+    );
   }
 }
 
@@ -1101,17 +1163,27 @@ class Dashboard extends ConsumerWidget {
       simulated: serverDemo,
       liveTop: demo ? null : const LiveDashboardTop(),
       liveBottom: demo ? null : const LiveRealtimeSection(),
-      routeExtras: Wrap(spacing: 8, runSpacing: 4, children: [
+      // 디자인 = web-prototype (2026-10-08): 재난문자·경보 카드와 제목 아래 판정 시각
+      warnings: liveWidgetItems(live, 'warnings'),
+      messages: liveWidgetAvailable(live, 'disaster_messages') ? liveWidgetItems(live, 'disaster_messages') : null,
+      messagesReason: liveWidgetReason(live, 'disaster_messages'),
+      headline: live?['headline'] == null ? null : Map<String, dynamic>.from(live!['headline'] as Map),
+      statusText: demo ? '가상 시연 데이터' : liveStatusText(live),
+      updatedText: live == null ? null : '${hhmm(live['updated_at'])} 갱신',
+      onRefresh: demo
+          ? null
+          : () {
+              ref.invalidate(liveDashboardProvider);
+              ref.invalidate(riskAreasProvider);
+              ref.invalidate(floodGridProvider);
+              ref.invalidate(windPointsProvider);
+            },
+      routeExtras: Wrap(spacing: 8, runSpacing: 8, children: [
         if (route != customRouteId) const OriginChip(),
-        ActionChip(
-            avatar: const Icon(Icons.alt_route, size: 18),
-            label: Text(route == customRouteId ? '길찾기 다시' : '길찾기 (주소로)'),
-            onPressed: () => c.push('/route-search')),
+        GkPill(route == customRouteId ? '길찾기 다시' : '주소로 길찾기',
+            icon: Icons.alt_route_rounded, big: true, onTap: () => c.push('/route-search')),
         if (route != null && !demo)
-          ActionChip(
-              avatar: const Icon(Icons.navigation_outlined, size: 18),
-              label: const Text('이동 중 안내'),
-              onPressed: () => c.push('/route-follow')),
+          GkPill('이동 중 안내', icon: Icons.navigation_rounded, big: true, onTap: () => c.push('/route-follow')),
       ]),
       routeActive: route != null,
       facilities: facilities,
@@ -1763,7 +1835,7 @@ class _MapCardState extends ConsumerState<MapCard> {
                   child: FilledButton.icon(
                       style: FilledButton.styleFrom(
                           backgroundColor:
-                              active ? const Color(0xff16803c) : Colors.white,
+                              active ? GK.navy : Colors.white,
                           foregroundColor:
                               active ? Colors.white : Colors.black87),
                       onPressed: () {
@@ -2290,6 +2362,8 @@ class AlertScreen extends ConsumerWidget {
   }
 }
 
+/// AI 대화창 = web-prototype Chat (2026-10-08): 모리 얼굴 + 흰 말풍선 · 내 말풍선 남색 · 내 정보에 맞춘 추천 질문 ·
+/// 알약 입력창 + 마이크(음성 질문, 서버 /api/voice) + 보내기
 class AiScreen extends ConsumerStatefulWidget {
   const AiScreen({super.key});
   @override
@@ -2298,7 +2372,10 @@ class AiScreen extends ConsumerStatefulWidget {
 
 class _AiScreenState extends ConsumerState<AiScreen> {
   final input = TextEditingController();
-  bool loading = false;
+  final scroll = ScrollController();
+  bool loading = false, recording = false;
+  VoiceRecorder? recorder;
+  bool walkingImpaired = false, hasJob = false;
 
   @override
   void initState() {
@@ -2308,230 +2385,395 @@ class _AiScreenState extends ConsumerState<AiScreen> {
       ref.read(chatMessages.notifier).state = [
         ChatMessage(
           AppConfig.isRemote
-              ? '구룡가디언 AI입니다. 현재 위험과 대피소, 가고 싶은 곳까지의 길을 물어보세요.'
+              ? '안녕하세요, 구룡가디언 AI 모리예요. 지금 위험, 가까운 대피소, 가고 싶은 곳까지의 안전한 길을 물어보세요.'
               : '예시 AI 안내입니다. 현재 위험과 대피소에 대해 물어보세요.',
           false,
         )
       ];
     });
+    _loadProfile();
+  }
+
+  Future<void> _loadProfile() async {
+    final walking = await AccountService().walkingImpaired();
+    final o = await AccountService().optionalProfile();
+    if (mounted) {
+      setState(() {
+        walkingImpaired = walking;
+        hasJob = (o['jobs'] ?? '').isNotEmpty || (o['직업'] ?? '').isNotEmpty;
+      });
+    }
+  }
+
+  void _scrollToEnd() => WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (scroll.hasClients) {
+          scroll.animateTo(scroll.position.maxScrollExtent,
+              duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+        }
+      });
+
+  void _add(List<ChatMessage> m) {
+    ref.read(chatMessages.notifier).state = [...ref.read(chatMessages), ...m];
+    _scrollToEnd();
   }
 
   Future<void> send([String? q]) async {
     final question = q ?? input.text;
     if (question.trim().isEmpty || loading) return;
-    ref.read(chatMessages.notifier).state = [
-      ...ref.read(chatMessages),
-      ChatMessage(question, true),
-    ];
+    _add([ChatMessage(question, true)]);
     setState(() {
       loading = true;
       input.clear();
     });
     try {
-      final answer = await ref
-          .read(repo)
-          .ask(question, UserMode.user, ref.read(userLocation).position);
-      if (mounted) {
-        ref.read(chatMessages.notifier).state = [
-          ...ref.read(chatMessages),
-          ChatMessage(answer.text, false, answer: answer),
-        ];
-      }
+      final answer = await ref.read(repo).ask(question, UserMode.user, ref.read(userLocation).position);
+      if (mounted) _add([ChatMessage(answer.text, false, answer: answer)]);
     } catch (_) {
       if (mounted) {
-        const answer = ChatAnswer(
-          'AI 서비스에 연결하지 못했습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.',
-          isError: true,
-        );
-        ref.read(chatMessages.notifier).state = [
-          ...ref.read(chatMessages),
-          ChatMessage(answer.text, false, answer: answer),
-        ];
+        const answer = ChatAnswer('AI 서비스에 연결하지 못했습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.', isError: true);
+        _add([ChatMessage(answer.text, false, answer: answer)]);
       }
     } finally {
       if (mounted) setState(() => loading = false);
     }
   }
 
-  @override
-  Widget build(BuildContext c) {
-    final messages = ref.watch(chatMessages);
-    return Column(children: [
-      Padding(
-          padding: const EdgeInsets.all(12),
-          child: Text(AppConfig.isRemote
-              ? '실시간 데이터 기반 AI 답변 · 공식 재난 안내를 함께 확인하세요.'
-              : '목업 데이터 기반 답변 · 실제 재난 지시가 아닙니다.')),
-      Expanded(
-          child: ListView(padding: const EdgeInsets.all(16), children: [
-        Wrap(
-            spacing: 8,
-            children: ['가까운 대피소는 어디야?', '지금 침수 위험이 있어?', '도보로 안전하게 갈 수 있어?']
-                .map(
-                    (q) => ActionChip(label: Text(q), onPressed: () => send(q)))
-                .toList()),
-        const SizedBox(height: 14),
-        ...List.generate(messages.length, (index) {
-          final m = messages[index];
-          String? retryQuestion;
-          if (m.answer?.isError == true) {
-            for (var i = index - 1; i >= 0; i--) {
-              if (messages[i].mine) {
-                retryQuestion = messages[i].text;
-                break;
-              }
-            }
-          }
-          return Align(
-            alignment: m.mine ? Alignment.centerRight : Alignment.centerLeft,
-            child: Card(
-                child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(m.text),
-                    if (retryQuestion != null)
-                      TextButton.icon(
-                          onPressed: loading ? null : () => send(retryQuestion),
-                          icon: const Icon(Icons.refresh),
-                          label: const Text('다시 시도')),
-                    if (m.answer?.route != null)
-                      RouteButton(onPressed: () {
-                        showAiRoute(ref, m.answer!);
-                        context.go('/');
-                      }),
-                  ]),
-            )),
-          );
-        }),
-        if (loading)
-          const Padding(
-              padding: EdgeInsets.all(12),
-              child:
-                  Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2)),
-                SizedBox(width: 8),
-                Text('구룡포 정보를 확인하고 있습니다…')
-              ])),
-      ])),
-      Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(children: [
-            Expanded(
-                child: TextField(
-                    controller: input,
-                    onSubmitted: send,
-                    decoration: const InputDecoration(
-                        border: OutlineInputBorder(), hintText: '메시지 입력…'))),
-            IconButton(
-                onPressed: loading ? null : send,
-                icon: loading
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.send))
-          ]))
+  /// 마이크: 누르면 녹음, 다시 누르면(또는 28초) 서버로 보내 받아쓴 질문·답을 보여 주고 답 음성을 재생 (대시보드 AiPanel과 같은 흐름)
+  Future<void> toggleMic() async {
+    if (loading) return;
+    if (recording) return finishVoice();
+    await VoicePlayer.instance.stop();
+    recorder ??= VoiceRecorder();
+    final ok = await recorder!.start(onLimit: finishVoice);
+    if (!mounted) return;
+    if (!ok) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('마이크 권한이 필요합니다. 브라우저·기기 설정에서 허용해 주세요.')));
+      return;
+    }
+    setState(() => recording = true);
+  }
+
+  Future<void> finishVoice() async {
+    if (!recording) return;
+    setState(() {
+      recording = false;
+      loading = true;
+    });
+    final wav = await recorder!.stop();
+    if (wav == null) {
+      if (mounted) {
+        setState(() => loading = false);
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('녹음이 너무 짧습니다. 버튼을 누르고 말씀한 뒤 다시 눌러 주세요.')));
+      }
+      return;
+    }
+    ChatAnswer? answer;
+    try {
+      final v = await ref.read(repo).askVoice(wav, UserMode.user, ref.read(userLocation).position);
+      answer = v.answer;
+      if (mounted) _add([ChatMessage('🎤 ${v.transcript}', true), ChatMessage(v.answer.text, false, answer: v.answer)]);
+    } catch (e) {
+      if (mounted) _add([ChatMessage(e is RemoteError ? e.message : '음성 질문을 처리하지 못했습니다. 다시 시도해 주세요.', false)]);
+    }
+    if (mounted) setState(() => loading = false);
+    if (answer?.audio != null) {
+      try {
+        await VoicePlayer.instance.play(answer!.audio!);
+      } catch (_) {}
+    }
+  }
+
+  List<String> get suggestions => [
+        walkingImpaired ? '오르막 없이 갈 수 있는 대피소 알려줘' : '가까운 대피소는 어디야?',
+        '지금 침수 위험이 있어?',
+        if (hasJob) '재난 후 내가 받을 수 있는 보험이 있는지 알려줘' else '도보로 안전하게 갈 수 있어?',
+        '대피할 때 뭘 해야 해?',
+      ];
+
+  Widget _avatar() => Container(
+        width: 56,
+        height: 56,
+        decoration: BoxDecoration(
+            shape: BoxShape.circle, color: Colors.white, border: Border.all(color: GK.navy, width: 3)),
+        clipBehavior: Clip.antiAlias,
+        child: Image.asset('assets/mori-face.png',
+            fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.smart_toy_rounded, color: GK.navy)),
+      );
+
+  Widget _bubble(ChatMessage m, {String? retryQuestion, bool showAvatar = true}) {
+    final narrow = MediaQuery.sizeOf(context).width < 600;
+    final body = Container(
+      constraints: BoxConstraints(maxWidth: narrow ? 320 : 560),
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
+      decoration: BoxDecoration(
+        color: m.mine ? GK.navy : Colors.white,
+        borderRadius: m.mine
+            ? const BorderRadius.only(
+                topLeft: Radius.circular(28), topRight: Radius.circular(8), bottomLeft: Radius.circular(28), bottomRight: Radius.circular(28))
+            : const BorderRadius.only(
+                topLeft: Radius.circular(8), topRight: Radius.circular(28), bottomLeft: Radius.circular(28), bottomRight: Radius.circular(28)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(m.text,
+            style: TextStyle(fontSize: narrow ? 17 : 19, height: 1.55, color: m.mine ? Colors.white : GK.ink)),
+        if (retryQuestion != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: GkPill('다시 시도', icon: Icons.refresh_rounded, onTap: loading ? null : () => send(retryQuestion)),
+          ),
+        if (m.answer?.route != null)
+          RouteButton(onPressed: () {
+            showAiRoute(ref, m.answer!);
+            context.go('/');
+          }),
+      ]),
+    );
+    if (m.mine) return Align(alignment: Alignment.centerRight, child: body);
+    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (showAvatar) _avatar() else const SizedBox(width: 56),
+      const SizedBox(width: 12),
+      Flexible(child: body),
     ]);
   }
 
   @override
+  Widget build(BuildContext c) {
+    final messages = ref.watch(chatMessages);
+    final narrow = MediaQuery.sizeOf(c).width < 600;
+    final pad = gkPagePadding(c);
+    return Align(
+      alignment: Alignment.topLeft,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 1100),
+        child: Column(children: [
+          Expanded(
+            child: ListView(controller: scroll, padding: pad.copyWith(bottom: 16), children: [
+              GkPageTitle('AI 대화창',
+                  subtitle: AppConfig.isRemote
+                      ? '실시간 데이터 기반 답변 · 공식 재난 안내를 함께 확인하세요'
+                      : '목업 데이터 기반 답변 · 실제 재난 지시가 아닙니다'),
+              const SizedBox(height: 8),
+              for (var index = 0; index < messages.length; index++)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 14),
+                  child: _bubble(messages[index],
+                      showAvatar: index == 0 || messages[index - 1].mine,
+                      retryQuestion: messages[index].answer?.isError == true
+                          ? messages.sublist(0, index).lastWhere((x) => x.mine, orElse: () => const ChatMessage('', true)).text
+                          : null),
+                ),
+              if (loading)
+                _bubble(ChatMessage(recording ? '듣고 있어요…' : '구룡포 정보를 확인하고 있습니다…', false),
+                    showAvatar: messages.isEmpty || messages.last.mine),
+            ]),
+          ),
+          Padding(
+            padding: EdgeInsets.fromLTRB(pad.left, 4, pad.right, narrow ? 12 : 24),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Row(children: [
+                Icon(Icons.auto_awesome_rounded, size: 22, color: GK.navy),
+                SizedBox(width: 8),
+                Text('내 정보에 맞춘 추천 질문', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: GK.muted)),
+              ]),
+              const SizedBox(height: 10),
+              Wrap(spacing: 10, runSpacing: 10, children: [
+                for (final q in suggestions)
+                  OutlinedButton(
+                      onPressed: loading ? null : () => send(q),
+                      style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                          textStyle: const TextStyle(fontFamily: GK.font, fontSize: 16, fontWeight: FontWeight.w600)),
+                      child: Text(q)),
+              ]),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.fromLTRB(24, 8, 8, 8),
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(999), boxShadow: GK.shadow),
+                child: Row(children: [
+                  Expanded(
+                    child: recording
+                        ? const Row(children: [
+                            Icon(Icons.graphic_eq_rounded, color: GK.red, size: 30),
+                            SizedBox(width: 10),
+                            Expanded(
+                                child: Text('듣고 있어요… 말씀이 끝나면 중지를 누르세요',
+                                    overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 18, color: GK.muted))),
+                          ])
+                        : TextField(
+                            controller: input,
+                            onSubmitted: send,
+                            style: TextStyle(fontSize: narrow ? 17 : 20),
+                            decoration: const InputDecoration(
+                                hintText: '무엇이든 물어보세요',
+                                filled: false,
+                                border: InputBorder.none,
+                                enabledBorder: InputBorder.none,
+                                focusedBorder: InputBorder.none,
+                                contentPadding: EdgeInsets.symmetric(vertical: 12)),
+                          ),
+                  ),
+                  if (recording)
+                    GkPill('중지', icon: Icons.stop_circle_rounded, filled: true, bg: GK.red, big: true, onTap: toggleMic)
+                  else
+                    _roundButton(Icons.mic_rounded, '음성 질문', GK.tint, GK.navy, loading ? null : toggleMic),
+                  const SizedBox(width: 8),
+                  _roundButton(loading ? null : Icons.arrow_upward_rounded, '보내기', GK.navy, Colors.white,
+                      loading ? null : () => send()),
+                ]),
+              ),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _roundButton(IconData? icon, String tip, Color bg, Color fg, VoidCallback? onTap) => Tooltip(
+        message: tip,
+        child: Material(
+          color: bg,
+          shape: const CircleBorder(),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: onTap,
+            child: SizedBox(
+              width: 52,
+              height: 52,
+              child: icon == null
+                  ? const Padding(padding: EdgeInsets.all(15), child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+                  : Icon(icon, color: fg, size: 28),
+            ),
+          ),
+        ),
+      );
+
+  @override
   void dispose() {
     input.dispose();
+    scroll.dispose();
     super.dispose();
   }
 }
 
+/// 사용자 = web-prototype UserPage (2026-10-08): 왼쪽 내 정보·AI가 수집한 정보·로그인, 오른쪽 알림·내 장소·시연 모드·안전 기능
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
   @override
   Widget build(BuildContext c, WidgetRef ref) {
-    return ListView(padding: const EdgeInsets.all(16), children: [
-      Text('사용자 정보', style: Theme.of(c).textTheme.headlineSmall),
+    final demo = ref.watch(showDemoProvider);
+    final acc = ref.watch(prototypeSafetyProvider);
+    final a11y = acc.accessibility;
+    Future<void> update(AccessibilitySettings next) => acc.updateAccessibility(next);
+    const gap = SizedBox(height: 20);
+    final left = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       ProfileDetailsCard(key: ValueKey('profile-${ref.watch(profileRevision)}')),
-      const SizedBox(height: 12),
+      gap,
       const ServerProfileRefresh(),
-      const SizedBox(height: 12),
+      gap,
       const AccountCard(),
-      if (AppConfig.isRemote) const DemoModeSwitch(),
-      // 시연 모드면 가상 시나리오 기능 모음, 아니면 실제 서버 기능만 (2026-10-05)
-      if (ref.watch(showDemoProvider)) ...[
-        const PrototypeFeatureLinks(),
-        const DemoRoleClaimCard(),
-      ] else
-        const LiveFeatureLinks(),
-      const FcmPushSettingsCard(),
-      if (ref.watch(showDemoProvider))
-        Card(
-            child: Column(children: const [
-          ListTile(title: Text('이동수단'), subtitle: Text('도보')),
-          ListTile(title: Text('접근성'), subtitle: Text('휠체어 접근 우선 (예시)'))
-        ])),
-      Card(
-          child: Column(children: [
-        ListTile(
-            title: const Text('음성 안내 설정'),
-            subtitle: Text('언어: ${ref.watch(voiceLanguage)} · 접근성 기능')),
-        SwitchListTile(
-            value: ref.watch(autoVoiceAlerts),
-            title: const Text('재난 경고 자동 음성 재생'),
-            subtitle: const Text('기본값: 꺼짐 · 사용자가 설정한 경우에만 자동 재생'),
-            onChanged: (v) => ref.read(autoVoiceAlerts.notifier).state = v),
-        SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(value: '한국어', label: Text('한국어')),
-              ButtonSegment(value: 'English', label: Text('English'))
-            ],
-            selected: {
-              ref.watch(voiceLanguage)
-            },
-            onSelectionChanged: (v) =>
-                ref.read(voiceLanguage.notifier).state = v.first),
-        const SizedBox(height: 10),
-      ])),
-      Card(
-          child: Column(children: [
-        const ListTile(
-            title: Text('등록 장소'),
-            subtitle:
-                Text('지도에 표시하고, AI에게 "집까지", "직장까지"처럼 물을 수 있어요. 이 기기에만 저장됩니다.')),
-        for (final p
-            in ref.watch(placesProvider).valueOrNull ?? const <SavedPlace>[])
-          ListTile(
-              leading: Icon(p.type == '집'
-                  ? Icons.home
-                  : p.type == '직장'
-                      ? Icons.business
-                      : Icons.place),
-              title: Text(p.type == '기타' ? p.name : '${p.type} · ${p.name}'),
-              subtitle: Text(
-                  '${p.address.isEmpty ? '주소 없음' : p.address} · 알림 ${p.alert ? '켜짐' : '꺼짐'}'),
-              trailing: IconButton(
-                  tooltip: '삭제',
-                  icon: const Icon(Icons.delete_outline),
-                  onPressed: () async {
-                    await AccountService().removePlace(p.id);
-                    ref.invalidate(placesProvider);
-                  })),
-        ListTile(
-            leading: const Icon(Icons.add_location_alt_outlined),
-            title: const Text('장소 등록'),
-            subtitle: const Text('장소명 · 유형 · 도로명 주소 · 알림 설정'),
-            onTap: () => showModalBottomSheet<void>(
-                context: c,
-                showDragHandle: true,
-                isScrollControlled: true,
-                builder: (_) => const _PlaceForm())),
-      ])),
+      gap,
       OptionalDetailsCard(key: ValueKey('optional-${ref.watch(profileRevision)}')),
+    ]);
+    final right = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      GkCard(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          const Text('알림', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 6),
+          GkSwitchRow(
+              icon: Icons.volume_up_rounded,
+              label: '음성 안내 자동 재생',
+              desc: '재난 경고를 소리로 읽어 줘요 (기본 꺼짐)',
+              value: ref.watch(autoVoiceAlerts),
+              onChanged: (v) => ref.read(autoVoiceAlerts.notifier).state = v),
+          GkSwitchRow(
+              icon: Icons.vibration_rounded,
+              label: '진동 알림',
+              desc: '대피 알림이 오면 휴대폰이 반복해서 진동해요',
+              value: a11y.strongVibration,
+              onChanged: (v) => update(a11y.copyWith(strongVibration: v))),
+          GkSwitchRow(
+              icon: Icons.flash_on_rounded,
+              label: '화면 점멸',
+              desc: '대피 알림이 오면 화면이 빨갛게 깜빡여요 · 광과민성이 있으면 꺼 두세요',
+              value: a11y.screenFlash,
+              onChanged: (v) => update(a11y.copyWith(screenFlash: v))),
+          GkSwitchRow(
+              icon: Icons.hearing_rounded,
+              label: '청각 지원',
+              desc: '켜면 진동·화면 점멸·큰 글씨가 함께 켜져요',
+              value: a11y.hearingSupport,
+              onChanged: (v) => update(v
+                  ? a11y.copyWith(hearingSupport: true, strongVibration: true, screenFlash: true, largeText: true)
+                  : a11y.copyWith(hearingSupport: false))),
+          GkSwitchRow(
+              icon: Icons.visibility_rounded,
+              label: '시각 지원',
+              desc: '켜면 음성 질문 자동 재생도 함께 켜져요',
+              value: a11y.visionSupport,
+              onChanged: (v) => update(v
+                  ? a11y.copyWith(visionSupport: true, voicePrompts: true)
+                  : a11y.copyWith(visionSupport: false))),
+          const SizedBox(height: 10),
+          const FcmPushSettingsCard(),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            GkPill('음성 언어 · ${ref.watch(voiceLanguage)}',
+                icon: Icons.translate_rounded,
+                onTap: () => ref.read(voiceLanguage.notifier).state =
+                    ref.read(voiceLanguage) == '한국어' ? 'English' : '한국어'),
+            GkPill('접근성 자세히', icon: Icons.accessibility_new_rounded, onTap: () => c.push('/accessibility')),
+          ]),
+        ]),
+      ),
+      gap,
+      GkCard(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          const Text('내 장소', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 4),
+          const Text('지도에 표시하고, 위험해지면 알려 드려요. AI에게 "집까지"처럼 물을 수도 있어요. 로그인 계정에 저장돼요.',
+              style: TextStyle(fontSize: 15, color: GK.muted)),
+          const SizedBox(height: 8),
+          for (final p in ref.watch(placesProvider).valueOrNull ?? const <SavedPlace>[])
+            GkInfoRow(
+                icon: p.type == '집'
+                    ? Icons.home_rounded
+                    : p.type == '직장'
+                        ? Icons.business_rounded
+                        : Icons.bookmark_rounded,
+                label: p.type == '기타' ? '내 장소' : p.type,
+                value: '${p.name}${p.address.isEmpty ? '' : ' · ${p.address}'}',
+                trailing: IconButton(
+                    tooltip: '삭제',
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: () async {
+                      await AccountService().removePlace(p.id);
+                      ref.invalidate(placesProvider);
+                    })),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+                onPressed: () => showModalBottomSheet<void>(
+                    context: c, showDragHandle: true, isScrollControlled: true, builder: (_) => const _PlaceForm()),
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('내 장소 추가하기')),
+          ),
+        ]),
+      ),
+      gap,
+      if (AppConfig.isRemote) ...[const DemoModeSwitch(), gap],
+      // 시연 모드면 가상 시나리오 기능 모음, 아니면 실제 서버 기능만 (2026-10-05)
+      if (demo) ...[const PrototypeFeatureLinks(), gap, const DemoRoleClaimCard()] else const LiveFeatureLinks(),
+    ]);
+    return ListView(padding: gkPagePadding(c), children: [
+      const GkPageTitle('사용자'),
+      const SizedBox(height: 8),
+      GkColumns(minWidth: 460, equalHeight: false, children: [left, right]),
       Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12),
+          padding: const EdgeInsets.symmetric(vertical: 16),
           child: Text('앱 버전 ${AppConfig.build}',
-              textAlign: TextAlign.center, style: const TextStyle(fontSize: 11, color: Colors.black45))),
+              textAlign: TextAlign.center, style: const TextStyle(fontSize: 13, color: GK.grey))),
     ]);
   }
 }
@@ -2589,23 +2831,16 @@ class _FcmPushSettingsCardState extends ConsumerState<FcmPushSettingsCard> {
   }
 
   @override
-  Widget build(BuildContext context) => Card(
-        child: SwitchListTile(
-          value: enabled,
-          onChanged: loading || !AppConfig.isRemote ? null : _toggle,
-          title: const Text('재난 푸시 알림'),
-          subtitle: Text(!AppConfig.isRemote
-              ? '실제 FCM은 원격 모드 Android/iOS에서 설정할 수 있습니다.'
-              : enabled
-                  ? 'FCM 토큰을 등록했습니다. 앱을 열면 경고도 주기적으로 확인합니다.'
-                  : '켜면 기기 토큰을 등록합니다. 권한이 없어도 경고 폴링은 계속됩니다.'),
-          secondary: loading
-              ? const SizedBox.square(
-                  dimension: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.notifications_active_outlined),
-        ),
+  Widget build(BuildContext context) => GkSwitchRow(
+        icon: Icons.notifications_active_rounded,
+        label: '재난 푸시 알림',
+        desc: !AppConfig.isRemote
+            ? '실제 푸시는 원격 모드 Android/iOS에서 설정할 수 있어요'
+            : enabled
+                ? '기기를 등록했어요. 앱을 열면 경고도 주기적으로 확인해요'
+                : '켜면 기기를 등록해요. 권한이 없어도 앱을 열면 경고를 확인해요',
+        value: enabled,
+        onChanged: loading || !AppConfig.isRemote ? null : _toggle,
       );
 }
 

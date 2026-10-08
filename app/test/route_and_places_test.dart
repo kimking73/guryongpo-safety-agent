@@ -156,8 +156,8 @@ void main() {
       await t.pump(const Duration(milliseconds: 300));
     }
     expect(find.text('대피소·의료시설 경로'), findsOneWidget);
-    expect(find.text('AI 채팅'), findsWidgets);
-    await t.tap(find.text('AI 채팅').first);
+    expect(find.text('AI 대화창'), findsWidgets);
+    await t.tap(find.text('AI 대화창').first);
     for (var i = 0; i < 3; i++) {
       await t.pump(const Duration(milliseconds: 100));
     }

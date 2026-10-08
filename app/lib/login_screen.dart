@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'services/auth_service.dart';
+import 'ui/gk_theme.dart';
+import 'ui/gk_widgets.dart';
 
 /// 로그인은 선택 — 익명으로도 앱을 전부 쓸 수 있다. 연결하면 다른 기기에서도 같은 계정으로 이어 쓴다.
 final authService = Provider<AuthService>((_) => AuthService());
@@ -29,45 +31,57 @@ class _AccountCardState extends ConsumerState<AccountCard> {
     }
   }
 
+  /// 계정 카드 = web-prototype MailCard (2026-10-08)
   @override
   Widget build(BuildContext c) {
     final auth = ref.watch(authService);
     if (!AuthService.ready) {
-      return const Card(
-          child: ListTile(
-              leading: Icon(Icons.person_outline),
-              title: Text('계정'),
-              subtitle: Text('예시 데이터 모드에서는 로그인을 쓰지 않습니다.')));
+      return const GkCard(
+          child: Row(children: [
+        GkCircleIcon(Icons.person_rounded, size: 52),
+        SizedBox(width: 16),
+        Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('계정', style: TextStyle(fontSize: 21, fontWeight: FontWeight.w700)),
+          Text('예시 데이터 모드에서는 로그인을 쓰지 않습니다.', style: TextStyle(fontSize: 16, color: GK.muted)),
+        ])),
+      ]));
     }
     final a = ref.watch(accountProvider).valueOrNull ?? auth.account;
     final signedIn = a != null && !a.isAnonymous;
-    return Card(
-        child: Column(children: [
-      ListTile(
-          leading: Icon(signedIn ? Icons.verified_user_outlined : Icons.person_outline),
-          title: Text(signedIn ? (a.email ?? '로그인됨') : '로그인하지 않음'),
-          subtitle: Text(signedIn
-              ? '${a.providerLabel} 계정으로 로그인 — 다른 기기에서도 같은 정보로 이어 씁니다.'
-              : '재난 정보·지도·길찾기·AI 대화는 로그인 없이 쓸 수 있습니다. 프로필은 이 기기에만 남고 서버에 저장하지 않습니다. '
-                  '로그인하면 프로필 계정 저장, AI가 대화 내용 기억, 내 위치 맞춤 경고·푸시 알림, 대피 응답을 쓸 수 있습니다.')),
-      if (busy) const LinearProgressIndicator(),
+    return GkCard(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Row(children: [
+        GkCircleIcon(signedIn ? Icons.verified_user_rounded : Icons.mail_rounded, size: 52),
+        const SizedBox(width: 16),
+        Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(signedIn ? (a.email ?? '로그인됨') : '로그인하지 않음',
+              style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w700)),
+          Text(
+              signedIn
+                  ? '${a.providerLabel} 계정으로 로그인됨 · 다른 기기에서도 내 정보 사용'
+                  : '로그인하면 프로필 저장, AI 맞춤 안내, 내 위치 맞춤 경고·푸시, 대피 응답을 쓸 수 있어요',
+              style: const TextStyle(fontSize: 16, color: GK.muted)),
+        ])),
+        const SizedBox(width: 12),
+        if (signedIn)
+          OutlinedButton(
+              onPressed: busy ? null : () => _do(auth.signOut, '로그아웃했습니다.'), child: const Text('로그아웃'))
+        else
+          FilledButton(onPressed: busy ? null : () => c.push('/login'), child: const Text('로그인')),
+      ]),
+      if (busy) const Padding(padding: EdgeInsets.only(top: 12), child: LinearProgressIndicator()),
       if (!signedIn) ...[
-        ListTile(
-            leading: const Icon(Icons.g_mobiledata, size: 32),
-            title: const Text('Google로 계속하기'),
-            enabled: !busy,
-            onTap: () => _do(auth.signInWithGoogle, 'Google 계정으로 로그인했습니다.')),
-        ListTile(
-            leading: const Icon(Icons.mail_outline),
-            title: const Text('이메일로 로그인·가입'),
-            enabled: !busy,
-            onTap: () => c.push('/login')),
-      ] else
-        ListTile(
-            leading: const Icon(Icons.logout),
-            title: const Text('로그아웃'),
-            enabled: !busy,
-            onTap: () => _do(auth.signOut, '로그아웃했습니다. 로그인 없이 계속 쓸 수 있습니다.')),
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: GkPill('Google로 계속하기',
+              icon: Icons.g_mobiledata_rounded,
+              big: true,
+              onTap: busy ? null : () => _do(auth.signInWithGoogle, 'Google 계정으로 로그인했습니다.')),
+        ),
+      ],
     ]));
   }
 }
@@ -146,59 +160,77 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     }
   }
 
-  // 로그인 강제 화면 (2026-10-08): 로그인해야 앱을 쓴다. 뒤로 가기 없음
+  // 로그인 강제 화면 (2026-10-08): 로그인해야 앱을 쓴다. 뒤로 가기 없음. 디자인 = web-prototype 초기 화면 (가운데 큰 카드)
   @override
   Widget build(BuildContext c) => Scaffold(
-      appBar: AppBar(title: const Text('구룡가디언 로그인'), automaticallyImplyLeading: false),
-      body: ListView(padding: const EdgeInsets.all(24), children: [
-        const Icon(Icons.health_and_safety_outlined, size: 56, color: Color(0xff16803c)),
-        const SizedBox(height: 8),
-        const Text('구룡포 재난 정보·대피 경로·AI 안내를 쓰려면 로그인해 주세요.\n'
-            '프로필과 AI가 기억한 정보는 이 계정에 저장되어 다른 기기에서도 이어집니다.',
-            textAlign: TextAlign.center),
-        const SizedBox(height: 20),
-        FilledButton.icon(
-            onPressed: busy ? null : _google,
-            icon: const Icon(Icons.g_mobiledata, size: 28),
-            label: const Text('Google로 계속하기')),
-        const Padding(
-            padding: EdgeInsets.symmetric(vertical: 16),
-            child: Row(children: [
-              Expanded(child: Divider()),
-              Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: Text('또는 이메일')),
-              Expanded(child: Divider()),
-            ])),
-        SegmentedButton<bool>(
-            segments: const [
-              ButtonSegment(value: false, label: Text('로그인')),
-              ButtonSegment(value: true, label: Text('가입')),
-            ],
-            selected: {signUp},
-            onSelectionChanged: busy ? null : (v) => setState(() => signUp = v.first)),
-        const SizedBox(height: 20),
-        TextField(
-            controller: email,
-            keyboardType: TextInputType.emailAddress,
-            autofillHints: const [AutofillHints.email],
-            decoration: const InputDecoration(labelText: '이메일', border: OutlineInputBorder())),
-        const SizedBox(height: 12),
-        TextField(
-            controller: password,
-            obscureText: true,
-            autofillHints: [signUp ? AutofillHints.newPassword : AutofillHints.password],
-            onSubmitted: (_) => busy ? null : _submit(),
-            decoration: InputDecoration(
-                labelText: '비밀번호', helperText: signUp ? '6자 이상' : null, border: const OutlineInputBorder())),
-        if (error != null) ...[
-          const SizedBox(height: 12),
-          Text(error!, style: TextStyle(color: Theme.of(c).colorScheme.error)),
-        ],
-        const SizedBox(height: 20),
-        FilledButton(
-            onPressed: busy ? null : _submit,
-            child: busy
-                ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                : Text(signUp ? '가입하기' : '로그인')),
-        if (!signUp) TextButton(onPressed: busy ? null : _reset, child: const Text('비밀번호를 잊었어요')),
-      ]));
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 560),
+              child: GkCard(
+                padding: const EdgeInsets.fromLTRB(28, 32, 28, 28),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  const Center(child: GkCircleIcon(Icons.shield_rounded, size: 80, bg: GK.navy, fg: Colors.white)),
+                  const SizedBox(height: 16),
+                  const Text('구룡포 안전 비서',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 36, fontWeight: FontWeight.w800, letterSpacing: -0.8)),
+                  const SizedBox(height: 8),
+                  const Text('구룡포 재난 정보·대피 경로·AI 안내를 쓰려면 로그인해 주세요.\n'
+                      '내 정보는 이 계정에 저장되어 다른 기기에서도 이어집니다.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 17, color: GK.muted, height: 1.5)),
+                  const SizedBox(height: 24),
+                  FilledButton.icon(
+                      onPressed: busy ? null : _google,
+                      icon: const Icon(Icons.g_mobiledata_rounded, size: 30),
+                      label: const Text('Google로 계속하기')),
+                  const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 18),
+                      child: Row(children: [
+                        Expanded(child: Divider()),
+                        Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 10),
+                            child: Text('또는 이메일', style: TextStyle(color: GK.muted, fontWeight: FontWeight.w600))),
+                        Expanded(child: Divider()),
+                      ])),
+                  SegmentedButton<bool>(
+                      segments: const [
+                        ButtonSegment(value: false, label: Text('로그인')),
+                        ButtonSegment(value: true, label: Text('가입')),
+                      ],
+                      selected: {signUp},
+                      onSelectionChanged: busy ? null : (v) => setState(() => signUp = v.first)),
+                  const SizedBox(height: 18),
+                  TextField(
+                      controller: email,
+                      keyboardType: TextInputType.emailAddress,
+                      autofillHints: const [AutofillHints.email],
+                      decoration: const InputDecoration(labelText: '이메일')),
+                  const SizedBox(height: 12),
+                  TextField(
+                      controller: password,
+                      obscureText: true,
+                      autofillHints: [signUp ? AutofillHints.newPassword : AutofillHints.password],
+                      onSubmitted: (_) => busy ? null : _submit(),
+                      decoration: InputDecoration(labelText: '비밀번호', helperText: signUp ? '6자 이상' : null)),
+                  if (error != null) ...[
+                    const SizedBox(height: 12),
+                    Text(error!, style: const TextStyle(color: GK.red, fontWeight: FontWeight.w700)),
+                  ],
+                  const SizedBox(height: 20),
+                  FilledButton(
+                      onPressed: busy ? null : _submit,
+                      child: busy
+                          ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          : Text(signUp ? '가입하기' : '로그인')),
+                  if (!signUp) TextButton(onPressed: busy ? null : _reset, child: const Text('비밀번호를 잊었어요')),
+                ]),
+              ),
+            ),
+          ),
+        ),
+      ));
 }

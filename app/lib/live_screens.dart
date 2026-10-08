@@ -8,12 +8,13 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'disaster_center.dart';
 import 'main.dart';
-import 'origin_picker.dart';
 import 'patrol_screens.dart';
 import 'services/app_config.dart';
 import 'services/demo_mode.dart';
 import 'services/demo_live_api.dart';
 import 'services/live_api.dart';
+import 'ui/gk_theme.dart';
+import 'ui/gk_widgets.dart';
 
 /// 실측 데이터 화면 (2026-10-05). 시연 모드를 끄면(기본) 이 화면들이, 켜면 disaster_center.dart·prototype_safety_screens.dart의
 /// 가상 시나리오 화면이 나온다. 자료가 없으면 지어내지 않고 "자료 없음 · 사유"를 보여 준다.
@@ -97,11 +98,12 @@ class LivePage extends StatelessWidget {
   final Future<void> Function()? onRefresh;
   @override
   Widget build(BuildContext c) {
-    final list = ListView(padding: const EdgeInsets.all(16), children: [
-      Row(children: [
-        Expanded(child: Text(title, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold))),
-        if (onRefresh != null) IconButton(tooltip: '새로고침', onPressed: onRefresh, icon: const Icon(Icons.refresh)),
-      ]),
+    // 디자인 = web-prototype (2026-10-08): 큰 제목·넓은 여백
+    final list = ListView(padding: gkPagePadding(c), children: [
+      GkPageTitle(title,
+          trailing: onRefresh == null
+              ? null
+              : IconButton(tooltip: '새로고침', onPressed: onRefresh, icon: const Icon(Icons.refresh_rounded, size: 30))),
       const SizedBox(height: 8),
       ...children,
       const SizedBox(height: 24),
@@ -183,54 +185,48 @@ final windPointsProvider = FutureProvider<List<WindPoint>>((ref) async {
   ];
 });
 
-/// 대시보드 위쪽: 판정 시각·출발 위치·바로가기·머리 배너
+/// 대시보드 위쪽 (디자인 = web-prototype, 2026-10-08): 시연 데이터 알림·불러오기 오류만.
+/// 판정 시각은 제목 아래([liveStatusText]), 출발 위치·길찾기는 지도 카드, 머리 경고는 빨간 카드, 새로고침은 제목 옆으로 옮겼다
 class LiveDashboardTop extends ConsumerWidget {
   const LiveDashboardTop({super.key});
   @override
   Widget build(BuildContext c, WidgetRef ref) {
     final d = ref.watch(liveDashboardProvider).valueOrNull;
-    final point = Map<String, dynamic>.from(d?['point_risk'] as Map? ?? const {});
-    final headline = d?['headline'] as Map?;
     final demo = d?['demo'] as Map?;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       if (ref.watch(serverDemoProvider))
         Container(
           margin: const EdgeInsets.only(bottom: 8),
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(color: Colors.amber.shade100, borderRadius: BorderRadius.circular(9)),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          decoration: BoxDecoration(color: GK.orangeTint, borderRadius: BorderRadius.circular(24)),
           child: Text(
               '시연 모드 · ${demo?['scenario'] ?? '시연 시나리오'} — 센서 위치는 실제, 측정값은 시연용 가상값입니다. '
               '위험 판정·경로 회피는 실측과 같은 규칙으로 계산하며 실제 경고는 보내지 않습니다.',
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: GK.orangeInk)),
         ),
-      Text(
-          d == null
-              ? '실시간 정보를 불러오는 중…'
-              : '${demo != null ? '시연 데이터' : '실시간 데이터'} · 위험 판정 ${hhmm(point['computed_at'])} 기준'
-                  '${point['data_stale'] == true ? ' · 판정이 30분 넘게 갱신되지 않았습니다' : ''}',
-          style: Theme.of(c).textTheme.bodySmall),
       if (ref.watch(liveDashboardProvider).hasError)
         Text('실시간 정보를 불러오지 못했습니다: ${liveError(ref.watch(liveDashboardProvider).error!)}',
-            style: TextStyle(color: Theme.of(c).colorScheme.error)),
-      const SizedBox(height: 6),
-      Wrap(spacing: 8, runSpacing: 6, children: [
-        const OriginChip(),
-        ActionChip(avatar: const Icon(Icons.alt_route, size: 18), label: const Text('길찾기'), onPressed: () => c.push('/route-search')),
-        ActionChip(avatar: const Icon(Icons.chat_bubble_outline, size: 18), label: const Text('AI 채팅'), onPressed: () => c.go('/ai')),
-        ActionChip(
-            avatar: const Icon(Icons.refresh, size: 18),
-            label: const Text('새로고침'),
-            onPressed: () {
-              ref.invalidate(liveDashboardProvider);
-              ref.invalidate(riskAreasProvider);
-              ref.invalidate(floodGridProvider);
-              ref.invalidate(windPointsProvider);
-            }),
-      ]),
-      if (headline != null) ...[const SizedBox(height: 8), _Headline(headline: Map<String, dynamic>.from(headline))],
+            style: const TextStyle(color: GK.red, fontWeight: FontWeight.w700)),
     ]);
   }
 }
+
+/// 제목 아래 한 줄: 실시간/시연 데이터 · 위험 판정 시각
+String liveStatusText(Map<String, dynamic>? d) {
+  if (d == null) return '실시간 정보를 불러오는 중…';
+  final point = Map<String, dynamic>.from(d['point_risk'] as Map? ?? const {});
+  return '${d['demo'] != null ? '시연 데이터' : '실시간 데이터'} · 위험 판정 ${hhmm(point['computed_at'])} 기준'
+      '${point['data_stale'] == true ? ' · 판정이 30분 넘게 갱신되지 않았습니다' : ''}';
+}
+
+Map<String, dynamic> _liveWidget(Map<String, dynamic>? d, String type) => Map<String, dynamic>.from(
+    (d?['widgets'] as List? ?? const []).cast<Map>().where((w) => w['type'] == type).firstOrNull?['data'] as Map? ?? const {});
+
+/// /dashboard 위젯의 items (특보·재난문자 등)
+List<Map<String, dynamic>> liveWidgetItems(Map<String, dynamic>? d, String type) =>
+    [for (final i in _liveWidget(d, type)['items'] as List? ?? const []) Map<String, dynamic>.from(i as Map)];
+bool liveWidgetAvailable(Map<String, dynamic>? d, String type) => d != null && _liveWidget(d, type)['available'] != false;
+String? liveWidgetReason(Map<String, dynamic>? d, String type) => _liveWidget(d, type)['reason'] as String?;
 
 /// 서버 판정 위험 항목 (대시보드 위험 카드용)
 List<Map<String, dynamic>> liveRiskItems(Map<String, dynamic>? dashboard) => [
@@ -282,38 +278,6 @@ class LiveAlertHubRoute extends ConsumerWidget {
         alerts: ref.watch(alertCenterProvider).reversed.toList(),
         areas: ref.watch(riskAreasProvider).valueOrNull ?? const [],
       );
-}
-
-class _Headline extends ConsumerWidget {
-  const _Headline({required this.headline});
-  final Map<String, dynamic> headline;
-  @override
-  Widget build(BuildContext c, WidgetRef ref) {
-    final risk = Map<String, dynamic>.from(headline['risk'] as Map? ?? const {});
-    final action = headline['action'];
-    return Card(
-        color: levelColor(risk['level'] as String?),
-        child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(children: [
-              const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 32),
-              const SizedBox(width: 10),
-              Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('${headline['title']}',
-                    style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
-                if (risk['reason'] != null) Text('${risk['reason']}', style: const TextStyle(color: Colors.white)),
-              ])),
-              if (action == 'open_route')
-                TextButton(
-                    onPressed: () => startRouteToShelter(ref, nearestShelterId(ref)),
-                    child: const Text('대피 경로', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)))
-              else if (action == 'open_chat')
-                TextButton(
-                    onPressed: () => c.go('/ai'),
-                    child: const Text('행동 요령', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
-            ])));
-  }
 }
 
 class LiveWidgetCard extends StatelessWidget {
@@ -584,28 +548,23 @@ class LiveFeatureLinks extends ConsumerWidget {
   @override
   Widget build(BuildContext c, WidgetRef ref) {
     final role = '${ref.watch(meProvider).valueOrNull?['role'] ?? ''}';
-    return Card(
-        child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              Text('안전 기능', style: Theme.of(c).textTheme.titleLarge),
-              const SizedBox(height: 8),
-              Wrap(spacing: 8, runSpacing: 8, children: [
-                FilledButton.tonalIcon(
-                    onPressed: () => c.go('/alerts'), icon: const Icon(Icons.campaign_outlined), label: const Text('경고·대피 확인')),
-                FilledButton.tonalIcon(
-                    onPressed: () => c.push('/accessibility'), icon: const Icon(Icons.accessibility_new), label: const Text('접근성 설정')),
-                FilledButton.tonalIcon(
-                    onPressed: () => c.push('/household'), icon: const Icon(Icons.home_work_outlined), label: const Text('내 가구 등록')),
-                FilledButton.tonalIcon(
-                    onPressed: () => c.push('/sea-route'), icon: const Icon(Icons.sailing_outlined), label: const Text('바다 위 대피 경로')),
-                // 방재단 화면은 방재단·관리자만 (C8, 2026-10-05). 그 외에는 초대 코드 입력으로
-                FilledButton.tonalIcon(
-                    onPressed: () => c.push('/responder'),
-                    icon: Icon(isPatrolRole(role) ? Icons.groups_outlined : Icons.key_outlined),
-                    label: Text(isPatrolRole(role) ? '방재단 대시보드 · ${roleKo[role] ?? role}' : '방재단 (초대 코드)')),
-              ]),
-            ])));
+    return GkCard(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      const Text('안전 기능', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
+      const SizedBox(height: 14),
+      Wrap(spacing: 10, runSpacing: 10, children: [
+        GkPill('경고·대피 확인', icon: Icons.campaign_rounded, big: true, onTap: () => c.go('/alerts')),
+        GkPill('재난 후 지원·복구', icon: Icons.health_and_safety_rounded, big: true, onTap: () => c.push('/support')),
+        GkPill('내 가구 등록', icon: Icons.home_work_rounded, big: true, onTap: () => c.push('/household')),
+        GkPill('바다 위 대피 경로', icon: Icons.sailing_rounded, big: true, onTap: () => c.push('/sea-route')),
+        // 방재단 화면은 방재단·관리자만 (C8, 2026-10-05). 그 외에는 초대 코드 입력으로
+        GkPill(isPatrolRole(role) ? '방재단 현황 · ${roleKo[role] ?? role}' : '방재단 로그인 (초대 코드)',
+            icon: isPatrolRole(role) ? Icons.shield_rounded : Icons.badge_rounded,
+            filled: !isPatrolRole(role),
+            big: true,
+            onTap: () => c.push('/responder')),
+      ]),
+    ]));
   }
 }
 
@@ -613,11 +572,14 @@ class LiveFeatureLinks extends ConsumerWidget {
 class DemoModeSwitch extends ConsumerWidget {
   const DemoModeSwitch({super.key});
   @override
-  Widget build(BuildContext c, WidgetRef ref) => Card(
-      child: SwitchListTile(
-          value: ref.watch(demoModeProvider),
-          onChanged: (v) => ref.read(demoModeProvider.notifier).set(v),
-          secondary: const Icon(Icons.science_outlined),
-          title: const Text('시연 모드'),
-          subtitle: const Text('켜면 가상 시나리오 화면(가상 태풍·가상 위험 구역·예시 가구)을 보여 줍니다. 끄면 실측 데이터만.')));
+  Widget build(BuildContext c, WidgetRef ref) => GkCard(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        const Text('시연 모드', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
+        GkSwitchRow(
+            icon: Icons.science_rounded,
+            label: '시연 모드',
+            desc: '켜면 시연 시나리오(가상 위험 구역·예시 가구)로 보여 줘요. 끄면 실측 데이터만.',
+            value: ref.watch(demoModeProvider),
+            onChanged: (v) => ref.read(demoModeProvider.notifier).set(v)),
+      ]));
 }

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'main.dart';
 import 'services/account_sync.dart';
 import 'services/app_config.dart';
+import 'ui/gk_widgets.dart';
 
 /// 프로필 화면 'AI가 대화에서 수집한 정보' (2026-10-08: 프로필은 서버 하나 — AI가 대화에서 들은 내용으로 같은 곳을 고친다).
 /// - 화면을 열 때 서버 프로필을 내려받고, AI 대화 뒤 바뀌면(AccountSync.updated) 위 카드들이 다시 읽게 한다
@@ -57,15 +58,13 @@ class _ServerProfileRefreshState extends ConsumerState<ServerProfileRefresh> {
   Widget build(BuildContext c) {
     if (!AppConfig.isRemote) return const SizedBox.shrink();
     final list = items;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
+    return GkCard(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            const Icon(Icons.psychology_outlined, color: Color(0xff16803c)),
-            const SizedBox(width: 6),
+            const GkCircleIcon(Icons.psychology_rounded, size: 48),
+            const SizedBox(width: 12),
             const Expanded(
-                child: Text('AI가 대화에서 수집한 정보', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold))),
+                child: Text('AI가 대화에서 수집한 정보', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800))),
             IconButton(
                 tooltip: '다시 불러오기',
                 onPressed: () async {
@@ -110,7 +109,6 @@ class _ServerProfileRefreshState extends ConsumerState<ServerProfileRefresh> {
               ]),
             ),
         ]),
-      ),
     );
   }
 }

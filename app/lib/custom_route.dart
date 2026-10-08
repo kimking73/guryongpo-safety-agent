@@ -9,6 +9,7 @@ import 'origin_picker.dart';
 import 'services/account_service.dart';
 import 'services/geocoding_service.dart';
 import 'services/location_service.dart';
+import 'ui/gk_widgets.dart';
 
 /// 길찾기 (2026-10-05): 출발지·목적지를 주소(또는 집·직장·저장 장소)로 정하면 가까운 경로와 안전 경로를 함께 계산해 비교하고,
 /// 고른 경로를 지도(Dashboard 경로 화면)에 띄운다. 경로 서버 POST /api/route — strategy fastest(가까운) · safest(안전).
@@ -183,9 +184,9 @@ class _CustomRouteScreenState extends ConsumerState<CustomRouteScreen> {
         advice = '$advice 오르막이 힘들면 오르막 회피 경로 (최대 오르막 ${safe.maxUphillPercent}% → ${flat.maxUphillPercent}%).';
       }
     }
-    return ListView(padding: const EdgeInsets.all(16), children: [
+    return ListView(padding: gkPagePadding(context), children: [
       Row(children: [
-        const Expanded(child: Text('길찾기', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold))),
+        const Expanded(child: GkPageTitle('길찾기')),
         IconButton(tooltip: '출발·도착 바꾸기', icon: const Icon(Icons.swap_vert), onPressed: () {
           setState(() {
             final t = fromText.text, s = from;

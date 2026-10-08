@@ -11,6 +11,18 @@
 - 넓은 화면에서 지도·시설 목록과 대시보드 정보가 함께 보이는 반응형 레이아웃
 - Firebase ID 토큰을 `Authorization: Bearer <token>`으로 붙이는 Dio 인터셉터
 
+## 디자인 (2026-10-08)
+
+화면 디자인은 `../web-prototype/`(Claude Design 시연 앱)을 따른다 — 남색 왼쪽 메뉴(좁은 화면은 아래 메뉴) 4개
+(대시보드 · AI 대화창 · 사용자 · 방재단 현황(방재단·관리자·시연)), 119 긴급전화, 위쪽 줄(온라인 · 현재 위치 · 대피 필요 · 알림 종).
+태풍 정보·지원 및 복구는 대시보드 아래 카드, 선제 경고·알림은 알림 종으로 간다 (주소 `/typhoon`·`/support`·`/alerts-hub` 그대로).
+
+- 색·글자·카드·버튼 모양: `lib/ui/gk_theme.dart` (`GK` 색, 경보 4단계 `gkLevelOf`), 공통 조각: `lib/ui/gk_widgets.dart`.
+  새 화면은 박힌 색 대신 이 둘을 쓴다. 지도 위 색(대피소 청록 등)은 범례와 맞춰 그대로 둔다.
+- 글꼴: Pretendard (SIL OFL, `assets/fonts/Pretendard-OFL.txt`) — 한국어 2,350자 + 영문·기호만 남긴 것.
+  드문 글자는 기기 글꼴로 나온다. 버튼에 `textStyle`을 직접 줄 때는 `fontFamily: GK.font`를 넣는다 (빼면 한글이 □로 나옴).
+- AI 캐릭터 '모리' 얼굴: `assets/mori-face.png` (web-prototype/public).
+
 ## 실행
 
 Flutter SDK 3.3 이상이 필요합니다. 최초에 플랫폼 폴더가 없다면 아래 명령을 한 번 실행합니다. 기존 앱 식별자가 있다면 생성 전에 조정하세요.
