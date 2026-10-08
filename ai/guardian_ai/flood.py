@@ -235,6 +235,8 @@ def forecast_evidence(fc: dict[str, Any], rain: bool = True, wind: bool = True) 
 # 모순이 되어 내용 검사가 세 번 다 막았다. 지시문으로 금지해도 LLM이 가끔 쓰므로 코드로 지운다.
 RISK_TOPICS = ("위험 여부", "위험 단계", "침수 위험", "산사태 위험", "호우", "바람", "파도", "풍속", "출항", "특보", "날씨")
 PLACE_TOPICS = ("대피할 곳", "대피 장소", "대피장소", "대피소", "이동 경로", "대피 경로", "어디로 대피", "위치·경로")
+# 지원·복구 agent 담당 (2026-10-08 실측: 강풍 agent가 "피해 지원 정보는 확인할 수 없습니다"라고 써 지원·복구 답과 충돌 → 검증 실패)
+SUPPORT_TOPICS = ("지원", "보험", "보상", "구호", "복구", "피해 신고")
 _DEFERRALS = ("확인할 수 없", "확인되지 않", "안내하지 않", "다루지 않", "알 수 없", "에서 확인해", "에서 안내", "따로 안내")
 _SENTENCE = re.compile(r"[^.!?\n]+[.!?]?\s*")
 
@@ -309,7 +311,7 @@ def make_rain_flood_agent(writer: Writer | None = None, fetch: Fetch | None = No
                                       state.get("manager_feedback") or ""), "LLM"
             except Exception as e:  # noqa: BLE001 — LLM 장애로 답이 끊기면 안 된다
                 logger.warning("침수 agent 문장 작성 실패 → 템플릿 (%s: %s)", type(e).__name__, e)
-        summary = strip_deferrals(summary, PLACE_TOPICS) if summary else template_summary(data)
+        summary = strip_deferrals(summary, PLACE_TOPICS + SUPPORT_TOPICS) if summary else template_summary(data)
         logger.info("침수 agent [%s] 단계=%s 근거=%d 확인불가=%s", how, data.level.value, len(data.evidence),
                     data.unavailable or "-")
         return {"specialist_results": [SpecialistResult(

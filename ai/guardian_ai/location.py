@@ -26,7 +26,7 @@ from typing import Any, Callable
 
 from . import tools as T
 from .db import Fetch
-from .flood import RISK_TOPICS, evidence_lines, location_text, pick_location, strip_deferrals
+from .flood import RISK_TOPICS, SUPPORT_TOPICS, evidence_lines, location_text, pick_location, strip_deferrals
 from .state import Evidence, GuardianState, Location, Specialist, SpecialistResult
 
 logger = logging.getLogger(__name__)
@@ -296,7 +296,7 @@ def make_location_route_agent(writer: Writer | None = None, fetch: Fetch | None 
                                       state.get("manager_feedback") or ""), "LLM"
             except Exception as e:  # noqa: BLE001 — LLM 장애로 답이 끊기면 안 된다
                 logger.warning("위치·경로 agent 문장 작성 실패 → 템플릿 (%s: %s)", type(e).__name__, e)
-        summary = strip_deferrals(summary, RISK_TOPICS) if summary else template_summary(data)
+        summary = strip_deferrals(summary, RISK_TOPICS + SUPPORT_TOPICS) if summary else template_summary(data)
         logger.info("위치·경로 agent [%s] 목적지=%s(%s) 대피소=%s 안전=%s 경로=%s", how, data.destination_query,
                     (data.place or {}).get("source") or data.place_missing, (data.chosen or {}).get("name"),
                     (data.chosen or {}).get("safe"), (data.route or {}).get("available"))

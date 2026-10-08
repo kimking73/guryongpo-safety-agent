@@ -120,3 +120,15 @@ def test_with_disaster_agent_drops_unconfirmed_insurance_note():
     plan = make_action_advisor(use_guides=False)(state)["action_plan"]
     assert not any(e.key == "보험·법률 정보" for e in plan.evidence)
     assert not any("보험·법률" in step for step in plan.steps)
+
+
+def test_disaster_agent_sentence_deferring_support_is_dropped():
+    """2026-10-08 실측: 강풍 agent가 '피해 지원 정보는 확인할 수 없습니다'라고 써 지원·복구 답과 충돌 → 검증 실패.
+    재난 agent 답에서 지원 주제를 '확인 불가'로 쓴 문장을 뺀다 (지원·복구 agent의 '등록된 제도 없음'은 남는다)"""
+    from guardian_ai.specialists import make_wind_typhoon_agent
+    writer = lambda q, ev, d, fb: "강풍 위험 단계는 정상입니다. 피해 지원 정보는 현재 근거에서 확인할 수 없습니다."
+    out = make_wind_typhoon_agent(writer=writer, fetch=lambda *a, **k: [])({"question": "태풍 피해 지원", "user": UserProfile(user_id="u1")})
+    assert out["specialist_results"][0].summary == "강풍 위험 단계는 정상입니다."
+    rec = make_recovery_support_agent(writer=lambda q, ev, d, fb: "[내 직업 지원·복구] DB에 등록된 제도가 없어 읍면동 행정복지센터에 문의.",
+                                      fetch=db)({"question": "보험", "user": UserProfile(user_id="u1")})
+    assert "등록된 제도가 없어" in rec["specialist_results"][0].summary
