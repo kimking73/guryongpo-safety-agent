@@ -84,6 +84,14 @@ def test_shore_within_30m_counts_as_land():
     assert chart.is_at_sea(35.99, 129.5510) is True      # 약 90m
 
 
+def test_sea_check_only_answers_at_sea():
+    # 경로 엔진이 죽어도 판별은 된다 (경로 계산 없음)
+    c = client(gh_status=500)
+    assert c.post("/api/route/sea/check", json={"origin": {"lat": 35.991, "lon": 129.57}}).json() == {"at_sea": True}
+    assert c.post("/api/route/sea/check", json={"origin": {"lat": 35.99, "lon": 129.52}}).json() == {"at_sea": False}
+    assert c.post("/api/route/sea/check", json={"origin": {"lat": 37.5, "lon": 127.0}}).status_code == 422
+
+
 def test_outside_area_is_422():
     assert client().post("/api/route/sea", json={"origin": {"lat": 37.5, "lon": 127.0}}).status_code == 422
 

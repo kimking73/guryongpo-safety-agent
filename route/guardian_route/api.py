@@ -11,11 +11,12 @@ from functools import lru_cache
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from .gh import GraphHopperUnavailable, RouteNotFound
 from .sea import OutsideArea
 from . import visits
-from .service import (RouteCheckRequest, RouteCheckResponse, RouteRequest, RouteResponse, RouteService,
+from .service import (LatLon, RouteCheckRequest, RouteCheckResponse, RouteRequest, RouteResponse, RouteService,
                       SeaRouteRequest, SeaRouteResponse)
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -69,6 +70,20 @@ def check(req: RouteCheckRequest, service: RouteService = Depends(get_service)) 
     except RouteNotFound as e:
         log.info("경로 없음: %s", e)
         raise HTTPException(404, f"구룡포 도로망에서 경로를 찾지 못했습니다. ({e})") from e
+
+
+class SeaCheckRequest(BaseModel):
+    origin: LatLon
+
+
+@app.post("/api/route/sea/check")
+def sea_check(req: SeaCheckRequest, service: RouteService = Depends(get_service)) -> dict:
+    """지금 위치가 바다 위인지만 (경로 계산 없음, 2026-10-09). 앱 '경로 안내' 메뉴가 육상 경로 3종 ↔ 해상 경로 안내를 고른다.
+    판정 = /api/route/sea와 같은 육지 지도(해안선 30m 이내는 육지). 범위 밖은 422 — 앱은 '위치 확인 필요'로 보인다."""
+    try:
+        return {"at_sea": service.chart.is_at_sea(req.origin.lat, req.origin.lon)}
+    except OutsideArea as e:
+        raise HTTPException(422, f"구룡포 일대 밖이라 바다·육지를 판별할 수 없습니다. ({e})") from e
 
 
 @app.post("/api/route/sea", response_model=SeaRouteResponse)
