@@ -1,4 +1,5 @@
 // AI 답의 경로 → 지도, 등록 장소 저장 → AI 요청 profile, 보행 불편 → 노약자 경로
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,6 +12,7 @@ import 'package:guryongpo_safety/models/domain_models.dart';
 import 'package:guryongpo_safety/repositories/mock_repository.dart';
 import 'package:guryongpo_safety/repositories/remote_repository.dart';
 import 'package:guryongpo_safety/services/account_service.dart';
+import 'package:guryongpo_safety/ui/map_menu.dart';
 
 const _chat = {
   'conversation_id': 'c1',
@@ -59,6 +61,9 @@ class RouteAnsweringRepo extends MockSafetyRepository {
 }
 
 void main() {
+  // 이 파일은 웹 화면(web-prototype 디자인)의 대시보드를 본다 — 테스트(VM)는 kIsWeb=false 라 기본이 휴대폰 화면
+  setUp(() => useMobileUi = false);
+  tearDown(() => useMobileUi = !kIsWeb);
   test('채팅 응답의 경로 → 지도용 경로·목적지', () {
     final a = chatAnswerFromJson(_chat, names: {'flood-67': '침수 경보'});
     expect(a.text, contains('902m'));
@@ -112,13 +117,9 @@ void main() {
     expect(placesForProfile(const []), isEmpty);
   });
 
-  test("선택 정보 '보행 능력'을 적으면 노약자 경로", () async {
-    SharedPreferences.setMockInitialValues({});
-    final acc = AccountService();
-    expect(await acc.walkingImpaired(), isFalse);
-    await acc.saveOptionalProfile({'보행 능력': '무릎이 불편함'});
-    expect(await acc.walkingImpaired(), isTrue);
-    expect(routeProfileFor(40, '도보', walkingImpaired: true), 'elderly');
+  test('노약자 경로 = 65세 이상 또는 휠체어 (보행 능력은 더 묻지 않음, 2026-10-09)', () {
+    expect(routeProfileFor(70, '도보'), 'elderly');
+    expect(routeProfileFor(40, '휠체어'), 'elderly');
     expect(routeProfileFor(40, '도보'), 'adult');
   });
 
@@ -145,7 +146,8 @@ void main() {
       if (d.library != 'image resource service') onError?.call(d);
     };
     addTearDown(() => FlutterError.onError = onError);
-    SharedPreferences.setMockInitialValues({'profile_setup_complete': true});
+    SharedPreferences.setMockInitialValues(
+        {'profile_setup_complete': true, 'onboarding_consent_v1': true, 'onboarding_done_v1': true});
     appRouter.go('/');
     final container = ProviderContainer(
         overrides: [repo.overrideWithValue(RouteAnsweringRepo())]);
@@ -155,7 +157,7 @@ void main() {
     for (var i = 0; i < 10; i++) {
       await t.pump(const Duration(milliseconds: 300));
     }
-    expect(find.text('대피소·의료시설 경로'), findsOneWidget);
+    expect(find.widgetWithText(MapMenuButton, '경로 안내'), findsOneWidget);
     expect(find.text('AI 대화창'), findsWidgets);
     await t.tap(find.text('AI 대화창').first);
     for (var i = 0; i < 3; i++) {
@@ -191,7 +193,9 @@ void main() {
       ),
     );
     expect(find.byTooltip('경로 안내 종료'), findsOneWidget);
-    expect(find.text('가까운 경로'), findsWidgets);
+    expect(find.widgetWithText(MapMenuButton, '최단 거리'), findsOneWidget);
+    await t.ensureVisible(find.byTooltip('경로 안내 종료'));
+    await t.pump();
     await t.tap(find.byTooltip('경로 안내 종료'));
     for (var i = 0; i < 4; i++) {
       await t.pump(const Duration(milliseconds: 100));
@@ -218,7 +222,8 @@ void main() {
       if (d.library != 'image resource service') onError?.call(d);
     };
     addTearDown(() => FlutterError.onError = onError);
-    SharedPreferences.setMockInitialValues({'profile_setup_complete': true});
+    SharedPreferences.setMockInitialValues(
+        {'profile_setup_complete': true, 'onboarding_consent_v1': true, 'onboarding_done_v1': true});
     appRouter.go('/');
     await t.pumpWidget(ProviderScope(
         overrides: [repo.overrideWithValue(MockSafetyRepository())],
@@ -226,14 +231,16 @@ void main() {
     for (var i = 0; i < 10; i++) {
       await t.pump(const Duration(milliseconds: 300));
     }
-    await t.tap(find.text('대피소·의료시설 경로'));
+    await t.tap(find.widgetWithText(MapMenuButton, '경로 안내'));
     for (var i = 0; i < 5; i++) {
       await t.pump(const Duration(milliseconds: 150));
     }
     expect(find.text('구룡포 실내체육관 (예시)'), findsOneWidget);
     expect(find.text('구룡포 의료지원소 (예시)'), findsOneWidget);
-    expect(find.text('가까운 경로'), findsNWidgets(4));
-    expect(find.text('안전 경로'), findsNWidgets(4));
+    // 경로 방식은 '경로 안내' 하위 항목에서 하나만 고른다 (2026-10-09)
+    expect(find.widgetWithText(MapMenuButton, '최단 거리'), findsOneWidget);
+    expect(find.widgetWithText(MapMenuButton, '안전한 경로'), findsOneWidget);
+    expect(find.widgetWithText(MapMenuButton, '오르막 회피'), findsOneWidget);
     await t.pumpWidget(const SizedBox());
     await t.pump(const Duration(seconds: 1));
   });
@@ -249,7 +256,8 @@ void main() {
         errors.add(d.exceptionAsString());
     };
     addTearDown(() => FlutterError.onError = onError);
-    SharedPreferences.setMockInitialValues({'profile_setup_complete': true});
+    SharedPreferences.setMockInitialValues(
+        {'profile_setup_complete': true, 'onboarding_consent_v1': true, 'onboarding_done_v1': true});
     appRouter.go('/');
     await t.pumpWidget(ProviderScope(
         overrides: [repo.overrideWithValue(MockSafetyRepository())],
@@ -257,11 +265,17 @@ void main() {
     for (var i = 0; i < 10; i++) {
       await t.pump(const Duration(milliseconds: 300));
     }
-    await t.tap(find.text('대피소·의료시설 경로'));
+    await t.tap(find.widgetWithText(MapMenuButton, '경로 안내'));
     for (var i = 0; i < 4; i++) {
       await t.pump(const Duration(milliseconds: 200));
     }
-    await t.tap(find.text('안전 경로').first);
+    await t.tap(find.text('구룡포 실내체육관 (예시)').first);
+    for (var i = 0; i < 4; i++) {
+      await t.pump(const Duration(milliseconds: 200));
+    }
+    await t.ensureVisible(find.widgetWithText(MapMenuButton, '안전한 경로'));
+    await t.pump();
+    await t.tap(find.widgetWithText(MapMenuButton, '안전한 경로'));
     for (var i = 0; i < 8; i++) {
       await t.pump(const Duration(milliseconds: 300));
     }

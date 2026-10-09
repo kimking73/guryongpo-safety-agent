@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 
 import 'main.dart';
+import 'ui/gk_theme.dart';
 import 'services/demo_speech.dart';
 import 'services/prototype_safety_store.dart';
 
@@ -31,52 +32,40 @@ bool shouldAutoPlayAccessibilityPrompt(
 class PrototypeFeatureLinks extends ConsumerWidget {
   const PrototypeFeatureLinks({super.key});
 
+  /// 시연 메뉴 (2026-10-09 사용자 요청): '대피 경보 팝업'·'방재단 대시보드 (시연)' 두 버튼만.
+  /// 대피 확인·접근성 설정·내 가구 등록·해상 경로 버튼은 뺐다 — 화면(경로)과 팝업 안 응답·저장은 그대로
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final controller = ref.watch(prototypeSafetyProvider);
-    final role = controller.demoRole;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('3주차 안전 기능 시연', style: Theme.of(context).textTheme.titleLarge),
+            Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+              Text('3주차 안전 기능 시연', style: Theme.of(context).textTheme.titleLarge),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                decoration: BoxDecoration(color: GK.tint, borderRadius: BorderRadius.circular(999)),
+                child: const Text('시연 화면 · 예시 데이터',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: GK.navy)),
+              ),
+            ]),
             const SizedBox(height: 4),
-            const Text('대피 확인·접근성·방재단 흐름을 확인합니다.'),
+            const Text('대피 경보와 방재단 대응 흐름을 확인합니다.'),
             const SizedBox(height: 10),
             Wrap(spacing: 8, runSpacing: 8, children: [
-              // 실제 대피 확인 경보와 같은 팝업 (응답은 기기에만, 서버로 보내지 않음)
+              // 실제 대피 확인 경보와 같은 팝업 (응답은 기기에만, 서버로 보내지 않음). 누를 때마다 새 시연 경보
               FilledButton.icon(
                 onPressed: () => showEvacuationAlertDemo(context, ref),
                 icon: const Icon(Icons.warning_amber_rounded),
                 label: const Text('대피 경보 팝업'),
               ),
-              FilledButton.tonalIcon(
-                onPressed: () => context.push('/evacuation'),
-                icon: const Icon(Icons.campaign_outlined),
-                label: const Text('대피 확인'),
-              ),
-              FilledButton.tonalIcon(
-                onPressed: () => context.push('/accessibility'),
-                icon: const Icon(Icons.accessibility_new),
-                label: const Text('접근성 설정'),
-              ),
-              FilledButton.tonalIcon(
-                onPressed: () => context.push('/household'),
-                icon: const Icon(Icons.home_work_outlined),
-                label: const Text('내 가구 등록'),
-              ),
-              FilledButton.tonalIcon(
-                onPressed: () => context.push('/sea-route'),
-                icon: const Icon(Icons.sailing_outlined),
-                label: const Text('해상 경로'),
-              ),
-              // 시연 모드의 방재단 대시보드는 시연 가구 12곳으로 바로 열린다 (역할 받기 없이)
+              // 시연 모드의 방재단 대시보드는 앱 안 예시 대피 상황·가구로 바로 열린다 (역할 받기 없이, 서버 기록과 분리)
               FilledButton.icon(
                 onPressed: () => context.push('/responder'),
                 icon: const Icon(Icons.groups_outlined),
-                label: Text(controller.hasResponderAccess ? '방재단 대시보드 · $role' : '방재단 대시보드 (시연)'),
+                label: const Text('방재단 대시보드 (시연)'),
               ),
             ]),
           ],

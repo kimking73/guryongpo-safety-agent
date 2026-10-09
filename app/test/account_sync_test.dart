@@ -10,7 +10,7 @@ void main() {
     return SharedPreferences.getInstance();
   }
 
-  test('서버 판단용 칸: 연령→출생연도, 휠체어→wheelchair, 직업·보행·시각·청각', () async {
+  test('서버 판단용 칸: 연령→출생연도, 휠체어→wheelchair, 직업·시각·청각 (보행 능력은 보내지 않음, 2026-10-09)', () async {
     final prefs = await prefsWith({
       'profile_age': '67',
       'profile_transport': '휠체어',
@@ -21,10 +21,8 @@ void main() {
       'mobility': 'wheelchair',
       'occupation': 'fisher, other',
       'owns_vessel': true,
-      'walking_ability': 'normal',     // '지팡이'는 화면 선택지가 아니다 → 보통
       'vision_impaired': true,
       'hearing_impaired': false,
-      'has_dependents': false,
       'blood_type': null,
     });
   });
@@ -40,37 +38,37 @@ void main() {
     expect(p['birth_year'], 1981);
   });
 
-  test('보행 능력: 보행 가능 → normal, 보행 어려움 → unable (AI가 서버 프로필을 읽는다, 2026-10-08)', () async {
-    for (final (choice, want) in [('보행 가능', 'normal'), ('보행 불편', 'limited'), ('보행 어려움', 'unable')]) {
-      final prefs = await prefsWith({'optional_profile': jsonEncode({'보행 능력': choice})});
-      expect(AccountSync.profilePatch(prefs)['walking_ability'], want, reason: choice);
-    }
+  test('보행 능력·보호 동반자는 예전 값이 남아 있어도 서버에 보내지 않는다 (2026-10-09)', () async {
+    final prefs = await prefsWith({
+      'optional_profile': jsonEncode({'보행 능력': '보행 어려움', '보호가 필요한 동반자 여부': '예', '보호 동반자': '예'}),
+    });
+    final p = AccountSync.profilePatch(prefs);
+    expect(p.containsKey('walking_ability'), isFalse);
+    expect(p.containsKey('has_dependents'), isFalse);
   });
 
-  test('판단용 칸 = 화면 값 (2026-10-08): 필요 없음 → 아니오, 보호 동반자·혈액형, 직접 입력한 직업은 그대로', () async {
+  test('판단용 칸 = 화면 값 (2026-10-08): 필요 없음 → 아니오, 혈액형, 직접 입력한 직업은 그대로', () async {
     final prefs = await prefsWith({
       'optional_profile': jsonEncode({
-        '시각 지원': '필요 없음', '청각 지원': '난청', '보호가 필요한 동반자 여부': '예', '혈액형': 'O+',
+        '시각 지원': '필요 없음', '청각 지원': '난청', '혈액형': 'O+',
         '직업': '수산업자', 'jobs': '학생',
       }),
     });
     final p = AccountSync.profilePatch(prefs);
     expect(p['vision_impaired'], false);
     expect(p['hearing_impaired'], true);
-    expect(p['has_dependents'], true);
     expect(p['blood_type'], 'O+');
     expect(p['occupation'], '수산업자, student');
     expect(p['owns_vessel'], false);
   });
 
   test('프로필 화면에서 지운 칸은 서버 기본값으로 되돌린다, 예전 칸 이름도 읽는다', () async {
-    final prefs = await prefsWith({'optional_profile': jsonEncode({'보호 동반자': '예', '혈액형': '모름'})});
+    final prefs = await prefsWith({'optional_profile': jsonEncode({'시각': '저시력', '혈액형': '모름'})});
     final p = AccountSync.profilePatch(prefs);
-    expect(p['has_dependents'], true);
+    expect(p['vision_impaired'], true);
     expect(p['blood_type'], null);
     expect(p.containsKey('blood_type'), isTrue);
     expect(p['occupation'], null);
-    expect(p['walking_ability'], 'normal');
   });
 
   test('비상 연락처 글자 → 이름·전화번호, 번호가 없으면 보내지 않음', () async {
@@ -97,17 +95,17 @@ void main() {
       'contacts': [{'id': 'c1', 'name': '딸', 'phone': '010-1234-5678'}],
     };
 
-    test('AI가 고친 서버 값이 화면 값이 된다 — 나이·이동수단·직업 칩·보행·청각·동반자·혈액형·집·저장 장소·연락처', () async {
+    test('AI가 고친 서버 값이 화면 값이 된다 — 나이·이동수단·직업 칩·청각·혈액형·집·저장 장소·연락처 (보행·동반자는 받지 않음)', () async {
       final prefs = await prefsWith({'optional_profile': jsonEncode({'age': '40', '시각 지원': '저시력'})});
       expect(await AccountSync.applyServerProfile(prefs, server, now: DateTime(2026, 10, 8)), isTrue);
       final o = optional(prefs);
       expect(o['age'], '72');
       expect(o['transport'], '휠체어');
       expect(o['jobs'], '어업 종사자·뱃사람|목수');
-      expect(o['보행 능력'], '보행 불편');
+      expect(o.containsKey('보행 능력'), isFalse);
       expect(o['시각 지원'], '필요 없음');
       expect(o['청각 지원'], '지원 필요');
-      expect(o['보호가 필요한 동반자 여부'], '예');
+      expect(o.containsKey('보호가 필요한 동반자 여부'), isFalse);
       expect(o['혈액형'], 'O+');
       expect(o['homeAddress'], '구룡포길 1');
       expect(o['homeLat'], '35.98');

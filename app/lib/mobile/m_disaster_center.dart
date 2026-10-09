@@ -1,21 +1,23 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart' hide Path;
 import 'package:url_launcher/url_launcher.dart';
 
-import 'services/account_service.dart';
-import 'services/location_service.dart';
-import 'services/app_config.dart';
-import 'services/demo_mode.dart';
-import 'models/domain_models.dart';
-import 'prototype_safety_screens.dart';
-import 'ui/gk_theme.dart';
-import 'ui/gk_widgets.dart';
-import 'ui/map_menu.dart';
+import '../services/account_service.dart';
+import '../services/location_service.dart';
+import '../services/app_config.dart';
+import '../services/demo_mode.dart';
+import '../models/domain_models.dart';
+import 'dashboard_cards.dart';
+import '../ui/tokens.dart';
+import '../ui/widgets.dart';
+
+void _openLandslideMap() => launchUrl(Uri.parse(
+    'https://sansatai.forest.go.kr/mhms_pub/mhms/lndsInfo/lndsMapViewPage.do'));
 
 const demoTime = '시연 기준 시각 · 가상 시나리오 당일 14:00';
 const guryongpo = LatLng(35.9910, 129.5530);
@@ -220,22 +222,6 @@ Color _windColor(double averageSpeed, double gustSpeed) {
 
 enum _DashboardMode { emergency, facilities }
 
-/// 재난 지도 하위 항목 순서 (2026-10-09): 태풍 · 침수 격자 · 강풍 · 산사태 위험 지역. 지도에 층을 그리는 건 뒤의 셋
-const _filterKinds = [HazardKind.storm, HazardKind.flood, HazardKind.wind, HazardKind.slide];
-const _mapKinds = [HazardKind.flood, HazardKind.wind, HazardKind.slide];
-
-/// 지금 위치가 육지·바다인지 (경로 안내 메뉴, 2026-10-09). checking = 판별 중, unknown = 판별 못 함 → '위치 확인 필요'
-enum WhereKind { checking, land, sea, unknown }
-
-class WhereNow {
-  const WhereNow(this.kind, {this.reason, this.noGps = false});
-  final WhereKind kind;
-  /// unknown 일 때 이유 (화면에 그대로)
-  final String? reason;
-  /// GPS 위치가 없어 구룡포 기본 위치(육지의 정해진 점)에서 경로를 그리는 중
-  final bool noGps;
-}
-
 IconData _hazardIcon(HazardKind k) => switch (k) {
       HazardKind.flood => Icons.flood,
       HazardKind.wind => Icons.navigation,
@@ -244,8 +230,8 @@ IconData _hazardIcon(HazardKind k) => switch (k) {
       HazardKind.storm => Icons.cyclone,
     };
 
-class DisasterDashboard extends StatefulWidget {
-  const DisasterDashboard({
+class MDisasterDashboard extends StatefulWidget {
+  const MDisasterDashboard({
     super.key,
     this.routeActive = false,
     this.facilities = const [],
@@ -270,22 +256,9 @@ class DisasterDashboard extends StatefulWidget {
     this.liveTop,
     this.liveBottom,
     this.routeExtras,
-    this.warnings = const [],
-    this.messages,
-    this.messagesReason,
-    this.headline,
-    this.statusText,
-    this.updatedText,
-    this.onRefresh,
-    this.extraPolygons = const [],
-    this.extraMarkers = const [],
-    this.extraPolylines = const [],
-    this.mapOnly = false,
-    this.where = const WhereNow(WhereKind.unknown),
-    this.onLocate,
-    this.onSeaRoute,
-    this.showFacilities = false,
-    this.focusPoint,
+    this.fullScreen = false,
+    this.onFullScreenChanged,
+    this.routeSummary,
   });
 
   final bool routeActive;
@@ -317,57 +290,27 @@ class DisasterDashboard extends StatefulWidget {
   final Widget? liveTop, liveBottom;
   /// 경로 패널에 붙일 것 (출발 위치·길찾기·이동 중 안내)
   final Widget? routeExtras;
-  /// 디자인 = web-prototype (2026-10-08): '경보·주의보' 카드의 기상청 특보 (/dashboard warnings 위젯 items)
-  final List<Map<String, dynamic>> warnings;
-  /// 빨간 '최근 재난문자' 카드 (/dashboard disaster_messages items, null = 수집 전 → messagesReason) · 없으면 서버 머리 경고(headline)
-  final List<Map<String, dynamic>>? messages;
-  final String? messagesReason;
-  final Map<String, dynamic>? headline;
-  /// 제목 아래 한 줄 (판정 시각 등) · '지금 구룡포 날씨' 옆 갱신 시각 · 새로고침
-  final String? statusText, updatedText;
-  final VoidCallback? onRefresh;
-
-  /// 방재단 현황(2026-10-09)이 대시보드 지도 칸만 쓸 때: mapOnly = 지도 카드만 그린다,
-  /// 지도 위에 더 올릴 영역(대피 상황)·표식(사람 아이콘, 맨 위 층)
-  final List<Polygon> extraPolygons;
-  final List<Marker> extraMarkers;
-  /// 지도 위에 더 그릴 선 (방재단 다중 방문 경로, 2026-10-09)
-  final List<Polyline> extraPolylines;
-  final bool mapOnly;
-
-  /// 경로 안내 메뉴: 지금 위치가 육지·바다인지 → 육상 경로 3종 / 해상 경로 안내 / 위치 확인 필요
-  final WhereNow where;
-  /// '현위치' 버튼: 위치를 다시 읽고 그 위치를 돌려준다 (지도를 그리로 옮긴다)
-  final Future<LatLng> Function()? onLocate;
-  /// '해상 경로 안내' 버튼
-  final VoidCallback? onSeaRoute;
-  /// 경로 모드가 아니어도 대피소·의료시설을 그린다 (방재단 지도, 2026-10-09)
-  final bool showFacilities;
-  /// 바뀌면 지도를 이 점으로 옮기고 확대한다 (방재단 목록에서 가구를 고를 때)
-  final LatLng? focusPoint;
+  /// 지도 전체화면 (디자인: 지도 카드의 '전체화면' 버튼 · 대피 중 응답 · AI 경로 카드)
+  final bool fullScreen;
+  final ValueChanged<bool>? onFullScreenChanged;
+  /// 지도 카드 아래 2줄 경로 요약 (출발지·이동 수단·목적지·시간)
+  final Widget? routeSummary;
 
   @override
-  State<DisasterDashboard> createState() => _DisasterDashboardState();
+  State<MDisasterDashboard> createState() => _MDisasterDashboardState();
 }
 
-class _DisasterDashboardState extends State<DisasterDashboard> {
+class _MDisasterDashboardState extends State<MDisasterDashboard> {
   _DashboardMode dashboardMode = _DashboardMode.emergency;
-  /// 재난 지도에서 켠 재난 (여러 개 동시). 처음엔 모두 켬
-  final layers = <HazardKind>{..._filterKinds};
-  /// 지도 층 셋(침수·강풍·산사태)이 모두 켜지면 종합 보기: 침수는 심각만, 겹침 표식·요약 범례 (예전 '전체 재난 표시' 화면)
-  bool get compositeView => _mapKinds.every(layers.contains);
-  /// 지도에 그리는 위험 층. 경로 모드는 경로가 피하는 침수·산사태
-  Set<HazardKind> get _visible => dashboardMode == _DashboardMode.facilities
-      ? const {HazardKind.flood, HazardKind.slide}
-      : {...layers, if (compositeView) HazardKind.overlap};
-  /// 상위 메뉴의 하위 항목이 펼쳐져 있는지 (보고 있는 메뉴 하나만 펼친다)
-  bool submenuOpen = true;
-  bool locating = false;
+  bool compositeView = true;
+  final activeLayers = <HazardKind>{};
   DemoHazard? selected;
   LatLng focus = guryongpo;
   double mapZoom = 13;
   bool zoomUpdateScheduled = false;
   final MapController mapController = MapController();
+  /// 카드 ↔ 전체화면을 오갈 때 지도(FlutterMap)를 다시 만들지 않고 옮긴다
+  final GlobalKey _mapKey = GlobalKey();
   Map<String, String> savedProfile = {};
   List<SavedPlace> savedPlaces = [];
   String? fittedRouteKey;
@@ -403,7 +346,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
       }
     },
     onTap: (_, point) {
-      if (!_visible.contains(HazardKind.flood)) return;
+      if (!compositeView && !activeLayers.contains(HazardKind.flood)) return;
       final grids = _grids;
       final cell = grids
           .where((g) =>
@@ -443,29 +386,41 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
     super.dispose();
   }
 
-  /// 재난 하나 켜기·끄기 (여러 개 동시 선택)
-  void toggleLayer(HazardKind kind) => setState(() {
-        if (!layers.remove(kind)) layers.add(kind);
-      });
+  void choose(String value) {
+    if (value == '태풍') {
+      context.push('/typhoon', extra: 'local');
+      return;
+    }
+    setState(() {
+      selected = null;
+      compositeView = true;
+      activeLayers.clear();
+      focus = guryongpo;
+    });
+    mapController.fitCamera(CameraFit.insideBounds(bounds: guryongpoBounds));
+  }
 
-  /// '전체 재난 표시': 모두 켜져 있으면 모두 끄고, 아니면 모두 켠다
-  void toggleAll() => setState(() {
-        if (_filterKinds.every(layers.contains)) {
-          layers.clear();
+  void toggleLayer(HazardKind layer, bool on) => setState(() {
+        if (compositeView) {
+          compositeView = false;
+          activeLayers.clear();
+        }
+        if (on) {
+          activeLayers.add(layer);
         } else {
-          layers.addAll(_filterKinds);
+          activeLayers.remove(layer);
         }
       });
 
+  void setCompositeView(bool on) => setState(() {
+        compositeView = on;
+        activeLayers.clear();
+      });
+
   void setDashboardMode(_DashboardMode mode) {
-    // 목적지 고르기 창은 육지(또는 기본 위치)에서만 — 바다 위면 해상 경로 안내를 쓴다
-    final shouldChooseFacility = mode == _DashboardMode.facilities &&
-        widget.selectedDestination == null &&
-        (widget.where.kind == WhereKind.land || widget.where.noGps);
-    setState(() {
-      dashboardMode = mode;
-      submenuOpen = true;
-    });
+    final shouldChooseFacility =
+        mode == _DashboardMode.facilities && widget.selectedDestination == null;
+    setState(() => dashboardMode = mode);
     if (shouldChooseFacility) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && dashboardMode == _DashboardMode.facilities) {
@@ -475,138 +430,38 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
     }
   }
 
-  /// 상위 메뉴 누름: 다른 메뉴면 그 메뉴로 바꾸고 펼친다(이전 메뉴는 접힘), 보고 있는 메뉴면 접기·펼치기
-  void tapMenu(_DashboardMode mode) {
-    if (mode == dashboardMode) {
-      setState(() => submenuOpen = !submenuOpen);
-    } else {
-      setDashboardMode(mode);
-    }
-  }
-
-  /// '현위치': 위치를 다시 읽고 지도 가운데를 그리로
-  Future<void> locate(MapController ctl) async {
-    if (locating) return;
-    setState(() => locating = true);
-    try {
-      final p = await (widget.onLocate?.call() ?? Future.value(widget.currentLocation));
-      if (!mounted) return;
-      setState(() => focus = p);
-      ctl.move(p, math.max(ctl.camera.zoom, 15));
-    } finally {
-      if (mounted) setState(() => locating = false);
-    }
-  }
-
-  Widget _locateButton(MapController ctl) => MapMenuButton(
-        label: locating ? '확인 중' : '현위치',
-        icon: MapIcons.locate,
-        kind: MapButtonKind.action,
-        tooltip: '내 위치를 확인하고 지도 가운데로 옮기기',
-        onTap: locating ? null : () => locate(ctl),
+  Widget _emergencyLayerControls(Set<HazardKind> visible) => Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          FilterChip(
+            avatar: const Icon(Icons.dashboard_outlined, size: 18),
+            label: const Text('전체 재난 표시'),
+            selected: compositeView,
+            onSelected: setCompositeView,
+          ),
+          ActionChip(
+            avatar: const Icon(Icons.cyclone, size: 18),
+            label: const Text('태풍'),
+            onPressed: () => choose('태풍'),
+          ),
+          FilterChip(
+            label: const Text('침수 격자'),
+            selected: !compositeView && visible.contains(HazardKind.flood),
+            onSelected: (on) => toggleLayer(HazardKind.flood, on),
+          ),
+          FilterChip(
+            label: const Text('강풍 화살표·풍속'),
+            selected: !compositeView && visible.contains(HazardKind.wind),
+            onSelected: (on) => toggleLayer(HazardKind.wind, on),
+          ),
+          FilterChip(
+            label: const Text('산사태 위험 지역'),
+            selected: !compositeView && visible.contains(HazardKind.slide),
+            onSelected: (on) => toggleLayer(HazardKind.slide, on),
+          ),
+        ],
       );
-
-  /// 재난 지도 하위 항목: 전체 재난 표시 · 태풍 · 침수 격자 · 강풍 · 산사태 위험 지역 (여러 개 선택)
-  Widget _emergencyLayerControls() {
-    final allOn = _filterKinds.every(layers.contains);
-    MapMenuButton item(HazardKind k, String label, String icon) => MapMenuButton(
-        label: label, icon: icon, kind: MapButtonKind.check, selected: layers.contains(k), onTap: () => toggleLayer(k));
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      MapButtonGroup(label: '표시할 재난 (여러 개 선택)', children: [
-        MapMenuButton(
-            label: '전체 재난 표시',
-            icon: MapIcons.all,
-            kind: MapButtonKind.check,
-            selected: allOn,
-            tooltip: allOn ? '모든 재난 끄기' : '모든 재난 켜기',
-            onTap: toggleAll),
-        item(HazardKind.storm, '태풍', MapIcons.typhoon),
-        item(HazardKind.flood, '침수 격자', MapIcons.flood),
-        item(HazardKind.wind, '강풍', MapIcons.wind),
-        item(HazardKind.slide, '산사태 위험 지역', MapIcons.landslide),
-      ]),
-      // 태풍은 이 지도(구룡포 일대)에 그리지 않는다 — 태풍 경로는 넓은 지도에서 봐야 한다 (태풍 화면)
-      if (layers.contains(HazardKind.storm)) ...[
-        const SizedBox(height: 8),
-        MapNotice(
-          text: '태풍 경로는 구룡포 밖까지 넓게 봐야 해서 이 지도에는 그리지 않아요. 태풍 지도에서 경로와 구룡포 영향을 확인하세요.',
-          action: MapMenuButton(
-              label: '태풍 지도 열기',
-              icon: MapIcons.external,
-              kind: MapButtonKind.action,
-              onTap: () => context.push('/typhoon', extra: 'local')),
-        ),
-      ],
-      if (layers.isEmpty) ...[
-        const SizedBox(height: 8),
-        const MapNotice(text: '켜진 재난이 없어 지도에 위험 정보를 표시하지 않아요. 보고 싶은 재난을 골라 주세요.'),
-      ],
-    ]);
-  }
-
-  /// 경로 안내 하위 항목: 육지면 최단 거리·안전한 경로·오르막 회피(하나만), 바다면 해상 경로 안내, 모르면 위치 확인 필요
-  Widget _routeControls() {
-    final where = widget.where;
-    final locateAction = MapMenuButton(
-        label: locating ? '확인 중' : '현위치 확인',
-        icon: MapIcons.locate,
-        kind: MapButtonKind.action,
-        onTap: locating ? null : () => locate(mapController));
-    if (where.kind == WhereKind.checking) {
-      return const MapNotice(text: '현재 위치가 육지인지 바다인지 확인하고 있어요.');
-    }
-    if (where.kind == WhereKind.sea) {
-      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        MapButtonGroup(label: '해상 경로', children: [
-          MapMenuButton(
-              label: '해상 경로 안내', icon: MapIcons.anchor, kind: MapButtonKind.action, selected: true, onTap: widget.onSeaRoute),
-        ]),
-        const SizedBox(height: 6),
-        const Text('지금 위치가 바다 위로 확인됐어요. 가까운 항구까지 바닷길과 항구에서 대피소까지 길을 안내해요.',
-            style: TextStyle(fontSize: 15, color: GK.muted, height: 1.45)),
-      ]);
-    }
-    // GPS 는 있는데 판별을 못 했으면 육지·바다 어느 쪽 경로도 내놓지 않는다
-    if (where.kind == WhereKind.unknown && !where.noGps) {
-      return MapNotice(
-          warn: true,
-          title: '위치 확인이 필요해요',
-          text: '${where.reason ?? '바다·육지를 판별하지 못했습니다.'} 위치를 다시 확인해 주세요.',
-          action: locateAction);
-    }
-    final types = widget.travelMode.routeTypes;
-    MapMenuButton type(RouteType t, String label, String icon) => MapMenuButton(
-          label: label,
-          icon: icon,
-          kind: MapButtonKind.radio,
-          selected: widget.routeType == t,
-          tooltip: types.contains(t) ? t.description : '${widget.travelMode.label}에서는 쓸 수 없어요',
-          onTap: types.contains(t) ? () => widget.onRouteTypeChanged?.call(t) : null,
-        );
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      if (where.noGps) ...[
-        MapNotice(
-            warn: true,
-            title: '위치 확인이 필요해요',
-            text: '${where.reason ?? '현재 위치를 확인하지 못했습니다.'} 확인 전에는 구룡포 기본 위치에서 출발하는 경로를 보여 드려요.',
-            action: locateAction),
-        const SizedBox(height: 8),
-      ],
-      MapButtonGroup(label: '경로 방식 (하나만 선택)', children: [
-        type(RouteType.nearest, '최단 거리', MapIcons.shortest),
-        type(RouteType.safest, '안전한 경로', MapIcons.safe),
-        type(RouteType.flat, '오르막 회피', MapIcons.flat),
-      ]),
-      const SizedBox(height: 6),
-      Text(
-          switch (widget.routeType) {
-            RouteType.nearest => '최단 거리: 이동 거리가 가장 짧은 경로예요. 위험 구역을 피하지 않고, 지나는 구역은 알려 드려요.',
-            RouteType.safest => '안전한 경로: 지금 판정된 침수·산사태 위험 구역(주의 이상)을 피해서 가요.',
-            RouteType.flat => '오르막 회피: 위험 구역을 피하면서, 도로 경사(고도 자료)로 가파른 오르막을 되도록 줄여요.',
-          },
-          style: const TextStyle(fontSize: 15, color: GK.muted, height: 1.45)),
-    ]);
-  }
 
   void focusOn(LatLng point) {
     setState(() => focus = point);
@@ -669,17 +524,10 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
   }
 
   @override
-  void didUpdateWidget(covariant DisasterDashboard oldWidget) {
+  void didUpdateWidget(covariant MDisasterDashboard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final fp = widget.focusPoint;
-    if (fp != null && fp != oldWidget.focusPoint) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) mapController.move(fp, math.max(mapController.camera.zoom, 16));
-      });
-    }
     if (!oldWidget.routeActive && widget.routeActive) {
       dashboardMode = _DashboardMode.facilities;
-      submenuOpen = true;
     }
     final route = widget.safetyRoute;
     final destination = widget.selectedDestination;
@@ -704,11 +552,20 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
     });
   }
 
-  /// 지도 (대시보드 카드 안·전체 화면 공통). 전체 화면은 컨트롤러·옵션을 따로 쓴다 (한 컨트롤러는 지도 하나에만 붙는다)
-  Widget _buildMap(BuildContext context, MapController ctl, MapOptions options) {
+  @override
+  Widget build(BuildContext context) {
     final routeMode = dashboardMode == _DashboardMode.facilities;
-    // 경로 모드(경로 안내)에서도 긴급 지도와 같은 침수·산사태 층을 보인다 (2026-10-07) — 경로가 무엇을 피하는지 보이게
-    final visible = _visible;
+    // 경로 모드(대피소·의료시설 경로)에서도 긴급 지도와 같은 침수·산사태 층을 보인다 (2026-10-07) — 경로가 무엇을 피하는지 보이게
+    final visible = routeMode
+        ? <HazardKind>{HazardKind.flood, HazardKind.slide}
+        : compositeView
+            ? <HazardKind>{
+                HazardKind.flood,
+                HazardKind.wind,
+                HazardKind.slide,
+                HazardKind.overlap,
+              }
+            : activeLayers;
     final floodGrids = _grids;
     final destination = routeMode ? widget.selectedDestination : null;
     final route = routeMode ? widget.safetyRoute : null;
@@ -742,9 +599,11 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
     final legendTitle = compositeView || legendParts.isEmpty
         ? '지도 범례'
         : '${legendParts.join('·')} 범례';
-    return FlutterMap(
-              mapController: ctl,
-              options: options,
+    final full = widget.fullScreen;
+    final map = FlutterMap(
+              key: _mapKey,
+              mapController: mapController,
+              options: mapOptions,
               children: [
                 TileLayer(
                   urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -756,8 +615,6 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                           severeOnly: compositeView)),
                 if (widget.riskAreas.isNotEmpty)
                   PolygonLayer(polygons: hazardAreaPolygons(widget.riskAreas)),
-                if (widget.extraPolygons.isNotEmpty) PolygonLayer(polygons: widget.extraPolygons),
-                if (widget.extraPolylines.isNotEmpty) PolylineLayer(polylines: widget.extraPolylines),
                 if (route != null && route.polylinePoints.length > 1)
                   PolylineLayer(polylines: [
                     Polyline(
@@ -915,7 +772,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                                         fontWeight: FontWeight.bold))),
                           ]),
                         ),
-                    if (routeMode || widget.showFacilities) ...facilityMarkers,
+                    if (routeMode) ...facilityMarkers,
                     if (destination != null)
                       Marker(
                         point: destination.position,
@@ -971,27 +828,17 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                     ),
                   ],
                 ),
-                if (widget.extraMarkers.isNotEmpty) MarkerLayer(markers: widget.extraMarkers),
+                if (full)
                 mapLegendButton(context,
+                    top: 150,
                     routeMode: routeMode,
                     visible: visible,
                     hasRoute: route != null,
-                    hasDestination: destination != null,
-                    hasSea: (route?.seaPoints.length ?? 0) > 1,
-                    showFacilities: routeMode || widget.showFacilities,
-                    showPlaces: !widget.mapOnly),
-                // 판단에 필요한 경고는 범례 안에 숨기지 않고 지도에 바로 (2026-10-09): 위험 구역을 못 피한 경로
-                if (route != null && (route.stillInside.isNotEmpty || !route.hazardsOk))
+                    hasSea: (route?.seaPoints.length ?? 0) > 1),
+                if (!routeMode && full)
                   Positioned(
                     left: 8,
-                    right: 8,
-                    bottom: 8,
-                    child: RouteHazardBanner(route: route),
-                  ),
-                if (!routeMode)
-                  Positioned(
-                    left: 8,
-                    top: 8,
+                    top: 150,
                     child: Card(
                       child: Padding(
                         padding: const EdgeInsets.all(9),
@@ -1034,12 +881,13 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                     ),
                   ),
                 if (!routeMode &&
+                    full &&
                     !compositeView &&
                     (visible.contains(HazardKind.flood) ||
                         visible.contains(HazardKind.wind)))
                   Positioned(
                     right: 8,
-                    bottom: 8,
+                    bottom: 90,
                     child: Card(
                       child: ConstrainedBox(
                         constraints: const BoxConstraints(maxWidth: 230),
@@ -1108,314 +956,321 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                   ),
               ],
             );
-  }
-
-  void _openFullMap(BuildContext context) {
-    final ctl = MapController();
-    final cam = mapController.camera;
-    final options = MapOptions(
-      initialCenter: cam.center,
-      initialZoom: cam.zoom,
-      cameraConstraint: CameraConstraint.contain(bounds: guryongpoBounds),
-      onTap: mapOptions.onTap,
+    final riskCards = Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      children: widget.demo
+          ? [for (final h in demoHazards) _riskCard(context, h)]
+          : widget.riskItems.isEmpty
+              ? [_liveRiskCard(context, null)]
+              : [for (final i in widget.riskItems) _liveRiskCard(context, i)],
     );
-    showDialog<void>(
-      context: context,
-      useSafeArea: false,
-      builder: (dc) => Dialog.fullscreen(
-        child: Stack(children: [
-          Positioned.fill(child: _buildMap(dc, ctl, options)),
-          Positioned(left: 13, bottom: 13, child: _locateButton(ctl)),
-          Positioned(
-            right: 16,
-            bottom: 16,
-            child: GkPill('전체 화면 닫기', icon: Icons.close_fullscreen_rounded, filled: true, big: true,
-                onTap: () => Navigator.pop(dc)),
-          ),
-        ]),
-      ),
-    ).whenComplete(ctl.dispose);
-  }
-
-  /// 빨간 '최근 재난문자' 카드 (프로토타입) — 재난문자 → 없으면 서버 머리 경고 → 없으면 흰 카드
-  Widget _messageCard(BuildContext context) {
-    final msgs = widget.messages;
-    final headline = widget.headline;
-    final demoMsg = widget.demo ? demoHazards.first : null;
-    final latest = (msgs ?? const <Map<String, dynamic>>[]).firstOrNull;
-    final red = latest != null || headline != null || demoMsg != null;
-    final fg = red ? Colors.white : GK.ink;
-    final title = latest != null ? '최근 재난문자' : headline != null ? '지금 위험 알림' : demoMsg != null ? '최근 재난문자 · 예시' : '최근 재난문자';
-    final from = latest != null
-        ? '${latest['sender'] ?? ''} · ${_hhmm('${latest['sent_at']}')}'
-        : headline != null
-            ? '위험 판정 엔진'
-            : demoMsg != null
-                ? '가상 시연 · ${demoMsg.time}'
-                : '';
-    final head = latest != null
-        ? '${latest['message']}'
-        : headline != null
-            ? '${headline['title']}'
-            : demoMsg != null
-                ? '${demoMsg.name} — ${demoMsg.guide}'
-                : (widget.messagesReason ?? '최근 재난문자가 없습니다.');
-    return GkCard(
-      color: red ? GK.red : Colors.white,
-      shadow: red,
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          GkCircleIcon(Icons.sms_rounded, size: 48, bg: red ? Colors.white : GK.tint, fg: red ? GK.red : GK.navy),
-          const SizedBox(width: 12),
-          Expanded(child: Text(title, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: fg))),
-          if (from.isNotEmpty)
-            Flexible(
-                child: Text(from,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: fg.withValues(alpha: .9)))),
-        ]),
-        const SizedBox(height: 16),
-        Text(head,
-            maxLines: 4,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-                fontSize: red ? 26 : 19, fontWeight: red ? FontWeight.w800 : FontWeight.w600, height: 1.3, color: red ? fg : GK.muted)),
-        if (headline != null || demoMsg != null) ...[
-          const SizedBox(height: 16),
-          Wrap(spacing: 10, runSpacing: 8, children: [
-            GkPill('대피 경로 보기',
-                icon: Icons.directions_run_rounded,
-                bg: Colors.white,
-                fg: GK.redDark,
-                big: true,
-                onTap: () => setDashboardMode(_DashboardMode.facilities)),
-            GkPill('AI에게 행동 요령 묻기',
-                icon: Icons.chat_bubble_rounded, bg: Colors.white, fg: GK.redDark, big: true, onTap: () => context.go('/ai')),
-          ]),
-        ],
-        if (latest != null && '${latest['message']}'.length > 80) ...[
-          const SizedBox(height: 12),
-          Text('원문: ${latest['message']}', style: TextStyle(fontSize: 15, height: 1.5, color: fg.withValues(alpha: .85))),
-        ],
-      ]),
-    );
-  }
-
-  /// '경보·주의보' 카드 — 기상청 특보 + 서버 위험 판정(누르면 지도 이동) + 태풍 정보
-  Widget _warningsCard(BuildContext context) {
-    final chips = <Widget>[];
-    for (final w in widget.warnings) {
-      final lv = gkLevelOf('${w['level']}');
-      chips.add(GkPill('${w['label'] ?? w['region_name']}',
-          icon: Icons.campaign_rounded,
-          filled: lv == gkLevels[3],
-          trailingIcon: Icons.chevron_right_rounded,
-          onTap: () => context.push('/alerts-hub')));
-    }
-    if (widget.demo) {
-      for (final h in demoHazards) {
-        chips.add(GkPill('${h.id} · ${h.name}',
-            icon: _hazardIcon(h.kind), trailingIcon: Icons.chevron_right_rounded, onTap: () => _focusHazard(context, h)));
-      }
-    } else {
-      for (final i in widget.riskItems) {
-        final lv = gkLevelOf('${i['level']}');
-        chips.add(GkPill('${i['label']} · ${_levelKoFromServer('${i['level'] ?? 'normal'}')}',
-            icon: Icons.warning_rounded,
-            bg: lv.bg,
-            fg: lv.fg,
-            trailingIcon: Icons.chevron_right_rounded,
-            onTap: () => _focusRiskItem(i)));
-      }
-    }
-    chips.add(GkPill('태풍 정보', icon: Icons.cyclone_rounded, trailingIcon: Icons.chevron_right_rounded,
-        onTap: () => context.push('/typhoon', extra: 'local')));
-    final none = widget.warnings.isEmpty && (widget.demo ? false : widget.riskItems.isEmpty);
-    return GkCard(
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        GkCardHeader('경보 · 주의보',
-            icon: Icons.warning_rounded,
-            trailing: Text(widget.demo ? '가상 시연' : '기상청 · 위험 판정',
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: GK.muted))),
-        const SizedBox(height: 16),
-        if (none)
-          const Padding(
-            padding: EdgeInsets.only(bottom: 12),
-            child: Text('지금 발효 중인 특보와 주의 이상 위험 판정이 없습니다.',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: GK.green)),
-          ),
-        Wrap(spacing: 10, runSpacing: 10, children: chips),
-        const SizedBox(height: 14),
-        Text(none ? '알림 종에서 받은 경고와 예보를 볼 수 있어요.' : '항목을 누르면 지도에서 위치를 보여 줘요. 해안가와 방파제 접근을 피하고 가까운 대피소를 확인하세요.',
-            style: const TextStyle(fontSize: 16, color: GK.muted, height: 1.5)),
-      ]),
-    );
-  }
-
-  void _focusHazard(BuildContext context, DemoHazard h) {
-    setState(() {
-      selected = h;
-      focus = h.point;
-      layers.add(h.kind);
-    });
-    mapController.move(h.point, 15);
-    _showHazard(context, h);
-  }
-
-  void _focusRiskItem(Map<String, dynamic> i) {
-    final loc = i['location'] as Map?;
-    if (loc == null) return;
-    final kind = switch (i['hazard']) {
-      'landslide' => HazardKind.slide,
-      'strong_wind' || 'high_seas' => HazardKind.wind,
-      'typhoon' => HazardKind.storm,
-      _ => HazardKind.flood,
-    };
-    setState(() => layers.add(kind));
-    mapController.move(LatLng((loc['lat'] as num).toDouble(), (loc['lng'] as num).toDouble()), 15);
-  }
-
-  /// 아래쪽 바로가기 카드 (메뉴에서 빠진 지원 및 복구·태풍 정보, 2026-10-08)
-  Widget _linkCard(BuildContext context, IconData icon, String title, String desc, String route) => GkCard(
-        onTap: () => context.push(route),
-        child: Row(children: [
-          GkCircleIcon(icon, size: 56),
-          const SizedBox(width: 16),
-          Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title, style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800)),
-            const SizedBox(height: 2),
-            Text(desc, style: const TextStyle(fontSize: 16, color: GK.muted)),
-          ])),
-          const GkCircleIcon(Icons.chevron_right_rounded, size: 40, bg: GK.bg),
-        ]),
-      );
-
-  @override
-  Widget build(BuildContext context) {
-    final routeMode = dashboardMode == _DashboardMode.facilities;
-    final visible = _visible;
-    final wide = MediaQuery.sizeOf(context).width >= 1100;
-    final narrow = MediaQuery.sizeOf(context).width < 600;
-    final map = ClipRRect(
-      borderRadius: BorderRadius.circular(GK.radiusInner),
-      child: Stack(children: [
-        Positioned.fill(child: _buildMap(context, mapController, mapOptions)),
-        // 내 위치 확인 + 지도 가운데로 (출발 위치 표시 칸 대신, 2026-10-09)
-        Positioned(left: 11, bottom: 11, child: _locateButton(mapController)),
-        Positioned(
-          right: 14,
-          bottom: 14,
-          child: GkPill('전체 화면', icon: Icons.open_in_full_rounded, filled: true, big: !narrow,
-              onTap: () => _openFullMap(context)),
-        ),
-      ]),
-    );
-    final places = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Padding(
-        padding: EdgeInsets.fromLTRB(4, 4, 4, 10),
-        child: Text('등록 장소 위험', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: GK.muted)),
-      ),
-      _SavedPlaceSummary(
-        currentLocation: widget.currentLocation,
-        onFocus: (p) => focusOn(p),
-        levelAt: widget.demo ? null : _levelAt,
-      ),
-    ]);
-    // 지도 카드 — 재난 지도 / 대피 경로 (방재단 현황은 이 카드만 쓴다: mapOnly)
-    final mapCard = GkCard(
-          padding: EdgeInsets.all(narrow ? 12 : 16),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            // 상위 메뉴 두 개 (2026-10-09): 누르면 그 메뉴의 하위 항목만 펼친다. 보고 있는 메뉴를 다시 누르면 접고 펼친다
-            Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-              MapMenuButton(
-                  label: '재난 지도',
-                  icon: MapIcons.layers,
-                  kind: MapButtonKind.menu,
-                  big: !narrow, // 휴대폰 폭에서는 두 메뉴가 한 줄에 들어가게
-                  selected: !routeMode,
-                  expanded: !routeMode && submenuOpen,
-                  onTap: () => tapMenu(_DashboardMode.emergency)),
-              MapMenuButton(
-                  label: '경로 안내',
-                  icon: MapIcons.route,
-                  kind: MapButtonKind.menu,
-                  big: !narrow, // 휴대폰 폭에서는 두 메뉴가 한 줄에 들어가게
-                  selected: routeMode,
-                  expanded: routeMode && submenuOpen,
-                  onTap: () => tapMenu(_DashboardMode.facilities)),
-            ]),
-            if (submenuOpen) ...[
-              const SizedBox(height: 10),
-              if (!routeMode) _emergencyLayerControls() else _routeControls(),
-            ],
-            // 목적지 고르기·경로 요약 (기존 기능) — 육지·기본 위치일 때, 또는 이미 그리는 경로가 있을 때
-            if (routeMode &&
-                (widget.selectedDestination != null ||
-                    widget.where.kind == WhereKind.land ||
-                    widget.where.noGps))
-              _integratedRoutePanel(context),
-            const SizedBox(height: 12),
-            if (wide)
-              SizedBox(
-                height: 520,
-                child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                  Expanded(child: map),
-                  if (!routeMode) ...[
-                    const SizedBox(width: 16),
-                    SizedBox(width: 262, child: SingleChildScrollView(child: places)),
-                  ],
+    if (full) return _fullScreen(context, map, routeMode, visible);
+    Widget mapCard(double height) => AppCard(
+          radius: Ds.rCardLg,
+          padding: const EdgeInsets.all(12),
+          child: Column(children: [
+            SizedBox(
+              height: height,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: Stack(children: [
+                  Positioned.fill(child: map),
+                  Positioned(
+                    top: 10,
+                    right: 10,
+                    child: Container(
+                      decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(Ds.pill),
+                          boxShadow: const [
+                            BoxShadow(color: Color(0x2614225B), blurRadius: 8, offset: Offset(0, 2))
+                          ]),
+                      child: PillChip('전체화면',
+                          icon: FontAwesomeIcons.expand,
+                          height: 44,
+                          fontSize: 15,
+                          onTap: () => widget.onFullScreenChanged?.call(true)),
+                    ),
+                  ),
                 ]),
-              )
-            else ...[
-              SizedBox(height: narrow ? 380 : 460, child: map),
-              if (!routeMode) ...[const SizedBox(height: 12), places],
-            ],
-            if (!routeMode && visible.contains(HazardKind.slide)) ...[
-              const SizedBox(height: 10),
-              ListTile(
-                leading: const GkCircleIcon(Icons.terrain_rounded, size: 40),
-                title: const Text('산림청 산사태 위험지도(2025)'),
-                subtitle: const Text('공식 산사태 위험지도 열기 · 위험등급 1~5(1등급이 가장 높음). 앱 지도에는 판정된 산사태 위험 영역만 표시합니다.'),
-                trailing: const Icon(Icons.open_in_new_rounded),
-                onTap: () => launchUrl(Uri.parse('https://sansatai.forest.go.kr/mhms_pub/mhms/lndsInfo/lndsMapViewPage.do')),
               ),
+            ),
+            if (widget.routeSummary != null) widget.routeSummary!,
+            if (routeMode && widget.routeError != null) ...[
+              const SizedBox(height: 8),
+              const ErrorLine('경로를 불러오지 못했어요. 전체화면에서 다시 찾을 수 있어요.'),
             ],
           ]),
         );
-    if (widget.mapOnly) return mapCard;
-    return ListView(
-      padding: gkPagePadding(context),
-      children: [
-        GkPageTitle('대시보드',
-            subtitle: widget.statusText,
-            trailing: widget.onRefresh == null
-                ? null
-                : IconButton(
-                    tooltip: '새로고침', onPressed: widget.onRefresh, icon: const Icon(Icons.refresh_rounded, size: 30))),
-        if (widget.demo) const _DemoBanner() else if (widget.liveTop != null) widget.liveTop!,
-        const SizedBox(height: 12),
-        GkColumns(minWidth: 440, children: [_messageCard(context), _warningsCard(context)]),
-        const SizedBox(height: 20),
-        mapCard,
-        _personalizedMockAlerts(context),
-        const SizedBox(height: 28),
-        Wrap(spacing: 12, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-          Text('지금 구룡포 날씨', style: TextStyle(fontSize: narrow ? 24 : 30, fontWeight: FontWeight.w800)),
-          Text(widget.demo ? '· 가상 시연 자료' : '· ${widget.updatedText ?? '실시간 관측·예보'}',
-              style: TextStyle(fontSize: narrow ? 17 : 22, fontWeight: FontWeight.w600, color: GK.muted)),
-        ]),
-        const SizedBox(height: 10),
-        const GkLevelLegend(),
+    final top = <Widget>[
+      if (widget.demo) ...[
+        const _DemoBanner(),
         const SizedBox(height: 14),
-        if (widget.demo) const _RealtimeCards() else if (widget.liveBottom != null) widget.liveBottom!,
-        const SizedBox(height: 24),
-        GkColumns(minWidth: 440, children: [
-          _linkCard(context, Icons.health_and_safety_rounded, '재난 후 지원 · 복구', '보험·피해 신고·직업별 지원 안내', '/support'),
-          _linkCard(context, Icons.cyclone_rounded, '태풍 정보', '태풍 경로와 구룡포 영향', '/typhoon'),
-        ]),
-        if (widget.demo) ...[const SizedBox(height: 20), const PrototypeFeatureLinks()],
+      ] else if (widget.liveTop != null) ...[
+        widget.liveTop!,
+        const SizedBox(height: 10),
       ],
+    ];
+    final alerts = <Widget>[
+      DisasterMessageCard(demo: widget.demo),
+      const SizedBox(height: 14),
+      WarningsCard(demo: widget.demo, riskJudgment: riskCards),
+    ];
+    final rest = <Widget>[
+      WeatherSection(demo: widget.demo),
+      const SizedBox(height: 24),
+      Text('내 장소 위험', style: dsText(21, weight: FontWeight.w800)),
+      const SizedBox(height: 10),
+      _SavedPlaceSummary(
+        currentLocation: widget.currentLocation,
+        onFocus: (p) {
+          widget.onFullScreenChanged?.call(true);
+          WidgetsBinding.instance.addPostFrameCallback((_) => focusOn(p));
+        },
+        levelAt: widget.demo ? null : _levelAt,
+      ),
+      _personalizedMockAlerts(context),
+      const SizedBox(height: 16),
+      AppCard(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: ExpansionTile(
+          shape: const Border(),
+          collapsedShape: const Border(),
+          title: Text(widget.demo ? '실시간 정보 자세히' : '실시간 관측·예보 자세히',
+              style: dsText(17, weight: FontWeight.w800)),
+          subtitle: Text(
+              widget.demo ? '각 지점은 서로 다른 측정 위치의 가상 자료' : '기상청 · 포항 디지털 트윈',
+              style: dsText(13, color: Ds.muted)),
+          childrenPadding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+          children: [
+            if (widget.demo) const _RealtimeCards() else if (widget.liveBottom != null) widget.liveBottom!,
+          ],
+        ),
+      ),
+    ];
+    return LayoutBuilder(builder: (context, box) {
+      // 넓은 화면(웹): 왼쪽 재난문자·경보·날씨, 오른쪽 큰 지도 (2026-10-09 사용자 요청 — 웹은 웹 배치로)
+      if (box.maxWidth >= 900) {
+        return SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 40),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            const ScreenTitle('대시보드'),
+            ...top,
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Expanded(
+                  flex: 5,
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    ...alerts,
+                    const SizedBox(height: 24),
+                    ...rest,
+                  ])),
+              const SizedBox(width: 20),
+              Expanded(flex: 6, child: mapCard(560)),
+            ]),
+          ]),
+        );
+      }
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
+        children: [
+          const ScreenTitle('대시보드'),
+          ...top,
+          ...alerts,
+          const SizedBox(height: 14),
+          mapCard(210),
+          const SizedBox(height: 24),
+          ...rest,
+        ],
+      );
+    });
+  }
+
+  /// 지도 전체화면: 위 '출발 → 도착' 바·보기 전환·지도 층, 아래 경로 패널 (경로 종류·목적지 변경·길찾기·이동 중 안내)
+  Widget _fullScreen(BuildContext context, Widget map, bool routeMode, Set<HazardKind> visible) {
+    final dest = widget.selectedDestination;
+    final route = widget.safetyRoute;
+    const shadow = [BoxShadow(color: Color(0x2614225B), blurRadius: 14, offset: Offset(0, 4))];
+    return Stack(children: [
+      Positioned.fill(child: map),
+      Positioned(
+        left: 16,
+        right: 16,
+        top: 12,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 6, 6, 6),
+            decoration: BoxDecoration(
+                color: Colors.white, borderRadius: BorderRadius.circular(Ds.pill), boxShadow: shadow),
+            child: Row(children: [
+              Text(routeMode ? '출발' : '지도', style: dsText(16, weight: FontWeight.w800)),
+              if (routeMode) ...[
+                const SizedBox(width: 6),
+                const FaIcon(FontAwesomeIcons.arrowRight, size: 14, color: Ds.navy),
+                const SizedBox(width: 6),
+                Expanded(
+                    child: Text(dest?.name ?? '목적지를 고르세요',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: dsText(16, weight: FontWeight.w800))),
+              ] else
+                const Spacer(),
+              CircleButton(FontAwesomeIcons.compress,
+                  size: 44,
+                  bg: Ds.navy,
+                  fg: Colors.white,
+                  tooltip: '전체화면 닫기',
+                  onPressed: () => widget.onFullScreenChanged?.call(false)),
+            ]),
+          ),
+          const SizedBox(height: 8),
+          HScroll(fade: false, children: [
+            Container(
+              decoration:
+                  BoxDecoration(borderRadius: BorderRadius.circular(Ds.pill), boxShadow: shadow),
+              child: SegmentedPill<_DashboardMode>(
+                expand: false,
+                bg: Colors.white,
+                items: const [
+                  (_DashboardMode.emergency, '긴급 재난 종합', FontAwesomeIcons.layerGroup),
+                  (_DashboardMode.facilities, '대피소·의료시설 경로', FontAwesomeIcons.personWalking),
+                ],
+                value: dashboardMode,
+                onChanged: setDashboardMode,
+              ),
+            ),
+          ]),
+          if (!routeMode) ...[
+            const SizedBox(height: 8),
+            HScroll(fade: false, children: [_emergencyLayerControls(visible)]),
+          ],
+        ]),
+      ),
+      Positioned(
+        left: 16,
+        right: 16,
+        bottom: 16,
+        child: routeMode
+            ? ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * .42),
+                child: SingleChildScrollView(child: _integratedRoutePanel(context)))
+            : Row(children: [
+                if (visible.contains(HazardKind.slide))
+                  const PillChip('산림청 산사태 위험지도',
+                      icon: FontAwesomeIcons.mountain, height: 44, onTap: _openLandslideMap),
+                const Spacer(),
+                if (route != null)
+                  Container(
+                    height: 52,
+                    padding: const EdgeInsets.symmetric(horizontal: 18),
+                    decoration: BoxDecoration(
+                        color: Ds.navy, borderRadius: BorderRadius.circular(Ds.pill), boxShadow: shadow),
+                    alignment: Alignment.center,
+                    child: Text('${route.estimatedMinutes}분',
+                        style: dsText(20, weight: FontWeight.w800, color: Colors.white)),
+                  ),
+              ]),
+      ),
+    ]);
+  }
+
+  Widget _riskCard(BuildContext context, DemoHazard h) => SizedBox(
+        width: MediaQuery.sizeOf(context).width > 850 ? 300 : null,
+        child: Card(
+          color: _hazardColor(h.kind).withValues(alpha: .06),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () {
+              setState(() {
+                selected = h;
+                focus = h.point;
+                compositeView = false;
+                activeLayers.add(h.kind);
+              });
+              mapController.move(h.point, 15);
+              _showHazard(context, h);
+            },
+            child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(_hazardIcon(h.kind), color: _hazardColor(h.kind)),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${h.id} · ${h.name}',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        Text(
+                          '${h.summary}\n기준 ${h.time} · ${h.guide}',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+  /// 실측 위험 카드: 서버 판정 항목 1개 (null = 위험 없음)
+  Widget _liveRiskCard(BuildContext context, Map<String, dynamic>? i) {
+    final kind = switch (i?['hazard']) {
+      'landslide' => HazardKind.slide,
+      'strong_wind' || 'high_seas' => HazardKind.wind,
+      'typhoon' => HazardKind.storm,
+      null => HazardKind.flood,
+      _ => HazardKind.flood,
+    };
+    final loc = i?['location'] as Map?;
+    final point = loc == null ? null : LatLng((loc['lat'] as num).toDouble(), (loc['lng'] as num).toDouble());
+    final level = _levelKoFromServer('${i?['level'] ?? 'normal'}');
+    return SizedBox(
+      width: MediaQuery.sizeOf(context).width > 850 ? 300 : null,
+      child: Card(
+        color: (i == null ? Colors.green : _hazardColor(kind)).withValues(alpha: .06),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: point == null
+              ? null
+              : () {
+                  setState(() {
+                    compositeView = false;
+                    activeLayers.add(kind);
+                  });
+                  mapController.move(point, 15);
+                },
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(i == null ? Icons.verified_outlined : _hazardIcon(kind),
+                  color: i == null ? Colors.green.shade700 : _hazardColor(kind)),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(i == null ? '현재 위치 주변 위험 없음 · 정상' : '${i['label']} · $level',
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Text(
+                    i == null
+                        ? '침수·호우·강풍·산사태·태풍·풍랑·생활안전 판정 결과 주의 이상 위험이 없습니다.'
+                        : [
+                            if (i['reason'] != null) '${i['reason']}',
+                            if (i['observed_at'] != null) '기준 ${_hhmm('${i['observed_at']}')}',
+                            if (i['simulated'] == true) '시연용 모의값',
+                          ].join(' · '),
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ]),
+              ),
+            ]),
+          ),
+        ),
+      ),
     );
   }
 
@@ -1492,7 +1347,6 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                 style: const TextStyle(fontSize: 12),
               ),
             ),
-          // 경로 방식(최단·안전·오르막 회피)은 위 '경로 안내' 하위 항목에서 고른다 (2026-10-09). 여기는 이동 수단만
           if (destination != null)
             Wrap(spacing: 6, children: [
               for (final m in TravelMode.values)
@@ -1501,6 +1355,14 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                   label: Text(m.label),
                   selected: widget.travelMode == m,
                   onSelected: (_) => widget.onTravelModeChanged?.call(m),
+                ),
+              const SizedBox(width: 8),
+              for (final t in widget.travelMode.routeTypes)
+                ChoiceChip(
+                  label: Text(t.label),
+                  tooltip: t.description,
+                  selected: widget.routeType == t,
+                  onSelected: (_) => widget.onRouteTypeChanged?.call(t),
                 ),
             ]),
           if (destination == null)
@@ -1657,12 +1519,11 @@ Widget mapLegendButton(BuildContext context,
         required Set<HazardKind> visible,
         required bool hasRoute,
         required bool hasSea,
-        bool? hasDestination,
-        bool? showFacilities,
-        bool showPlaces = true}) =>
+        bool showPlaces = true,
+        double top = 8}) =>
     Positioned(
       right: 8,
-      top: 8,
+      top: top,
       child: FilledButton.tonalIcon(
         style: FilledButton.styleFrom(
             visualDensity: VisualDensity.compact,
@@ -1672,8 +1533,6 @@ Widget mapLegendButton(BuildContext context,
             visible: visible,
             hasRoute: hasRoute,
             hasSea: hasSea,
-            hasDestination: hasDestination ?? hasRoute,
-            showFacilities: showFacilities ?? routeMode,
             hidesTownWide: DemoData.on,
             showPlaces: showPlaces),
         icon: const Icon(Icons.info_outline, size: 18),
@@ -1802,18 +1661,15 @@ class _DemoBanner extends StatelessWidget {
   @override
   Widget build(BuildContext c) => Container(
         margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-        decoration: BoxDecoration(color: GK.orangeTint, borderRadius: BorderRadius.circular(24)),
-        child: const Row(children: [
-          Icon(Icons.info_rounded, color: GK.orangeInk, size: 22),
-          SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              '모든 위험·좌표·측정값·시설 정보는 실제 발생 정보가 아닌 시연용 가상 데이터입니다. 기상청 실시간 자료 미연동.',
-              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: GK.orangeInk),
-            ),
-          ),
-        ]),
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: Colors.amber.shade100,
+          borderRadius: BorderRadius.circular(9),
+        ),
+        child: const Text(
+          '모든 위험·좌표·측정값·시설 정보는 실제 발생 정보가 아닌 시연용 가상 데이터입니다. 기상청 실시간 자료 미연동.',
+          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+        ),
       );
 }
 
@@ -2052,7 +1908,7 @@ void _placeDetail(
 class _RealtimeCards extends StatelessWidget {
   const _RealtimeCards();
   @override
-  Widget build(BuildContext c) => GkMetricGrid(
+  Widget build(BuildContext c) => Column(
         children: [
           _rainfallMetric(),
           _metric(Icons.navigation, '바람', '평균 21 · 순간 30m/s',
@@ -2067,27 +1923,139 @@ class _RealtimeCards extends StatelessWidget {
 }
 
 Widget _rainfallMetric() {
-  const hourlyRain = <(String, double)>[('09시', 8), ('10시', 12), ('11시', 17), ('12시', 24), ('13시', 31), ('14시', 38)];
-  return GkMetricCard(
-    icon: Icons.water_drop_rounded,
-    title: '강수',
-    value: '38 mm/h',
-    description: '매우 강한 비 · 오늘 누적 130mm (예시)',
-    footnote: '강수 시연지점 · 14:00 · 가상 시연 자료',
-    badge: '예시',
-    level: 'warning',
-    extra: _rainBars(hourlyRain),
+  const hourlyRain = <(String, int)>[
+    ('09시', 8),
+    ('10시', 12),
+    ('11시', 17),
+    ('12시', 24),
+    ('13시', 25),
+    ('14시', 32),
+  ];
+  const color = Colors.indigo;
+  return Card(
+    child: Padding(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Icon(Icons.water_drop_outlined, color: color),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text('강수',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            ),
+            _exampleBadge(),
+          ]),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              RichText(
+                text: const TextSpan(
+                  style: TextStyle(color: Colors.black87),
+                  children: [
+                    TextSpan(
+                        text: '32',
+                        style: TextStyle(
+                            fontSize: 28, fontWeight: FontWeight.w800)),
+                    TextSpan(
+                        text: ' mm/h',
+                        style: TextStyle(
+                            fontSize: 15, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: .10),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Text('강한 비',
+                    style: TextStyle(
+                        color: color,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13)),
+              ),
+              const Text('누적 118 mm',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          const Text('최근 6시간 시간당 강수량',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 6),
+          Semantics(
+            container: true,
+            label:
+                '최근 6시간 시간당 강수량 예시. ${hourlyRain.map((e) => '${e.$1} ${e.$2}밀리미터').join(', ')}. 누적 118밀리미터.',
+            child: SizedBox(
+              height: 78,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  for (var i = 0; i < hourlyRain.length; i++)
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 3),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            Text('${hourlyRain[i].$2}',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: i == hourlyRain.length - 1
+                                        ? FontWeight.bold
+                                        : FontWeight.normal,
+                                    color: i == hourlyRain.length - 1
+                                        ? color
+                                        : Colors.black54)),
+                            const SizedBox(height: 3),
+                            Container(
+                              height: 38 * hourlyRain[i].$2 / 32,
+                              decoration: BoxDecoration(
+                                color: color.withValues(
+                                    alpha: i == hourlyRain.length - 1
+                                        ? .92
+                                        : .30 + .08 * i),
+                                borderRadius: const BorderRadius.vertical(
+                                    top: Radius.circular(5)),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(hourlyRain[i].$1,
+                                style: const TextStyle(
+                                    fontSize: 10, color: Colors.black54)),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          const Divider(height: 18),
+          const Text('구룡포 강수 시연지점 · 14:00 · 목업 자료',
+              style: TextStyle(fontSize: 12, color: Colors.black54)),
+        ],
+      ),
+    ),
   );
 }
 
+Widget _exampleBadge() => _badge('예시');
+
 /// 자료 구분 배지: 예시(가상) · 실측 · 예보 · 자료 없음
 Widget _badge(String text) => Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-          color: text == '실측' ? GK.tint : text == '예보' ? GK.orangeTint : GK.bg, borderRadius: BorderRadius.circular(999)),
-      child: Text(text,
-          style: TextStyle(
-              fontSize: 14, fontWeight: FontWeight.w700, color: text == '예보' ? GK.orangeInk : GK.navy)),
+          color: (text == '실측' ? Colors.teal : text == '예보' ? Colors.indigo : Colors.black).withValues(alpha: .08),
+          borderRadius: BorderRadius.circular(20)),
+      child: Text(text, style: const TextStyle(fontSize: 11, color: Colors.black54)),
     );
 
 /// 실측 '실시간 정보' (2026-10-05): 김다인 디자인(_rainfallMetric·_metric) 그대로, 값은 서버 /dashboard 위젯
@@ -2108,7 +2076,7 @@ class LiveRealtimeCards extends StatelessWidget {
   Widget build(BuildContext c) {
     final rain = _w('rain'), wind = _w('wind'), wave = _w('wave'), water = _w('water_level');
     final life = _w('life_safety'), fc = _w('forecast');
-    return GkMetricGrid(children: [
+    return Column(children: [
       _ok(rain)
           ? _liveRainfall(rain, simulated: simulated)
           : _metric(Icons.water_drop_outlined, '강수', '자료 없음', '${rain['reason']}', '구룡포 AWS', Colors.indigo,
@@ -2117,8 +2085,7 @@ class LiveRealtimeCards extends StatelessWidget {
           ? _metric(Icons.navigation, '바람', '평균 ${_n(wind['value'])} · 순간 ${_n(wind['wind_gust'])}m/s',
               '${_windFromKo(wind['wind_dir'])} · 화살표는 바람이 불어가는 방향', '${wind['station_name']} · ${_hhmm('${wind['observed_at']}')}',
               Colors.deepOrange,
-              rotation: wind['wind_dir'] is num ? ((wind['wind_dir'] as num) + 180) * math.pi / 180 : 0, badge: _obs, suffix: simulated ? ' · 시연값' : ' · 기상청 관측',
-              level: wind['level'] as String?)
+              rotation: wind['wind_dir'] is num ? ((wind['wind_dir'] as num) + 180) * math.pi / 180 : 0, badge: _obs, suffix: simulated ? ' · 시연값' : ' · 기상청 관측')
           : _metric(Icons.navigation, '바람', '자료 없음', '${wind['reason']}', '구룡포 AWS', Colors.deepOrange, badge: '자료 없음', suffix: ''),
       _ok(wave)
           ? _metric(
@@ -2143,8 +2110,7 @@ class LiveRealtimeCards extends StatelessWidget {
               '${i['station_name']} · ${_hhmm('${i['observed_at']}')}',
               Colors.amber.shade800,
               badge: _obs,
-              suffix: '',
-              level: i['level'] as String?),
+              suffix: ''),
     ]);
   }
 
@@ -2192,6 +2158,7 @@ class LiveRealtimeCards extends StatelessWidget {
 
 /// 김다인 _rainfallMetric 디자인 + 실측: 1시간 강수·오늘 누적·최근 6시간 시간별 막대
 Widget _liveRainfall(Map<String, dynamic> d, {bool simulated = false}) {
+  const color = Colors.indigo;
   final now = (d['value'] as num?)?.toDouble() ?? 0;
   // 10분 간격 '1시간 강수' 값에서 시각별 마지막 값 → 최근 6시간 막대
   final byHour = <int, (String, double)>{};
@@ -2202,42 +2169,70 @@ Widget _liveRainfall(Map<String, dynamic> d, {bool simulated = false}) {
   }
   final hourly = (byHour.keys.toList()..sort()).map((k) => byHour[k]!).toList();
   final bars = hourly.length > 6 ? hourly.sublist(hourly.length - 6) : hourly;
+  final top = bars.isEmpty ? 0.0 : bars.map((e) => e.$2).reduce(math.max);
   final label = now <= 0 ? '비 없음' : now < 3 ? '약한 비' : now < 15 ? '보통 비' : now < 30 ? '강한 비' : '매우 강한 비';
-  return GkMetricCard(
-    icon: Icons.water_drop_rounded,
-    title: '강수',
-    value: '${now.toStringAsFixed(1)} mm/h',
-    description: '$label · 오늘 누적 ${((d['rain_day'] as num?) ?? 0).toStringAsFixed(1)}mm',
-    footnote: '${d['station_name']} · ${_hhmm('${d['observed_at']}')} · ${simulated ? '시연값' : '기상청 관측'}',
-    badge: simulated ? '시연' : '실측',
-    level: d['level'] as String?,
-    extra: bars.length < 2 ? null : _rainBars(bars),
-  );
-}
-
-/// 시간별 강수 막대 (프로토타입 AI 대화창의 '시간별 강수량' 막대 모양)
-Widget _rainBars(List<(String, double)> bars) {
-  final top = bars.map((e) => e.$2).reduce(math.max);
-  return SizedBox(
-    height: 92,
-    child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-      for (var i = 0; i < bars.length; i++)
-        Expanded(
-          child: Column(mainAxisAlignment: MainAxisAlignment.end, children: [
-            Text(bars[i].$2.toStringAsFixed(bars[i].$2 < 10 ? 1 : 0),
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: i == bars.length - 1 ? GK.navy : GK.muted)),
-            const SizedBox(height: 4),
-            Container(
-              width: 24,
-              height: top <= 0 ? 4 : math.max(4, 46 * bars[i].$2 / top),
-              decoration: BoxDecoration(
-                  color: i >= bars.length - 3 ? GK.navy : const Color(0xFFB8C2DE), borderRadius: BorderRadius.circular(999)),
-            ),
-            const SizedBox(height: 4),
-            Text(bars[i].$1, style: const TextStyle(fontSize: 12, color: GK.muted)),
+  return Card(
+    child: Padding(
+      padding: const EdgeInsets.all(14),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.water_drop_outlined, color: color),
+          const SizedBox(width: 8),
+          const Expanded(child: Text('강수', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold))),
+          _badge(simulated ? '시연' : '실측'),
+        ]),
+        const SizedBox(height: 8),
+        Wrap(spacing: 10, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+          RichText(
+            text: TextSpan(style: const TextStyle(color: Colors.black87), children: [
+              TextSpan(text: now.toStringAsFixed(1), style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
+              const TextSpan(text: ' mm/h', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+            ]),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(color: color.withValues(alpha: .10), borderRadius: BorderRadius.circular(20)),
+            child: Text(label, style: const TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13)),
+          ),
+          Text('오늘 누적 ${((d['rain_day'] as num?) ?? 0).toStringAsFixed(1)} mm',
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+        ]),
+        const SizedBox(height: 12),
+        const Text('최근 6시간 시간당 강수량', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 6),
+        SizedBox(
+          height: 78,
+          child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            for (var i = 0; i < bars.length; i++)
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 3),
+                  child: Column(mainAxisAlignment: MainAxisAlignment.end, children: [
+                    Text(bars[i].$2.toStringAsFixed(bars[i].$2 < 10 ? 1 : 0),
+                        style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: i == bars.length - 1 ? FontWeight.bold : FontWeight.normal,
+                            color: i == bars.length - 1 ? color : Colors.black54)),
+                    const SizedBox(height: 3),
+                    Container(
+                      height: top <= 0 ? 2 : math.max(2, 38 * bars[i].$2 / top),
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: i == bars.length - 1 ? .92 : .30 + .08 * i),
+                        borderRadius: const BorderRadius.vertical(top: Radius.circular(5)),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(bars[i].$1, style: const TextStyle(fontSize: 10, color: Colors.black54)),
+                  ]),
+                ),
+              ),
           ]),
         ),
-    ]),
+        const Divider(height: 18),
+        Text('${d['station_name']} · ${_hhmm('${d['observed_at']}')} · ${simulated ? '시연값' : '기상청 관측'}',
+            style: const TextStyle(fontSize: 12, color: Colors.black54)),
+      ]),
+    ),
   );
 }
 
@@ -2257,85 +2252,44 @@ Widget _metric(
   double rotation = 0,
   String badge = '예시',
   String suffix = ' · 가상 시연 자료',
-  String? level,
 }) =>
-    GkMetricCard(
-      icon: icon,
-      title: title,
-      value: value,
-      description: description,
-      footnote: '$locationTime$suffix',
-      badge: badge,
-      level: level,
-      rotation: rotation,
-    );
-
-/// 지표 카드 (프로토타입 MetricCard): 원 아이콘 · 이름·설명 · 큰 값 · 단계 칩/자료 구분 · 관측소·시각
-class GkMetricCard extends StatelessWidget {
-  const GkMetricCard(
-      {super.key,
-      required this.icon,
-      required this.title,
-      required this.value,
-      required this.description,
-      required this.footnote,
-      required this.badge,
-      this.level,
-      this.rotation = 0,
-      this.extra});
-  final IconData icon;
-  final String title, value, description, footnote, badge;
-  /// 서버 위험 단계 (있으면 원·칩 색)
-  final String? level;
-  final double rotation;
-  final Widget? extra;
-  @override
-  Widget build(BuildContext c) {
-    final lv = level == null ? null : gkLevelOf(level);
-    return GkCard(
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
+    Card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(children: [
           Container(
-            width: 72,
-            height: 72,
-            decoration: BoxDecoration(color: lv?.bg ?? GK.tint, shape: BoxShape.circle),
-            child: Transform.rotate(angle: rotation, child: Icon(icon, size: 40, color: lv?.fg ?? GK.navy)),
-          ),
-          const SizedBox(width: 14),
+              width: 54,
+              height: 54,
+              decoration: BoxDecoration(
+                  color: color.withValues(alpha: .12),
+                  borderRadius: BorderRadius.circular(15)),
+              child: Center(
+                  child: Transform.rotate(
+                      angle: rotation,
+                      child: Icon(icon, color: color, size: 31)))),
+          const SizedBox(width: 13),
           Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title, style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 2),
-            Text(description, style: const TextStyle(fontSize: 16, height: 1.4)),
-          ])),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Row(children: [
+                  Text(title,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 15)),
+                  const Spacer(),
+                  _badge(badge),
+                ]),
+                Text(value,
+                    style: const TextStyle(
+                        fontSize: 20, fontWeight: FontWeight.w800)),
+                Text(description, style: const TextStyle(fontSize: 13)),
+                Text('$locationTime$suffix',
+                    style:
+                        const TextStyle(fontSize: 12, color: Colors.black54)),
+              ])),
         ]),
-        const SizedBox(height: 14),
-        Text(value,
-            style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w800, color: GK.navy, letterSpacing: -0.6, height: 1.2)),
-        if (extra != null) ...[const SizedBox(height: 10), extra!],
-        const SizedBox(height: 12),
-        Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
-          if (lv != null) GkLevelChip(lv),
-          _badge(badge),
-          Text(footnote, style: const TextStyle(fontSize: 14, color: GK.muted)),
-        ]),
-      ]),
+      ),
     );
-  }
-}
-
-/// 지표 카드 격자 (프로토타입 auto-fill minmax(280px,1fr))
-class GkMetricGrid extends StatelessWidget {
-  const GkMetricGrid({super.key, required this.children});
-  final List<Widget> children;
-  @override
-  Widget build(BuildContext c) => LayoutBuilder(builder: (c, box) {
-        const gap = 16.0;
-        final cols = (box.maxWidth / 300).floor().clamp(1, 4);
-        final w = (box.maxWidth - gap * (cols - 1)) / cols;
-        return Wrap(spacing: gap, runSpacing: gap, children: [for (final x in children) SizedBox(width: w, child: x)]);
-      });
-}
 
 class TyphoonScreen extends StatefulWidget {
   const TyphoonScreen({super.key, this.initialLocal = false, this.demo = true, this.live});
@@ -2422,10 +2376,6 @@ class _TyphoonScreenState extends State<TyphoonScreen> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        const Text(
-          '태풍 정보',
-          style: TextStyle(fontSize: 30, fontWeight: FontWeight.bold),
-        ),
         if (widget.demo) const _DemoBanner(),
         Card(
           child: Padding(
@@ -2882,10 +2832,8 @@ class _AlertHubScreenState extends State<AlertHubScreen> {
     const lv = {'watch': '관심', 'advisory': '주의', 'warning': '경보', 'critical': '위험'};
     const hz = {'flood': '침수', 'landslide': '산사태', 'heavy_rain': '호우', 'strong_wind': '강풍', 'typhoon': '태풍', 'high_seas': '풍랑'};
     return ListView(
-      padding: gkPagePadding(context),
+      padding: const EdgeInsets.all(16),
       children: [
-        const GkPageTitle('선제 경고·알림'),
-        const SizedBox(height: 8),
         const Text('사용자 맞춤형 선제 경고', style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold)),
         _WeatherBulletins(warnings: _widget('warnings') ?? const {}, forecast: _widget('forecast') ?? const {}),
         if (widget.alerts.isEmpty && places.isEmpty)
@@ -3020,9 +2968,8 @@ class _AlertHubScreenState extends State<AlertHubScreen> {
         ));
       }
     return ListView(
-      padding: gkPagePadding(context),
+      padding: const EdgeInsets.all(16),
       children: [
-        const GkPageTitle('선제 경고·알림'),
         const SizedBox(height: 8),
         const _DemoBanner(),
         const Text(
@@ -3210,9 +3157,8 @@ class _RecoveryScreenState extends State<RecoveryScreen> {
         .toSet()
         .toList();
     return ListView(
-      padding: gkPagePadding(c),
+      padding: const EdgeInsets.all(16),
       children: [
-        const GkPageTitle('지원 및 복구'),
         const _DemoBanner(),
         const Text(
           '목업 안내입니다. 실제 제도·자격·지원 금액은 관할 기관에 확인하세요.',
@@ -3273,51 +3219,15 @@ class _RecoveryScreenState extends State<RecoveryScreen> {
   }
 }
 
-// 사용자 화면 '내 정보' 카드(ProfileDetailsCard)는 profile_cards.dart 로 옮겼다 (2026-10-09)
 
-/// 경로가 위험 구역을 다 피하지 못했을 때 지도 위에 바로 띄우는 경고 (범례·작은 글씨에만 두지 않는다, 2026-10-09)
-class RouteHazardBanner extends StatelessWidget {
-  const RouteHazardBanner({super.key, required this.route});
-  final SafetyRoute route;
-  @override
-  Widget build(BuildContext context) => Semantics(
-        liveRegion: true,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0xffd93232), width: 2),
-              boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)]),
-          child: Row(children: [
-            const Icon(Icons.warning_amber_rounded, color: Color(0xffd93232)),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                [
-                  if (route.stillInside.isNotEmpty) '다른 길이 없어 위험 구역을 지나는 경로입니다: ${route.stillInside.join(', ')}',
-                  if (!route.hazardsOk) '위험 정보를 확인하지 못해 위험 구역을 피하지 않고 계산한 경로입니다',
-                ].join('\n'),
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xff8a1c17)),
-              ),
-            ),
-          ]),
-        ),
-      );
-}
-
-/// 지도 범례 (2026-10-07, 2026-10-09 간소화): 기본은 지도를 읽는 데 꼭 필요한 것만 — 위험 단계·재난 구분·주요 표식·경로.
-/// 긴 설명과 기술 세부(수위계·침수 격자·숫자 원·채움/테두리·판단 근거·출처·칠하지 않는 특보)는 접힌 '범례 자세히' 안.
-/// 지금 켠 층·경로 상태에 맞는 항목만 보인다 (경로 안내 전에는 목적지·경로 없음). 색은 지도 그리기와 같은 함수를 쓰고,
-/// 단계 이름도 지도 데이터(위험 판정 → 주의·경계·심각)와 같다.
+/// 지도 범례 (2026-10-07): 지도에 그려진 색·선·아이콘이 무엇인지. 지도 오른쪽 위 '범례' 버튼으로 연다.
+/// 보이는 항목만 — 경로 모드인지, 켠 재난 종류(침수·강풍·산사태)에 따라 바뀐다. 색은 지도 그리기와 같은 함수를 쓴다.
 void _showMapLegend(BuildContext context,
     {required bool routeMode,
     required Set<HazardKind> visible,
     required bool hasRoute,
     required bool hasSea,
     required bool hidesTownWide,
-    bool hasDestination = false,
-    bool showFacilities = false,
     bool showPlaces = true}) {
   Widget fill(Color c, {Color? border}) => Container(
       width: 22,
@@ -3363,20 +3273,6 @@ void _showMapLegend(BuildContext context,
       padding: const EdgeInsets.only(top: 12, bottom: 2),
       child: Text(t,
           style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)));
-  Widget chip(Widget mark, String label) => Container(
-      padding: const EdgeInsets.fromLTRB(8, 5, 12, 5),
-      decoration: BoxDecoration(color: const Color(0xFFF3F5FA), borderRadius: BorderRadius.circular(999)),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        mark,
-        const SizedBox(width: 6),
-        Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
-      ]));
-  final hasAreas = visible.contains(HazardKind.flood) || visible.contains(HazardKind.slide);
-  final showRoute = routeMode || hasRoute;
-  final facilityMark = CircleAvatar(
-      radius: 11,
-      backgroundColor: Colors.teal.shade800,
-      child: const Text('3', style: TextStyle(color: Colors.white, fontSize: 11)));
 
   showModalBottomSheet<void>(
     context: context,
@@ -3392,111 +3288,84 @@ void _showMapLegend(BuildContext context,
           children: [
             const Text('지도 범례',
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            // ---------------------------------------------------------------- 기본
-            if (hasAreas) ...[
-              section('위험 단계'),
-              Wrap(spacing: 8, runSpacing: 6, children: [
-                chip(fill(_floodColor('주의')), '노랑 · 주의'),
-                chip(fill(_floodColor('경계')), '주황 · 경계'),
-                chip(fill(_floodColor('심각')), '빨강 · 심각'),
-              ]),
-              section('재난 구분'),
-              Wrap(spacing: 8, runSpacing: 6, children: [
-                if (visible.contains(HazardKind.flood))
-                  chip(fill(Colors.white, border: _hazardColor(HazardKind.flood)), '파란 테두리 · 침수'),
-                if (visible.contains(HazardKind.slide))
-                  chip(fill(Colors.white, border: _hazardColor(HazardKind.slide)), '갈색 테두리 · 산사태'),
-              ]),
+            if (visible.isNotEmpty) ...[
+              section('위험 영역 (면)'),
+              const Text('채움색 = 위험 단계, 테두리색 = 재난 종류',
+                  style: TextStyle(fontSize: 12, color: Colors.black54)),
+              row(fill(_floodColor('주의')), '주의', '위험 판정 엔진의 주의 단계'),
+              row(fill(_floodColor('경계')), '경보', '앱 화면에서는 "경계"로도 표시'),
+              row(fill(_floodColor('심각')), '위험', '가장 높은 단계'),
+              row(fill(Colors.white, border: _hazardColor(HazardKind.flood)),
+                  '파란 테두리 = 침수', '수위계·맨홀 주변 반경 100~500m'),
+              row(fill(Colors.white, border: _hazardColor(HazardKind.slide)),
+                  '갈색 테두리 = 산사태', '호우 특보 × 산사태위험지도 비탈 100m·지정 취약지역'),
+              if (hidesTownWide)
+                row(icon(Icons.visibility_off_outlined, Colors.black54),
+                    '호우·강풍 특보는 칠하지 않음',
+                    '구룡포읍 전체에 내려져 화면을 다 덮으므로 위쪽 특보 카드로 확인'),
+            ],
+            if (visible.contains(HazardKind.flood)) ...[
+              section('수위계'),
+              row(
+                  Container(
+                      width: 22,
+                      height: 22,
+                      decoration: BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: _hazardColor(HazardKind.flood), width: 2)),
+                      child: Icon(Icons.water_drop, size: 14, color: _floodColor('경계'))),
+                  '물방울',
+                  '침수 판정의 원인 센서(수위계·맨홀) 실제 위치 = 침수 원의 중심. 색 = 단계, 누르면 측정값'),
+              section('침수 격자'),
+              row(fill(_floodColor('경계')), '작은 칸',
+                  '위 침수 영역을 약 100m 칸으로 나눈 것 (경로가 피하는 범위와 같음)'),
+              row(dot(_floodColor('경계')), '칸 가운데 점', '칸 위치 표시일 뿐 측정 지점이 아님 — 누르면 그 칸의 단계·출처'),
             ],
             if (visible.contains(HazardKind.wind)) ...[
               section('바람'),
-              row(icon(Icons.navigation, _windColor(21, 21)), '화살표', '바람이 불어가는 쪽 · 클수록·붉을수록 셈'),
+              row(icon(Icons.navigation, Colors.blueGrey.shade700), '화살표 방향',
+                  '바람이 불어가는 쪽'),
+              row(icon(Icons.navigation, _windColor(10, 10)), '회색', '평균 14m/s 미만'),
+              row(icon(Icons.navigation, _windColor(14, 14)), '주황',
+                  '평균 14m/s 이상 (강풍주의보 기준)'),
+              row(icon(Icons.navigation, _windColor(21, 21)), '빨강',
+                  '평균 21m/s 이상 (강풍경보 기준) · 화살표가 클수록 셈'),
             ],
-            section('주요 표식'),
-            row(icon(Icons.my_location, _riskColor('경계')), '현위치', '색 = 지금 위치의 위험 단계'),
-            if (showFacilities) ...[
+            section('표식'),
+            row(icon(Icons.my_location, _riskColor('경계')), '현위치',
+                '색 = 지금 위치의 위험 단계 (초록 정상 → 노랑 → 주황 → 빨강)'),
+            if (!routeMode && showPlaces)
+              row(icon(Icons.home, _riskColor('정상')), '등록한 집·직장',
+                  '색 = 그 장소의 위험 단계'),
+            if (routeMode) ...[
               row(icon(Icons.health_and_safety, Colors.teal.shade800), '대피소'),
               row(icon(Icons.local_hospital, Colors.red.shade700), '의료시설'),
-              row(icon(Icons.warning_amber_rounded, Colors.deepOrange, size: 18), '주황 경고 표시',
-                  '위험지역 안에 있는 시설 — 대피소로 고르지 않음'),
+              row(
+                  CircleAvatar(
+                      radius: 11,
+                      backgroundColor: Colors.teal.shade800,
+                      child: const Text('3',
+                          style: TextStyle(color: Colors.white, fontSize: 11))),
+                  '숫자 원',
+                  '가까운 시설 묶음 — 누르면 확대'),
             ],
-            if (hasDestination)
-              row(icon(Icons.location_on, Colors.blue.shade800), '목적지'),
-            if (showRoute && (hasRoute || hasDestination)) ...[
-              section('안내 경로'),
-              row(line(Colors.blue.shade800), '파란 선', '위험 구역을 피해 계산한 길'),
+            row(icon(Icons.location_on, Colors.blue.shade800), '목적지',
+                '고른 대피소·시설 (병원은 십자 표시)'),
+            row(icon(Icons.warning_amber_rounded, Colors.deepOrange, size: 18),
+                '주황 경고 표시', '위험 영역 안에 있는 시설 — 대피소로 고르지 않음'),
+            if (routeMode || hasRoute) ...[
+              section('경로'),
+              row(line(Colors.blue.shade800), '파란 선',
+                  '안내 경로 (위험 영역을 피해 계산, 못 피하면 화면에 경고)'),
               if (hasSea)
-                row(line(Colors.teal.shade700, dotted: true), '청록 점선', '바다 위에서 항구까지 바닷길'),
+                row(line(Colors.teal.shade700, dotted: true), '청록 점선',
+                    '바다 위에서 항구까지 바닷길'),
             ],
-            // ---------------------------------------------------------------- 자세히 (기본은 접힘)
-            const SizedBox(height: 8),
-            Theme(
-              data: Theme.of(c).copyWith(dividerColor: Colors.transparent),
-              child: ExpansionTile(
-                key: const Key('legend-details'),
-                tilePadding: EdgeInsets.zero,
-                childrenPadding: const EdgeInsets.only(bottom: 8),
-                expandedCrossAxisAlignment: CrossAxisAlignment.start,
-                title: const Text('범례 자세히', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
-                subtitle: const Text('센서·격자·묶음 표시, 판단 근거와 출처', style: TextStyle(fontSize: 12)),
-                children: [
-                  if (hasAreas) ...[
-                    section('채움색과 테두리색'),
-                    row(fill(_floodColor('경계'), border: _hazardColor(HazardKind.flood)), '채움색 = 위험 단계',
-                        '테두리색 = 재난 종류. 같은 면이 두 정보를 함께 보여 줍니다'),
-                    section('판단 근거·범위·출처'),
-                    if (visible.contains(HazardKind.flood))
-                      row(fill(Colors.white, border: _hazardColor(HazardKind.flood)), '침수',
-                          '수위계·맨홀 측정값(포항 디지털 트윈) 기준, 센서 주변 반경 100~500m. 서버 위험 판정 단계이며 실측 수심 구간이 아님'),
-                    if (visible.contains(HazardKind.slide))
-                      row(fill(Colors.white, border: _hazardColor(HazardKind.slide)), '산사태',
-                          '호우 특보(기상청) × 산사태위험지도 비탈 100m · 지정 취약지역'),
-                  ],
-                  if (visible.contains(HazardKind.flood)) ...[
-                    section('수위계·센서'),
-                    row(
-                        Container(
-                            width: 22,
-                            height: 22,
-                            decoration: BoxDecoration(
-                                color: Colors.white,
-                                shape: BoxShape.circle,
-                                border: Border.all(color: _hazardColor(HazardKind.flood), width: 2)),
-                            child: Icon(Icons.water_drop, size: 14, color: _floodColor('경계'))),
-                        '물방울',
-                        '침수 판정의 원인 센서(수위계·맨홀) 실제 위치 = 침수 원의 중심. 색 = 단계, 누르면 측정값'),
-                    section('침수 격자'),
-                    row(fill(_floodColor('경계')), '작은 칸',
-                        '침수 영역을 약 100m 칸으로 나눈 것 (경로가 피하는 범위와 같음)'),
-                    row(dot(_floodColor('경계')), '칸 가운데 점', '칸 위치 표시일 뿐 측정 지점이 아님 — 누르면 그 칸의 단계·출처'),
-                  ],
-                  if (visible.contains(HazardKind.wind)) ...[
-                    section('바람 기준'),
-                    row(icon(Icons.navigation, _windColor(10, 10)), '회색', '평균 14m/s 미만'),
-                    row(icon(Icons.navigation, _windColor(14, 14)), '주황', '평균 14m/s 이상 (강풍주의보 기준)'),
-                    row(icon(Icons.navigation, _windColor(21, 21)), '빨강', '평균 21m/s 이상 (강풍경보 기준)'),
-                  ],
-                  section('표식 더 보기'),
-                  if (showFacilities) row(facilityMark, '숫자 원', '가까운 시설 묶음 — 누르면 그곳으로 확대'),
-                  if (!routeMode && showPlaces)
-                    row(icon(Icons.home, _riskColor('정상')), '등록한 집·직장', '색 = 그 장소의 위험 단계'),
-                  row(icon(Icons.my_location, _riskColor('정상')), '현위치 색',
-                      '초록 정상 → 노랑 주의 → 주황 경계 → 빨강 심각'),
-                  if (hasDestination) row(icon(Icons.local_hospital, Colors.blue.shade800), '목적지 십자', '고른 곳이 병원이면 십자 표시'),
-                  if (hidesTownWide) ...[
-                    section('지도에 칠하지 않는 기상특보'),
-                    row(icon(Icons.visibility_off_outlined, Colors.black54), '호우·강풍 특보',
-                        '구룡포읍 전체에 내려져 화면을 다 덮으므로 칠하지 않음 — 위쪽 특보 카드로 확인'),
-                  ],
-                  if (showRoute)
-                    row(line(Colors.blue.shade800), '경로 경고',
-                        '위험 구역을 다 피하지 못한 경로는 지도 아래에 빨간 경고를 바로 띄웁니다'),
-                ],
-              ),
-            ),
           ],
         ),
       ),
     ),
   );
 }
+

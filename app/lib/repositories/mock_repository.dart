@@ -223,8 +223,7 @@ class MockSafetyRepository implements SafetyRepository {
 
   Future<SafetyRoute> _applySavedProfile(SafetyRoute route) async {
     final (age, transport) = await _account.requiredSetup();
-    final walking = await _account.walkingImpaired();
-    final profile = deriveRouteProfile(age, transport, walkingImpaired: walking);
+    final profile = deriveRouteProfile(age, transport);
     return SafetyRoute(
       shelterId: route.shelterId,
       routeType: route.routeType,

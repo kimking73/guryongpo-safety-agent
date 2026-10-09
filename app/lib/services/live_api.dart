@@ -36,6 +36,9 @@ class LiveApi {
       _list('/api/v1/hotlines', {if (hazard != null) 'hazard': hazard});
 
   // ---- 방재단 (역할 필요: 초대 코드로 받음) ----
+  /// 방재단 업무 단계(가는 중·방문 중·대피 동행·완료)를 서버에 저장할 수 있는지.
+  /// 2026-10-09: 서버(incident_targets)에 업무 단계 칸이 아직 없어 false — 배정(assigned_to)만 저장된다. 시연은 true
+  bool get supportsWorkStatus => false;
   Future<Map<String, dynamic>> me() => _get('/api/v1/user');
   Future<Map<String, dynamic>> claimRole(String code) async => Map<String, dynamic>.from(
       (await _api.post<Map<String, dynamic>>('/api/v1/user/role', data: {'invite_code': code.trim()})).data ?? const {});
@@ -70,6 +73,21 @@ class LiveApi {
         'profile': profile,
         if (DemoData.on) 'demo': true,
       }));
+
+  /// 지금 위치가 바다 위인지 (2026-10-09, 경로 안내 메뉴). 경로 서버 육지 지도로 판별 — 범위 밖은 422(오류로 던짐).
+  /// 판별 창구가 아직 없는 서버(404·405)면 해상 경로 응답의 at_sea 로 대신한다
+  Future<bool> seaCheck(double lat, double lon) async {
+    try {
+      final r = await _route.post<Map<String, dynamic>>('/api/route/sea/check', data: {
+        'origin': {'lat': lat, 'lon': lon},
+      });
+      return r.data?['at_sea'] == true;
+    } on DioException catch (e) {
+      final code = e.response?.statusCode;
+      if (code != 404 && code != 405) rethrow;
+      return (await seaRoute(lat, lon))['at_sea'] == true;
+    }
+  }
 
   // ---- 방재단 다중 방문 경로 (2026-10-09, route 서버 /api/route/visits) ----
   /// 출발점 → 고른 집 1~10곳. 응답 shortest·priority 두 경로 (order[id·seq·tier·leg_distance_m·leg_duration_s], distance_m,

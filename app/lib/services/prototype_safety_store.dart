@@ -209,6 +209,7 @@ class PrototypeSafetyController extends ChangeNotifier {
   static const _roleKey = 'prototype_demo_role_v1';
   static const _householdsKey = 'prototype_households_v1';
   static const _visitsKey = 'prototype_visits_v1';
+  static const _demoAlertKey = 'prototype_demo_alert_active_v1';
 
   bool _loaded = false;
   AccessibilitySettings _accessibility = const AccessibilitySettings();
@@ -216,8 +217,11 @@ class PrototypeSafetyController extends ChangeNotifier {
   Map<String, EvacuationResponseStatus> _responses = {};
   List<DemoHousehold> _households = _seedHouseholds;
   List<DemoVisit> _visits = [];
+  bool _demoAlertActive = false;
 
   bool get loaded => _loaded;
+  /// 시연 대피 경보가 진행 중인지 ('대피 경보 팝업'을 누르면 새 경보가 시작된다, 2026-10-09)
+  bool get demoAlertActive => _demoAlertActive;
   AccessibilitySettings get accessibility => _accessibility;
   String? get demoRole => _demoRole;
   // 방재단 화면은 방재단·관리자만 (C8, 2026-10-05 — 돌봄 담당 caregiver 제외, 실측 모드 patrolRoles와 같게)
@@ -249,6 +253,7 @@ class PrototypeSafetyController extends ChangeNotifier {
             jsonDecode(rawAccessibility) as Map<String, dynamic>);
       }
       _demoRole = prefs.getString(_roleKey);
+      _demoAlertActive = prefs.getBool(_demoAlertKey) ?? false;
       final rawHouseholds = prefs.getString(_householdsKey);
       if (rawHouseholds != null) {
         _households = (jsonDecode(rawHouseholds) as List)
@@ -274,6 +279,22 @@ class PrototypeSafetyController extends ChangeNotifier {
     _responses = {..._responses, alertId: status};
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _responsesKey,
+      jsonEncode({
+        for (final entry in _responses.entries)
+          entry.key: entry.value.wireValue,
+      }),
+    );
+  }
+
+  /// 새 시연 대피 경보 시작: 이전 시연 경보의 응답은 지운다 — 지난 응답이 새 경보의 상태로 남지 않게 (2026-10-09)
+  Future<void> startDemoAlert(String alertId) async {
+    _responses = {..._responses}..remove(alertId);
+    _demoAlertActive = true;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_demoAlertKey, true);
     await prefs.setString(
       _responsesKey,
       jsonEncode({

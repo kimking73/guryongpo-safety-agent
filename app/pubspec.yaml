@@ -24,6 +24,8 @@ dependencies:
   audioplayers: ^6.8.1
   flutter_local_notifications: ^19.5.0
   flutter_tts: ^4.2.5
+  font_awesome_flutter: 11.0.0
+  flutter_svg: ^2.3.0
 
 dev_dependencies:
   flutter_test:
@@ -35,6 +37,8 @@ flutter:
   # 디자인 = web-prototype (2026-10-08). AI 대화 캐릭터 '모리'
   assets:
     - assets/mori-face.png
+    # 휴대폰 앱 디자인(lib/mobile/)의 AI 캐릭터
+    - assets/images/mascot.png
   # Pretendard (SIL OFL 1.1, assets/fonts/Pretendard-OFL.txt) — 한국어 2,350자 + 영문·기호로 줄인 것 (굵기당 약 420KB)
   fonts:
     - family: Pretendard

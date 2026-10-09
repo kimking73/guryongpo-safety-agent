@@ -41,12 +41,7 @@ class AccountService {
     await prefs.setString('device_user_id', id);
     return id;
   }
-  /// 선택 정보 '보행 능력'이 '보행 가능'이 아닌 값이면 보행 불편으로 본다 (노약자 경로).
-  /// 2026-10-07: 예전엔 무엇이든 적으면 불편으로 봐서 '보행 가능'을 골라도 노약자 경로가 됐다
-  Future<bool> walkingImpaired() async {
-    final v = ((await optionalProfile())['보행 능력'] ?? '').trim();
-    return v.isNotEmpty && v != '보행 가능';
-  }
+  // 보행 능력·보호 동반자는 더 묻지 않는다 (2026-10-09 사용자 결정). 노약자 경로는 나이 65세 이상·휠체어로만 정한다
 
   static const _placesKey = 'saved_places';
   Future<List<SavedPlace>> places() async {

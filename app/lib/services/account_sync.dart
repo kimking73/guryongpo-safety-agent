@@ -13,7 +13,7 @@ import 'auth_service.dart';
 /// (앱 시작·로그인, 프로필 화면 열 때, AI 대화 뒤). 올릴 때는 마지막으로 맞춘 서버 값과 달라진 칸만 보낸다 (AI가 고친 값을 덮어쓰지 않게).
 ///
 /// - 통째 저장: GET·PUT /api/v1/user/app-state — 아래 [syncedKeys] 그대로 (다른 기기에서 같은 계정이면 그대로 복원)
-/// - 서버 판단용 칸: PATCH /api/v1/user (출생연도·이동수단·직업·보행·시각·청각·보호 동반자·혈액형), /api/v1/user/places
+/// - 서버 판단용 칸: PATCH /api/v1/user (출생연도·이동수단·직업·시각·청각·혈액형), /api/v1/user/places
 ///   (집·직장·저장 장소), /api/v1/user/contacts (비상 연락처) — 통째 저장의 프로필 화면 값과 같게 (2026-10-08)
 ///   → 선제 경고(A5)가 이 값으로 대상자를 고른다
 /// - 언제: 앱 시작·로그인 때 [pullOrPush] + [pullProfile], 화면에서 저장할 때 [changed] (1초 모아서 올림)
@@ -286,11 +286,9 @@ class AccountSync {
         // 직업: 화면 이름 → 서버 코드 (서버 경고의 어업 판단이 'fisher' 를 본다). 직접 입력한 직업은 글자 그대로
         'occupation': jobs.isEmpty ? null : jobs.join(', '),
         'owns_vessel': jobs.contains('fisher'),
-        'walking_ability': switch (v('보행 능력')) { '보행 불편' => 'limited', '보행 어려움' => 'unable', _ => 'normal' },
         // '필요 없음'은 아니오 (예전엔 값이 있기만 하면 예로 보냈다)
         'vision_impaired': visual.isNotEmpty && visual != '필요 없음',
         'hearing_impaired': hearing.isNotEmpty && hearing != '필요 없음',
-        'has_dependents': v('보호가 필요한 동반자 여부') == '예',
         // 혈액형은 서버가 보호 구역(care.user_health)에 둔다. '모름'은 없음
         'blood_type': _bloodTypes.contains(blood) ? blood : null,
       },
@@ -304,7 +302,7 @@ class AccountSync {
   static const _bloodTypes = {'A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'};
   /// 예전 버전 앱이 쓰던 칸 이름 (main.dart legacyFieldLabels)
   static const _legacy = {
-    '보호가 필요한 동반자 여부': '보호 동반자', '보행 능력': '보행능력', '시각 지원': '시각', '청각 지원': '청각', '비상 연락처': '비상연락처',
+    '시각 지원': '시각', '청각 지원': '청각', '비상 연락처': '비상연락처',
   };
 
   /// 프로필 화면 '비상 연락처'(글자 하나) → 서버 비상연락처. 전화번호를 찾지 못하면 null (예: "딸 010-1234-5678")
@@ -389,20 +387,12 @@ class AccountSync {
       set('jobs', jobs.map((j) => names[j] ?? j).join('|'));
       set('직업', '');
     }
-    // 보행·시각·청각·보호 동반자·혈액형: 화면 값의 뜻이 서버와 다를 때만 바꾼다
-    final walking = '${profile['walking_ability'] ?? 'normal'}';
-    final localWalking = switch (v('보행 능력')) { '보행 불편' => 'limited', '보행 어려움' => 'unable', _ => 'normal' };
-    if (walking != localWalking) {
-      set('보행 능력', switch (walking) { 'limited' => '보행 불편', 'unable' => '보행 어려움', _ => '보행 가능' });
-    }
+    // 시각·청각·혈액형: 화면 값의 뜻이 서버와 다를 때만 바꾼다.
+    // 보행 능력·보호 동반자는 더 묻지 않아 주고받지 않는다 (2026-10-09). 서버에 남은 예전 값은 그대로 둔다
     for (final (key, field) in [('시각 지원', 'vision_impaired'), ('청각 지원', 'hearing_impaired')]) {
       final want = profile[field] == true;
       final has = v(key).isNotEmpty && v(key) != '필요 없음';
       if (want != has) set(key, want ? '지원 필요' : (v(key).isEmpty ? '' : '필요 없음'));
-    }
-    final dependents = profile['has_dependents'] == true;
-    if (dependents != (v('보호가 필요한 동반자 여부') == '예')) {
-      set('보호가 필요한 동반자 여부', dependents ? '예' : (v('보호가 필요한 동반자 여부').isEmpty ? '' : '아니요'));
     }
     if (profile.containsKey('blood_type')) {
       final blood = '${profile['blood_type'] ?? ''}';
@@ -497,13 +487,17 @@ class AccountSync {
 
 /// AI가 대화에서 들은 사용자 정보로 프로필을 고친 기록 한 줄 (서버 care.profile_updates)
 class ProfileUpdate {
-  const ProfileUpdate({required this.id, required this.label, required this.value, this.quote, this.createdAt});
+  const ProfileUpdate(
+      {required this.id, required this.label, required this.value, this.field = '', this.quote, this.createdAt});
   final int id;
+  /// 서버 칸 이름 (age, occupation …) — 화면에서 더 다루지 않는 칸(보행·동반자)을 거를 때 쓴다
+  final String field;
   final String label, value;
   final String? quote;
   final DateTime? createdAt;
   factory ProfileUpdate.fromJson(Map<String, dynamic> j) => ProfileUpdate(
       id: (j['id'] as num).toInt(),
+      field: '${j['field'] ?? ''}',
       label: '${j['label'] ?? j['field'] ?? ''}',
       value: '${j['value'] ?? ''}',
       quote: (j['quote'] as String?)?.trim().isEmpty ?? true ? null : (j['quote'] as String).trim(),

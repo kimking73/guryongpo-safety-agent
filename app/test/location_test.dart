@@ -39,6 +39,8 @@ Future<OriginSpy> boot(WidgetTester t, LocationService gps) async {
   return spy;
 }
 
+ProviderContainer container(WidgetTester t) => ProviderScope.containerOf(t.element(find.byType(GuryongpoApp)));
+
 Future<void> done(WidgetTester t) async { await t.pumpWidget(const SizedBox()); await t.pump(const Duration(seconds: 1)); }
 
 void main() {
@@ -47,11 +49,12 @@ void main() {
     expect(inServiceArea(const LatLng(36.019, 129.343)), isFalse);   // 포항 시내
   });
 
-  testWidgets('구룡포 안 GPS → 위험도를 그 위치로 요청, 상태 줄 "GPS 위치 기준"', (t) async {
+  testWidgets('구룡포 안 GPS → 위험도를 그 위치로 요청, 상단은 위치 대신 대피 현황 (2026-10-09)', (t) async {
     const here = LatLng(35.9930, 129.5560);
     final spy = await boot(t, FakeGps([here]));
     expect(spy.origins.last, here);
-    expect(find.textContaining('GPS 위치 기준'), findsOneWidget);
+    expect(find.text('대피 경보 없음'), findsOneWidget);
+    expect(find.textContaining('GPS 위치 기준'), findsNothing);
     await done(t);
   });
 
@@ -64,14 +67,14 @@ void main() {
   testWidgets('구룡포 밖 GPS → 예시 위치, 이유 표시', (t) async {
     final spy = await boot(t, FakeGps(const [LatLng(36.019, 129.343)]));
     expect(spy.origins.last, originFor(UserMode.user));
-    expect(find.textContaining('구룡포 밖이라 예시 위치'), findsOneWidget);
+    expect(container(t).read(gpsNote), contains('구룡포 밖이라 예시 위치'));
     await done(t);
   });
 
   testWidgets('권한 거부 → 예시 위치, 이유 표시', (t) async {
     final spy = await boot(t, FakeGps(const [], fail: const LocationUnavailable('위치 권한이 없어 예시 위치를 씁니다.')));
     expect(spy.origins.last, originFor(UserMode.user));
-    expect(find.textContaining('위치 권한이 없어'), findsOneWidget);
+    expect(container(t).read(gpsNote), contains('위치 권한이 없어'));
     await done(t);
   });
 }

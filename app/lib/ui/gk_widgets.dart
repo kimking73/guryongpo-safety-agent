@@ -111,7 +111,9 @@ class GkPill extends StatelessWidget {
       child: InkWell(
         customBorder: const StadiumBorder(),
         onTap: onTap,
-        child: Padding(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 44),
+          child: Padding(
           padding: EdgeInsets.symmetric(horizontal: big ? 22 : 16, vertical: big ? 14 : 10),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             if (icon != null) ...[Icon(icon, size: fs + 5, color: foreground), const SizedBox(width: 8)],
@@ -124,6 +126,7 @@ class GkPill extends StatelessWidget {
               Icon(trailingIcon, size: fs + 4, color: foreground.withValues(alpha: 0.8))
             ],
           ]),
+        ),
         ),
       ),
     );
@@ -161,54 +164,121 @@ class GkLevelLegend extends StatelessWidget {
       ]);
 }
 
-/// 원 아이콘 + 이름·설명 + 스위치 (프로토타입 ToggleRow)
+/// 작은 아이콘 + 이름·짧은 설명 + 오른쪽 스위치 (2026-10-09: 원 배경·큰 여백을 빼고 목록처럼).
+/// [note] = 주의 문구 (주황, 예: 화면 점멸의 광과민성 안내). 줄 전체를 눌러도 바뀌고, 키보드 초점은 스위치가 받는다
 class GkSwitchRow extends StatelessWidget {
   const GkSwitchRow(
-      {super.key, required this.icon, required this.label, this.desc, required this.value, required this.onChanged});
+      {super.key,
+      required this.icon,
+      required this.label,
+      this.desc,
+      this.note,
+      required this.value,
+      required this.onChanged});
   final IconData icon;
   final String label;
-  final String? desc;
+  final String? desc, note;
   final bool value;
   final ValueChanged<bool>? onChanged;
   @override
-  Widget build(BuildContext c) => InkWell(
-        onTap: onChanged == null ? null : () => onChanged!(!value),
+  Widget build(BuildContext c) => MergeSemantics(
+        child: InkWell(
+          canRequestFocus: false,
+          onTap: onChanged == null ? null : () => onChanged!(!value),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 60),
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: GK.tint))),
+            child: Row(children: [
+              Icon(icon, size: 22, color: GK.navy),
+              const SizedBox(width: 14),
+              Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(label, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: GK.ink)),
+                if (desc != null)
+                  Text(desc!, style: const TextStyle(fontSize: 14, color: GK.muted, height: 1.35)),
+                if (note != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      const Padding(
+                          padding: EdgeInsets.only(top: 1),
+                          child: Icon(Icons.warning_amber_rounded, size: 16, color: GK.orangeInk)),
+                      const SizedBox(width: 4),
+                      Expanded(
+                          child: Text(note!,
+                              style: const TextStyle(fontSize: 13.5, color: GK.orangeInk, fontWeight: FontWeight.w600))),
+                    ]),
+                  ),
+              ])),
+              const SizedBox(width: 8),
+              Switch(value: value, onChanged: onChanged),
+            ]),
+          ),
+        ),
+      );
+}
+
+/// 작은 아이콘 + 항목명 + 값 한 줄 (프로토타입 내 정보 rowLine, 2026-10-09 간결하게).
+/// [empty]면 값을 옅게 ('입력 안 함' 등). [valueWidget]을 주면 값 대신 그것 (여러 줄 장소 목록)
+class GkInfoRow extends StatelessWidget {
+  const GkInfoRow(
+      {super.key,
+      required this.icon,
+      required this.label,
+      this.value = '',
+      this.valueWidget,
+      this.trailing,
+      this.empty = false,
+      this.divider = true});
+  final IconData icon;
+  final String label, value;
+  final Widget? valueWidget, trailing;
+  final bool empty, divider;
+  @override
+  Widget build(BuildContext c) => MergeSemantics(
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: GK.tint))),
-          child: Row(children: [
-            GkCircleIcon(icon, size: 48),
-            const SizedBox(width: 14),
+          constraints: const BoxConstraints(minHeight: 52),
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: divider ? const BoxDecoration(border: Border(bottom: BorderSide(color: GK.tint))) : null,
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Padding(padding: const EdgeInsets.only(top: 1), child: Icon(icon, size: 22, color: GK.navy)),
+            const SizedBox(width: 12),
+            SizedBox(
+                width: 92,
+                child: Text(label, style: const TextStyle(fontSize: 15, color: GK.muted, height: 1.45))),
+            const SizedBox(width: 8),
             Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(label, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w700)),
-              if (desc != null) Text(desc!, style: const TextStyle(fontSize: 15, color: GK.muted)),
-            ])),
-            Switch(value: value, onChanged: onChanged),
+                child: valueWidget ??
+                    Text(value,
+                        style: TextStyle(
+                            fontSize: 16,
+                            height: 1.4,
+                            fontWeight: empty ? FontWeight.w500 : FontWeight.w700,
+                            color: empty ? GK.grey : GK.ink))),
+            if (trailing != null) trailing!,
           ]),
         ),
       );
 }
 
-/// 원 아이콘 + 이름 + 값 한 줄 (프로토타입 내 정보 rowLine)
-class GkInfoRow extends StatelessWidget {
-  const GkInfoRow({super.key, required this.icon, required this.label, required this.value, this.trailing});
-  final IconData icon;
-  final String label, value;
-  final Widget? trailing;
+/// 프로필 카드 제목 (20px) — 카드 안 여백은 [gkCompactPad]
+class GkCardTitle extends StatelessWidget {
+  const GkCardTitle(this.text, {super.key, this.icon});
+  final String text;
+  final IconData? icon;
   @override
-  Widget build(BuildContext c) => Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: GK.tint))),
+  Widget build(BuildContext c) => Semantics(
+        header: true,
         child: Row(children: [
-          GkCircleIcon(icon, size: 44),
-          const SizedBox(width: 14),
-          SizedBox(width: 92, child: Text(label, style: const TextStyle(fontSize: 17, color: GK.muted))),
-          Expanded(child: Text(value, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w700))),
-          if (trailing != null) trailing!,
+          if (icon != null) ...[Icon(icon, size: 22, color: GK.navy), const SizedBox(width: 8)],
+          Flexible(child: Text(text, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: GK.ink))),
         ]),
       );
 }
+
+/// 간결한 카드 안 여백 (프로필 화면, 2026-10-09)
+const gkCompactPad = EdgeInsets.all(20);
 
 /// 넓은 화면이면 두 칸, 좁으면 한 칸으로 쌓는다 (프로토타입 grid auto-fit)
 class GkColumns extends StatelessWidget {

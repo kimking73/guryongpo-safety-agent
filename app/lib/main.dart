@@ -1,4 +1,5 @@
 import 'profile_refresh.dart';
+import 'profile_cards.dart';
 import 'ui/gk_theme.dart';
 import 'ui/gk_widgets.dart';
 import 'services/account_sync.dart';
@@ -34,6 +35,19 @@ import 'services/demo_notifications.dart';
 import 'services/prototype_safety_store.dart';
 import 'services/fcm_notification_service.dart';
 import 'services/evacuation_response_queue.dart';
+import 'ui/tokens.dart' show buildAppTheme;
+import 'mobile/ai_chat.dart' as m;
+import 'mobile/app_shell.dart' as m;
+import 'mobile/evac_sos.dart' as m;
+import 'mobile/m_core.dart' as m;
+import 'mobile/m_patrol_screens.dart' as m;
+import 'mobile/onboarding.dart' as m;
+import 'mobile/profile_screen.dart' as m;
+
+/// 화면 디자인 고르기 (2026-10-09 사용자 결정): 웹(브라우저)은 web-prototype 디자인(이 파일의 Shell·Dashboard 등, 김종연),
+/// 휴대폰 앱(안드로이드·iOS)은 '구룡포 안전 비서 모바일' 디자인(lib/mobile/, 김다인). 기능·데이터 코드는 함께 쓴다.
+/// 테스트에서 바꿀 수 있게 변수로 둔다
+bool useMobileUi = !kIsWeb;
 
 /// APP_MODE=remote면 실제 서버, 아니면 예시 데이터
 final repo = Provider<SafetyRepository>((_) =>
@@ -380,9 +394,14 @@ Future<void> _recordPrototypeEvacuationResponse(
       }
       startRouteToShelter(ref, nearestShelterId(ref),
           routeType: RouteType.nearest);
+      if (useMobileUi) ref.read(m.dashMapFull.notifier).state = true;
       appRouter.go('/');
     } else if (status == EvacuationResponseStatus.needHelp) {
-      _showResponseMessage('방재단에게 도움을 요청했습니다');
+      if (useMobileUi) {
+        appRouter.push('/sos');
+      } else {
+        _showResponseMessage('방재단에게 도움을 요청했습니다');
+      }
     }
   } catch (error) {
     _showResponseMessage('응답을 저장하지 못했습니다. $error');
@@ -407,6 +426,11 @@ void _setAlertResponse(WidgetRef ref, String alertId, String status) {
     for (final alert in alerts)
       if (alert.id == alertId) alert.copyWith(myStatus: status) else alert,
   ];
+  // 상단 대피 현황·방재단 집계가 다음 폴링을 기다리지 않게: 진행 중인 대피 상황의 내 상태도 바로 바꾼다
+  final evac = ref.read(alertEvacuationProvider);
+  if (evac != null && evac['alert_id'] == alertId) {
+    ref.read(alertEvacuationProvider.notifier).state = {...evac, 'status': status};
+  }
   ref.read(pendingResponseIdsProvider.notifier).state = {
     ...ref.read(pendingResponseIdsProvider),
   }..remove(alertId);
@@ -416,7 +440,11 @@ Future<void> _afterResponseSuccess(
     WidgetRef ref, String alertId, String status) async {
   _setAlertResponse(ref, alertId, status);
   if (status == 'need_help') {
-    _showResponseMessage('방재단에게 도움을 요청했습니다');
+    if (useMobileUi) {
+      appRouter.push('/sos');
+    } else {
+      _showResponseMessage('방재단에게 도움을 요청했습니다');
+    }
   } else if (status == 'evacuating') {
     try {
       await ref.read(facilitiesProvider.future);
@@ -425,9 +453,18 @@ Future<void> _afterResponseSuccess(
     }
     startRouteToShelter(ref, nearestShelterId(ref),
         routeType: RouteType.nearest);
+    if (useMobileUi) ref.read(m.dashMapFull.notifier).state = true;
     appRouter.go('/');
   }
 }
+
+// 휴대폰 앱 화면(lib/mobile/)이 같은 대피 응답 처리를 쓰도록 공개
+typedef ResponseSubmitResult = _ResponseSubmitResult;
+Future<ResponseSubmitResult> submitEvacuationResponse(WidgetRef ref, AlertItem alert, String status) =>
+    _submitEvacuationResponse(ref, alert, status);
+Future<void> recordPrototypeEvacuationResponse(WidgetRef ref, EvacuationResponseStatus status) =>
+    _recordPrototypeEvacuationResponse(ref, status);
+void showResponseMessage(String message) => _showResponseMessage(message);
 
 Future<_ResponseSubmitResult> _submitEvacuationResponse(
   WidgetRef ref,
@@ -661,7 +698,7 @@ class GuryongpoApp extends StatelessWidget {
         scaffoldMessengerKey: rootMessengerKey,
         debugShowCheckedModeBanner: false,
         // 디자인 = web-prototype (2026-10-08) — ui/gk_theme.dart
-        theme: gkTheme(),
+        theme: useMobileUi ? buildAppTheme() : gkTheme(),
         routerConfig: appRouter,
       );
 }
@@ -678,26 +715,49 @@ final appRouter = GoRouter(
       if (!appBooted) {
         return loc == '/boot' ? null : Uri(path: '/boot', queryParameters: {'from': state.uri.toString()}).toString();
       }
-      // 로그인 강제 (사용자 결정 2026-10-08): 로그인 안 했으면 로그인 화면만. 로그인하면 가려던 화면으로. 목업 모드는 제외
+      final from = state.uri.queryParameters['from'];
+      String target() =>
+          from != null && from.startsWith('/') && !from.startsWith('/login') && !from.startsWith('/boot') && !from.startsWith('/setup')
+              ? from
+              : '/';
+      // 첫 화면 (2026-10-09 사용자 요청, 웹·앱 공통): 이 기기에서 아직 동의하지 않았으면 동의·로그인(1/2)부터
+      if (!m.Onboarding.consented && loc != '/login') {
+        return Uri(path: '/login', queryParameters: {'from': state.uri.toString()}).toString();
+      }
+      // 로그인 강제 (사용자 결정 2026-10-08): 로그인 안 했으면 로그인 화면만. 목업 모드는 제외
       if (AuthService.enabled && !AuthService.signedIn && loc != '/login') {
         return Uri(path: '/login', queryParameters: {'from': state.uri.toString()}).toString();
       }
-      if (AuthService.signedIn && loc == '/login') {
-        final from = state.uri.queryParameters['from'];
-        return from != null && from.startsWith('/') && !from.startsWith('/login') && !from.startsWith('/boot') ? from : '/';
+      // 2/2 내 정보: '시작하기'나 '나중에 입력할게요'를 누를 때까지 먼저 보여 준다
+      if (!m.Onboarding.done && loc != '/login' && loc != '/setup') {
+        return Uri(path: '/setup', queryParameters: {'from': state.uri.toString()}).toString();
+      }
+      // 이미 동의한 사람이 다시 로그인하면 가려던 화면으로
+      if (loc == '/login' && m.Onboarding.consented && (AuthService.signedIn || !AuthService.enabled)) {
+        if (!m.Onboarding.done) return Uri(path: '/setup', queryParameters: {'from': target()}).toString();
+        return target();
       }
       return null;
     },
     routes: [
   GoRoute(path: '/boot', builder: (_, s) => BootScreen(from: s.uri.queryParameters['from'])),
-  GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),   // 로그인 후 이동은 위 redirect 가 한다
+  // 첫 화면(동의·로그인·내 정보)은 웹·앱 공통 — web-prototype 온보딩과 같은 구성
+  GoRoute(path: '/login', builder: (_, s) => m.MLoginScreen(from: s.uri.queryParameters['from'])),
+  GoRoute(path: '/setup', builder: (_, s) => m.SetupScreen(from: s.uri.queryParameters['from'])),
+  GoRoute(path: '/sos', builder: (_, __) => const m.SosScreen()),
   GoRoute(path: '/location', builder: (_, __) => const InitialSetupScreen()),
-  ShellRoute(builder: (_, __, child) => Shell(child: child), routes: [
-    GoRoute(path: '/', builder: (_, __) => const Dashboard()),
+  ShellRoute(builder: (_, __, child) => useMobileUi ? m.MShell(child: child) : Shell(child: child), routes: [
+    GoRoute(path: '/', builder: (_, __) => useMobileUi ? const m.MDashboard() : const Dashboard()),
     GoRoute(path: '/map', builder: (_, __) => const FacilitiesScreen()),
     GoRoute(path: '/alerts', builder: (_, __) => const AlertsScreen()),
-    GoRoute(path: '/ai', builder: (_, __) => const AiScreen()),
-    GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
+    GoRoute(path: '/ai', builder: (_, __) => useMobileUi ? const m.MAiScreen() : const AiScreen()),
+    GoRoute(path: '/profile', builder: (_, __) => useMobileUi ? const m.MProfileScreen() : const ProfileScreen()),
+    GoRoute(path: '/profile/edit', builder: (_, __) => const m.ProfileEditScreen()),
+    // 휴대폰 앱의 '방재단 현황' 탭 (웹은 /responder)
+    GoRoute(
+        path: '/team',
+        builder: (_, __) => const DemoSwitch(
+            demo: DemoPatrolScope(child: m.MLiveResponderScreen()), live: m.MLiveResponderScreen())),
     GoRoute(
         path: '/typhoon',
         builder: (_, s) => DemoSwitch(
@@ -780,6 +840,7 @@ class _BootScreenState extends ConsumerState<BootScreen> {
 
   Future<void> start() async {
     final a = await AuthService().initialize();
+    await m.Onboarding.load();
     // 프로필에서 '직접 지정'한 출발 위치가 있으면 그 위치로 시작 (계정 정보를 내려받은 뒤)
     await restoreSavedOrigin(ref);
     await AccountService().clearLegacyMode();
@@ -1064,7 +1125,11 @@ const _demoEvacuationAlert = AlertItem(
   responseRequired: true,
 );
 
-Future<void> showEvacuationAlertDemo(BuildContext context, WidgetRef ref) => showDialog<void>(
+/// [newAlert] = 새 시연 경보로 시작 (이전 시연 응답을 지운다). 상단 대피 현황 칩에서 다시 열 때는 false (응답 바꾸기)
+Future<void> showEvacuationAlertDemo(BuildContext context, WidgetRef ref, {bool newAlert = true}) async {
+  if (newAlert) await ref.read(prototypeSafetyProvider).startDemoAlert(prototypeEvacuationAlertId);
+  if (!context.mounted) return;
+  await showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (_) => EvacuationAlertDialog(
@@ -1077,47 +1142,129 @@ Future<void> showEvacuationAlertDemo(BuildContext context, WidgetRef ref) => sho
         },
       ),
     );
+}
 
-/// 위쪽 머리줄 = web-prototype ResidentHeader (2026-10-08): 온라인/오프라인 배지 · 현재 위치 알약 · 대피 상태/대피 필요 칩 ·
-/// 알림 종(선제 경고·알림 화면) · 좁은 화면이면 119
+/// 공통 상단 '대피 현황' (2026-10-09 사용자 요청): 지금 진행 중인 대피 경보에 대한 내 응답만 본다.
+/// 진행 중인 경보 = 서버가 알려 준 내 대피 상황(alertEvacuationProvider, 경보 폴링의 evacuation — 열린 대피 상황만).
+/// 지난 경보의 응답은 쓰지 않는다. 시연 모드면 '대피 경보 팝업'으로 시작한 시연 경보(기기에만 기록)를 '시연' 표시와 함께.
+class EvacHeaderState {
+  const EvacHeaderState({this.status, this.alertId, this.demo = false});
+  /// null = 진행 중인 대피 경보 없음, no_response = 응답 전, need_help · evacuating · evacuated
+  final String? status;
+  final String? alertId;
+  final bool demo;
+  bool get active => status != null;
+}
+
+const _evacResponses = {'need_help', 'evacuating', 'evacuated'};
+
+EvacHeaderState evacHeaderState(WidgetRef ref) {
+  final evac = ref.watch(alertEvacuationProvider);
+  if (evac != null) {
+    final s = evac['status'] as String?;
+    return EvacHeaderState(
+        status: _evacResponses.contains(s) ? s : 'no_response', alertId: evac['alert_id'] as String?);
+  }
+  if (ref.watch(showDemoProvider)) {
+    final demo = ref.watch(prototypeSafetyProvider);
+    if (demo.demoAlertActive) {
+      return EvacHeaderState(
+          status: demo.responseFor(prototypeEvacuationAlertId)?.wireValue ?? 'no_response',
+          alertId: prototypeEvacuationAlertId,
+          demo: true);
+    }
+  }
+  return const EvacHeaderState();
+}
+
+/// 대피 현황 상태별 글자·아이콘·색 (색만으로 구분하지 않도록 아이콘·글자가 모두 다르다)
+({String label, IconData icon, Color fg, Color iconBg}) evacHeaderStyle(String? status) => switch (status) {
+      'no_response' => (label: '응답 전', icon: Icons.directions_run_rounded, fg: GK.navy, iconBg: GK.tint),
+      'need_help' => (label: '도움 필요', icon: Icons.sos_rounded, fg: GK.redDark, iconBg: GK.redTint),
+      'evacuating' => (label: '대피 중', icon: Icons.directions_walk_rounded, fg: GK.orangeInk, iconBg: GK.orangeTint),
+      'evacuated' => (label: '대피 완료', icon: Icons.check_circle_rounded, fg: GK.green, iconBg: const Color(0xFFE3F4EA)),
+      _ => (label: '대피 경보 없음', icon: Icons.verified_user_outlined, fg: GK.muted, iconBg: GK.bg),
+    };
+
+/// 대피 현황 칩을 누르면: 진행 중인 경보의 응답 팝업을 다시 연다 (응답 바꾸기)
+void openEvacHeader(BuildContext c, WidgetRef ref, EvacHeaderState st) {
+  if (!st.active) return;
+  if (st.demo) {
+    showEvacuationAlertDemo(c, ref, newAlert: false);
+    return;
+  }
+  final alert = ref.read(alertCenterProvider).where((a) => a.id == st.alertId).firstOrNull;
+  if (alert != null) {
+    showDialog<void>(context: c, barrierDismissible: false, builder: (_) => EvacuationAlertDialog(alert: alert));
+  } else if (st.alertId != null) {
+    c.push('/alert/${Uri.encodeComponent(st.alertId!)}');
+  }
+}
+
+/// 대피 현황 칩 (공통 상단)
+class EvacStatusChip extends ConsumerWidget {
+  const EvacStatusChip({super.key, this.narrow = false});
+  final bool narrow;
+  @override
+  Widget build(BuildContext c, WidgetRef ref) {
+    final evac = evacHeaderState(ref);
+    final st = evacHeaderStyle(evac.status);
+    return Tooltip(
+      message: evac.active ? '눌러서 대피 응답 바꾸기' : '진행 중인 대피 경보가 없습니다',
+      child: Semantics(
+        label: '대피 현황 ${st.label}${evac.demo ? ' (시연)' : ''}',
+        button: evac.active,
+        excludeSemantics: true,
+        child: Material(
+          color: Colors.white,
+          shape: StadiumBorder(
+              side: evac.status == 'need_help' ? const BorderSide(color: GK.red, width: 2) : BorderSide.none),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: evac.active ? () => openEvacHeader(c, ref, evac) : null,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(6, 6, 16, 6),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                GkCircleIcon(st.icon, size: narrow ? 34 : 40, bg: st.iconBg, fg: st.fg),
+                const SizedBox(width: 8),
+                Text('대피 현황',
+                    style: TextStyle(fontSize: narrow ? 14 : 16, fontWeight: FontWeight.w700, color: GK.muted)),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(st.label,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: narrow ? 17 : 20,
+                          fontWeight: FontWeight.w800,
+                          color: evac.active ? GK.ink : GK.muted)),
+                ),
+                if (evac.demo) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(color: GK.tint, borderRadius: BorderRadius.circular(999)),
+                    child: const Text('시연',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: GK.navy)),
+                  ),
+                ],
+              ]),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 위쪽 머리줄 = web-prototype ResidentHeader (2026-10-08): 온라인/오프라인 배지 · 대피 현황 칩(2026-10-09, 예전 현재 위치 알약) ·
+/// 알림 종(선제 경고·알림 화면) · 좁은 화면이면 119. 현재 위치 확인은 지도의 '현위치' 버튼과 경로 안내에 그대로 있다
 class StatusLine extends ConsumerWidget {
   const StatusLine({super.key, this.compact119 = false});
   final bool compact119;
   @override
   Widget build(BuildContext c, WidgetRef ref) {
     final isOffline = ref.watch(offline);
-    final here = ref.watch(userLocation);
-    final alerts = ref.watch(alertCenterProvider);
-    final prototypeResponse = ref
-        .watch(prototypeSafetyProvider)
-        .responseFor(prototypeEvacuationAlertId)
-        ?.wireValue;
-    final responseStatus = alerts.reversed
-        .map((alert) => alert.myStatus)
-        .where((status) =>
-            status == 'evacuating' ||
-            status == 'evacuated' ||
-            status == 'need_help')
-        .firstOrNull;
-    final status = prototypeResponse ??
-        responseStatus ??
-        (ref.watch(alertEvacuationProvider)?['status'] as String?);
-    // 대피 상태 칩 (프로토타입 EVAC 색)
-    final (statusLabel, statusIcon, statusColor) = switch (status) {
-      'evacuating' => ('대피 중', Icons.directions_walk_rounded, GK.orange),
-      'evacuated' => ('대피 완료', Icons.check_circle_rounded, GK.green),
-      'need_help' => ('도움 필요', Icons.sos_rounded, GK.red),
-      _ => (null, null, null),
-    };
-    final pending = ref.watch(pendingResponseIdsProvider);
-    final needEvac = alerts
-        .where((a) => a.responseRequired && a.myStatus == null && !pending.contains(a.id))
-        .firstOrNull;
-    final unread = alerts.where((a) => !a.read).length;
-    final place = here.fromGps
-        ? (here.manual ? (ref.watch(originLabelProvider) ?? '지도에서 고른 위치') : 'GPS 위치')
-        : (AppConfig.isRemote ? '구룡포 기본 위치' : '예시 위치');
-    final note = !here.fromGps && ref.watch(gpsNote) != null ? ' (${ref.watch(gpsNote)})' : '';
+    final unread = ref.watch(alertCenterProvider).where((a) => !a.read).length;
     final narrow = MediaQuery.sizeOf(c).width < 600;
     return Padding(
       padding: EdgeInsets.fromLTRB(narrow ? 12 : 40, narrow ? 10 : 20, narrow ? 12 : 40, narrow ? 6 : 12),
@@ -1133,36 +1280,9 @@ class StatusLine extends ConsumerWidget {
                   fg: isOffline ? Colors.white : GK.navy,
                   onTap: () => ref.read(offline.notifier).state = !isOffline),
             ),
-            Container(
-              padding: const EdgeInsets.fromLTRB(10, 8, 16, 8),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(999)),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                const Icon(Icons.my_location_rounded, size: 22, color: GK.navy),
-                const SizedBox(width: 6),
-                if (!narrow) ...[
-                  const Text('현재 위치', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: GK.navy)),
-                  const SizedBox(width: 6),
-                ],
-                Flexible(
-                  child: Text(isOffline ? '저장된 예시 정보 · 10:42' : '$place 기준$note',
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: GK.muted)),
-                ),
-              ]),
-            ),
+            EvacStatusChip(narrow: narrow),
           ]),
         ),
-        const SizedBox(width: 10),
-        if (needEvac != null)
-          GkPill('대피 필요',
-              icon: Icons.directions_run_rounded,
-              filled: true,
-              bg: GK.red,
-              big: !narrow,
-              onTap: () => showDialog<void>(
-                  context: c, barrierDismissible: false, builder: (_) => EvacuationAlertDialog(alert: needEvac)))
-        else if (statusLabel != null)
-          GkPill(statusLabel, icon: statusIcon, filled: true, bg: statusColor, big: !narrow),
         const SizedBox(width: 10),
         if (compact119) ...[GkEmergencyCall(compact: true, onCall: () => call119(c)), const SizedBox(width: 8)],
         // 알림 종 → 선제 경고·알림 화면 (메뉴에서 빠짐, 2026-10-08)
@@ -1191,13 +1311,22 @@ class StatusLine extends ConsumerWidget {
 
 class Dashboard extends ConsumerWidget {
   const Dashboard(
-      {super.key, this.extraPolygons = const [], this.extraMarkers = const [], this.extraPolylines = const [], this.mapOnly = false});
+      {super.key,
+      this.extraPolygons = const [],
+      this.extraMarkers = const [],
+      this.extraPolylines = const [],
+      this.mapOnly = false,
+      this.showFacilities = false,
+      this.focusPoint});
 
   /// 방재단 현황(2026-10-09)이 대시보드 지도 칸만 쓸 때 (DisasterDashboard 참고)
   final List<Polygon> extraPolygons;
   final List<Marker> extraMarkers;
   final List<Polyline> extraPolylines;
   final bool mapOnly;
+  /// 방재단 지도: 대피소·의료시설을 늘 그리고, 목록에서 고른 가구로 지도를 옮긴다 (2026-10-09)
+  final bool showFacilities;
+  final LatLng? focusPoint;
   @override
   Widget build(BuildContext c, WidgetRef ref) {
     final route = ref.watch(routeFacilityId);
@@ -1216,6 +1345,8 @@ class Dashboard extends ConsumerWidget {
       extraMarkers: extraMarkers,
       extraPolylines: extraPolylines,
       mapOnly: mapOnly,
+      showFacilities: showFacilities,
+      focusPoint: focusPoint,
       demo: demo,
       floodGrids: demo ? null : ref.watch(floodGridProvider).valueOrNull,
       riskItems: liveRiskItems(live),
@@ -1243,13 +1374,22 @@ class Dashboard extends ConsumerWidget {
               ref.invalidate(floodGridProvider);
               ref.invalidate(windPointsProvider);
             },
-      routeExtras: Wrap(spacing: 8, runSpacing: 8, children: [
-        if (route != customRouteId) const OriginChip(),
-        GkPill(route == customRouteId ? '길찾기 다시' : '주소로 길찾기',
-            icon: Icons.alt_route_rounded, big: true, onTap: () => c.push('/route-search')),
-        if (route != null && !demo)
-          GkPill('이동 중 안내', icon: Icons.navigation_rounded, big: true, onTap: () => c.push('/route-follow')),
-      ]),
+      // '출발: …' 표시와 '주소로 길찾기' 버튼은 뺐다 (2026-10-09 사용자 요청). 위치 확인은 지도의 '현위치' 버튼
+      routeExtras: route != null && !demo
+          ? GkPill('이동 중 안내', icon: Icons.navigation_rounded, big: true, onTap: () => c.push('/route-follow'))
+          : null,
+      where: ref.watch(whereNowProvider).when(
+          data: (w) => w,
+          loading: () => const WhereNow(WhereKind.checking),
+          error: (_, __) => const WhereNow(WhereKind.unknown, reason: '바다·육지를 판별하지 못했습니다.')),
+      onLocate: () async {
+        final msg = await useGpsOrigin(ref);
+        if (msg != null && c.mounted) {
+          ScaffoldMessenger.of(c).showSnackBar(SnackBar(content: Text(msg)));
+        }
+        return ref.read(userLocation).position;
+      },
+      onSeaRoute: () => c.push('/sea-route'),
       routeActive: route != null,
       facilities: facilities,
       riskAreas: ref.watch(riskAreasProvider).valueOrNull ?? const <RiskArea>[],
@@ -1269,12 +1409,8 @@ class Dashboard extends ConsumerWidget {
       ),
       travelMode: ref.watch(travelMode),
       onTravelModeChanged: (m) => ref.read(travelMode.notifier).state = m,
-      onRouteTypeChanged: (type) {
-        if (destination != null) {
-          ref.read(routeKind.notifier).state = type;
-          ref.invalidate(routeProvider(destination.id));
-        }
-      },
+      // 경로 방식은 목적지를 고르기 전에도 정해 둔다 — 고른 목적지 경로가 이 방식으로 나온다 (routeProvider 가 routeKind 를 본다)
+      onRouteTypeChanged: (type) => ref.read(routeKind.notifier).state = type,
       onEndRoute: () => ref.read(routeFacilityId.notifier).state = null,
       onRetryRoute:
           route == null ? null : () => ref.invalidate(routeProvider(route)),
@@ -2440,7 +2576,7 @@ class _AiScreenState extends ConsumerState<AiScreen> {
   final scroll = ScrollController();
   bool recording = false;
   VoiceRecorder? recorder;
-  bool walkingImpaired = false, hasJob = false;
+  bool hasJob = false;
 
   /// 답을 기다리는 중 (앱 전체 상태 — 다른 메뉴에 갔다 와도 이어짐)
   bool get loading => ref.watch(chatLoading);
@@ -2467,11 +2603,9 @@ class _AiScreenState extends ConsumerState<AiScreen> {
   }
 
   Future<void> _loadProfile() async {
-    final walking = await AccountService().walkingImpaired();
     final o = await AccountService().optionalProfile();
     if (mounted) {
       setState(() {
-        walkingImpaired = walking;
         hasJob = (o['jobs'] ?? '').isNotEmpty || (o['직업'] ?? '').isNotEmpty;
       });
     }
@@ -2527,7 +2661,7 @@ class _AiScreenState extends ConsumerState<AiScreen> {
   }
 
   List<String> get suggestions => [
-        walkingImpaired ? '오르막 없이 갈 수 있는 대피소 알려줘' : '가까운 대피소는 어디야?',
+        '가까운 대피소는 어디야?',
         '지금 침수 위험이 있어?',
         if (hasJob) '재난 후 내가 받을 수 있는 보험이 있는지 알려줘' else '도보로 안전하게 갈 수 있어?',
         '대피할 때 뭘 해야 해?',
@@ -2707,119 +2841,33 @@ class _AiScreenState extends ConsumerState<AiScreen> {
   }
 }
 
-/// 사용자 = web-prototype UserPage (2026-10-08): 왼쪽 내 정보·AI가 수집한 정보·로그인, 오른쪽 알림·내 장소·시연 모드·안전 기능
+/// 사용자 = web-prototype UserPage (2026-10-08) → 2026-10-09 간결하게:
+/// 왼쪽 내 정보(요약·내 장소)·AI가 반영한 정보·로그인 계정·선택 정보, 오른쪽 알림·시연 모드·안전 기능(바다 위 대피 경로·방재단 로그인).
+/// 경고·대피 확인·재난 후 지원·내 가구 등록은 여기 진입점만 뺐다 (화면은 대시보드 카드·알림 종 등에서 그대로)
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
   @override
   Widget build(BuildContext c, WidgetRef ref) {
-    final demo = ref.watch(showDemoProvider);
-    final acc = ref.watch(prototypeSafetyProvider);
-    final a11y = acc.accessibility;
-    Future<void> update(AccessibilitySettings next) => acc.updateAccessibility(next);
-    const gap = SizedBox(height: 20);
+    const gap = SizedBox(height: 16);
     final left = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       ProfileDetailsCard(key: ValueKey('profile-${ref.watch(profileRevision)}')),
       gap,
       const ServerProfileRefresh(),
-      gap,
+      if (AppConfig.isRemote) gap,
       const AccountCard(),
       gap,
       OptionalDetailsCard(key: ValueKey('optional-${ref.watch(profileRevision)}')),
     ]);
     final right = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      GkCard(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          const Text('알림', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 6),
-          GkSwitchRow(
-              icon: Icons.volume_up_rounded,
-              label: '음성 안내 자동 재생',
-              desc: '재난 경고를 소리로 읽어 줘요 (기본 꺼짐)',
-              value: ref.watch(autoVoiceAlerts),
-              onChanged: (v) => ref.read(autoVoiceAlerts.notifier).state = v),
-          GkSwitchRow(
-              icon: Icons.vibration_rounded,
-              label: '진동 알림',
-              desc: '대피 알림이 오면 휴대폰이 반복해서 진동해요',
-              value: a11y.strongVibration,
-              onChanged: (v) => update(a11y.copyWith(strongVibration: v))),
-          GkSwitchRow(
-              icon: Icons.flash_on_rounded,
-              label: '화면 점멸',
-              desc: '대피 알림이 오면 화면이 빨갛게 깜빡여요 · 광과민성이 있으면 꺼 두세요',
-              value: a11y.screenFlash,
-              onChanged: (v) => update(a11y.copyWith(screenFlash: v))),
-          GkSwitchRow(
-              icon: Icons.hearing_rounded,
-              label: '청각 지원',
-              desc: '켜면 진동·화면 점멸·큰 글씨가 함께 켜져요',
-              value: a11y.hearingSupport,
-              onChanged: (v) => update(v
-                  ? a11y.copyWith(hearingSupport: true, strongVibration: true, screenFlash: true, largeText: true)
-                  : a11y.copyWith(hearingSupport: false))),
-          GkSwitchRow(
-              icon: Icons.visibility_rounded,
-              label: '시각 지원',
-              desc: '켜면 음성 질문 자동 재생도 함께 켜져요',
-              value: a11y.visionSupport,
-              onChanged: (v) => update(v
-                  ? a11y.copyWith(visionSupport: true, voicePrompts: true)
-                  : a11y.copyWith(visionSupport: false))),
-          const SizedBox(height: 10),
-          const FcmPushSettingsCard(),
-          Wrap(spacing: 8, runSpacing: 8, children: [
-            GkPill('음성 언어 · ${ref.watch(voiceLanguage)}',
-                icon: Icons.translate_rounded,
-                onTap: () => ref.read(voiceLanguage.notifier).state =
-                    ref.read(voiceLanguage) == '한국어' ? 'English' : '한국어'),
-            GkPill('접근성 자세히', icon: Icons.accessibility_new_rounded, onTap: () => c.push('/accessibility')),
-          ]),
-        ]),
-      ),
-      gap,
-      GkCard(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          const Text('내 장소', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 4),
-          const Text('지도에 표시하고, 위험해지면 알려 드려요. AI에게 "집까지"처럼 물을 수도 있어요. 로그인 계정에 저장돼요.',
-              style: TextStyle(fontSize: 15, color: GK.muted)),
-          const SizedBox(height: 8),
-          for (final p in ref.watch(placesProvider).valueOrNull ?? const <SavedPlace>[])
-            GkInfoRow(
-                icon: p.type == '집'
-                    ? Icons.home_rounded
-                    : p.type == '직장'
-                        ? Icons.business_rounded
-                        : Icons.bookmark_rounded,
-                label: p.type == '기타' ? '내 장소' : p.type,
-                value: '${p.name}${p.address.isEmpty ? '' : ' · ${p.address}'}',
-                trailing: IconButton(
-                    tooltip: '삭제',
-                    icon: const Icon(Icons.close_rounded),
-                    onPressed: () async {
-                      await AccountService().removePlace(p.id);
-                      ref.invalidate(placesProvider);
-                    })),
-          const SizedBox(height: 12),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: OutlinedButton.icon(
-                onPressed: () => showModalBottomSheet<void>(
-                    context: c, showDragHandle: true, isScrollControlled: true, builder: (_) => const _PlaceForm()),
-                icon: const Icon(Icons.add_rounded),
-                label: const Text('내 장소 추가하기')),
-          ),
-        ]),
-      ),
+      const ProfileAlertsCard(),
       gap,
       if (AppConfig.isRemote) ...[const DemoModeSwitch(), gap],
-      // 시연 모드면 가상 시나리오 기능 모음, 아니면 실제 서버 기능만 (2026-10-05)
-      if (demo) ...[const PrototypeFeatureLinks(), gap, const DemoRoleClaimCard()] else const LiveFeatureLinks(),
+      const SafetyFeaturesCard(),
     ]);
     return ListView(padding: gkPagePadding(c), children: [
       const GkPageTitle('사용자'),
       const SizedBox(height: 8),
-      GkColumns(minWidth: 460, equalHeight: false, children: [left, right]),
+      GkColumns(minWidth: 460, gap: 16, equalHeight: false, children: [left, right]),
       Padding(
           padding: const EdgeInsets.symmetric(vertical: 16),
           child: Text('앱 버전 ${AppConfig.build}',
@@ -2885,116 +2933,13 @@ class _FcmPushSettingsCardState extends ConsumerState<FcmPushSettingsCard> {
         icon: Icons.notifications_active_rounded,
         label: '재난 푸시 알림',
         desc: !AppConfig.isRemote
-            ? '실제 푸시는 원격 모드 Android/iOS에서 설정할 수 있어요'
+            ? '서버에 연결한 앱에서 쓸 수 있어요'
             : enabled
-                ? '기기를 등록했어요. 앱을 열면 경고도 주기적으로 확인해요'
-                : '켜면 기기를 등록해요. 권한이 없어도 앱을 열면 경고를 확인해요',
+                ? '이 기기로 재난 경고를 받아요'
+                : '켜면 이 기기를 등록해요 · 꺼도 앱을 열면 경고를 확인해요',
         value: enabled,
         onChanged: loading || !AppConfig.isRemote ? null : _toggle,
       );
-}
-
-class _PlaceForm extends ConsumerStatefulWidget {
-  const _PlaceForm();
-  @override
-  ConsumerState<_PlaceForm> createState() => _PlaceFormState();
-}
-
-class _PlaceFormState extends ConsumerState<_PlaceForm> {
-  String type = '집';
-  bool alert = true;
-  bool resolving = false;
-  final name = TextEditingController();
-  final address = TextEditingController();
-  @override
-  void dispose() {
-    name.dispose();
-    address.dispose();
-    super.dispose();
-  }
-
-  Future<void> save() async {
-    if (resolving || address.text.trim().isEmpty) return;
-    setState(() => resolving = true);
-    try {
-      final resolved = await GeocodingService().resolve(address.text);
-      final label = name.text.trim().isEmpty ? type : name.text.trim();
-      await AccountService().addPlace(SavedPlace(
-        id: DateTime.now().microsecondsSinceEpoch.toString(),
-        name: label,
-        type: type,
-        address: resolved.address,
-        position: resolved.position,
-        alert: alert,
-      ));
-      ref.invalidate(placesProvider);
-      if (mounted) Navigator.pop(context);
-    } on GeocodingException catch (e) {
-      if (mounted)
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message)));
-    } finally {
-      if (mounted) setState(() => resolving = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext c) => SafeArea(
-      child: Padding(
-          padding: EdgeInsets.fromLTRB(
-              20, 0, 20, 24 + MediaQuery.viewInsetsOf(c).bottom),
-          child: SingleChildScrollView(
-              child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                const Text('장소 등록',
-                    style:
-                        TextStyle(fontWeight: FontWeight.bold, fontSize: 19)),
-                const SizedBox(height: 12),
-                TextField(
-                    controller: name,
-                    decoration: const InputDecoration(
-                        labelText: '장소명 (비우면 유형 이름)',
-                        border: OutlineInputBorder())),
-                const SizedBox(height: 9),
-                DropdownButtonFormField<String>(
-                    initialValue: type,
-                    decoration: const InputDecoration(
-                        labelText: '유형', border: OutlineInputBorder()),
-                    items: const [
-                      DropdownMenuItem(value: '집', child: Text('집')),
-                      DropdownMenuItem(value: '직장', child: Text('직장')),
-                      DropdownMenuItem(value: '기타', child: Text('기타'))
-                    ],
-                    onChanged: (v) => setState(() => type = v!)),
-                const SizedBox(height: 9),
-                TextField(
-                    controller: address,
-                    onChanged: (_) => setState(() {}),
-                    decoration: const InputDecoration(
-                        labelText: '도로명 주소',
-                        hintText: '예: 경북 포항시 남구 구룡포읍 호미로 152',
-                        border: OutlineInputBorder())),
-                const SizedBox(height: 6),
-                const Text('주소를 저장하면 서버가 카카오 주소 검색으로 좌표를 확인합니다.',
-                    style: TextStyle(fontSize: 12)),
-                SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    value: alert,
-                    title: const Text('알림 수신'),
-                    onChanged: (v) => setState(() => alert = v)),
-                FilledButton.icon(
-                    onPressed:
-                        resolving || address.text.trim().isEmpty ? null : save,
-                    icon: resolving
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.add_location_alt_outlined),
-                    label: Text(resolving ? '주소 확인 중…' : '주소 확인 후 등록')),
-              ]))));
 }
 
 class OptionalDetailsCard extends StatefulWidget {
@@ -3010,8 +2955,6 @@ class _OptionalDetailsCardState extends State<OptionalDetailsCard> {
   String? selectedValue;
   static const fields = [
     '자주 방문하는 장소',
-    '보호가 필요한 동반자 여부',
-    '보행 능력',
     '시각 지원',
     '청각 지원',
     '혈액형',
@@ -3019,8 +2962,6 @@ class _OptionalDetailsCardState extends State<OptionalDetailsCard> {
     '비상 연락처'
   ];
   static const choices = <String, List<String>>{
-    '보호가 필요한 동반자 여부': ['예', '아니요'],
-    '보행 능력': ['보행 가능', '보행 불편', '보행 어려움'],
     '시각 지원': ['필요 없음', '저시력', '전맹', '지원 필요'],
     '청각 지원': ['필요 없음', '난청', '농·난청', '지원 필요'],
     '혈액형': ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-', '모름'],
@@ -3028,8 +2969,6 @@ class _OptionalDetailsCardState extends State<OptionalDetailsCard> {
   };
   static const legacyFieldLabels = <String, String>{
     '자주 가는 장소': '자주 방문하는 장소',
-    '보호 동반자': '보호가 필요한 동반자 여부',
-    '보행능력': '보행 능력',
     '시각': '시각 지원',
     '청각': '청각 지원',
     '비상연락처': '비상 연락처',
@@ -3037,17 +2976,6 @@ class _OptionalDetailsCardState extends State<OptionalDetailsCard> {
     'frequent_places': '자주 방문하는 장소',
     'frequentplace': '자주 방문하는 장소',
     'frequentplaces': '자주 방문하는 장소',
-    'has_dependents': '보호가 필요한 동반자 여부',
-    'hasdependents': '보호가 필요한 동반자 여부',
-    'dependents': '보호가 필요한 동반자 여부',
-    'protected_companion': '보호가 필요한 동반자 여부',
-    'has_protected_companion': '보호가 필요한 동반자 여부',
-    'needs_companion': '보호가 필요한 동반자 여부',
-    'walking_ability': '보행 능력',
-    'walkingability': '보행 능력',
-    'walking_impaired': '보행 능력',
-    'walkingimpaired': '보행 능력',
-    'mobility_limited': '보행 능력',
     'vision': '시각 지원',
     'vision_impaired': '시각 지원',
     'visionimpaired': '시각 지원',
@@ -3075,16 +3003,12 @@ class _OptionalDetailsCardState extends State<OptionalDetailsCard> {
     final normalized = value.trim().toLowerCase().replaceAll('-', '_');
     if (const {'true', 'yes', '1'}.contains(normalized)) {
       return switch (label) {
-        '보호가 필요한 동반자 여부' => '예',
-        '보행 능력' => '보행 불편',
         '시각 지원' || '청각 지원' => '지원 필요',
         _ => '예',
       };
     }
     if (const {'false', 'no', '0'}.contains(normalized)) {
       return switch (label) {
-        '보호가 필요한 동반자 여부' => '아니요',
-        '보행 능력' => '보행 가능',
         '시각 지원' || '청각 지원' => '필요 없음',
         _ => '아니요',
       };
@@ -3100,11 +3024,6 @@ class _OptionalDetailsCardState extends State<OptionalDetailsCard> {
           'bicycle': '자전거',
           'public_transit': '대중교통',
           'wheelchair': '휠체어',
-          'limited': '보행 불편',
-          'mobility_limited': '보행 불편',
-          'unable': '보행 어려움',
-          'normal': '보행 가능',
-          'able': '보행 가능',
           'blind': '전맹',
           'low_vision': '저시력',
           'visually_impaired': '시각 지원 필요',

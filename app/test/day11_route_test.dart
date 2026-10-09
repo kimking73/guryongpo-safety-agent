@@ -41,7 +41,7 @@ void main() {
   });
 
   test(
-      'mock route uses wheelchair and walking difficulty for automatic profile',
+      'mock route uses wheelchair for automatic profile; old walking ability no longer counts (2026-10-09)',
       () async {
     SharedPreferences.setMockInitialValues({
       'profile_age': '30',
@@ -66,6 +66,6 @@ void main() {
       RouteType.nearest,
       origin,
     );
-    expect(walkingSupport.profile, 'elderly');
+    expect(walkingSupport.profile, 'adult');
   });
 }

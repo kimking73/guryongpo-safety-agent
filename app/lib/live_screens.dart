@@ -8,11 +8,12 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'disaster_center.dart';
 import 'main.dart';
-import 'patrol_screens.dart';
 import 'services/app_config.dart';
 import 'services/demo_mode.dart';
 import 'services/demo_live_api.dart';
 import 'services/live_api.dart';
+import 'services/prototype_safety_store.dart';
+import 'prototype_safety_screens.dart' show prototypeEvacuationAlertId;
 import 'ui/gk_theme.dart';
 import 'ui/gk_widgets.dart';
 
@@ -26,6 +27,25 @@ final liveDashboardProvider = FutureProvider<Map<String, dynamic>>((ref) {
   ref.watch(serverDemoProvider);   // 시연 모드 ↔ 실측 전환 때 다시 받기
   final p = ref.watch(userLocation).position;
   return ref.watch(liveApiProvider).dashboard(p.latitude, p.longitude);
+});
+
+/// 지금 위치가 육지인지 바다인지 (2026-10-09, 대시보드 '경로 안내' 메뉴). 판별 = 경로 서버의 육지 지도(/api/route/sea/check).
+/// GPS 위치가 없거나(권한 없음·구룡포 밖) 판별할 데이터가 없으면 unknown + 이유 — 육지·바다를 임의로 정하지 않는다
+final whereNowProvider = FutureProvider<WhereNow>((ref) async {
+  final here = ref.watch(userLocation);
+  if (!here.fromGps) {
+    return WhereNow(WhereKind.unknown,
+        noGps: true, reason: ref.watch(gpsNote) ?? '위치 권한이 없거나 아직 현재 위치를 받지 못했습니다.');
+  }
+  if (!AppConfig.isRemote) {
+    return const WhereNow(WhereKind.unknown, reason: '예시 데이터 모드라 바다·육지를 판별할 경로 서버가 연결되어 있지 않습니다.');
+  }
+  try {
+    final atSea = await ref.watch(liveApiProvider).seaCheck(here.position.latitude, here.position.longitude);
+    return WhereNow(atSea ? WhereKind.sea : WhereKind.land);
+  } catch (_) {
+    return const WhereNow(WhereKind.unknown, reason: '경로 서버에서 바다·육지를 판별하지 못했습니다.');
+  }
 });
 
 /// 시연 모드면 [demo], 아니면 [live]
@@ -488,12 +508,23 @@ class LiveRecoveryScreen extends ConsumerWidget {
 final meProvider = FutureProvider<Map<String, dynamic>>((ref) => ref.watch(liveApiProvider).me());
 
 /// 시연 모드의 방재단 화면: 같은 화면(patrol_screens.dart)을 서버 대신 앱 안 시연 데이터(DemoLiveApi, 가구 12곳)로 (2026-10-05)
-class DemoPatrolScope extends StatelessWidget {
+void syncDemoPatrol(PrototypeSafetyController demo) {
+  DemoLiveApi.myAlertActive = demo.demoAlertActive;
+  DemoLiveApi.myResponse = demo.responseFor(prototypeEvacuationAlertId)?.wireValue;
+}
+
+/// 대피 경보 팝업의 시연 응답(기기 시연 기록)을 시연 대피 상황의 '앱 사용자 (나 · 시연)'에 넘긴다 (2026-10-09)
+class DemoPatrolScope extends ConsumerWidget {
   const DemoPatrolScope({super.key, required this.child});
   final Widget child;
   static final _api = DemoLiveApi();
   @override
-  Widget build(BuildContext c) => ProviderScope(overrides: [
+  Widget build(BuildContext c, WidgetRef ref) {
+    syncDemoPatrol(ref.watch(prototypeSafetyProvider));
+    return _scope(child);
+  }
+
+  static Widget _scope(Widget child) => ProviderScope(overrides: [
         liveApiProvider.overrideWithValue(_api),
         meProvider.overrideWith((_) => _api.me()),
       ], child: child);
@@ -542,39 +573,16 @@ class _RoleClaimCardState extends ConsumerState<RoleClaimCard> {
           ])));
 }
 
-/// 프로필의 기능 바로가기 (실측 모드): 실제 서버 기능만
-class LiveFeatureLinks extends ConsumerWidget {
-  const LiveFeatureLinks({super.key});
-  @override
-  Widget build(BuildContext c, WidgetRef ref) {
-    final role = '${ref.watch(meProvider).valueOrNull?['role'] ?? ''}';
-    return GkCard(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      const Text('안전 기능', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
-      const SizedBox(height: 14),
-      Wrap(spacing: 10, runSpacing: 10, children: [
-        GkPill('경고·대피 확인', icon: Icons.campaign_rounded, big: true, onTap: () => c.go('/alerts')),
-        GkPill('재난 후 지원·복구', icon: Icons.health_and_safety_rounded, big: true, onTap: () => c.push('/support')),
-        GkPill('내 가구 등록', icon: Icons.home_work_rounded, big: true, onTap: () => c.push('/household')),
-        GkPill('바다 위 대피 경로', icon: Icons.sailing_rounded, big: true, onTap: () => c.push('/sea-route')),
-        // 방재단 화면은 방재단·관리자만 (C8, 2026-10-05). 그 외에는 초대 코드 입력으로
-        GkPill(isPatrolRole(role) ? '방재단 현황 · ${roleKo[role] ?? role}' : '방재단 로그인 (초대 코드)',
-            icon: isPatrolRole(role) ? Icons.shield_rounded : Icons.badge_rounded,
-            filled: !isPatrolRole(role),
-            big: true,
-            onTap: () => c.push('/responder')),
-      ]),
-    ]));
-  }
-}
+// 프로필 '안전 기능'은 profile_cards.dart SafetyFeaturesCard (2026-10-09)
 
 /// 프로필의 시연 모드 스위치 (서버 연결 상태에서만 의미 있음)
 class DemoModeSwitch extends ConsumerWidget {
   const DemoModeSwitch({super.key});
   @override
   Widget build(BuildContext c, WidgetRef ref) => GkCard(
+          padding: gkCompactPad,
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        const Text('시연 모드', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
+        const GkCardTitle('시연 모드'),
         GkSwitchRow(
             icon: Icons.science_rounded,
             label: '시연 모드',

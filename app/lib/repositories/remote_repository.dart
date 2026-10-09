@@ -177,7 +177,6 @@ class RemoteSafetyRepository implements SafetyRepository {
   Future<SafetyRoute> routeFor(Facility facility, UserMode userMode,
       RouteType routeType, LatLng o) async {
     final (age, transport) = await _account.requiredSetup();
-    final walking = await _account.walkingImpaired();
     final r = await _guard(
         () => _client.route.post<Map<String, dynamic>>('/api/route', data: {
               'origin': {'lat': o.latitude, 'lon': o.longitude},
@@ -189,7 +188,7 @@ class RemoteSafetyRepository implements SafetyRepository {
               // 안전 경로 = 급경사도 피함. 걸음 속도는 둘 다 사용자 유형(profile)대로.
               'strategy': _strategy(routeType),
               'mode': TravelSetting.mode.api,
-              'profile': routeProfileFor(age, transport, walkingImpaired: walking),
+              'profile': routeProfileFor(age, transport),
               // 시연 모드: 경로 서버가 시연 위험 영역을 피한다
               if (DemoData.on) 'demo': true,
             }),
@@ -233,7 +232,6 @@ class RemoteSafetyRepository implements SafetyRepository {
     // 로그인했으면 Firebase uid (AI 기억이 계정을 따라감), Firebase가 없으면 기기 ID
     final uid = _auth.uid ?? await _account.deviceUserId();
     final (age, transport) = await _account.requiredSetup();
-    final walking = await _account.walkingImpaired();
     final places = await _account.places();
     return (uid, <String, Object>{
       'user_id': uid,
@@ -242,7 +240,6 @@ class RemoteSafetyRepository implements SafetyRepository {
       // 입력했을 때만 보낸다 (2026-10-07: 예전엔 없으면 'walk'로 채워 AI 기억 "휠체어 타요"가 늘 무시됐다)
       if (transport != null && transport.isNotEmpty)
         'mobility': switch (transport) { '휠체어' => 'wheelchair', '자동차' => 'car', _ => 'walk' },
-      if (walking) 'walking_impaired': true,
       ...placesForProfile(places),
     });
   }

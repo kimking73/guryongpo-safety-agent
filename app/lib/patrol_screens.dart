@@ -14,6 +14,9 @@ import 'origin_picker.dart';
 import 'services/geocoding_service.dart';
 import 'ui/gk_theme.dart';
 import 'services/live_api.dart';
+import 'services/demo_live_api.dart';
+import 'services/prototype_safety_store.dart';
+import 'ui/gk_widgets.dart';
 import 'services/location_service.dart';
 import 'services/polyline.dart';
 
@@ -67,7 +70,7 @@ bool matchesFilter(HouseholdFilter f, Object? needs) => switch (f) {
     };
 
 /// 대피 상태 (A12) → 한글·색. 명단 정렬도 서버(priority_rank)를 따르고 앱은 표시만 한다
-const statusKo = {'need_help': '도움 필요', 'no_response': '미응답', 'evacuating': '대피 중', 'evacuated': '대피 완료'};
+const statusKo = {'need_help': '도움 필요', 'no_response': '응답 없음', 'evacuating': '대피 중', 'evacuated': '대피 완료'};
 Color statusColor(String? s) => switch (s) {
       'need_help' => const Color(0xffc62828),
       'no_response' => const Color(0xffe65100),
@@ -547,6 +550,12 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
   String? incidentId, selected, error;
   HouseholdFilter filter = HouseholdFilter.all;
   Timer? poll;
+  /// 마지막으로 받은 시각 (서버, 시연이면 앱 안 예시 데이터)
+  DateTime? updatedAt;
+  /// 배정 현황 업무 상태 필터 (null = 전체)
+  WorkStatus? workFilter;
+  /// 지도를 옮길 점 — 목록에서 가구를 고를 때만 (지도 표식을 누를 때는 옮기지 않는다)
+  LatLng? focus;
 
   // 내 방문 경로 (2026-10-09): 명단에서 '경로에 추가'한 곳(이 기기에서만)을 모두 도는 길 — 최단 / 우선순위 최단
   Set<String> visitStops = {};
@@ -557,6 +566,9 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
   String visitTab = 'shortest';
   bool visitLoading = false;
   String? visitError;
+
+  /// 시연 대시보드인지 (앱 안 예시 데이터, 서버 기록과 분리)
+  bool get _demo => ref.read(liveApiProvider) is DemoLiveApi;
 
   @override
   void initState() {
@@ -583,6 +595,7 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
         incidentId = id;
         households = hh;
         error = null;
+        updatedAt = DateTime.now();
         if (id == null) detail = null;
       });
       if (id != null) await _loadDetail();
@@ -605,6 +618,7 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
       setState(() {
         detail = d;
         error = null;
+        updatedAt = DateTime.now();
       });
       final sec = (d['next_poll_sec'] as num?)?.toInt() ?? 10;
       if (d['closed_at'] == null) poll = Timer(Duration(seconds: sec.clamp(5, 60)), _loadDetail);
@@ -626,76 +640,292 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
     if (ok) await _loadDetail();
   }
 
+  /// 배정: 내가 맡기 / 맡기 취소 (서버 assigned_to — 기존 배정 기능)
+  Future<void> _assign(Map<String, dynamic> t) async {
+    final mine = (t['assigned_to'] as Map?)?['is_me'] == true;
+    await _patch(t, {'assigned_to': mine ? null : 'me'}, mine ? '맡기를 취소했습니다' : '내가 맡았습니다');
+  }
+
+  /// 방재단 업무 단계 바꾸기 (주민 대피 응답은 바꾸지 않는다)
+  Future<void> _setWork(Map<String, dynamic> t, WorkStatus w) =>
+      _patch(t, {'work_status': workWire[w]}, '업무 상태: ${workKo[w]}');
+
+  Future<void> _patch(Map<String, dynamic> t, Map<String, dynamic> body, String done) async {
+    try {
+      await ref.read(liveApiProvider).patchTarget(incidentId!, '${t['id']}', body);
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${t['label']}: $done')));
+      await _loadDetail();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(liveError(e))));
+    }
+  }
+
+  /// 목록에서 고르기 → 지도에서 그 위치를 강조하고 지도를 옮긴다
+  void _pick(Map<String, dynamic> t) => setState(() {
+        selected = '${t['id']}';
+        focus = latLng(t['location']);
+      });
+
   @override
   Widget build(BuildContext c) {
+    // 대피 경보 팝업에서 응답을 바꾸면 바로 다시 받는다 (시연 = 기기 시연 기록, 실제 = 서버 대피 상황)
+    ref.listen(prototypeSafetyProvider, (_, next) {
+      if (!_demo) return;
+      syncDemoPatrol(next);
+      _loadDetail();
+    });
+    ref.listen(alertEvacuationProvider, (_, __) {
+      if (!_demo) _loadDetail();
+    });
     if (error != null && incidents == null) return LoadError(message: error!, onRetry: _load);
     if (incidents == null) return const DashboardLoading();
     final targets = _targets;
+    final priority = priorityTargets(targets);
+    final numbers = {for (var i = 0; i < priority.length; i++) '${priority[i]['id']}': i + 1};
     final incident = detail ?? incidents!.cast<Map<String, dynamic>?>().firstWhere((i) => i?['id'] == incidentId, orElse: () => null);
+    final closed = detail?['closed_at'] != null;
+    final demo = _demo;
     return LivePage(title: '방재단 대시보드', onRefresh: _load, children: [
-      Row(children: [
-        Expanded(child: Text('가까운 위험 가구부터 확인하세요. 명단은 ${incidentId == null ? '' : '10초마다 '}새로 고칩니다.')),
-        IconButton(tooltip: '가구 대리 등록', onPressed: () => c.push('/household/delegate'), icon: const Icon(Icons.person_add_alt_1)),
-      ]),
-      if (error != null) Text(error!, style: const TextStyle(color: Colors.red)),
-      if (incidents!.length > 1)
-        DropdownButton<String>(
-            isExpanded: true,
-            value: incidentId,
-            items: [for (final i in incidents!) DropdownMenuItem(value: '${i['id']}', child: Text('${i['title']}'))],
-            onChanged: (v) {
-              setState(() {
-                incidentId = v;
-                detail = null;
-                selected = null;
-                _clearVisit(pick: true);
-              });
-              _loadDetail();
-            }),
-      _FilterBar(households: households ?? const [], filter: filter, onChanged: (f) => setState(() => filter = f)),
-      if (incidentId == null) ...[
-        const Card(child: ListTile(leading: Icon(Icons.check_circle_outline), title: Text('진행 중인 대피 상황이 없습니다'),
-            subtitle: Text('평시에도 장애인·독거노인 가구를 지도에서 확인할 수 있습니다. 대피 상황이 생기면 대상 가구가 번호(우선순위)로 바뀝니다.'))),
-        _map(_householdPoints(const {}), const []),
-        const _MapLegend(withTargets: false),
-        for (final h in _shownHouseholds) _HouseholdTile(h: h, selected: selected == '${h['id']}'),
-        if (_shownHouseholds.isEmpty) const Card(child: ListTile(title: Text('조건에 맞는 등록 가구가 없습니다'))),
-      ] else ...[
-        if (incident != null) _IncidentHeader(incident: incident),
-        _map([
-          ..._householdPoints({for (final t in targets) if (t['household_id'] != null) '${t['household_id']}'}),
-          for (final t in targets)
-            if (latLng(t['location']) != null)
-              _MapPoint('${t['id']}', latLng(t['location'])!, (t['priority_rank'] as num?)?.toInt(), t['status'] as String?, '${t['label']}'),
-        ], geoJsonRings(detail?['area'])),
-        const _MapLegend(withTargets: true),
-        const SizedBox(height: 8),
-        _visitCard(targets),
-        const SizedBox(height: 6),
-        const Text('방문 우선순위', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-        // B13 규칙 (서버 priority.py, 사용자 결정 2026-10-08)
-        Text('위험지역 안 대상만 · 도움 요청+장애 → 도움 요청 → 응답 없음+장애 → 응답 없음 → 대피 중 → 대피 완료. '
-            '장애 = 시각·청각·지체. 같은 순위는 ${ref.watch(userLocation).fromGps ? '내 위치에서 가까운 순' : '오래 기다린 순 (내 위치를 켜면 가까운 순)'}',
-            style: Theme.of(context).textTheme.bodySmall),
-        if (detail == null) const LinearProgressIndicator(),
-        if (detail != null && targets.isEmpty) const Card(child: ListTile(title: Text('이 대피 상황의 대상 가구가 없습니다'))),
-        for (final t in [...targets.where((t) => '${t['id']}' == selected), ...targets.where((t) => '${t['id']}' != selected)])
-          _TargetCard(t: t, selected: '${t['id']}' == selected, closed: detail?['closed_at'] != null,
-              inRoute: visitStops.contains('${t['id']}'),
-              onVisit: () => _visit(t), onRoute: () => _toggleRoute(t), onSelect: () => setState(() => selected = '${t['id']}')),
-        // 대피 대상이 아닌 등록 가구도 지도에서 눌러 볼 수 있게
-        for (final h in _shownHouseholds.where((h) => '${h['id']}' == selected)) _HouseholdTile(h: h, selected: true),
+      // ① 접속 상태와 방재단원 계정
+      _ConnectionBar(
+          demo: demo,
+          failed: error != null,
+          live: !demo && incidentId != null && detail != null && !closed && error == null,
+          onDelegate: () => c.push('/household/delegate')),
+      const SizedBox(height: 16),
+      // ② 주민 대피 현황 요약
+      _summary(c, targets, incident, closed),
+      const SizedBox(height: 20),
+      // ③ 우선 확인 가구·대피소 지도
+      _mapSection(c, targets, numbers, demo),
+      const SizedBox(height: 20),
+      // ④ 우선 확인 가구 목록
+      _prioritySection(c, priority, numbers, closed),
+      if (incidentId != null) ...[
+        const SizedBox(height: 20),
+        // ⑤ 방재단 배정 현황
+        _assignSection(c, targets, numbers, closed),
+        const SizedBox(height: 20),
+        _visitCard(targets, numbers),
       ],
     ]);
   }
 
+  // ------------------------------------------------------------------ ② 주민 대피 현황
+  Widget _summary(BuildContext c, List<Map<String, dynamic>> targets, Map<String, dynamic>? incident, bool closed) {
+    final updated = updatedAt == null ? '갱신 전' : '${_hms(updatedAt!)} 갱신';
+    return GkCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text('주민 대피 현황', style: Theme.of(c).textTheme.headlineSmall),
+        const SizedBox(height: 2),
+        Text('구룡포읍 · 구룡포 자율방재단 · $updated', style: Theme.of(c).textTheme.bodySmall),
+        if (error != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: _Notice(Icons.sync_problem_rounded, '연결 오류 · 마지막으로 받은 정보를 보여 줍니다 (30초 뒤 다시 시도)', error!, GK.orangeInk),
+          ),
+        if (incidents!.length > 1)
+          DropdownButton<String>(
+              isExpanded: true,
+              value: incidentId,
+              items: [for (final i in incidents!) DropdownMenuItem(value: '${i['id']}', child: Text('${i['title']}', overflow: TextOverflow.ellipsis))],
+              onChanged: (v) {
+                setState(() {
+                  incidentId = v;
+                  detail = null;
+                  selected = null;
+                  focus = null;
+                  _clearVisit(pick: true);
+                });
+                _loadDetail();
+              }),
+        const SizedBox(height: 12),
+        if (incidentId == null)
+          const _Notice(Icons.verified_user_outlined, '진행 중인 대피 경보가 없습니다',
+              '경보가 시작되면 응답 대상과 상태별 집계가 여기에 나옵니다. 평시에도 아래 지도에서 등록 취약 가구를 볼 수 있습니다.', GK.muted)
+        else ...[
+          if (incident != null)
+            Row(children: [
+              Icon(Icons.campaign_rounded, color: levelColor(incident['level'] as String?)),
+              const SizedBox(width: 6),
+              Expanded(
+                  child: Text('${incident['title']}',
+                      maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700))),
+              const SizedBox(width: 6),
+              Text(closed ? '종료됨' : '${hhmm(incident['started_at'])} 시작', style: Theme.of(c).textTheme.bodySmall),
+            ]),
+          const SizedBox(height: 10),
+          if (detail == null)
+            const _Notice(Icons.hourglass_top_rounded, '불러오는 중', '응답 대상과 상태를 받고 있습니다.', GK.muted)
+          else ...[
+            _StatusGrid(counts: {for (final s in residentStatuses) s: targets.where((t) => t['status'] == s).length}),
+            const SizedBox(height: 8),
+            Text('집계 단위 = 곳 (등록 가구 하나 또는 앱 사용자 한 명). 응답 없음 = 이번 경보의 응답 대상 중 아직 응답하지 않은 곳',
+                style: Theme.of(c).textTheme.bodySmall),
+          ],
+        ],
+      ]),
+    );
+  }
+
+  // ------------------------------------------------------------------ ③ 지도
+  Widget _mapSection(BuildContext c, List<Map<String, dynamic>> targets, Map<String, int> numbers, bool demo) {
+    final sel = targets.where((t) => '${t['id']}' == selected).firstOrNull;
+    final selHousehold = sel == null ? _shownHouseholds.where((h) => '${h['id']}' == selected).firstOrNull : null;
+    final points = incidentId == null
+        ? _householdPoints(const {})
+        : [
+            ..._householdPoints({for (final t in targets) if (t['household_id'] != null) '${t['household_id']}'}),
+            for (final t in targets)
+              if (latLng(t['location']) != null)
+                _MapPoint('${t['id']}', latLng(t['location'])!, numbers['${t['id']}'], t['status'] as String?, '${t['label']}'),
+          ];
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
+        Text('우선 확인 가구·대피소 지도', style: Theme.of(c).textTheme.titleLarge),
+        if (demo) const _Tag('예시 위치 · 실제 지도 연결 전', icon: Icons.info_outline_rounded),
+      ]),
+      const SizedBox(height: 4),
+      Text(
+          incidentId == null
+              ? '평시: 등록 취약 가구 위치입니다. 표식을 누르면 그 가구 정보를 봅니다.'
+              : '번호 = 아래 우선 확인 가구 목록 번호. 표식을 누르면 그 가구 정보를, 목록을 누르면 지도에서 위치를 보여 줍니다. 지도 카드의 크게 보기로 확대할 수 있습니다.',
+          style: Theme.of(c).textTheme.bodySmall),
+      _FilterBar(households: households ?? const [], filter: filter, onChanged: (f) => setState(() => filter = f)),
+      _map(points, geoJsonRings(detail?['area'])),
+      const SizedBox(height: 8),
+      _MapLegend(withTargets: incidentId != null),
+      if (sel != null) ...[
+        const SizedBox(height: 10),
+        _TargetDetail(
+            t: sel,
+            no: numbers['${sel['id']}'],
+            closed: detail?['closed_at'] != null,
+            inRoute: visitStops.contains('${sel['id']}'),
+            onVisit: () => _visit(sel),
+            onRoute: () => _toggleRoute(sel),
+            onClose: () => setState(() => selected = null)),
+      ],
+      // 평시: 등록 취약 가구 목록 (고른 가구가 맨 앞). 대피 상황 중에는 대상이 아닌 등록 가구를 지도에서 눌렀을 때만
+      if (incidentId == null) ...[
+        const SizedBox(height: 10),
+        for (final h in _shownHouseholds) _HouseholdTile(h: h, selected: selected == '${h['id']}'),
+        if (_shownHouseholds.isEmpty) const Text('조건에 맞는 등록 가구가 없습니다'),
+      ] else if (selHousehold != null) ...[const SizedBox(height: 10), _HouseholdTile(h: selHousehold, selected: true)],
+    ]);
+  }
+
+  // ------------------------------------------------------------------ ④ 우선 확인 가구
+  Widget _prioritySection(BuildContext c, List<Map<String, dynamic>> priority, Map<String, int> numbers, bool closed) {
+    return GkCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text('우선 확인 가구', style: Theme.of(c).textTheme.titleLarge),
+        const SizedBox(height: 2),
+        Text.rich(
+          TextSpan(style: Theme.of(c).textTheme.bodySmall, children: const [
+            TextSpan(text: '위험지역 안', style: TextStyle(color: GK.redDark, fontWeight: FontWeight.w800)),
+            TextSpan(text: ' 도움 필요 → 응답 없음 순. 등록된 지원 필요 정보(장애)가 있으면 같은 상태 안에서 먼저'),
+          ]),
+        ),
+        const SizedBox(height: 10),
+        if (incidentId == null)
+          const _Notice(Icons.verified_user_outlined, '대피 경보가 없어 우선 확인할 곳이 없습니다', null, GK.muted)
+        else if (detail == null)
+          const LinearProgressIndicator()
+        else if (priority.isEmpty)
+          const _Notice(Icons.check_circle_outline_rounded, '지금 우선 확인할 곳이 없습니다', '위험지역 안 도움 필요·응답 없음이 0곳입니다.', GK.green)
+        else
+          for (final t in priority)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _PriorityRow(t: t, no: numbers['${t['id']}']!, selected: '${t['id']}' == selected, onTap: () => _pick(t)),
+            ),
+      ]),
+    );
+  }
+
+  // ------------------------------------------------------------------ ⑤ 방재단 배정 현황
+  Widget _assignSection(BuildContext c, List<Map<String, dynamic>> targets, Map<String, int> numbers, bool closed) {
+    final supports = ref.read(liveApiProvider).supportsWorkStatus;
+    final counts = <WorkStatus, int>{};
+    for (final t in targets) {
+      final w = workStatusOf(t);
+      counts[w] = (counts[w] ?? 0) + 1;
+    }
+    final assigned = targets.where((t) => t['assigned_to'] != null).length;
+    final shown = [for (final t in targets) if (workFilter == null || workStatusOf(t) == workFilter) t]
+      ..sort((a, b) {
+        final w = workStatusOf(a).index.compareTo(workStatusOf(b).index);
+        if (w != 0) return w;
+        return (numbers['${a['id']}'] ?? 999).compareTo(numbers['${b['id']}'] ?? 999);
+      });
+    Widget chip(WorkStatus? w) {
+      final n = w == null ? targets.length : (counts[w] ?? 0);
+      return ChoiceChip(
+        avatar: w == null ? null : Icon(workIcon[w], size: 18, color: workColor[w]),
+        label: Text('${w == null ? '전체' : workKo[w]} $n'),
+        selected: workFilter == w,
+        onSelected: (_) => setState(() => workFilter = w),
+      );
+    }
+
+    return GkCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Wrap(spacing: 10, runSpacing: 4, alignment: WrapAlignment.spaceBetween, crossAxisAlignment: WrapCrossAlignment.center, children: [
+          Text('방재단 배정 현황', style: Theme.of(c).textTheme.titleLarge),
+          Text('배정 $assigned곳 · 미배정 ${targets.length - assigned}곳',
+              style: const TextStyle(fontWeight: FontWeight.w800, color: GK.muted)),
+        ]),
+        const SizedBox(height: 2),
+        Text('방재단 업무 상태는 주민 대피 응답과 따로입니다. 주민이 대피 완료로 답해도 업무는 저절로 완료되지 않습니다.',
+            style: Theme.of(c).textTheme.bodySmall),
+        if (!supports)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text('업무 단계(가는 중·방문 중·대피 동행·완료)는 서버에 저장 칸이 아직 없어 배정·미배정까지만 표시합니다.',
+                style: Theme.of(c).textTheme.bodySmall?.copyWith(color: GK.orangeInk, fontWeight: FontWeight.w600)),
+          ),
+        const SizedBox(height: 10),
+        // 상태 필터: 잘리지 않게 줄바꿈
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          chip(null),
+          for (final w in WorkStatus.values)
+            if (w != WorkStatus.assigned || (counts[w] ?? 0) > 0) chip(w),
+        ]),
+        const SizedBox(height: 10),
+        if (detail == null)
+          const LinearProgressIndicator()
+        else if (targets.isEmpty)
+          const _Notice(Icons.inbox_outlined, '이 대피 상황의 대상이 없습니다', null, GK.muted)
+        else if (shown.isEmpty)
+          const _Notice(Icons.filter_alt_off_outlined, '이 상태인 곳이 없습니다', null, GK.muted)
+        else
+          for (final t in shown)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _AssignCard(
+                  t: t,
+                  no: numbers['${t['id']}'],
+                  closed: closed,
+                  supportsWork: supports,
+                  onAssign: () => _assign(t),
+                  onWork: (w) => _setWork(t, w),
+                  onTap: () => _pick(t)),
+            ),
+      ]),
+    );
+  }
+
   /// 지도 = 대시보드 지도 칸 그대로(재난 층·전체 화면·등록 장소 위험) + 대피 영역(빨간 테두리) + 사람 아이콘 (2026-10-09 사용자 요청)
+  /// + 대피소·의료시설, 목록에서 고른 곳으로 이동
   Widget _map(List<_MapPoint> points, List<List<LatLng>> rings) {
     final plan = _visitPlan;
     final line = plan == null ? const <LatLng>[] : decodePolyline('${plan['geometry']}');
     final at = {for (final p in points) p.id: p.at};
     return Dashboard(
       mapOnly: true,
+      showFacilities: true,
+      focusPoint: focus,
       extraPolygons: [
         for (final r in rings)
           Polygon(points: r, color: Colors.red.withValues(alpha: .10), borderColor: Colors.red.shade700, borderStrokeWidth: 2.5),
@@ -709,7 +939,7 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
       extraMarkers: [
         ..._peopleMarkers(points, selected, (id) => setState(() => selected = id)),
         if (plan != null) ...[
-          // 방문 순서: 사람 아이콘 왼쪽 아래 남색 번호 (오른쪽 위 흰 번호 = B13 순위)
+          // 방문 순서: 사람 아이콘 왼쪽 아래 남색 번호 (오른쪽 위 흰 번호 = 우선 확인 번호)
           for (final o in plan['order'] as List)
             if (at['${o['id']}'] != null)
               Marker(
@@ -816,30 +1046,29 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
     }
   }
 
-  Widget _visitCard(List<Map<String, dynamic>> targets) {
+  Widget _visitCard(List<Map<String, dynamic>> targets, Map<String, int> numbers) {
     final picked = _routeTargets(targets);
     final label = {for (final t in targets) '${t['id']}': '${t['label']}'};
     final plan = _visitPlan;
     final me = ref.watch(userLocation);
     String km(num m) => m >= 1000 ? '${(m / 1000).toStringAsFixed(1)}km' : '${m.round()}m';
     String min(num s) => '${(s / 60).ceil()}분';
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    String noOf(Map<String, dynamic> t) => numbers['${t['id']}'] == null ? '' : '${numbers['${t['id']}']}번 · ';
+    return GkCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Row(children: [
             Icon(Icons.route_rounded, color: GK.navy),
             SizedBox(width: 6),
             Text('내 방문 경로', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           ]),
-          Text("아래 명단에서 '경로에 추가'한 곳을 모두 도는 길입니다. 위험 구역은 피하고, 방문할 집이 있는 구역만 들어갑니다.",
+          Text("우선 확인 가구에서 '경로에 추가'한 곳을 모두 도는 길입니다. 위험 구역은 피하고, 방문할 집이 있는 구역만 들어갑니다.",
               style: Theme.of(context).textTheme.bodySmall),
           if (picked.isEmpty)
             const ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: Icon(Icons.info_outline),
                 title: Text('경로에 추가한 곳이 없습니다'),
-                subtitle: Text("아래 명단의 가구 카드에서 '경로에 추가'를 눌러 방문할 곳을 넣으세요."))
+                subtitle: Text("우선 확인 가구 목록에서 가구를 눌러 '경로에 추가'로 방문할 곳을 넣으세요."))
           else ...[
             const SizedBox(height: 6),
             Text('경로에 넣은 곳 ${picked.length}/$maxVisitStops', style: const TextStyle(fontWeight: FontWeight.bold)),
@@ -848,10 +1077,10 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
                 dense: true,
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.add_road_rounded, color: GK.navy),
-                title: Text('${t['priority_rank'] ?? '-'}순위 · ${t['label']}'),
-                subtitle: Text(priorityReason(t)),
+                title: Text('${noOf(t)}${t['label']}'),
+                subtitle: Text(statusKo[t['status']] ?? '${t['status']}'),
                 trailing: IconButton(tooltip: '경로에서 빼기', icon: const Icon(Icons.close_rounded), onPressed: () => _toggleRoute(t)),
-                onTap: () => setState(() => selected = '${t['id']}'),
+                onTap: () => _pick(t),
               ),
             const SizedBox(height: 8),
             Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
@@ -918,7 +1147,6 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
             ],
           ],
         ]),
-      ),
     );
   }
 
@@ -935,6 +1163,519 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
             _MapPoint('${h['id']}', latLng(h['location'])!, null, null, '${h['label']}', kind: vulnerableKind(h['needs']),
                 detail: needsText(h['needs'])),
       ];
+}
+
+String _hms(DateTime t) =>
+    '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}:${t.second.toString().padLeft(2, '0')}';
+
+// ------------------------------------------------------------------ 우선순위·업무 상태 (화면 계산)
+/// 주민 대피 응답 상태 (집계 순서)
+const residentStatuses = ['need_help', 'no_response', 'evacuating', 'evacuated'];
+
+/// 등록된 지원 필요 정보 중 장애 — 등록 가구의 needs(본인·보호자 동의로 등록)만 본다.
+/// 앱 사용자의 시각·청각 화면 설정으로는 장애를 추정하지 않는다 (2026-10-09 사용자 요청)
+const supportNeedKo = {'vision': '시각', 'hearing': '청각', 'wheelchair': '휠체어', 'bedridden': '와상', 'mobility_limited': '보행 불편'};
+List<String> registeredSupport(Map<String, dynamic> t) {
+  if (t['kind'] == 'app_user') return const [];
+  return [for (final n in t['needs'] as List? ?? const []) if (supportNeedKo['$n'] != null) supportNeedKo['$n']!];
+}
+
+int _priorityTier(Map<String, dynamic> t) {
+  final dis = registeredSupport(t).isNotEmpty;
+  return t['status'] == 'need_help' ? (dis ? 0 : 1) : (dis ? 2 : 3);
+}
+
+/// 우선 확인 가구: 위험지역 안의 도움 필요·응답 없음만. 도움 필요 → 응답 없음, 같은 상태 안에서는 등록된 장애 정보가 있으면 먼저,
+/// 그다음 서버 순위(가까운 순 또는 오래 기다린 순). 화면 번호 = 이 순서 (지도 번호와 같다)
+List<Map<String, dynamic>> priorityTargets(List<Map<String, dynamic>> targets) {
+  final out = [
+    for (final t in targets)
+      if (t['in_area'] != false && (t['status'] == 'need_help' || t['status'] == 'no_response')) t
+  ];
+  out.sort((a, b) {
+    final c = _priorityTier(a).compareTo(_priorityTier(b));
+    if (c != 0) return c;
+    final r = ((a['priority_rank'] as num?) ?? 999).compareTo((b['priority_rank'] as num?) ?? 999);
+    if (r != 0) return r;
+    return ((b['minutes_since_alert'] as num?) ?? 0).compareTo((a['minutes_since_alert'] as num?) ?? 0);
+  });
+  return out;
+}
+
+/// 방재단 업무 상태 (주민 대피 응답과 따로). assigned = 배정은 됐지만 업무 단계를 모름 (서버에 단계 칸이 없을 때)
+enum WorkStatus { unassigned, enRoute, visiting, escorting, done, assigned }
+
+const workKo = {
+  WorkStatus.unassigned: '미배정',
+  WorkStatus.enRoute: '가는 중',
+  WorkStatus.visiting: '방문 중',
+  WorkStatus.escorting: '대피 동행',
+  WorkStatus.done: '완료',
+  WorkStatus.assigned: '배정됨 · 단계 미연결',
+};
+const workWire = {
+  WorkStatus.enRoute: 'en_route',
+  WorkStatus.visiting: 'visiting',
+  WorkStatus.escorting: 'escorting',
+  WorkStatus.done: 'done',
+};
+const workIcon = {
+  WorkStatus.unassigned: Icons.person_off_outlined,
+  WorkStatus.enRoute: Icons.directions_run_rounded,
+  WorkStatus.visiting: Icons.door_front_door_outlined,
+  WorkStatus.escorting: Icons.transfer_within_a_station_rounded,
+  WorkStatus.done: Icons.task_alt_rounded,
+  WorkStatus.assigned: Icons.assignment_ind_outlined,
+};
+const workColor = {
+  WorkStatus.unassigned: GK.redDark,
+  WorkStatus.enRoute: GK.orangeInk,
+  WorkStatus.visiting: GK.navy,
+  WorkStatus.escorting: Color(0xff4b5aa8),
+  WorkStatus.done: GK.green,
+  WorkStatus.assigned: GK.muted,
+};
+
+WorkStatus workStatusOf(Map<String, dynamic> t) {
+  if (t['assigned_to'] == null) return WorkStatus.unassigned;
+  return switch (t['work_status']) {
+    'en_route' => WorkStatus.enRoute,
+    'visiting' => WorkStatus.visiting,
+    'escorting' => WorkStatus.escorting,
+    'done' => WorkStatus.done,
+    _ => WorkStatus.assigned,
+  };
+}
+
+/// 진행 단계 '출발 → 방문 → 대피 동행 → 완료' 중 지금 칸 (모르면 -1)
+int workStep(WorkStatus w) => switch (w) {
+      WorkStatus.enRoute => 0,
+      WorkStatus.visiting => 1,
+      WorkStatus.escorting => 2,
+      WorkStatus.done => 3,
+      _ => -1,
+    };
+const workSteps = ['출발', '방문', '대피 동행', '완료'];
+
+String assigneeText(Map<String, dynamic> t) {
+  final a = t['assigned_to'] as Map?;
+  if (a == null) return '미배정';
+  return a['is_me'] == true ? '내가 담당' : '${a['nickname'] ?? '방재단'} 담당';
+}
+
+/// 우선순위 근거: 서버 priority_reasons(B13 — 상태·장애·거리 또는 기다린 시간)를 그대로 잇는다. 없으면(예전 서버) 상태만
+String priorityReason(Map<String, dynamic> t) {
+  final reasons = [for (final r in t['priority_reasons'] as List? ?? const []) if (r is Map) '${r['label'] ?? r['factor']}'];
+  if (reasons.isNotEmpty) return reasons.join(' · ');
+  return '${statusKo[t['status']] ?? t['status']}';
+}
+
+// ------------------------------------------------------------------ 화면 조각
+/// 작은 표시 칩 (시연·예시 위치 등)
+class _Tag extends StatelessWidget {
+  const _Tag(this.text, {this.icon});
+  final String text;
+  final IconData? icon;
+  static const bg = GK.tint, fg = GK.navy;
+  @override
+  Widget build(BuildContext c) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(999)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          if (icon != null) ...[Icon(icon, size: 15, color: fg), const SizedBox(width: 4)],
+          Flexible(child: Text(text, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: fg))),
+        ]),
+      );
+}
+
+/// 빈 상태·불러오는 중·연결 오류 안내 한 줄
+class _Notice extends StatelessWidget {
+  const _Notice(this.icon, this.title, this.detail, this.color);
+  final IconData icon;
+  final String title;
+  final String? detail;
+  final Color color;
+  @override
+  Widget build(BuildContext c) => Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(color: GK.bg, borderRadius: BorderRadius.circular(GK.radiusInner)),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(icon, color: color),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(title, style: TextStyle(fontWeight: FontWeight.w800, color: color == GK.muted ? GK.ink : color)),
+              if (detail != null) Text(detail!, style: Theme.of(c).textTheme.bodySmall),
+            ]),
+          ),
+        ]),
+      );
+}
+
+/// ① 접속 상태 · 방재단원 계정 · 실시간/시연 표시
+class _ConnectionBar extends ConsumerWidget {
+  const _ConnectionBar({required this.demo, required this.failed, required this.live, required this.onDelegate});
+  final bool demo, failed, live;
+  final VoidCallback onDelegate;
+  @override
+  Widget build(BuildContext c, WidgetRef ref) {
+    final off = ref.watch(offline);
+    final me = ref.watch(meProvider).valueOrNull;
+    final role = '${me?['role'] ?? 'responder'}';
+    final nick = (me?['profile'] as Map?)?['nickname'] ?? me?['nickname'];
+    final who = demo ? '시연 방재단원' : '${role == 'admin' ? '관리자' : '방재단원'}${nick != null && '$nick'.isNotEmpty ? ' · $nick' : ''}';
+    final (netLabel, netIcon, netBg, netFg) = off
+        ? ('오프라인', Icons.cloud_off_rounded, GK.orange, Colors.white)
+        : failed
+            ? ('연결 오류', Icons.sync_problem_rounded, GK.orangeTint, GK.orangeInk)
+            : ('온라인', Icons.cloud_done_rounded, Colors.white, GK.navy);
+    return Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+      GkPill(netLabel, icon: netIcon, bg: netBg, fg: netFg),
+      GkPill(who, icon: Icons.badge_outlined, bg: Colors.white),
+      if (demo)
+        const GkPill('시연 · 예시 데이터', icon: Icons.slideshow_rounded, filled: true)
+      else if (live)
+        const GkPill('실시간', icon: Icons.fiber_manual_record_rounded, filled: true, bg: GK.red),
+      TextButton.icon(onPressed: onDelegate, icon: const Icon(Icons.person_add_alt_1), label: const Text('가구 대리 등록')),
+    ]);
+  }
+}
+
+/// ② 상태별 집계 카드 — 휴대폰 폭이면 2열
+class _StatusGrid extends StatelessWidget {
+  const _StatusGrid({required this.counts});
+  final Map<String, int> counts;
+  static const _style = {
+    'need_help': (Icons.sos_rounded, GK.redDark, GK.redTint),
+    'no_response': (Icons.notifications_paused_rounded, GK.orangeInk, GK.orangeTint),
+    'evacuating': (Icons.directions_walk_rounded, GK.navy, GK.tint),
+    'evacuated': (Icons.check_circle_rounded, GK.green, Color(0xFFE3F4EA)),
+  };
+  @override
+  Widget build(BuildContext c) => LayoutBuilder(builder: (c, box) {
+        final cols = box.maxWidth < 560 ? 2 : 4;
+        const gap = 10.0;
+        final w = (box.maxWidth - gap * (cols - 1)) / cols;
+        return Wrap(spacing: gap, runSpacing: gap, children: [
+          for (final s in residentStatuses)
+            SizedBox(
+              width: w,
+              child: Semantics(
+                label: '${statusKo[s]} ${counts[s] ?? 0}곳',
+                excludeSemantics: true,
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(color: _style[s]!.$3, borderRadius: BorderRadius.circular(GK.radiusInner)),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      GkCircleIcon(_style[s]!.$1, size: 34, bg: Colors.white, fg: _style[s]!.$2),
+                      const SizedBox(width: 8),
+                      Flexible(
+                          child: Text(statusKo[s]!,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontWeight: FontWeight.w800, color: _style[s]!.$2))),
+                    ]),
+                    const SizedBox(height: 6),
+                    Text.rich(key: ValueKey('evac-count-$s'), TextSpan(children: [
+                      TextSpan(text: '${counts[s] ?? 0}', style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800, color: GK.ink)),
+                      const TextSpan(text: ' 곳', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: GK.muted)),
+                    ])),
+                  ]),
+                ),
+              ),
+            ),
+        ]);
+      });
+}
+
+/// 번호 원 (지도 번호와 같은 번호, 색 = 응답 상태)
+class _NoCircle extends StatelessWidget {
+  const _NoCircle(this.no, this.status, {this.size = 34});
+  final int? no;
+  final String? status;
+  final double size;
+  @override
+  Widget build(BuildContext c) => Container(
+        width: size,
+        height: size,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(color: statusColor(status), shape: BoxShape.circle),
+        child: no == null
+            ? Icon(Icons.person_rounded, color: Colors.white, size: size * .6)
+            : Text('$no', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: size * .45)),
+      );
+}
+
+/// ④ 우선 확인 가구 한 줄: 번호 · 이름 · 응답 상태 · 위치 요약 · 담당
+class _PriorityRow extends StatelessWidget {
+  const _PriorityRow({required this.t, required this.no, required this.selected, required this.onTap});
+  final Map<String, dynamic> t;
+  final int no;
+  final bool selected;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext c) {
+    final status = t['status'] as String?;
+    final dis = registeredSupport(t);
+    final assignee = assigneeText(t);
+    final assigneeStyle = TextStyle(
+        fontWeight: FontWeight.w800, color: t['assigned_to'] == null ? GK.redDark : GK.muted, fontSize: 15);
+    return Material(
+      color: status == 'need_help' ? const Color(0xFFF8ECEB) : GK.bg,
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(GK.radiusInner),
+          side: selected ? const BorderSide(color: GK.navy, width: 2) : BorderSide.none),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 14, 12),
+          child: LayoutBuilder(builder: (c, box) {
+            final narrow = box.maxWidth < 420;
+            final info = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Wrap(spacing: 8, runSpacing: 2, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                Text('${t['label']}', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+                Text([statusKo[status] ?? '$status', if (dis.isNotEmpty) '장애'].join(' · '),
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: statusColor(status))),
+              ]),
+              Text(t['address'] == null ? '위치 정보: 지도 표식 참고' : '${t['address']}',
+                  maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(c).textTheme.bodySmall),
+              if (narrow) Text(assignee, style: assigneeStyle),
+            ]);
+            return Row(children: [
+              _NoCircle(no, status),
+              const SizedBox(width: 12),
+              Expanded(child: info),
+              if (!narrow) ...[
+                const SizedBox(width: 10),
+                ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: box.maxWidth * .3),
+                  child: Text(assignee, textAlign: TextAlign.end, maxLines: 2, overflow: TextOverflow.ellipsis, style: assigneeStyle),
+                ),
+              ],
+            ]);
+          }),
+        ),
+      ),
+    );
+  }
+}
+
+/// 지도에서 고른(또는 목록에서 고른) 대상 정보 + 할 일
+class _TargetDetail extends StatelessWidget {
+  const _TargetDetail(
+      {required this.t,
+      required this.no,
+      required this.closed,
+      required this.inRoute,
+      required this.onVisit,
+      required this.onRoute,
+      required this.onClose});
+  final Map<String, dynamic> t;
+  final int? no;
+  final bool closed, inRoute;
+  final VoidCallback onVisit, onRoute, onClose;
+  @override
+  Widget build(BuildContext c) {
+    final status = t['status'] as String?;
+    final visit = t['last_visit'] as Map?;
+    final mins = t['minutes_since_alert'];
+    final dis = registeredSupport(t);
+    return GkCard(
+      padding: const EdgeInsets.all(16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          _NoCircle(no, status, size: 30),
+          const SizedBox(width: 10),
+          Expanded(
+              child: Text('${no != null ? '$no번 · ' : ''}${t['label']}',
+                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800))),
+          IconButton(tooltip: '닫기', onPressed: onClose, icon: const Icon(Icons.close_rounded)),
+        ]),
+        Text('주민 응답: ${statusKo[status] ?? status} · ${assigneeText(t)} · 업무: ${workKo[workStatusOf(t)]}',
+            style: const TextStyle(fontWeight: FontWeight.w700)),
+        Text([
+          if (t['address'] != null) '${t['address']}',
+          if (dis.isNotEmpty) '등록된 지원 필요: ${dis.join(', ')}',
+          if (mins is num) '경고 후 $mins분',
+          if (t['escalated'] == true) '재알림 ${t['reminder_count'] ?? ''}회 무응답',
+        ].join(' · ')),
+        if (visit != null)
+          Text('마지막 방문 ${hhmm(visit['visited_at'])} · ${visitKo[visit['result']] ?? visit['result']}'
+              '${(visit['responder'] as Map?)?['nickname'] != null ? ' (${(visit['responder'] as Map)['nickname']})' : ''}',
+              style: Theme.of(c).textTheme.bodySmall),
+        if (inRoute)
+          Text('내 방문 경로에 넣음', style: Theme.of(c).textTheme.bodySmall?.copyWith(color: GK.navy, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 6),
+        Wrap(spacing: 6, runSpacing: 6, children: [
+          if (!closed) FilledButton.tonalIcon(onPressed: onVisit, icon: const Icon(Icons.assignment_turned_in_outlined), label: const Text('방문 결과')),
+          if (!closed)
+            inRoute
+                ? OutlinedButton.icon(onPressed: onRoute, icon: const Icon(Icons.remove_road_rounded), label: const Text('경로에서 빼기'))
+                : TextButton.icon(onPressed: onRoute, icon: const Icon(Icons.add_road_rounded), label: const Text('경로에 추가')),
+          if (t['phone'] != null)
+            IconButton(tooltip: '전화', icon: const Icon(Icons.phone), onPressed: () => launchUrl(Uri.parse('tel:${t['phone']}'))),
+        ]),
+      ]),
+    );
+  }
+}
+
+/// ⑤ 배정 현황 카드: 가구 · 위치 · 담당 · 업무 상태 · 진행 단계(출발 → 방문 → 대피 동행 → 완료)
+class _AssignCard extends StatelessWidget {
+  const _AssignCard(
+      {required this.t,
+      required this.no,
+      required this.closed,
+      required this.supportsWork,
+      required this.onAssign,
+      required this.onWork,
+      required this.onTap});
+  final Map<String, dynamic> t;
+  final int? no;
+  final bool closed, supportsWork;
+  final VoidCallback onAssign, onTap;
+  final ValueChanged<WorkStatus> onWork;
+  @override
+  Widget build(BuildContext c) {
+    final w = workStatusOf(t);
+    final mine = (t['assigned_to'] as Map?)?['is_me'] == true;
+    final status = t['status'] as String?;
+    return Material(
+      color: GK.bg,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(GK.radiusInner)),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text.rich(
+                    TextSpan(children: [
+                      if (no != null) TextSpan(text: '$no번 ', style: const TextStyle(color: GK.muted, fontWeight: FontWeight.w800)),
+                      TextSpan(text: '${t['label']}', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+                    ]),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (t['address'] != null)
+                    Text('${t['address']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(c).textTheme.bodySmall),
+                  Text('${assigneeText(t)} · 주민 응답 ${statusKo[status] ?? status}',
+                      maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                ]),
+              ),
+              const SizedBox(width: 8),
+              _WorkPill(w),
+            ]),
+            const SizedBox(height: 10),
+            _WorkProgress(w),
+            if (!closed)
+              Wrap(spacing: 6, runSpacing: 0, children: [
+                TextButton.icon(
+                    onPressed: onAssign,
+                    icon: Icon(mine ? Icons.person_remove_alt_1_outlined : Icons.person_add_alt_1_outlined),
+                    label: Text(mine ? '맡기 취소' : '내가 맡기')),
+                if (supportsWork && t['assigned_to'] != null)
+                  PopupMenuButton<WorkStatus>(
+                    tooltip: '업무 단계 바꾸기',
+                    onSelected: onWork,
+                    itemBuilder: (_) => [
+                      for (final s in const [WorkStatus.enRoute, WorkStatus.visiting, WorkStatus.escorting, WorkStatus.done])
+                        PopupMenuItem(
+                            value: s,
+                            child: Row(children: [
+                              Icon(workIcon[s], color: workColor[s]),
+                              const SizedBox(width: 8),
+                              Text(workKo[s]!),
+                              if (s == w) const Text('  (지금)'),
+                            ])),
+                    ],
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.swap_horiz_rounded, color: GK.navy, size: 20),
+                        SizedBox(width: 4),
+                        Text('업무 단계 바꾸기', style: TextStyle(color: GK.navy, fontWeight: FontWeight.w700)),
+                      ]),
+                    ),
+                  ),
+              ]),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// 업무 상태 알약 (아이콘 + 글자)
+class _WorkPill extends StatelessWidget {
+  const _WorkPill(this.w);
+  final WorkStatus w;
+  @override
+  Widget build(BuildContext c) {
+    final unassigned = w == WorkStatus.unassigned;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+          color: unassigned ? GK.red : Colors.white,
+          borderRadius: BorderRadius.circular(999),
+          border: unassigned ? null : Border.all(color: workColor[w]!, width: 1.5)),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(workIcon[w], size: 16, color: unassigned ? Colors.white : workColor[w]),
+        const SizedBox(width: 4),
+        Text(w == WorkStatus.assigned ? '배정됨' : workKo[w]!,
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: unassigned ? Colors.white : workColor[w])),
+      ]),
+    );
+  }
+}
+
+/// 진행 단계 막대: 지난 칸·지금 칸은 남색, 지금 칸 글자는 굵게 + '(지금)'. 모르면 회색과 안내
+class _WorkProgress extends StatelessWidget {
+  const _WorkProgress(this.w);
+  final WorkStatus w;
+  @override
+  Widget build(BuildContext c) {
+    final step = workStep(w);
+    final note = switch (w) {
+      WorkStatus.unassigned => '담당이 정해지면 시작',
+      WorkStatus.assigned => '단계 정보 없음 (서버 연결 필요)',
+      _ => null,
+    };
+    return Semantics(
+      label: step < 0 ? '진행 단계: ${note ?? '없음'}' : '진행 단계: ${workSteps[step]} (${step + 1}/4)',
+      excludeSemantics: true,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          for (var i = 0; i < workSteps.length; i++) ...[
+            if (i > 0) const SizedBox(width: 4),
+            Expanded(
+              child: Column(children: [
+                Container(
+                  height: 6,
+                  decoration: BoxDecoration(
+                      color: i <= step ? (step == 3 ? GK.green : GK.navy) : GK.line, borderRadius: BorderRadius.circular(3)),
+                ),
+                const SizedBox(height: 4),
+                Text(i == step ? '${workSteps[i]}(지금)' : workSteps[i],
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: i == step ? FontWeight.w800 : FontWeight.w500,
+                        color: i == step ? GK.ink : (i < step ? GK.muted : GK.grey))),
+              ]),
+            ),
+          ],
+        ]),
+        if (note != null) Text(note, style: const TextStyle(fontSize: 12, color: GK.muted)),
+      ]),
+    );
+  }
 }
 
 /// 전체 / 장애인 / 독거노인 필터 (개수 포함)
@@ -969,9 +1710,12 @@ class _MapLegend extends StatelessWidget {
     Widget item(Widget mark, String label) => Row(mainAxisSize: MainAxisSize.min, children: [mark, const SizedBox(width: 4), Text(label)]);
     Widget icon(VulnerableKind k) => CircleAvatar(radius: 10, backgroundColor: kindColor[k], child: Icon(personIcon(k), size: 14, color: Colors.white));
     return Wrap(spacing: 14, runSpacing: 4, children: [
-      if (withTargets)
-        item(CircleAvatar(radius: 10, backgroundColor: statusColor('need_help'), child: const Icon(Icons.person_rounded, size: 14, color: Colors.white)),
-            '대피 대상 (숫자 = 우선순위, 색 = 상태)'),
+      if (withTargets) ...[
+        item(const _NoCircle(1, 'need_help', size: 20), '우선 확인 번호 (목록과 같음, 색 = 응답 상태)'),
+        item(Container(width: 18, height: 12, decoration: BoxDecoration(border: Border.all(color: Colors.red.shade700, width: 2))),
+            '빨간 테두리 = 대피 경보 지역'),
+      ],
+      item(Icon(Icons.health_and_safety, color: Colors.teal.shade800, size: 20), '대피소'),
       item(icon(VulnerableKind.disabled), '장애인 가구'),
       item(icon(VulnerableKind.elderlyAlone), '독거노인 가구'),
       item(icon(VulnerableKind.other), '기타 취약 가구'),
@@ -979,42 +1723,11 @@ class _MapLegend extends StatelessWidget {
   }
 }
 
-class _IncidentHeader extends StatelessWidget {
-  const _IncidentHeader({required this.incident});
-  final Map<String, dynamic> incident;
-  @override
-  Widget build(BuildContext c) {
-    final s = Map<String, dynamic>.from(incident['summary'] as Map? ?? const {});
-    Widget chip(String label, Object? n, Color color) => Chip(
-        avatar: CircleAvatar(backgroundColor: color, radius: 6), label: Text('$label ${n ?? 0}'), visualDensity: VisualDensity.compact);
-    return Card(
-        child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                Icon(Icons.campaign, color: levelColor(incident['level'] as String?)),
-                const SizedBox(width: 6),
-                Expanded(child: Text('${incident['title']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
-                Text('${hhmm(incident['started_at'])} 시작', style: Theme.of(c).textTheme.bodySmall),
-              ]),
-              const SizedBox(height: 6),
-              Wrap(spacing: 6, runSpacing: 4, children: [
-                chip('대상', s['total'], Colors.blueGrey),
-                chip('도움 필요', s['need_help'], statusColor('need_help')),
-                chip('미응답', s['no_response'], statusColor('no_response')),
-                chip('대피 중', s['evacuating'], statusColor('evacuating')),
-                chip('대피 완료', s['evacuated'], statusColor('evacuated')),
-                chip('방문함', s['visited'], Colors.indigo),
-              ]),
-            ])));
-  }
-}
-
 class _MapPoint {
   const _MapPoint(this.id, this.at, this.rank, this.status, this.label, {this.kind, this.detail});
   final String id;
   final LatLng at;
-  final int? rank;              // 대피 대상이면 우선순위
+  final int? rank;              // 우선 확인 대상이면 화면 번호 (목록 번호와 같다)
   final String? status;         // 대피 대상이면 대피 상태
   final String label;
   final VulnerableKind? kind;   // 등록 가구(대피 대상 아님)면 장애인·독거노인·기타
@@ -1024,27 +1737,27 @@ class _MapPoint {
 /// 방문 경로 한 번에 고를 수 있는 곳 (route 서버 visits.MAX_STOPS와 같게)
 const maxVisitStops = 10;
 
-/// 대시보드 지도 위 사람 아이콘 (2026-10-09): 대피 대상은 사람 + 우선순위 번호(색 = 대피 상태),
-/// 등록 취약 가구는 장애인·독거노인·기타 사람 아이콘. 누르면 그 대상 카드가 명단 맨 위로
+/// 대시보드 지도 위 사람 아이콘 (2026-10-09): 대피 대상은 사람 + 우선 확인 번호(색 = 대피 상태),
+/// 등록 취약 가구는 장애인·독거노인·기타 사람 아이콘. 누르면 그 대상 정보가 지도 아래에
 List<Marker> _peopleMarkers(List<_MapPoint> points, String? selected, ValueChanged<String> onTap) => [
-      for (final p in points)
+      for (final p in [...points.where((p) => p.id != selected), ...points.where((p) => p.id == selected)])
         Marker(
           point: p.at,
-          width: p.id == selected ? 50 : 42,
-          height: p.id == selected ? 50 : 42,
+          width: p.id == selected ? 54 : 42,
+          height: p.id == selected ? 54 : 42,
           child: GestureDetector(
             onTap: () => onTap(p.id),
             child: Tooltip(
               message: p.kind != null
                   ? '${p.label} · ${kindKo[p.kind]}${p.detail?.isNotEmpty ?? false ? ' (${p.detail})' : ''}'
-                  : '${p.rank != null ? '${p.rank}순위 ' : ''}${p.label} · ${statusKo[p.status] ?? '대피 대상'}',
+                  : '${p.rank != null ? '${p.rank}번 ' : ''}${p.label} · ${statusKo[p.status] ?? '대피 대상'}',
               child: Stack(clipBehavior: Clip.none, children: [
                 Positioned.fill(
                   child: Container(
                     decoration: BoxDecoration(
                         color: p.kind != null ? kindColor[p.kind] : statusColor(p.status),
                         shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: p.id == selected ? 3 : 2),
+                        border: Border.all(color: p.id == selected ? GK.navy : Colors.white, width: p.id == selected ? 4 : 2),
                         boxShadow: const [BoxShadow(blurRadius: 4, color: Colors.black38)]),
                     child: Icon(personIcon(p.kind), color: Colors.white, size: p.id == selected ? 30 : 26),
                   ),
@@ -1075,68 +1788,6 @@ IconData personIcon(VulnerableKind? kind) => switch (kind) {
       VulnerableKind.elderlyAlone => Icons.elderly_rounded,
       _ => Icons.person_rounded,
     };
-
-/// 우선순위 근거: 서버 priority_reasons(B13 — 상태·장애·거리 또는 기다린 시간)를 그대로 잇는다. 없으면(예전 서버) 상태만
-String priorityReason(Map<String, dynamic> t) {
-  final reasons = [for (final r in t['priority_reasons'] as List? ?? const []) if (r is Map) '${r['label'] ?? r['factor']}'];
-  if (reasons.isNotEmpty) return reasons.join(' · ');
-  return '${statusKo[t['status']] ?? t['status']}';
-}
-
-class _TargetCard extends StatelessWidget {
-  const _TargetCard({required this.t, required this.selected, required this.closed, required this.inRoute, required this.onVisit,
-      required this.onRoute, required this.onSelect});
-  final Map<String, dynamic> t;
-  final bool selected, closed;
-  /// 내 방문 경로에 넣었는지 (2026-10-09: '내가 맡기' 대신 '경로에 추가')
-  final bool inRoute;
-  final VoidCallback onVisit, onRoute, onSelect;
-
-  @override
-  Widget build(BuildContext c) {
-    final status = t['status'] as String?;
-    final visit = t['last_visit'] as Map?;
-    final mins = t['minutes_since_alert'];
-    return Card(
-        shape: selected ? RoundedRectangleBorder(side: BorderSide(color: Theme.of(c).colorScheme.primary, width: 2), borderRadius: BorderRadius.circular(12)) : null,
-        child: InkWell(
-            onTap: onSelect,
-            child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 8, 4),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Row(children: [
-                    CircleAvatar(radius: 15, backgroundColor: statusColor(status),
-                        child: Text('${t['priority_rank'] ?? '-'}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
-                    const SizedBox(width: 10),
-                    Expanded(child: Text('${t['label']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
-                    Text(statusKo[status] ?? '$status', style: TextStyle(color: statusColor(status), fontWeight: FontWeight.bold)),
-                  ]),
-                  const SizedBox(height: 4),
-                  Text([
-                    if (t['address'] != null) '${t['address']}',
-                    if ((t['needs'] as List?)?.isNotEmpty ?? false) needsText(t['needs']),
-                    if (mins is num) '경고 후 $mins분',
-                    if (t['escalated'] == true) '재알림 ${t['reminder_count'] ?? ''}회 무응답',
-                  ].join(' · ')),
-                  Text('순위 근거: ${priorityReason(t)}', style: Theme.of(c).textTheme.bodySmall),
-                  if (visit != null)
-                    Text('마지막 방문 ${hhmm(visit['visited_at'])} · ${visitKo[visit['result']] ?? visit['result']}'
-                        '${(visit['responder'] as Map?)?['nickname'] != null ? ' (${(visit['responder'] as Map)['nickname']})' : ''}',
-                        style: Theme.of(c).textTheme.bodySmall),
-                  if (inRoute)
-                    Text('내 방문 경로에 넣음', style: Theme.of(c).textTheme.bodySmall?.copyWith(color: GK.navy, fontWeight: FontWeight.w700)),
-                  Wrap(spacing: 4, children: [
-                    if (!closed) FilledButton.tonalIcon(onPressed: onVisit, icon: const Icon(Icons.assignment_turned_in_outlined), label: const Text('방문 결과')),
-                    if (!closed)
-                      inRoute
-                          ? OutlinedButton.icon(onPressed: onRoute, icon: const Icon(Icons.remove_road_rounded), label: const Text('경로에서 빼기'))
-                          : TextButton.icon(onPressed: onRoute, icon: const Icon(Icons.add_road_rounded), label: const Text('경로에 추가')),
-                    if (t['phone'] != null)
-                      IconButton(tooltip: '전화', icon: const Icon(Icons.phone), onPressed: () => launchUrl(Uri.parse('tel:${t['phone']}'))),
-                  ]),
-                ]))));
-  }
-}
 
 class _HouseholdTile extends StatelessWidget {
   const _HouseholdTile({required this.h, required this.selected});

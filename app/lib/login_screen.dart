@@ -31,54 +31,65 @@ class _AccountCardState extends ConsumerState<AccountCard> {
     }
   }
 
-  /// 계정 카드 = web-prototype MailCard (2026-10-08)
+  /// 계정 카드 = web-prototype MailCard (2026-10-08) → 2026-10-09 간결하게: 작은 계정 아이콘 · 이메일 · 로그아웃.
+  /// 긴 이메일은 두 줄까지 줄바꿈 후 말줄임, 좁으면 버튼을 아래 줄로 내려 겹치지 않게
   @override
   Widget build(BuildContext c) {
     final auth = ref.watch(authService);
+    Widget head(IconData icon, String title, String sub) => Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Padding(padding: const EdgeInsets.only(top: 1), child: Icon(icon, size: 24, color: GK.navy)),
+          const SizedBox(width: 12),
+          Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Tooltip(
+              message: title,
+              child: Text(title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: GK.ink, height: 1.35)),
+            ),
+            const SizedBox(height: 2),
+            Text(sub, style: const TextStyle(fontSize: 14, color: GK.muted, height: 1.35)),
+          ])),
+        ]);
     if (!AuthService.ready) {
-      return const GkCard(
-          child: Row(children: [
-        GkCircleIcon(Icons.person_rounded, size: 52),
-        SizedBox(width: 16),
-        Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('계정', style: TextStyle(fontSize: 21, fontWeight: FontWeight.w700)),
-          Text('예시 데이터 모드에서는 로그인을 쓰지 않습니다.', style: TextStyle(fontSize: 16, color: GK.muted)),
-        ])),
-      ]));
+      return GkCard(
+          padding: gkCompactPad,
+          child: head(Icons.account_circle_outlined, '로그인 계정', '예시 데이터 모드에서는 로그인을 쓰지 않아요.'));
     }
     final a = ref.watch(accountProvider).valueOrNull ?? auth.account;
     final signedIn = a != null && !a.isAnonymous;
+    final info = head(
+        Icons.account_circle_outlined,
+        signedIn ? (a.email ?? '로그인됨') : '로그인하지 않음',
+        signedIn ? '${a.providerLabel} 계정으로 로그인됨' : '로그인하면 내 정보·맞춤 경고를 다른 기기에서도 써요');
+    final button = signedIn
+        ? OutlinedButton(
+            style: OutlinedButton.styleFrom(minimumSize: const Size(88, 44)),
+            onPressed: busy ? null : () => _do(auth.signOut, '로그아웃했습니다.'),
+            child: const Text('로그아웃'))
+        : FilledButton(
+            style: FilledButton.styleFrom(minimumSize: const Size(88, 44)),
+            onPressed: busy ? null : () => c.push('/login'),
+            child: const Text('로그인'));
     return GkCard(
+        padding: gkCompactPad,
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Row(children: [
-        GkCircleIcon(signedIn ? Icons.verified_user_rounded : Icons.mail_rounded, size: 52),
-        const SizedBox(width: 16),
-        Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(signedIn ? (a.email ?? '로그인됨') : '로그인하지 않음',
-              style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w700)),
-          Text(
-              signedIn
-                  ? '${a.providerLabel} 계정으로 로그인됨 · 다른 기기에서도 내 정보 사용'
-                  : '로그인하면 프로필 저장, AI 맞춤 안내, 내 위치 맞춤 경고·푸시, 대피 응답을 쓸 수 있어요',
-              style: const TextStyle(fontSize: 16, color: GK.muted)),
-        ])),
-        const SizedBox(width: 12),
-        if (signedIn)
-          OutlinedButton(
-              onPressed: busy ? null : () => _do(auth.signOut, '로그아웃했습니다.'), child: const Text('로그아웃'))
-        else
-          FilledButton(onPressed: busy ? null : () => c.push('/login'), child: const Text('로그인')),
-      ]),
-      if (busy) const Padding(padding: EdgeInsets.only(top: 12), child: LinearProgressIndicator()),
+      LayoutBuilder(
+          builder: (_, box) => box.maxWidth < 340
+              ? Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  info,
+                  const SizedBox(height: 10),
+                  Align(alignment: Alignment.centerRight, child: button),
+                ])
+              : Row(children: [Expanded(child: info), const SizedBox(width: 12), button])),
+      if (busy) const Padding(padding: EdgeInsets.only(top: 10), child: LinearProgressIndicator()),
       if (!signedIn) ...[
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
         Align(
           alignment: Alignment.centerLeft,
           child: GkPill('Google로 계속하기',
               icon: Icons.g_mobiledata_rounded,
-              big: true,
               onTap: busy ? null : () => _do(auth.signInWithGoogle, 'Google 계정으로 로그인했습니다.')),
         ),
       ],
