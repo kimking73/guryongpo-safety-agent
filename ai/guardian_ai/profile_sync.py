@@ -59,9 +59,8 @@ def to_patch(facts, today: datetime | None = None) -> dict[str, Any]:
                 age = int(float(v))
                 if 0 < age < 120:
                     out["birth_year"] = year - age
-            elif f.field == "walking_impaired":
-                out["walking_ability"] = "limited" if _bool(v) else "normal"
-            elif f.field in ("has_dependents", "vision_impaired", "hearing_impaired"):
+            # 보행 능력·보호가 필요한 동반자는 프로필에 쓰지 않는다 (2026-10-09 사용자 결정)
+            elif f.field in ("vision_impaired", "hearing_impaired"):
                 out[f.field] = _bool(v)
             elif f.field == "mobility" and v in MOBILITY:
                 out["mobility"] = MOBILITY[v]
@@ -73,7 +72,7 @@ def to_patch(facts, today: datetime | None = None) -> dict[str, Any]:
     return out
 
 
-LABELS = {"age": "나이", "walking_impaired": "보행", "has_dependents": "보호가 필요한 동반자", "mobility": "이동 수단",
+LABELS = {"age": "나이", "mobility": "이동 수단",
           "occupation": "직업", "vision_impaired": "시각", "hearing_impaired": "청각", "home_address": "집 주소",
           "frequent_place": "자주 가는 곳"}
 MOBILITY_NAMES = {"walk": "도보", "car": "자동차", "wheelchair": "휠체어", "public_transport": "대중교통"}
@@ -84,10 +83,6 @@ def readable(field: str, value: str) -> str:
     v = str(value).strip()
     if field == "age":
         return f"{v}세"
-    if field == "walking_impaired":
-        return "보행 불편" if _bool(v) else "보행 가능"
-    if field == "has_dependents":
-        return "있음" if _bool(v) else "없음"
     if field in ("vision_impaired", "hearing_impaired"):
         return "지원 필요" if _bool(v) else "필요 없음"
     if field == "mobility":
@@ -96,8 +91,7 @@ def readable(field: str, value: str) -> str:
 
 
 # 프로필 칸 → 그 칸을 만든 사실 (수집 기록에 반영된 것만 남기려고)
-PATCH_SOURCE = {"birth_year": "age", "walking_ability": "walking_impaired", "has_dependents": "has_dependents",
-                "mobility": "mobility", "occupation": "occupation", "vision_impaired": "vision_impaired",
+PATCH_SOURCE = {"birth_year": "age", "mobility": "mobility", "occupation": "occupation", "vision_impaired": "vision_impaired",
                 "hearing_impaired": "hearing_impaired"}
 
 
@@ -176,10 +170,6 @@ def describe(profile) -> list[str]:
     lines = []
     if profile.age is not None:
         lines.append(f"나이: {profile.age}")
-    if profile.walking_impaired is not None:
-        lines.append(f"보행 불편: {profile.walking_impaired}")
-    if profile.has_dependents is not None:
-        lines.append(f"보호가 필요한 동반자: {profile.has_dependents}")
     if profile.mobility is not None:
         lines.append(f"이동수단: {profile.mobility.value}")
     if profile.occupation:

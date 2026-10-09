@@ -617,9 +617,8 @@ def get_user_profile(uid: str, fetch: Fetch | None = None, today: datetime | Non
         out["mobility"] = _MOBILITY_DB[r["mobility"]]
     # 아래 칸은 DB 기본값(normal·false)이 '입력 안 함'과 구별되지 않아, 해당할 때(true)만 기준으로 쓴다 —
     # false 를 기준으로 쓰면 앱이 보낸 true(예: 보호자 여부는 서버로 안 올라감)를 덮어쓴다 (2026-10-08)
-    if r.get("walking_ability") in ("limited", "unable"):
-        out["walking_impaired"] = True
-    for k in ("has_dependents", "vision_impaired", "hearing_impaired"):
+    # 보행 능력·보호가 필요한 동반자는 더 쓰지 않는다 (2026-10-09 사용자 결정) — 서버에 남은 예전 값은 읽지 않는다
+    for k in ("vision_impaired", "hearing_impaired"):
         if r.get(k):
             out["visual_impaired" if k == "vision_impaired" else k] = True
     jobs = [_JOB_NAMES.get(j.strip(), j.strip()) for j in (r.get("occupation") or "").split(",") if j.strip()]

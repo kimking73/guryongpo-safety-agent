@@ -14,14 +14,15 @@ from guardian_ai.service import ChatRequest, ChatService, _place_queries
 
 
 def fact(field, value):
-    return MemoryFact(field=field, value=value, quote=value)
+    # 추출기가 더 내지 않는 칸(보행·동반자)도 들어왔다고 치고 무시되는지 보려고 검사 없이 만든다
+    return MemoryFact.model_construct(field=field, value=value, quote=value)
 
 
 @pytest.mark.parametrize("field, value, expect", [
     ("age", "72", {"birth_year": 1954}),
-    ("walking_impaired", "true", {"walking_ability": "limited"}),
-    ("walking_impaired", "false", {"walking_ability": "normal"}),
-    ("has_dependents", "true", {"has_dependents": True}),
+    # 보행 능력·보호가 필요한 동반자는 프로필에 쓰지 않는다 (2026-10-09)
+    ("walking_impaired", "true", {}),
+    ("has_dependents", "true", {}),
     ("hearing_impaired", "true", {"hearing_impaired": True}),
     ("mobility", "public_transport", {"mobility": "public_transit"}),
     ("mobility", "helicopter", {}),
@@ -96,14 +97,15 @@ def test_get_user_profile_maps_db_rows():
                   {"place_type": "home", "label": None, "lat": 35.98, "lon": 129.55}]}
     fetch = lambda sql, params=None: rows["p" if "user_places" in sql else "u"]
     p = get_user_profile("uid", fetch=fetch, today=datetime(2026, 10, 8))["profile"]
-    assert p["age"] == 70 and p["mobility"] == "public_transport" and p["walking_impaired"] is True
+    assert p["age"] == 70 and p["mobility"] == "public_transport"
+    assert not {"walking_impaired", "has_dependents"} & p.keys()          # 서버에 남은 예전 보행 값은 읽지 않음
     assert p["occupation"] == "어업 종사자·뱃사람, 수산업" and p["hearing_impaired"] is True and "visual_impaired" not in p
     assert p["user_type"] == "resident" and p["home"]["label"] == "집" and p["frequent_places"][0]["label"] == "구룡포항"
     assert get_user_profile("x", fetch=lambda *a, **k: [])["available"] is False
     # DB 기본값(normal·false)은 '입력 안 함'일 수 있어 기준으로 쓰지 않는다 → 앱이 보낸 값이 남는다
-    rows["u"][0].update(walking_ability="normal", has_dependents=False, hearing_impaired=False)
+    rows["u"][0].update(hearing_impaired=False)
     p = get_user_profile("uid", fetch=fetch)["profile"]
-    assert not {"walking_impaired", "has_dependents", "hearing_impaired"} & p.keys()
+    assert "hearing_impaired" not in p
 
 
 def test_signed_in_owner_only(monkeypatch):
@@ -137,12 +139,12 @@ def test_record_failure_keeps_profile_update():
             return httpx.Response(503)
         return httpx.Response(200, json={"places": []})
     w = P.ProfileWriter(client=httpx.Client(base_url="http://api", transport=httpx.MockTransport(handle)))
-    done = w.apply("tok", [fact("walking_impaired", "true")])
-    assert done["profile"] == {"walking_ability": "limited"} and done["recorded"] == 0
+    done = w.apply("tok", [fact("hearing_impaired", "true")])
+    assert done["profile"] == {"hearing_impaired": True} and done["recorded"] == 0
 
 
 @pytest.mark.parametrize("field, value, shown", [
-    ("age", "72", "72세"), ("walking_impaired", "false", "보행 가능"), ("mobility", "wheelchair", "휠체어"),
+    ("age", "72", "72세"), ("mobility", "wheelchair", "휠체어"),
     ("hearing_impaired", "true", "지원 필요"), ("occupation", "어선 선장", "어선 선장")])
 def test_readable(field, value, shown):
     assert P.readable(field, value) == shown

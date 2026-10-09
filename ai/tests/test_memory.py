@@ -9,7 +9,7 @@ from guardian_ai.llm import MemoryFact, MemoryUpdate
 from guardian_ai.service import ChatRequest, ChatService
 from guardian_ai.state import Specialist, UserProfile
 
-KNEE = MemoryUpdate(facts=[MemoryFact(field="walking_impaired", value="true", quote="제가 무릎이 안 좋아요")])
+AGE = MemoryUpdate(facts=[MemoryFact(field="age", value="72", quote="저는 72살이에요")])
 
 
 class Spy:
@@ -32,15 +32,15 @@ class FakeWriter:
     def apply(self, token, facts, today=None):
         self.calls.append((token, [f.field for f in facts]))
         for f in facts:
-            if f.field == "walking_impaired":
-                self.profile["walking_impaired"] = f.value == "true"
+            if f.field == "age":
+                self.profile["age"] = int(f.value)
         return {"profile": dict(self.profile), "places": []}
 
     def source(self, uid):
         return {"available": True, "profile": dict(self.profile)}
 
 
-def service(extract=lambda q, a, known, summary="": KNEE, spy=None, **kw):
+def service(extract=lambda q, a, known, summary="": AGE, spy=None, **kw):
     svc = ChatService(classifier=spy or G.keyword_classify, extractor=extract, **kw)
     svc.writer = FakeWriter()
     svc.user_source = svc.writer.source
@@ -55,24 +55,24 @@ def ask(svc, question, user="u1", signed_in=True, **kw):
 def test_what_user_said_goes_to_server_profile_and_next_question_reads_it():
     spy = Spy()
     svc = service(spy=spy)
-    ask(svc, "제가 무릎이 안 좋아요. 대피소 어디예요?")
-    assert svc.writer.calls == [("tok-u1", ["walking_impaired"])]          # 본인 토큰으로 서버 프로필 수정
+    ask(svc, "저는 72살이에요. 대피소 어디예요?")
+    assert svc.writer.calls == [("tok-u1", ["age"])]                        # 본인 토큰으로 서버 프로필 수정
     ask(svc, "비 와요?")                                                    # 새 대화도 서버 프로필에서 읽음
-    assert spy.states[-1]["user"].walking_impaired is True
+    assert spy.states[-1]["user"].age == 72
     assert spy.states[-1]["user_memory"] == []                              # 예전 장기 기억 문장은 쓰지 않음
 
 
 def test_not_signed_in_neither_reads_nor_writes_profile():
     spy = Spy()
     svc = service(spy=spy)
-    svc.writer.profile["walking_impaired"] = True
-    ask(svc, "무릎이 안 좋아요", signed_in=False)
-    assert svc.writer.calls == [] and not spy.states[-1]["user"].walking_impaired
+    svc.writer.profile["age"] = 72
+    ask(svc, "저는 72살이에요", signed_in=False)
+    assert svc.writer.calls == [] and spy.states[-1]["user"].age is None
 
 
 def test_remember_off_does_not_write():
     svc = service()
-    ask(svc, "무릎이 안 좋아요", remember=False)
+    ask(svc, "저는 72살이에요", remember=False)
     assert svc.writer.calls == []
 
 
@@ -85,18 +85,18 @@ def test_nothing_said_about_self_writes_nothing():
 def test_server_profile_wins_over_app_values_and_app_fills_gaps():
     spy = Spy()
     svc = service(spy=spy)
-    svc.writer.profile.update(walking_impaired=False)
-    ask(svc, "대피소", profile=UserProfile(user_id="u1", walking_impaired=True, age=70))
+    svc.writer.profile.update(age=80)
+    ask(svc, "대피소", profile=UserProfile(user_id="u1", age=70, occupation="자영업자"))
     u = spy.states[-1]["user"]
-    assert u.walking_impaired is False and u.age == 70
+    assert u.age == 80 and u.occupation == "자영업자"
 
 
 def test_extractor_is_told_the_current_profile():
     seen = []
     svc = service(extract=lambda q, a, known, summary="": seen.append(known) or MemoryUpdate(facts=[]))
-    svc.writer.profile.update(walking_impaired=True)
+    svc.writer.profile.update(age=72)
     ask(svc, "대피소 어디예요?")
-    assert seen == [["보행 불편: True"]]
+    assert seen == [["나이: 72"]]
 
 
 def test_other_users_conversation_id_starts_a_new_conversation():
@@ -119,9 +119,9 @@ def test_same_conversation_still_continues():
 def test_close_waits_for_pending_profile_writes():
     def slow(q, a, known, summary=""):
         time.sleep(0.2)
-        return KNEE
+        return AGE
     svc = service(extract=slow, executor=ThreadPoolExecutor(1))
-    ask(svc, "무릎이 안 좋아요")
+    ask(svc, "저는 72살이에요")
     svc.close()                                                      # 종료 = 반영이 끝날 때까지 대기
     assert svc.writer.calls
 
@@ -130,7 +130,7 @@ def test_conversation_expires_after_an_hour_of_silence_but_profile_stays():
     clock = {"t": datetime(2026, 10, 2, 9, 0, tzinfo=timezone.utc)}
     spy = Spy()
     svc = service(spy=spy, now=lambda: clock["t"])
-    first = ask(svc, "무릎이 안 좋아요. 대피소 어디예요?")
+    first = ask(svc, "저는 72살이에요. 대피소 어디예요?")
 
     clock["t"] += timedelta(minutes=30)                              # 1시간 안 → 같은 대화
     assert ask(svc, "거기까지 멀어요?", conversation_id=first.conversation_id).conversation_id == first.conversation_id
@@ -139,7 +139,7 @@ def test_conversation_expires_after_an_hour_of_silence_but_profile_stays():
     later = ask(svc, "거기 지금 가도 돼요?", conversation_id=first.conversation_id)
     assert later.conversation_id != first.conversation_id
     assert spy.states[-1]["history"] == []                           # 옛 대화의 "거기"는 모름
-    assert spy.states[-1]["user"].walking_impaired is True           # 프로필은 이어짐
+    assert spy.states[-1]["user"].age == 72                          # 프로필은 이어짐
     old = svc.app.get_state({"configurable": {"thread_id": first.conversation_id}}).values
     assert not old                                                   # 만료된 대화는 메모리에서 지움
 
