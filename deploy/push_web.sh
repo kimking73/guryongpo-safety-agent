@@ -24,7 +24,8 @@ if [ -f "$root/deploy/web-defines.json" ]; then
   defines+=(--dart-define-from-file="$root/deploy/web-defines.json")
 fi
 
-(cd "$work/app" && flutter pub get >/dev/null && flutter build web --release "${defines[@]}")
+# --no-tree-shake-icons: Font Awesome(font_awesome_flutter 11, 첫 화면·앱 화면) 아이콘은 트리 셰이킹하면 네모로 보인다
+(cd "$work/app" && flutter pub get >/dev/null && flutter build web --release --no-tree-shake-icons "${defines[@]}")
 
 # 서비스 워커 끄기 (2026-10-08, app/web/flutter_bootstrap.js 가 등록하지 않는다). 이미 예전 서비스 워커가 깔린 브라우저는
 # 다음 접속 때 이 파일로 업데이트되어 캐시를 비우고 스스로 해제한 뒤 한 번 새로고침한다 → 그 뒤로는 항상 새 버전
