@@ -220,6 +220,26 @@ def _route_evidence(state: GuardianState, results: list[SpecialistResult], fetch
     return L.route_info(data), [e for e in data.evidence if e.key != "기준 위치"]
 
 
+def passing_zones_note(route: dict[str, Any] | None) -> str:
+    """대피 경로가 다른 길이 없어 위험 영역을 지나면 그 사실 한 문장, 아니면 빈 문자열."""
+    n = len((route or {}).get("still_inside") or [])
+    return f"가는 길에 다른 길이 없어 위험 영역 {n}곳을 지납니다." if n else ""
+
+
+def with_passing_zones(steps: list[str], route: dict[str, Any] | None) -> list[str]:
+    """대피 경로가 위험 영역을 지나는데 '지금 할 일'이 알리지 않으면 경로 안내 문장 뒤에 코드가 붙인다.
+
+    위치·경로 agent 없이 행동 권고가 직접 경로를 구한 답("지금 비 얼마나 와?", 위험 지역 안)에서 이 사실이 어디에도 없어
+    내용 검사가 '경로 위험 누락'으로 세 번 막고 대체 답이 나갔다 (2026-10-10 VM). 작성 AI에 맡기지 않는다.
+    """
+    note = passing_zones_note(route)
+    if not note or not steps or any("위험 영역" in s for s in steps):
+        return steps
+    name = ((route or {}).get("destination") or {}).get("name") or ""
+    at = next((i for i, s in enumerate(steps) if name and name in s), 0 if "119" not in steps[0] else min(1, len(steps) - 1))
+    return [f"{s} {note}" if i == at else s for i, s in enumerate(steps)]
+
+
 def situation_text(state: GuardianState, decision: Decision, main: SpecialistResult | None,
                    route: dict[str, Any] | None) -> str:
     user = state.get("user")
@@ -242,6 +262,8 @@ def situation_text(state: GuardianState, decision: Decision, main: SpecialistRes
     if route:
         dest = route.get("destination") or {}
         lines.append(f"- 대피소 경로: {dest.get('name')}까지 {route.get('distance_m')}m, 도보 약 {-(-route.get('duration_s', 0) // 60)}분")
+        if passing_zones_note(route):
+            lines.append(f"- 경로 주의: {passing_zones_note(route)}")
     for m in state.get("user_memory") or []:
         lines.append(f"- 사용자 기억: {m}")
     return "\n".join(lines)
@@ -323,12 +345,15 @@ def make_action_advisor(writer: ActionWriter | None = None, fetch: Fetch | None 
         evidence = ([Evidence(source="action_guides", key=f"행동요령: {g['title']}", value=g["content"]) for g in guides]
                     + decision.notes + route_ev + forecast_ev)
 
+        # 위치·경로 agent가 낸 경로면 '위험 영역을 지남'은 그 agent 문단이 이미 알린다 → 여기서 직접 구한 경로일 때만 할 일에 붙인다
+        own_route = route if route_ev else None
+        shown_route = {**route, "still_inside": []} if route else None
         steps: list[str] = []
         how = "-"
         if guides or decision.emergency or route or decision.notes:
             if writer is not None:
                 try:
-                    steps = writer(state.get("question") or "", situation_text(state, decision, main, route),
+                    steps = writer(state.get("question") or "", situation_text(state, decision, main, own_route or shown_route),
                                    guide_lines(guides) or "(해당 원문 없음)", state.get("manager_feedback") or "")
                     if decision.emergency and (not steps or "119" not in steps[0]):
                         steps = [EMERGENCY_STEP, *steps]               # 이동 불가 → 구조 요청이 맨 앞 (규칙)
@@ -338,6 +363,7 @@ def make_action_advisor(writer: ActionWriter | None = None, fetch: Fetch | None 
                     steps = []
             if not steps:
                 steps, how = template_steps(decision, guides, route), "원문"
+            steps = with_passing_zones(steps, own_route)
         path = " > ".join(decision.path)
         logger.info("행동 권고 [%s] 분기=%s 재난=%s 원문=%s 경로=%s 질문=%s", how, path,
                     main.agent.value if main else None, [g["id"] for g in guides], bool(route), bool(decision.question))

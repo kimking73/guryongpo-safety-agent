@@ -378,6 +378,17 @@ def test_unknown_wants_action_keeps_old_rule():
     assert _advise(None, None, Phase.NONE, "태풍 대비 어떻게 해?")["action_plan"].decision_path == ["평시(대비)", "체크리스트"]
 
 
+def test_route_through_hazard_zone_is_always_stated_in_steps():
+    """대피 경로가 위험 영역을 지나면 '지금 할 일'이 꼭 알린다 — 작성 AI가 빼도 코드가 붙인다 (2026-10-10 VM 대체 답)."""
+    route = {"destination": {"name": "구룡포 초등학교 앞"}, "distance_m": 1077, "duration_s": 780, "still_inside": ["flood_1"]}
+    steps = A.with_passing_zones(["구룡포 초등학교 앞까지 1077m, 도보 약 13분 경로로 대피하세요.", "외출을 삼가세요."], route)
+    assert steps[0].endswith("가는 길에 다른 길이 없어 위험 영역 1곳을 지납니다.") and steps[1] == "외출을 삼가세요."
+    assert A.with_passing_zones(steps, route) == steps                                   # 이미 알렸으면 그대로
+    assert A.with_passing_zones(["대피하세요."], {**route, "still_inside": []}) == ["대피하세요."]
+    emergency = A.with_passing_zones([A.EMERGENCY_STEP, "안전한 곳으로 이동하세요."], route)  # 119 문장에는 붙이지 않는다
+    assert emergency[0] == A.EMERGENCY_STEP and "위험 영역 1곳" in emergency[1]
+
+
 def test_reply_to_follow_up_reuses_previous_agents():
     """'스스로 이동하실 수 있나요?' → '네, 걸어갈 수 있어요' — 답장도 같은 판단 로직으로 (직전 agent 재사용)."""
     from guardian_ai.state import ActionPlan

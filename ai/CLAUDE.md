@@ -4,7 +4,7 @@
 1. Read `.claude/docs/timeline.md` → status table, "다음 세션 시작점", "이월 항목", work log.
 2. From `코드/`: `git pull` (teammates push to `main`), then `docker compose up -d` and `docker compose ps`
    (db, api, ai all healthy). If `.env` changed since the ai container started: `docker compose up -d --force-recreate ai`.
-3. Baseline tests: `.venv/bin/python -m pytest -q` → **213 passed** (2026-10-10). `-m "db and not live"` needs local db + `AI_DB_*`
+3. Baseline tests: `.venv/bin/python -m pytest -q` → **214 passed** (2026-10-10). `-m "db and not live"` needs local db + `AI_DB_*`
    in `.env` (plain `-m db` also runs paid live tests). `-m live` calls real OpenAI (routing, B3 injection, extractor; a few 원).
    If `docker compose ps` hangs, restart the OrbStack app (happened 2026-10-08); VM checks still work.
    Other lanes' baselines: server 220 passed·8 skipped, route 76, app 101 with 7 known failures (see timeline "다음 세션 시작점";
