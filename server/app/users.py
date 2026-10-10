@@ -116,11 +116,14 @@ SELECT u.id, u.firebase_uid, u.is_anonymous, u.role::text AS role, u.created_at,
 FROM users u LEFT JOIN user_profiles p ON p.user_id = u.id LEFT JOIN care.user_health uh ON uh.user_id = u.id
 WHERE u.id = %(uid)s
 """
-# 정적 위험지역(지금은 산사태: 위험지도 1·2등급 100m 범위·지정 취약지역) 안이면 그 재난
+# 정적 위험지역 안이면 그 재난 — 산사태: 지정 취약지역 지점 100m 안 (판정 범위와 같음), 그 밖: 폴리곤 안
 PLACES_SQL = """
 SELECT pl.id, pl.place_type::text AS place_type, pl.label, pl.address, pl.notify,
        ST_Y(pl.geom) AS lat, ST_X(pl.geom) AS lng,
-       ARRAY(SELECT DISTINCT hz.hazard::text FROM hazard_zones hz WHERE ST_Intersects(hz.geom, pl.geom)) AS in_hazard_zones
+       ARRAY(SELECT DISTINCT hz.hazard::text FROM hazard_zones hz
+             WHERE CASE WHEN hz.hazard = 'landslide'
+                        THEN ST_DWithin(pl.geom::geography, ST_PointOnSurface(hz.geom)::geography, 100)
+                        ELSE ST_Intersects(hz.geom, pl.geom) END) AS in_hazard_zones
 FROM user_places pl WHERE pl.user_id = %(uid)s {extra}
 ORDER BY pl.created_at, pl.id
 """

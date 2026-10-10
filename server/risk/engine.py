@@ -175,17 +175,23 @@ ACTIVE_SQL = """
 SELECT id, hazard::text AS hazard, level::text AS level, rule_id, basis->>'key' AS key,
        (basis->>'station_id')::int AS station_id, computed_at < now() - make_interval(mins => %(keep_min)s) AS expired
 FROM risk_assessments WHERE valid_to IS NULL AND basis->>'engine' = %(engine)s
+ORDER BY id
 """
 KEEP_UNSEEN_MIN = 180     # 수집이 끊긴 관측소의 위험 영역은 바로 지우지 않고 3시간 유지 (끊겼다고 '안전'으로 보이지 않게)
 
 
-def sync(results: list[Result], seen_station_ids: set[int]) -> dict[str, int]:
+def sync(results: list[Result], seen_station_ids: set[int], engine: str = ENGINE) -> dict[str, int]:
     """판정 결과를 risk_assessments 에 반영. 반환: kept / opened / closed / held 개수
-    seen_station_ids: 이번에 최신값이 있었던 관측소 — 여기 없는 관측소의 기존 영역은 KEEP_UNSEEN_MIN 동안 유지"""
+    seen_station_ids: 이번에 최신값이 있었던 관측소 — 여기 없는 관측소의 기존 영역은 KEEP_UNSEEN_MIN 동안 유지
+    engine: 비교할 기존 판정의 basis.engine (hazards 는 hazards_v1 — 빠지면 기존 영역을 못 찾아 매번 새로 열고 닫지 못함)"""
     stats = {"kept": 0, "opened": 0, "closed": 0, "held": 0}
     with db.connection() as conn:
-        active = {r["key"]: r for r in conn.execute(ACTIVE_SQL, {"engine": ENGINE, "keep_min": KEEP_UNSEEN_MIN}).fetchall()}
+        active: dict = {}
         to_close: list[int] = []
+        for r in conn.execute(ACTIVE_SQL, {"engine": engine, "keep_min": KEEP_UNSEEN_MIN}).fetchall():
+            if r["key"] in active:                               # 같은 대상이 여러 행이면 최신 1개만 남김 (예전 중복 정리)
+                to_close.append(active[r["key"]]["id"])
+            active[r["key"]] = r
         for res in results:
             row = {"hazard": res.hazard, "level": res.level, "label": res.label, "rule_id": res.rule_id,
                    "lng": res.lng, "lat": res.lat, "buffer_m": res.buffer_m, "zone_id": res.zone_id,

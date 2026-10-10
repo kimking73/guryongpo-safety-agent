@@ -66,7 +66,7 @@ docker compose exec api python -m collector --once kma.aws      # 작업 하나�
 ### 정적 데이터 적재 — loader (A7)
 
 ```bash
-docker compose run --rm loader              # 01m 스키마 추가분 · 02 판단 기준·관측소·맨홀 · 03 산사태 · 04 행동요령 · 05 대피소 · 06 응급의료 · 09 산사태 위험지도
+docker compose run --rm loader              # 01m 스키마 추가분 · 02 판단 기준·관측소·맨홀 · 03 산사태 · 04 행동요령 · 05 대피소 · 06 응급의료 · 09 산림청 산사태 위험지도 행 삭제
 docker compose run --rm loader --dry-run    # 적용해 보고 되돌림 (행 수만 확인)
 docker compose run --rm loader --check      # 적용 없이 행 수 확인 — 최소 행 수 미달이면 종료 코드 1
 ```
@@ -208,7 +208,7 @@ DATABASE_URL=postgresql://guardian:guardian-local-only@localhost:5433/guardian .
 - 동의: 본인 등록은 앱 동의(`consent: true`), 대리 등록은 서면·구두 확인(`consent_method`·`consent_by`). 일시·방법·동의자·**동의서 버전**(`households.CONSENT_VERSION`, 지금 v1) 저장 — 문구가 바뀌면 버전을 올린다
 - 동의 철회 = 가구 삭제 (대피 대상·방문 기록도 함께). 대리 등록 가구에 연결만 된 주민이 철회하면 연결만 끊음
 - 건강 정보(혈액형·병력 메모)는 `care.user_health` — AI 읽기 전용 계정은 못 읽음 (`01m_v0_4_households.sql` 이 기존 값을 옮기고 public 컬럼 삭제). `/user` 응답 형식은 같음
-- 시연용 가상 가구: `/internal/simulate` `demo_households` (5곳, "[시연] …", 침수 경보 영역 2곳·산사태 1등급 비탈 1곳) / `demo_households_clear`. `clear` 는 가구를 지우지 않음
+- 시연용 가상 가구: `/internal/simulate` `demo_households` (5곳, "[시연] …", 침수 경보 영역 2곳·산사태 취약지역 100m 안 1곳) / `demo_households_clear`. `clear` 는 가구를 지우지 않음
 
 ### 시연 시나리오
 

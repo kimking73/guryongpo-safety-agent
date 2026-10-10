@@ -3,7 +3,7 @@
 - 센서: DB stations (포항 DT 수위계·맨홀·강우량계·대기 센서, 구룡포 AWS)의 실제 좌표·이름
 - 값  : 호우·침수 + 강풍. 포항 DT 수위계 값은 DEMO_DT (항구 저지대 침수, /internal/simulate 와 따로)
 - 판정: engine.evaluate(침수·DT 강우) · hazards.evaluate_heavy_rain / evaluate_strong_wind / evaluate_landslide
-        (예외 하나: 산사태 경고 범위는 위험지도 1등급 100m — demo_landslide_rules, 2026-10-07 사용자 결정)
+        (산사태 트리거 = 시연 특보 WARNINGS 의 '[시연] 포항시 호우경보' × 지정 취약지역 100m, 실측과 같은 규칙)
         — 실측 판정과 같은 함수·같은 risk_rules (반경 100/150/300/500m, 15cm 기준 등)
 - 저장하지 않는다: observations·risk_assessments·경고(A5)는 그대로 → 실측 모드·실제 사용자·선제 경고에 영향 없음
 - 앱 시연 모드가 /api/v1/demo/* 로, 경로 서버는 요청에 demo=true 일 때 /api/v1/demo/risk/areas 를 피한다
@@ -25,7 +25,7 @@ UNITS = {"flood_depth": "mm", "manhole_level": "mm", "river_level": "mm", "rain_
 
 # 포항 DT 시연 값 (external_id → 지표, 값, DT 등급). /internal/simulate heavy_rain_flood 와 따로 둔다 (2026-10-07).
 # 그 값(구룡포교 주의·수협 경보 등)은 시가지 → 동쪽 대피소로 가는 유일한 해안 도로와 하천 다리를 막아 1km 대피에 5km를 돌았다.
-# 산사태(호우경보 × 산사태위험지도 1·2등급 100m)는 그대로 두고, 침수를 기능이 보이게 배치 (scratchpad 측정, 시연 안내는 server/README):
+# 산사태(호우경보 × 지정 취약지역 100m)는 그대로 두고, 침수를 기능이 보이게 배치 (scratchpad 측정, 시연 안내는 server/README):
 #   - 환승센터 경보(300m): 항구에 있는 사람이 위험 영역 안 → 대피 안내, 지하 대피소 제외, 해안 도로로 구룡포중학교 앞까지 1.2km
 #   - 하나과메기 지표면 주의(150m): 읍사무소 서쪽 → 하정축양장 앞 공터 경로가 이 구역을 피해 약 500m 돌아감 (회피 장면)
 #   - 나머지는 보통(100m, 지도에만 단계 표시 — 경로·대피소 판단은 주의 이상)
@@ -111,31 +111,18 @@ def results() -> list[engine.Result]:
     hr = hazards.evaluate_heavy_rain(AWS["rain_3h"], AWS["rain_12h"], now, rules, simulated=True)
     sw = hazards.evaluate_strong_wind(AWS["wind_speed"], AWS["wind_gust"], bool(aws and aws["is_mountain"]), now, rules, simulated=True)
     out += [r for r in (hr, sw) if r]
-    # 호우 단계: DT 강우량계와 AWS 중 높은 쪽 (실측 판정과 같은 방식)
-    rain_levels = [r.level for r in out if r.hazard == "heavy_rain"]
-    top_rain = max(rain_levels, key=LEVELS.index) if rain_levels else "normal"
-    out += hazards.evaluate_landslide(top_rain, db.fetch_all(hazards.ZONES_SQL), demo_landslide_rules(rules))
+    # 산사태: 시연 기상청 특보(WARNINGS)의 호우특보 × 지정 취약지역 100m (실측 판정과 같은 함수)
+    out += hazards.evaluate_landslide(demo_rain_warning(), db.fetch_all(hazards.ZONES_SQL), rules)
     return out
 
 
-# 시연에서만 산사태 경고(호우경보) 범위를 산사태위험지도 1등급 비탈 100m 로 (사용자 결정 2026-10-07).
-# 실측 규칙(risk_rules 11: 1·2등급 100m, 53km²·대피소 9곳)은 그대로 — 시연은 1등급(50km²·대피소 5곳)으로 대피소 4곳이 다시 후보가 된다.
-# 단계(산사태 경고)·호우경보는 그대로이고 범위만 다르다. 지정 취약지역 100m 는 같다.
-DEMO_LANDSLIDE_WARNING_AREA = "riskmap_g1_buf100"
-
-
-def demo_landslide_rules(rules: list[dict]) -> list[dict]:
-    """산사태 경고 규칙(11)의 위험지도 범위만 DEMO_LANDSLIDE_WARNING_AREA 로 바꾼 복사본 (원본 rules 는 그대로)"""
-    out = []
-    for r in rules:
-        if r.get("id") == 11:
-            cond = json.loads(json.dumps(hazards._cond(r)))
-            for c in cond.get("all", []):
-                if "within" in c:
-                    c["riskmap_area"] = DEMO_LANDSLIDE_WARNING_AREA
-            r = {**r, "condition": cond}
-        out.append(r)
-    return out
+def demo_rain_warning() -> dict:
+    """WARNINGS 중 가장 높은 호우특보 → hazards.evaluate_landslide 입력 형태 (없으면 normal)"""
+    rain = [w for w in WARNINGS if w["hazard"] == "heavy_rain"]
+    if not rain:
+        return {"level": "normal"}
+    w = max(rain, key=lambda w: LEVELS.index(w["level"]))
+    return {"level": w["level"], "headline": w["headline"], "issued_at": None}
 
 
 def _features() -> list[dict]:

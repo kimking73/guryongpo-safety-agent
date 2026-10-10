@@ -21,19 +21,17 @@ WIND_RULES = [
 ]
 LANDSLIDE_RULES = [
     {"id": 10, "hazard": "landslide", "level": "advisory", "label": "산사태 주의",
-     "condition": {"all": [{"risk": "heavy_rain", "min_level": "advisory"},
-                           {"within": "hazard_zones.landslide", "buffer_m": 100, "riskmap_area": "riskmap_g1_buf100"}]}},
+     "condition": {"all": [{"warning": "heavy_rain", "min_level": "advisory"},
+                           {"within": "hazard_zones.landslide", "buffer_m": 100}]}},
     {"id": 11, "hazard": "landslide", "level": "warning", "label": "산사태 경고",
-     "condition": {"all": [{"risk": "heavy_rain", "min_level": "warning"},
-                           {"within": "hazard_zones.landslide", "buffer_m": 100, "riskmap_area": "riskmap_g12_buf100"}]}},
+     "condition": {"all": [{"warning": "heavy_rain", "min_level": "warning"},
+                           {"within": "hazard_zones.landslide", "buffer_m": 100}]}},
 ]
 ZONE = {"id": 1, "name": "포항시 남구 연일읍 자명리 산42임", "meta": {"emd": "연일읍"}, "lng": 129.31, "lat": 36.01}
 ZONE_WITH_REASON = {"id": 2, "name": "포항시 남구 구룡포읍 삼정리 산126-2임",
                     "meta": {"emd": "구룡포읍", "reason": "과거 월류 피해 이력이 있으며, 계류 내 붕괴지가 관찰됨"}, "lng": 129.55, "lat": 36.01}
-RISK_G1 = {"id": 901, "external_id": "riskmap_g1_buf100", "name": "산사태 주의 범위", "meta": {"role": "trigger_area"},
-           "lng": 129.55, "lat": 35.99}
-RISK_G12 = {"id": 902, "external_id": "riskmap_g12_buf100", "name": "산사태 경고 범위", "meta": {"role": "trigger_area"},
-            "lng": 129.55, "lat": 35.99}
+ADVISORY = {"level": "advisory", "headline": "포항시 호우주의보", "issued_at": NOW}
+WARNING = {"level": "warning", "headline": "포항시 호우경보", "issued_at": NOW}
 TYPHOON_RULES = [
     {"id": 7, "hazard": "typhoon", "level": "advisory", "label": "태풍주의보/영향권"},
     {"id": 8, "hazard": "typhoon", "level": "warning", "label": "태풍경보"},
@@ -89,68 +87,88 @@ def test_strong_wind_gust_triggers_warning():
     assert (r.level, r.rule_id) == ("warning", 4)
 
 
-# ------------------------------------------------------------------ 산사태 (rules 10·11) — 위치 x 호우 단계
-def test_landslide_unknown_heavy_rain_gives_nothing():
+# ------------------------------------------------------------------ 산사태 (rules 10·11) — 기상청 호우특보 x 취약지역 100m
+def test_landslide_unknown_warning_gives_nothing():
+    """특보 수집이 끊겨 판단 불가(None)면 아무것도 만들지 않음 — 호출 측이 seen 에 안 넣어 기존 판정 유지"""
     from risk.hazards import evaluate_landslide
     assert evaluate_landslide(None, [ZONE], LANDSLIDE_RULES) == []
 
 
-def test_landslide_below_advisory_gives_nothing():
+def test_landslide_no_warning_gives_nothing():
     from risk.hazards import evaluate_landslide
-    assert evaluate_landslide("watch", [ZONE], LANDSLIDE_RULES) == []
+    assert evaluate_landslide({"level": "normal"}, [ZONE], LANDSLIDE_RULES) == []
 
 
-def test_landslide_advisory_uses_wider_buffer():
+def test_landslide_preliminary_warning_gives_nothing():
+    """예비특보(watch)는 발령된 특보가 아님"""
     from risk.hazards import evaluate_landslide
-    out = evaluate_landslide("advisory", [ZONE], LANDSLIDE_RULES)
-    assert len(out) == 1 and (out[0].rule_id, out[0].buffer_m) == (10, 100)
+    assert evaluate_landslide({"level": "watch", "headline": "호우 예비특보"}, [ZONE], LANDSLIDE_RULES) == []
 
 
-def test_landslide_warning_keeps_same_100m_buffer():
-    """주의·경고 모두 100m — 흘러내리는 거리는 비의 세기가 아니라 지형으로 정해짐 (2026-10-02 개편)"""
+def test_landslide_advisory_warning_gives_rule10_100m_circle():
     from risk.hazards import evaluate_landslide
-    out = evaluate_landslide("warning", [ZONE], LANDSLIDE_RULES)
-    assert (out[0].rule_id, out[0].buffer_m) == (11, 100)
-
-
-def test_landslide_advisory_uses_grade1_riskmap_area_only():
-    from risk.hazards import evaluate_landslide
-    out = evaluate_landslide("advisory", [RISK_G1, RISK_G12], LANDSLIDE_RULES)
+    out = evaluate_landslide(ADVISORY, [ZONE], LANDSLIDE_RULES)
     assert len(out) == 1
     r = out[0]
-    assert (r.rule_id, r.zone_id, r.key) == (10, 901, "landslide:riskmap")
-    assert "1등급" in r.reason and "산림청" in r.reason and "발생 가능성" in r.reason
+    assert (r.rule_id, r.level, r.buffer_m, r.zone_id) == (10, "advisory", 100, None)   # 지점 좌표 반경 100m 원
+    assert (r.lng, r.lat) == (ZONE["lng"], ZONE["lat"])
+    assert r.basis["trigger"] == "kma_warning" and r.basis["warning_level"] == "advisory"
+    assert "기상청 포항시 호우주의보 발효 중" in r.reason and "100m 이내" in r.reason
 
 
-def test_landslide_warning_uses_grade12_riskmap_area():
+def test_landslide_warning_gives_rule11_same_100m():
+    """주의·경고 모두 100m — 흘러내리는 거리는 비의 세기가 아니라 지형으로 정해짐"""
     from risk.hazards import evaluate_landslide
-    out = evaluate_landslide("warning", [RISK_G1, RISK_G12], LANDSLIDE_RULES)
-    assert [(r.rule_id, r.zone_id) for r in out] == [(11, 902)]
+    out = evaluate_landslide(WARNING, [ZONE, ZONE_WITH_REASON], LANDSLIDE_RULES)
+    assert [(r.rule_id, r.buffer_m) for r in out] == [(11, 100), (11, 100)]
+    assert "지정사유: 과거 월류 피해 이력" in out[1].reason
 
 
-def test_landslide_designated_zone_and_riskmap_together():
-    """지정 취약지역은 위험지도 범위와 함께(합집합) 판정되고, 지정사유가 근거 문장에 들어감"""
+def test_landslide_headline_fallback():
     from risk.hazards import evaluate_landslide
-    out = evaluate_landslide("advisory", [RISK_G1, ZONE_WITH_REASON], LANDSLIDE_RULES)
-    kinds = sorted(r.basis["kind"] for r in out)
-    assert kinds == ["designated", "riskmap"]
-    d = next(r for r in out if r.basis["kind"] == "designated")
-    assert d.zone_id is None and d.buffer_m == 100 and "지정사유: 과거 월류 피해 이력" in d.reason
+    r = evaluate_landslide({"level": "warning"}, [ZONE], LANDSLIDE_RULES)[0]
+    assert "기상청 포항시 호우경보 발효 중" in r.reason
 
 
-def test_landslide_critical_still_uses_warning_rule():
-    """호우가 심각(critical) 이어도 산사태는 경고(11번)까지만 — 더 높은 산사태 단계는 없음"""
-    from risk.hazards import evaluate_landslide
-    out = evaluate_landslide("critical", [ZONE], LANDSLIDE_RULES)
-    assert out[0].rule_id == 11
+def test_landslide_zones_sql_uses_designated_zones_only():
+    """산림청 산사태위험지도(riskmap_*) 는 판정에 쓰지 않음 — 공공데이터포털 지정 취약지역만"""
+    from risk.hazards import ZONES_SQL
+    assert "source_code = 'datagokr'" in ZONES_SQL and "riskmap" not in ZONES_SQL
 
 
 def test_landslide_reason_avoids_certainty_language():
     """토양수분 실측/예측이 아니므로 '발생'을 단정하지 않고 가능성·대비로만 표현한다"""
     from risk.hazards import evaluate_landslide
-    r = evaluate_landslide("advisory", [ZONE], LANDSLIDE_RULES)[0]
+    r = evaluate_landslide(ADVISORY, [ZONE], LANDSLIDE_RULES)[0]
     assert "발생 가능성" in r.reason
     assert "산사태가 발생" not in r.reason and "산사태 발생했" not in r.reason
+
+
+def test_current_warning_stale_collection_is_unknown(monkeypatch):
+    """특보 수집이 40분 넘게 성공하지 못했으면 '특보 없음'이 아니라 판단 불가(None)"""
+    from risk import hazards
+    monkeypatch.setattr(hazards.db, "fetch_one",
+                        lambda sql, params=None: {"at": NOW - timedelta(minutes=41)} if "ingest_runs" in sql else None)
+    assert hazards.current_heavy_rain_warning(NOW) is None
+
+
+def test_current_warning_fresh_collection(monkeypatch):
+    from risk import hazards
+
+    def fetch_one(sql, params=None):
+        if "ingest_runs" in sql:
+            return {"at": NOW - timedelta(minutes=5)}
+        assert params == {"region": "L1072400"}
+        return {"level": "warning", "headline": "포항시 호우경보", "issued_at": NOW}
+    monkeypatch.setattr(hazards.db, "fetch_one", fetch_one)
+    assert hazards.current_heavy_rain_warning(NOW)["level"] == "warning"
+
+
+def test_current_warning_none_active(monkeypatch):
+    from risk import hazards
+    monkeypatch.setattr(hazards.db, "fetch_one",
+                        lambda sql, params=None: {"at": NOW - timedelta(minutes=5)} if "ingest_runs" in sql else None)
+    assert hazards.current_heavy_rain_warning(NOW) == {"level": "normal"}
 
 
 # ------------------------------------------------------------------ 태풍 (rules 7·8) — 특보 발효 or 반경 진입
@@ -196,3 +214,26 @@ def test_aws_station_id_matches_collector():
     from risk import hazards
     st = kma_warn_aws.aws_station(AWS_STN)
     assert (hazards.AWS_SOURCE, hazards.AWS_EXTERNAL_ID) == (st["source_code"], st["external_id"])
+
+
+def test_sync_matches_existing_rows_by_engine_and_closes_duplicates(monkeypatch):
+    """hazards 판정은 engine='hazards_v1' 로 기존 영역을 찾아야 해제(특보 해제·정상 복귀)가 반영된다.
+    같은 대상이 여러 행이면(예전 중복) 최신 1개만 남긴다"""
+    from contextlib import contextmanager
+    from risk import engine
+    calls = []
+
+    class Conn:
+        def execute(self, sql, params=None):
+            calls.append((sql, params))
+            rows = [{"id": 1, "key": "landslide:zone:7", "level": "warning", "rule_id": 11, "station_id": -107, "expired": False},
+                    {"id": 2, "key": "landslide:zone:7", "level": "warning", "rule_id": 11, "station_id": -107, "expired": False}]
+            return type("R", (), {"fetchall": lambda self: rows if sql is engine.ACTIVE_SQL else []})()
+
+    @contextmanager
+    def connection():
+        yield Conn()
+    monkeypatch.setattr(engine.db, "connection", connection)
+    stats = engine.sync([], {-107}, engine="hazards_v1")
+    assert calls[0][1]["engine"] == "hazards_v1"
+    assert stats["closed"] == 2 and sorted(calls[-1][1]["ids"]) == [1, 2]

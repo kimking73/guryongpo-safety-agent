@@ -109,7 +109,7 @@ def stations_layer(bbox: tuple[float, float, float, float], now: datetime | None
 LANDSLIDE_SQL = """
 SELECT id, source_code, name, grade, meta, ST_AsGeoJSON(geom) AS geojson
 FROM hazard_zones
-WHERE hazard = 'landslide' AND COALESCE(meta->>'role', '') <> 'trigger_area'   -- 판정용 100m 범위는 risk_areas 로만 보임
+WHERE hazard = 'landslide' AND source_code = 'datagokr'   -- 지정 산사태 취약지역 (판정된 100m 범위는 risk_areas 로 보임)
   AND ST_Intersects(geom, ST_MakeEnvelope(%(a)s, %(b)s, %(c)s, %(d)s, 4326))
 ORDER BY id
 """
@@ -121,12 +121,11 @@ def landslide_layer(bbox: tuple[float, float, float, float]) -> dict:
         meta = r["meta"] if isinstance(r["meta"], dict) else json.loads(r["meta"] or "{}")
         feats.append({"type": "Feature", "id": r["id"], "geometry": json.loads(r["geojson"]),
                       "properties": {"name": r["name"], "hazard": "landslide", "grade": r["grade"],
-                                     "kind": "riskmap" if meta.get("role") == "display" else "designated",
-                                     "data_kind": "official_risk_map" if meta.get("role") == "display" else "designated_vulnerable_area",
-                                     "data_label": "산림청 산사태 위험지도 등급 · 현재 발생/예보 아님" if meta.get("role") == "display" else "산사태 취약지역 지정 자료 · 현재 발생/예보 아님",
-                                     "source": meta.get("source") or ("산림청 산사태 위험지도" if meta.get("role") == "display" else "공공데이터포털 · 경상북도 포항시 산사태 취약지역 현황"),
-                                     "source_code": r.get("source_code") or ("safemap" if meta.get("role") == "display" else "datagokr"),
-                                     "source_url": "https://sansatai.forest.go.kr/" if meta.get("role") == "display" else "https://www.data.go.kr/",
+                                     "kind": "designated", "data_kind": "designated_vulnerable_area",
+                                     "data_label": "산사태 취약지역 지정 자료 · 현재 발생/예보 아님",
+                                     "source": meta.get("source") or "공공데이터포털 · 경상북도 포항시 산사태 취약지역 현황",
+                                     "source_code": r.get("source_code") or "datagokr",
+                                     "source_url": "https://www.data.go.kr/",
                                      "is_example": False,
                                      "reason": meta.get("reason"), "area_m2": meta.get("area_m2"),
                                      "shelter_distance_m": meta.get("shelter_distance_m")}})
@@ -221,17 +220,22 @@ def flood_grid_layer(bbox: tuple[float, float, float, float], zones: list[dict] 
 POHANG_BBOX = (129.30, 35.90, 129.62, 36.10)          # 구룡포 안에 응급의료기관이 없어 의료시설은 bbox 생략 시 포항 전체
 
 # in_risk_area: 대피소 자체가 현재 유효한 위험 영역(risk_assessments, 주의 이상) 안이면 true → 앱·경로 안내에서 제외
-# landslide_g1_m: 산사태위험지도 1등급 비탈 100m 안이면 그 거리(m) → 산사태 때 비추천 (unsuitable_for)
-#   100m 범위(riskmap_g1_buf100, 09_seed)로 먼저 거른 뒤에만 1등급 폴리곤과 거리 계산 (큰 폴리곤이라 전부 계산하면 느림)
+# landslide_zone_*: 지정 산사태 취약지역 지점 100m 안이면 가장 가까운 곳의 이름·거리(m) → 산사태 때 비추천 (unsuitable_for)
+#   (산사태 판정 범위와 같은 100m — risk/hazards.py, 산림청 위험지도는 2026-10-10 부터 사용 안 함)
 SHELTERS_SQL = """
 SELECT s.id, s.name, s.shelter_types, s.address, s.capacity, s.phone, s.is_indoor, s.is_accessible,
        ST_X(s.geom) AS lng, ST_Y(s.geom) AS lat,
        EXISTS (SELECT 1 FROM risk_assessments ra
                WHERE ra.valid_to IS NULL AND ra.level >= 'advisory' AND ST_Intersects(ra.area, s.geom)) AS in_risk_area,
-       (SELECT round(ST_Distance(s.geom::geography, g1.geom::geography))
-        FROM hazard_zones b JOIN hazard_zones g1 ON g1.hazard = 'landslide' AND g1.external_id = 'riskmap_g1'
-        WHERE b.hazard = 'landslide' AND b.external_id = 'riskmap_g1_buf100' AND ST_Intersects(b.geom, s.geom)) AS landslide_g1_m
+       lz.name AS landslide_zone_name, lz.dist_m AS landslide_zone_m
 FROM shelters s
+LEFT JOIN LATERAL (
+  SELECT z.name, round(ST_Distance(s.geom::geography, ST_PointOnSurface(z.geom)::geography)) AS dist_m
+  FROM hazard_zones z
+  WHERE z.hazard = 'landslide' AND z.source_code = 'datagokr'
+    AND ST_DWithin(s.geom::geography, ST_PointOnSurface(z.geom)::geography, 100)
+  ORDER BY dist_m LIMIT 1
+) lz ON true
 WHERE s.is_open AND ST_Intersects(s.geom, ST_MakeEnvelope(%(a)s, %(b)s, %(c)s, %(d)s, 4326))
 ORDER BY s.id
 """
@@ -269,15 +273,16 @@ def shelters_layer(bbox: tuple[float, float, float, float]) -> dict:
     feats = [_point(r, {"id": r["id"], "name": r["name"], "shelter_types": list(r["shelter_types"] or []),
                         "address": r["address"], "capacity": r["capacity"], "phone": r["phone"],
                         "is_indoor": r["is_indoor"], "is_accessible": r["is_accessible"],
-                        "in_risk_area": bool(r["in_risk_area"]), **_unsuitable(r.get("landslide_g1_m"))})
+                        "in_risk_area": bool(r["in_risk_area"]), **_unsuitable(r.get("landslide_zone_m"), r.get("landslide_zone_name"))})
              for r in db.fetch_all(SHELTERS_SQL, dict(zip("abcd", bbox)))]
     return {"type": "FeatureCollection", "features": feats}
 
 
-def _unsuitable(landslide_g1_m) -> dict:
-    if landslide_g1_m is None:
+def _unsuitable(landslide_zone_m, landslide_zone_name=None) -> dict:
+    if landslide_zone_m is None:
         return {"unsuitable_for": [], "unsuitable_reason": None}
-    return {"unsuitable_for": ["landslide"], "unsuitable_reason": f"산사태위험지도 1등급 비탈 {int(landslide_g1_m)}m"}
+    name = f" {landslide_zone_name}" if landslide_zone_name else ""
+    return {"unsuitable_for": ["landslide"], "unsuitable_reason": f"산사태 취약지역{name} {int(landslide_zone_m)}m"}
 
 
 def _er(r: dict, now: datetime) -> dict | None:

@@ -3396,7 +3396,7 @@ void _showMapLegend(BuildContext context,
                           '수위계·맨홀 측정값(포항 디지털 트윈) 기준, 센서 주변 반경 100~500m. 서버 위험 판정 단계이며 실측 수심 구간이 아님'),
                     if (visible.contains(HazardKind.slide))
                       row(fill(Colors.white, border: _hazardColor(HazardKind.slide)), '산사태',
-                          '호우 특보(기상청) × 산사태위험지도 비탈 100m · 지정 취약지역'),
+                          '호우 특보(기상청) × 산사태 취약지역 100m'),
                   ],
                   if (visible.contains(HazardKind.flood)) ...[
                     section('수위계·센서'),
