@@ -1264,23 +1264,23 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
         ),
       ]),
     );
-    final places = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Padding(
+    final places = _SavedPlaceSummary(
+      currentLocation: widget.currentLocation,
+      onFocus: (p) => focusOn(p),
+      levelAt: widget.demo ? null : _levelAt,
+      showCurrent: !widget.mapOnly,
+      header: const Padding(
         padding: EdgeInsets.fromLTRB(4, 4, 4, 10),
         child: Text('등록 장소 위험', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: GK.muted)),
       ),
-      _SavedPlaceSummary(
-        currentLocation: widget.currentLocation,
-        onFocus: (p) => focusOn(p),
-        levelAt: widget.demo ? null : _levelAt,
-      ),
-    ]);
+    );
     // 지도 카드 — 재난 지도 / 대피 경로 (방재단 현황은 이 카드만 쓴다: mapOnly)
     final mapCard = GkCard(
           padding: EdgeInsets.all(narrow ? 12 : 16),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            // 방재단 현황(mapOnly)은 메뉴·하위 버튼 없이 지도만 (2026-10-11 사용자 요청) — 재난 층은 처음 값(모두 켬) 그대로 보인다
             // 상위 메뉴 두 개 (2026-10-09): 누르면 그 메뉴의 하위 항목만 펼친다. 보고 있는 메뉴를 다시 누르면 접고 펼친다
-            Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+            if (!widget.mapOnly) Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
               MapMenuButton(
                   label: '재난 지도',
                   icon: MapIcons.layers,
@@ -1298,7 +1298,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                   expanded: routeMode && submenuOpen,
                   onTap: () => tapMenu(_DashboardMode.facilities)),
             ]),
-            if (submenuOpen) ...[
+            if (submenuOpen && !widget.mapOnly) ...[
               const SizedBox(height: 10),
               if (!routeMode) _emergencyLayerControls() else _routeControls(),
             ],
@@ -1308,8 +1308,9 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                     widget.where.kind == WhereKind.land ||
                     widget.where.noGps))
               _integratedRoutePanel(context),
-            const SizedBox(height: 12),
-            if (wide)
+            if (!widget.mapOnly) const SizedBox(height: 12),
+            // mapOnly 는 '현위치' 칸을 빼서 오른쪽 칸이 빌 수 있다 → 지도를 넓게 두고 남은 등록 장소는 지도 아래에
+            if (wide && !widget.mapOnly)
               SizedBox(
                 height: 520,
                 child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -1799,9 +1800,15 @@ class _SavedPlaceSummary extends StatefulWidget {
     required this.currentLocation,
     required this.onFocus,
     this.levelAt,
+    this.showCurrent = true,
+    this.header,
   });
   final LatLng currentLocation;
   final ValueChanged<LatLng> onFocus;
+  /// false = '현위치' 칸을 뺀다 (방재단 현황 지도, 2026-10-11 사용자 요청)
+  final bool showCurrent;
+  /// 칸들 위 제목. 보여 줄 칸이 하나도 없으면 제목도 그리지 않는다
+  final Widget? header;
   /// 실측: 위험 영역·침수 격자로 판정한 단계. null = 시연(가상 격자)
   final String Function(LatLng)? levelAt;
   @override
@@ -1830,18 +1837,20 @@ class _SavedPlaceSummaryState extends State<_SavedPlaceSummary> {
       future: AccountService().places(),
       builder: (c, s) {
         final places = s.data ?? const <SavedPlace>[];
-        return Wrap(
+        if (!widget.showCurrent && home == null && work == null && places.isEmpty) return const SizedBox.shrink();
+        final tiles = Wrap(
           spacing: 8,
           runSpacing: 8,
           children: [
-            _placeTile(
-              c,
-              '현위치',
-              widget.currentLocation,
-              widget.levelAt == null ? '현재 위치 기준 · 예시 판정' : '현재 위치 기준 · 서버 위험 판정',
-              grids,
-              Icons.my_location,
-            ),
+            if (widget.showCurrent)
+              _placeTile(
+                c,
+                '현위치',
+                widget.currentLocation,
+                widget.levelAt == null ? '현재 위치 기준 · 예시 판정' : '현재 위치 기준 · 서버 위험 판정',
+                grids,
+                Icons.my_location,
+              ),
             if (home != null)
               _placeTile(
                 c,
@@ -1872,6 +1881,8 @@ class _SavedPlaceSummaryState extends State<_SavedPlaceSummary> {
             ),
           ],
         );
+        if (widget.header == null) return tiles;
+        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [widget.header!, tiles]);
       },
     );
   }
