@@ -38,7 +38,7 @@ from typing import Callable
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
-from .action import NOT_READY, make_action_advisor  # noqa: F401 — NOT_READY는 테스트·밖에서 G.NOT_READY로 쓴다
+from .action import ACTION_WORDS, NOT_READY, make_action_advisor  # noqa: F401 — NOT_READY는 테스트·밖에서 G.NOT_READY로 쓴다
 from .verify import make_hallucination_check
 from .state import (
     MAX_POLISH_RETRY,   # 다듬기 재시도 한도 (1회)
@@ -62,6 +62,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 MANAGER = "manager"
+DIRECT_REPLY = "direct_reply"
 ACTION_ADVISOR = "action_advisor"
 INTENT_CHECK = "intent_check"
 HALLUCINATION_CHECK = "hallucination_check"
@@ -178,7 +179,14 @@ _NEW_TURN_RESET = {
     "polished": "",
     "voice_text": "",
     "card": None,
+    "wants_action": None,
+    "user_info": None,
 }
+
+# 전문 agent 없이 바로 답할 때 (인사·사용법, 자기 정보만 말함). 위험 여부·할 일은 말하지 않는다 (2026-10-10 사용자 결정)
+SERVICE_INTRO = ("구룡포 재난 지킴이입니다. 비·침수, 산사태, 강풍·태풍, 미세먼지·자외선, 대피소와 대피 경로, "
+                 "피해 지원 제도를 물어보세요.")
+USER_INFO_REPLY = "알려 주신 내용({info})을 앞으로 안내에 반영할게요."
 
 
 def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_classify,
@@ -256,12 +264,19 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
         question = state.get("question") or ""
         if state.get("mode") == "alert":
             destination, limited, can_move, damage = None, False, "unknown", "unknown"
+            wants_action, user_info = True, None
         elif extra is not None and hasattr(extra, "destination"):
             destination, limited = extra.destination, bool(extra.mobility_limited)
             can_move, damage = getattr(extra, "can_move", "unknown"), getattr(extra, "damage", "unknown")
+            wants_action = bool(getattr(extra, "wants_action", True))
+            user_info = (getattr(extra, "user_info", None) or "").strip() or None
         else:
             destination, limited = keyword_destination(question), keyword_mobility_limited(question)
             can_move, damage = keyword_situation(question)
+            # 규칙 대체: 평시에는 행동을 묻는 말이 있을 때만, 그 밖의 단계는 예전처럼 (None → action.py가 단계로 정한다)
+            wants_action, user_info = (True if any(w in question for w in ACTION_WORDS) else None), None
+        if continued:
+            wants_action = True             # 직전 되묻기("스스로 이동하실 수 있나요?")의 답 → 판단 로직을 이어 간다
         # 앱이 보낸 값·기억이 이미 있으면 그대로 (memory.apply_to_profile과 같은 우선순위). 기억 저장은 답변 뒤 따로 한다.
         user = state.get("user")
         user_update = {}
@@ -285,6 +300,8 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
             "destination_query": destination if destination and destination.strip() not in _NOT_PLACE else None,
             "can_move": can_move,
             "damage": damage,
+            "wants_action": wants_action,
+            "user_info": user_info if not selected else None,   # agent를 골랐으면 질문이 있는 말이다
             "phase": _phase(view),          # 특보·위험 판정으로 (action.decide_phase), 없으면 '재난 중'
             "selected_agents": selected,    # 다음 route_specialists가 이 목록을 보고 병렬 실행한다
             # 재시도로 다시 들어온 경우를 대비해 이전 시도의 결과를 비운다.
@@ -320,6 +337,18 @@ def _specialist_stub(agent: Specialist) -> Node:
 # 행동 권고 (B4): 규칙이 고른 행동요령 원문 → (서비스는) LLM이 사용자 상황에 맞춘 '지금 할 일' → action.py.
 # 기본 그래프는 원문을 찾지 않는다(DB 없이 도는 테스트용). 서비스가 원문·작성기를 붙인 것으로 바꿔 끼운다 (service.py).
 action_advisor = make_action_advisor(use_guides=False)
+
+
+def direct_reply(state: GuardianState) -> dict:
+    """전문 agent가 필요 없는 말(인사·사용법, 자기 정보만 말함)에 바로 답한다. AI 호출·검증 없음 (수치·사실을 말하지 않는다).
+
+    예전에는 행동 권고가 "현재 확인된 위험 없음"이라고 답했다 — 경보 중에도 그렇게 나와 틀린 위험 판단처럼 보였다 (2026-10-10).
+    checkpointer가 턴 사이에 state를 남기므로 이전 질문의 행동 권고·카드를 비운다 (안 비우면 응답에 이전 카드·되묻기가 실린다).
+    """
+    info = state.get("user_info")
+    answer = USER_INFO_REPLY.format(info=info) if info else SERVICE_INTRO
+    return {"final_answer": answer, "used_fallback": False, "voice_text": answer, "card": None, "action_plan": None,
+            "draft": answer}
 
 
 def intent_check(state: GuardianState) -> dict:
@@ -411,6 +440,7 @@ def fallback(state: GuardianState) -> dict:
 # 노드 이름 → 함수 매핑. build_graph(overrides=...)로 일부만 바꿔 끼울 수 있다.
 DEFAULT_NODES: dict[str, Node] = {
     MANAGER: manager,
+    DIRECT_REPLY: direct_reply,
     **{s.value: _specialist_stub(s) for s in Specialist},   # 전문 agent 6개 (지원·복구 2026-10-08)
     ACTION_ADVISOR: action_advisor,
     INTENT_CHECK: intent_check,
@@ -433,11 +463,12 @@ def route_specialists(state: GuardianState) -> list[Send] | str:
     """manager 다음: 선택된 전문 agent들을 병렬로 실행한다.
 
     Send(노드이름, state)를 여러 개 반환하면 LangGraph가 그 노드들을 동시에 실행한다.
-    선택된 agent가 없으면(예: "안녕하세요") 바로 행동 권고로 간다.
+    선택된 agent가 없으면(예: "안녕하세요", "저는 72살이에요") 행동 권고를 거치지 않고 바로 답한다 (direct_reply).
+    alert 모드는 질문이 없으므로 예전처럼 행동 권고로 간다.
     """
     selected = state.get("selected_agents") or []
     if not selected:
-        return ACTION_ADVISOR
+        return ACTION_ADVISOR if state.get("mode") == "alert" else DIRECT_REPLY
     return [Send(Specialist(s).value, state) for s in selected]
 
 
@@ -492,7 +523,8 @@ def build_graph(overrides: dict[str, Node] | None = None, checkpointer=None):
     # [1단계] 시작 → 관리자 → 전문 agent(병렬) → 행동 권고
     g.add_edge(START, MANAGER)
     # 세 번째 인자 = 라우팅 함수가 보낼 수 있는 목적지 목록 (그래프 그림을 그릴 때 쓰임)
-    g.add_conditional_edges(MANAGER, route_specialists, [*SPECIALISTS, ACTION_ADVISOR])
+    g.add_conditional_edges(MANAGER, route_specialists, [*SPECIALISTS, ACTION_ADVISOR, DIRECT_REPLY])
+    g.add_edge(DIRECT_REPLY, END)          # 전문 agent 없이 답한 말: 검증·다듬기 없이 끝
     for s in SPECIALISTS:
         # 병렬로 실행된 agent들이 모두 끝나면 action_advisor가 "한 번만" 실행된다 (fan-in)
         g.add_edge(s, ACTION_ADVISOR)

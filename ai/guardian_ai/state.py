@@ -207,6 +207,8 @@ class GuardianState(TypedDict, total=False):
     destination_query: str | None        # 질문에서 뽑은 목적지 이름 ("구룡포항", "집"). 없으면 가까운 대피소로 안내
     can_move: Literal["yes", "no", "unknown"]   # 대화로 본 스스로 이동 가능 여부 (행동 권고 판단 로직)
     damage: Literal["yes", "no", "unknown"]     # 대화로 본 거주지 피해 유무 (재난 후 분기)
+    wants_action: bool | None            # 사용자가 행동·대비·대피를 물었는가 (None = 모름 → 예전 규칙). '지금 할 일'을 붙일지에 쓴다
+    user_info: str | None                # 묻는 것 없이 자기 정보만 말했을 때 들은 내용 ("72세, 어업") → direct_reply
 
     # 전문 agent → 행동 권고
     specialist_results: Annotated[list[SpecialistResult], merge_results]

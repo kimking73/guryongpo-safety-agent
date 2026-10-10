@@ -67,13 +67,15 @@ INSERT INTO care.households (label, address, geom, phone, members, needs, note, 
 VALUES (%(label)s, '경북 포항시 남구 구룡포읍 (시연용 가상 주소)', ST_SetSRID(ST_MakePoint(%(lng)s, %(lat)s), 4326),
         NULL, %(members)s, %(needs)s::text[], %(note)s, 'responder', now(), 'written', '시연용 가상 데이터', %(ver)s)
 """
-# 산사태 시연용: 구룡포 중심에서 가장 가까운 산사태위험지도 1등급 비탈 위 지점
+# 산사태 시연용: 구룡포 중심에서 가장 가까운 지정 산사태 취약지역 지점에서 40m 남쪽 (판정 범위 100m 안)
 DEMO_LANDSLIDE_SQL = """
 INSERT INTO care.households (label, address, geom, members, needs, note, source, consent_at, consent_method, consent_by, consent_version)
 SELECT %(label)s, '경북 포항시 남구 구룡포읍 (시연용 가상 주소)',
-       ST_ClosestPoint(g.geom, ST_SetSRID(ST_MakePoint(%(lng)s, %(lat)s), 4326)), 2, ARRAY['elderly','mobility_limited'],
+       ST_Project(ST_PointOnSurface(g.geom)::geography, 40, radians(180))::geometry, 2, ARRAY['elderly','mobility_limited'],
        '뒷산 비탈 바로 아래', 'responder', now(), 'written', '시연용 가상 데이터', %(ver)s
-FROM hazard_zones g WHERE g.hazard = 'landslide' AND g.external_id = 'riskmap_g1'
+FROM hazard_zones g WHERE g.hazard = 'landslide' AND g.source_code = 'datagokr'
+ORDER BY ST_PointOnSurface(g.geom)::geography <-> ST_SetSRID(ST_MakePoint(%(lng)s, %(lat)s), 4326)::geography
+LIMIT 1
 """
 
 
@@ -85,7 +87,7 @@ def demo_households(remove: bool = False) -> dict:
     n = db.execute_many(DEMO_SQL, [{"label": DEMO_PREFIX + label, "lat": lat, "lng": lng, "needs": needs, "members": m,
                                     "note": note, "ver": CONSENT_VERSION}
                                    for label, lat, lng, needs, m, note in DEMO_HOUSEHOLDS])
-    n += db.execute(DEMO_LANDSLIDE_SQL, {"label": DEMO_PREFIX + "산사태 비탈 아래 노부부 댁", "lng": GURYONGPO_CENTER[0],
+    n += db.execute(DEMO_LANDSLIDE_SQL, {"label": DEMO_PREFIX + "산사태 취약지역 아래 노부부 댁", "lng": GURYONGPO_CENTER[0],
                                          "lat": GURYONGPO_CENTER[1], "ver": CONSENT_VERSION})
     return {"scenario": "demo_households", "accepted": True, "households": n, "replaced": removed}
 

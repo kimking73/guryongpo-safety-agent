@@ -97,9 +97,9 @@ def test_dashboard_real_values_and_emergency_order(client, fake_db):
     now = datetime.now(KST)
     fake_db.rows["FROM shelters s"] = [
         {"id": 1, "name": "구룡포초등학교", "shelter_types": ["earthquake"], "address": "구룡포읍", "capacity": 300, "phone": None,
-         "is_indoor": False, "is_accessible": True, "lng": 129.552, "lat": 35.986, "in_risk_area": False, "landslide_g1_m": None},
+         "is_indoor": False, "is_accessible": True, "lng": 129.552, "lat": 35.986, "in_risk_area": False, "landslide_zone_m": None, "landslide_zone_name": None},
         {"id": 2, "name": "침수된 대피소", "shelter_types": [], "address": None, "capacity": None, "phone": None,
-         "is_indoor": False, "is_accessible": None, "lng": 129.556, "lat": 35.990, "in_risk_area": True, "landslide_g1_m": None}]
+         "is_indoor": False, "is_accessible": None, "lng": 129.556, "lat": 35.990, "in_risk_area": True, "landslide_zone_m": None, "landslide_zone_name": None}]
     fake_db.rows["FROM risk_assessments ra, (SELECT"] = [{
         "id": 7, "hazard": "heavy_rain", "level": "warning", "label": "호우경보", "rule_id": 2, "computed_at": now,
         "distance_m": 0, "source_distance_m": 0,
@@ -240,12 +240,12 @@ def test_chat_route_voice_removed_from_api(client):
 def test_shelter_unsuitable_for_landslide(client, fake_db):
     fake_db.rows["FROM shelters s"] = [
         {"id": 3, "name": "충혼탑 앞", "shelter_types": ["tsunami"], "address": None, "capacity": None, "phone": None,
-         "is_indoor": False, "is_accessible": None, "lng": 129.55, "lat": 35.99, "in_risk_area": False, "landslide_g1_m": 35},
+         "is_indoor": False, "is_accessible": None, "lng": 129.55, "lat": 35.99, "in_risk_area": False, "landslide_zone_m": 35, "landslide_zone_name": "구룡포읍 삼정리 산126-2임"},
         {"id": 4, "name": "구룡포항 앞", "shelter_types": ["tsunami"], "address": None, "capacity": None, "phone": None,
-         "is_indoor": False, "is_accessible": None, "lng": 129.56, "lat": 35.99, "in_risk_area": False, "landslide_g1_m": None}]
+         "is_indoor": False, "is_accessible": None, "lng": 129.56, "lat": 35.99, "in_risk_area": False, "landslide_zone_m": None, "landslide_zone_name": None}]
     f = client.get("/api/v1/dashboard/layers/shelters").json()["features"]
     assert f[0]["properties"]["unsuitable_for"] == ["landslide"]
-    assert f[0]["properties"]["unsuitable_reason"] == "산사태위험지도 1등급 비탈 35m"
+    assert f[0]["properties"]["unsuitable_reason"] == "산사태 취약지역 구룡포읍 삼정리 산126-2임 35m"
     assert f[1]["properties"]["unsuitable_for"] == [] and f[1]["properties"]["unsuitable_reason"] is None
 
 

@@ -18,22 +18,22 @@ from .mocks import iso
 CONSENT_VERSION = "v1"
 DEMO_PREFIX = "[시연] "             # /internal/simulate demo_households 가 만든 가상 가구 (실제 개인정보 아님)
 
-# landslide: 산사태위험지도 1등급 비탈 100m 안이면 그 거리, 아니면 지정 취약지역 이름, 아니면 1·2등급 100m 범위 여부
-#   (대피소 레이어 layers.SHELTERS_SQL 과 같은 방식 — 100m 범위로 먼저 거른 뒤에만 거리 계산)
+# landslide: 지정 산사태 취약지역 지점 100m 안이면 가장 가까운 곳의 이름·거리 (산사태 판정 범위와 같음,
+#   대피소 레이어 layers.SHELTERS_SQL 과 같은 방식. 산림청 위험지도는 2026-10-10 부터 사용 안 함)
 HOUSEHOLD_SQL = """
 SELECT h.id, h.label, h.address, ST_Y(h.geom) AS lat, ST_X(h.geom) AS lng, h.phone, h.members, h.needs,
        h.linked_user_id, h.caregiver_user_id, cu.nickname AS caregiver_nickname, h.source,
        h.consent_at, h.consent_method, h.consent_by, h.consent_version, h.note, h.active, h.updated_at,
-       (SELECT round(ST_Distance(h.geom::geography, g1.geom::geography))
-        FROM hazard_zones b JOIN hazard_zones g1 ON g1.hazard = 'landslide' AND g1.external_id = 'riskmap_g1'
-        WHERE b.hazard = 'landslide' AND b.external_id = 'riskmap_g1_buf100' AND ST_Intersects(b.geom, h.geom)) AS landslide_g1_m,
-       (SELECT z.name FROM hazard_zones z
-        WHERE z.hazard = 'landslide' AND COALESCE(z.meta->>'role', '') NOT IN ('trigger_area', 'display')
-          AND ST_Intersects(z.geom, h.geom) LIMIT 1) AS landslide_designated,
-       EXISTS (SELECT 1 FROM hazard_zones z WHERE z.hazard = 'landslide' AND z.external_id = 'riskmap_g12_buf100'
-               AND ST_Intersects(z.geom, h.geom)) AS landslide_g12
+       lz.name AS landslide_zone_name, lz.dist_m AS landslide_zone_m
 FROM care.households h
 LEFT JOIN users cu ON cu.id = h.caregiver_user_id
+LEFT JOIN LATERAL (
+  SELECT z.name, round(ST_Distance(h.geom::geography, ST_PointOnSurface(z.geom)::geography)) AS dist_m
+  FROM hazard_zones z
+  WHERE z.hazard = 'landslide' AND z.source_code = 'datagokr'
+    AND ST_DWithin(h.geom::geography, ST_PointOnSurface(z.geom)::geography, 100)
+  ORDER BY dist_m LIMIT 1
+) lz ON true
 WHERE {where}
 ORDER BY h.label, h.id
 """
@@ -42,13 +42,10 @@ VISIBLE = "(%(cg)s::uuid IS NULL OR h.caregiver_user_id = %(cg)s::uuid)"
 
 
 def landslide_label(r: dict) -> Optional[str]:
-    if r.get("landslide_g1_m") is not None:
-        return f"산사태위험지도 1등급 비탈 {int(r['landslide_g1_m'])}m"
-    if r.get("landslide_designated"):
-        return f"산사태 취약지역 ({r['landslide_designated']})"
-    if r.get("landslide_g12"):
-        return "산사태위험지도 1·2등급 비탈 100m 이내"
-    return None
+    if r.get("landslide_zone_m") is None:
+        return None
+    name = f" ({r['landslide_zone_name']})" if r.get("landslide_zone_name") else ""
+    return f"산사태 취약지역{name} {int(r['landslide_zone_m'])}m"
 
 
 def household_out(r: dict) -> dict:

@@ -57,21 +57,19 @@ INSERT INTO risk_rules (id, hazard, level, label, metric, operator, threshold, t
 --   호주 빅토리아주 SES "15cm of water is enough for a vehicle to start to float" (포항 DT 등급 기준은 파일 끝 21~28번)
   (9, 'flood', 'advisory', '침수 발생', 'flood_depth', '>=', 150, NULL, NULL,
    '{"station_kind":"road_flood","unit":"mm","buffer_m":150,"note":"영향 범위 = 수위계 반경 150m"}', '도시침수 예보 노면수위 15cm 기준(한강홍수통제소, 도시하천유역 침수피해방지대책법) / 포항 디지털 트윈 지표면 수위계'),
--- 산사태 (2026-10-02 개편): 호우 특보 단계 x (산림청 산사태위험지도 등급 비탈 100m 이내 OR 지정 취약지역 100m 이내)
---   주의(10) = 호우주의보 + 1등급 비탈 100m (riskmap_g1_buf100), 경고(11) = 호우경보 + 1·2등급 비탈 100m (riskmap_g12_buf100)
---   등급: 산림청 산사태위험판정기준표(산림보호법 시행규칙 별표1) — 1등급 180점 이상 '집중강우 시' 발생 확률 대단히 높음,
---         2등급 120~180점 '폭우 시' 쉽게 무너질 수 있음 → 주의보↔1등급, 경보↔1·2등급 으로 연결 (등급 정의의 강우 조건에 맞춘 자체 설계)
+-- 산사태 (2026-10-10 개편, 사용자 결정): 기상청 호우특보 발효 x 지정 산사태 취약지역(03_seed) 지점 반경 100m
+--   주의(10) = 포항시 호우주의보 발효 중, 경고(11) = 포항시 호우경보 발효 중 (weather_warnings, 예비특보 제외)
+--   → 그 100m 원 안에 현재 위치·알림 켠 등록 장소가 있는 사용자에게 경고 (alerts/dispatch)
 --   100m 근거: 김경수 외(2006), "자연사면에서 발생된 토석류산사태의 기하양상", KIGAM
 --     (https://data.kigam.re.kr/ieg/cmmn/downloadFile.do?fileName=Y3061006.PDF) — 구룡포와 같은 제3기퇴적암류(포항) 지역
 --     산사태 진행방향 길이 평균 36m, 91%가 60m 이내. 주의·경고 모두 같은 100m (흘러내리는 거리는 지형으로 정해짐)
---   위험지도 폴리곤: 09_seed_landslide_riskmap.sql (생활안전지도 IF_0046_WMS, 격자 1칸짜리 고립 조각 제외)
---   산림청 산사태예측정보 API 는 2012~2026 이력에 포항 0건 → 사용하지 않음 (단계는 기상청 호우특보)
+--   산림청 산사태위험지도(WMS)·산사태예측정보 API 는 사용하지 않음 (위험지도 행은 09_remove_landslide_riskmap.sql 이 삭제)
   (10, 'landslide', 'advisory', '산사태 주의', NULL, 'composite', NULL, NULL, NULL,
-   '{"all":[{"risk":"heavy_rain","min_level":"advisory"},{"within":"hazard_zones.landslide","buffer_m":100,"riskmap_area":"riskmap_g1_buf100"}]}',
-   '기상청 호우특보 + 산림청 산사태위험지도 1등급 100m / 지정 취약지역 100m · 100m 근거 KIGAM 김경수 외(2006)'),
+   '{"all":[{"warning":"heavy_rain","min_level":"advisory"},{"within":"hazard_zones.landslide","buffer_m":100}]}',
+   '기상청 호우주의보(포항시) + 지정 산사태 취약지역 100m · 100m 근거 KIGAM 김경수 외(2006)'),
   (11, 'landslide', 'warning',  '산사태 경고', NULL, 'composite', NULL, NULL, NULL,
-   '{"all":[{"risk":"heavy_rain","min_level":"warning"},{"within":"hazard_zones.landslide","buffer_m":100,"riskmap_area":"riskmap_g12_buf100"}]}',
-   '기상청 호우특보 + 산림청 산사태위험지도 1·2등급 100m / 지정 취약지역 100m · 100m 근거 KIGAM 김경수 외(2006)'),
+   '{"all":[{"warning":"heavy_rain","min_level":"warning"},{"within":"hazard_zones.landslide","buffer_m":100}]}',
+   '기상청 호우경보(포항시) + 지정 산사태 취약지역 100m · 100m 근거 KIGAM 김경수 외(2006)'),
 -- 미세먼지 · 초미세먼지 (포항 DT 대기환경 측정기 24대, 원천 측정 시각 60분 이내 값만 사용)
 --   advisory/warning = 대기환경보전법 경보 발령기준 (시간평균 농도 2시간 이상 지속 → DUST_SUSTAINED_SQL)
   (12, 'fine_dust',      'advisory', '미세먼지 주의보',   'pm10', '>=',      150, NULL, 120,  '{"max_age_min":60,"buffer_m":300,"agg":"hourly_avg"}', '대기환경보전법 시행규칙 (경보 발령기준)'),

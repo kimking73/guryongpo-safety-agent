@@ -225,9 +225,9 @@ def test_households_end_to_end(real_db):
 
         # 시연 가구 → 모의 침수 → 대피 상황 대상에 가구가 들어감
         res = simulate.apply("demo_households")
-        assert res["households"] == len(simulate.DEMO_HOUSEHOLDS) + 1   # + 산사태 비탈 가구
+        assert res["households"] == len(simulate.DEMO_HOUSEHOLDS) + 1   # + 산사태 취약지역 가구
         demo = [x for x in c.get("/api/v1/admin/households", headers=staff, params={"q": "[시연]"}).json()]
-        assert len(demo) == len(simulate.DEMO_HOUSEHOLDS) + 1 and any((x["landslide_zone"] or "").startswith("산사태위험지도 1등급") for x in demo)
+        assert len(demo) == len(simulate.DEMO_HOUSEHOLDS) + 1 and any((x["landslide_zone"] or "").startswith("산사태 취약지역") for x in demo)
         simulate.apply("heavy_rain_flood")
         flood = next(i for i in c.get("/api/v1/admin/incidents", headers=staff).json() if i["hazard"] == "flood")
         labels = {t["label"] for t in c.get(f"/api/v1/admin/incidents/{flood['id']}", headers=staff).json()["targets"]}

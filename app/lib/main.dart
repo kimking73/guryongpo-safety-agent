@@ -721,6 +721,30 @@ class GuryongpoApp extends StatelessWidget {
 /// 로그인 준비 없이 서버를 불러 '로그인 정보를 확인하지 못했습니다'가 나므로 먼저 /boot 를 거치게 한다 (2026-10-05)
 bool appBooted = false;
 
+/// 메뉴(대시보드·AI 대화창·방재단 현황·사용자 …) 사이 이동을 깔끔하게 (2026-10-10 사용자 요청).
+/// 기기 기본 전환은 탭 이동에 맞지 않는다 — 아이폰·맥 브라우저는 새 화면이 옆에서 밀려 들어오고, 그 밖은 확대되며 들어온다.
+/// 머리줄·메뉴는 그대로 두고 안쪽 화면만: 이전 화면은 바로 가려지고 새 화면이 짧게 떠오른다.
+/// 이전 화면은 새 화면의 전환이 끝날 때까지 아래에 남아 있다(Navigator 동작) — 새 화면만 투명하게 떠오르면 그동안 이전 화면이
+/// 비쳐 잔상처럼 보였다. 그래서 화면 바탕색을 처음부터 불투명하게 깔고 그 위에서 내용만 떠오르게 한다.
+const menuFadeDuration = Duration(milliseconds: 120);
+
+List<RouteBase> _menuRoutes(List<GoRoute> routes) => [
+      for (final r in routes)
+        GoRoute(
+            path: r.path,
+            name: r.name,
+            redirect: r.redirect,
+            routes: r.routes,
+            pageBuilder: (context, state) => CustomTransitionPage<void>(
+                key: state.pageKey,
+                child: r.builder!(context, state),
+                transitionDuration: menuFadeDuration,
+                reverseTransitionDuration: Duration.zero,
+                transitionsBuilder: (context, animation, __, child) => ColoredBox(
+                    color: Theme.of(context).scaffoldBackgroundColor,
+                    child: FadeTransition(opacity: CurveTween(curve: Curves.easeOut).animate(animation), child: child)))),
+    ];
+
 final appRouter = GoRouter(
     initialLocation: '/boot',
     refreshListenable: AuthService.changes,
@@ -760,7 +784,7 @@ final appRouter = GoRouter(
   GoRoute(path: '/setup', builder: (_, s) => m.SetupScreen(from: s.uri.queryParameters['from'])),
   GoRoute(path: '/sos', builder: (_, __) => const m.SosScreen()),
   GoRoute(path: '/location', builder: (_, __) => const InitialSetupScreen()),
-  ShellRoute(builder: (_, __, child) => useMobileUi ? m.MShell(child: child) : Shell(child: child), routes: [
+  ShellRoute(builder: (_, __, child) => useMobileUi ? m.MShell(child: child) : Shell(child: child), routes: _menuRoutes([
     GoRoute(path: '/', builder: (_, __) => useMobileUi ? const m.MDashboard() : const Dashboard()),
     GoRoute(path: '/map', builder: (_, __) => const FacilitiesScreen()),
     GoRoute(path: '/alerts', builder: (_, __) => const AlertsScreen()),
@@ -818,7 +842,7 @@ final appRouter = GoRouter(
         path: '/sea-route',
         builder: (_, __) => const DemoSwitch(
             demo: SeaRouteDemoScreen(), live: LiveSeaRouteScreen())),
-  ]),
+  ])),
   GoRoute(
       path: '/facility/:id',
       builder: (_, s) => FacilityScreen(id: s.pathParameters['id']!)),

@@ -452,13 +452,13 @@ paths:
             유효 시간(수위계 40·대기 60·자외선 90·AWS 30분)을 넘으면 `stale=true` → 앱은 회색·"오래된 자료"
         - shelters: { id, name, shelter_types, address, capacity, phone, is_indoor, is_accessible, in_risk_area, unsuitable_for, unsuitable_reason }
           — in_risk_area = 대피소가 현재 주의 이상 위험 영역 안 (안내에서 제외)
-          — unsuitable_for = 그 재난 때 권하지 않음. 지금은 ["landslide"] 만: 산사태위험지도 1등급 비탈 100m 안 (예 "1등급 비탈 35m")
+          — unsuitable_for = 그 재난 때 권하지 않음. 지금은 ["landslide"] 만: 지정 산사태 취약지역 지점 100m 안 (예 "산사태 취약지역 구룡포읍 삼정리 산126-2임 35m")
         - medical: { id, name, kind, address, phone, er_phone, emergency_class, er } — er = { beds, ambulance, observed_at, stale } 응급실 가용병상
           (국립중앙의료원, 10분 수집, 40분 지나면 stale). 구룡포 안에 응급의료기관이 없어 bbox 생략 시 포항 전체
         - manholes: { id, kind(smart = 포항 DT 스마트맨홀), name, source }
         - landslide_zones: { name, hazard, grade, kind, reason, area_m2, shelter_distance_m }
-          — kind = riskmap (산림청 산사태위험지도 1·2등급, 지도 표시용) | designated (지정 산사태 취약지역, reason = 지정사유)
-          — 판정용 100m 범위(riskmap_g1_buf100 등)는 이 레이어에 나오지 않고, 판정되면 risk_areas 로 보임
+          — kind = designated (지정 산사태 취약지역, reason = 지정사유). 산림청 산사태위험지도는 2026-10-10 부터 사용 안 함
+          — 판정용 100m 범위는 이 레이어에 나오지 않고, 기상청 호우특보가 발효되면 risk_areas 로 보임
         - risk_areas: /risk/areas 와 같음
         위험지역 고정 영역은 산사태만 (침수·해안 고정 영역 없음 — 침수는 실시간 판정 영역 risk_areas)
         flood_grid: 현재 침수 위험 판정 영역을 격자로 나눈 GeoJSON. 판정 영역 밖은 응답하지 않으며 관측을 미확인 셀까지 확장하지 않음.
@@ -979,7 +979,7 @@ paths:
         모의 관측값(observations.quality='simulated')을 넣고 즉시 판정. 모의값은 6시간 동안 실측보다 우선하고 clear 로 지운다.
         구현된 시나리오: heavy_rain_flood, clear. 새 시나리오를 만들면 이 목록에 추가한다.
         demo_households (A13): 시연용 가상 취약 가구 5곳 등록(표시명 "[시연] …", 실제 개인정보 아님, 다시 실행하면 교체) —
-        침수 경보 영역 2곳·산사태위험지도 1등급 비탈 1곳 포함. demo_households_clear 로 삭제 (clear 는 가구를 지우지 않음).
+        침수 경보 영역 2곳·산사태 취약지역 100m 안 1곳 포함. demo_households_clear 로 삭제 (clear 는 가구를 지우지 않음).
         A12 이후: 위험 영역이 생기면 대피 상황(source=simulated)과 대피 확인 경고도 함께 만들어진다.
       responses:
         '202': { description: '적용됨 — 응답 필드 scenario, accepted, observations, assessments, risk_run' }
@@ -1443,7 +1443,7 @@ components:
             location: { $ref: '#/components/schemas/LatLng' }
             in_hazard_zones:
               type: array
-              description: 이 장소가 포함된 정적 위험지역 (지금은 산사태만 — 위험지도 1·2등급 100m·지정 취약지역)
+              description: 이 장소가 포함된 정적 위험지역 (지금은 산사태만 — 지정 산사태 취약지역 지점 100m 안)
               items: { $ref: '#/components/schemas/Hazard' }
     EmergencyContact:
       type: object
@@ -1551,7 +1551,7 @@ components:
         distance_m: { type: number, description: 요청 좌표 기준 직선거리 }
         in_risk_area: { type: boolean, description: 대피소 자체가 현재 위험 영역 안이면 true (안내 대상에서 제외됨) }
         unsuitable_for: { type: array, items: { $ref: '#/components/schemas/Hazard' }, description: '이 재난 때는 권하지 않음 (지금은 landslide 만)' }
-        unsuitable_reason: { type: [string, 'null'], examples: ['산사태위험지도 1등급 비탈 35m'] }
+        unsuitable_reason: { type: [string, 'null'], examples: ['산사태 취약지역 구룡포읍 삼정리 산126-2임 35m'] }
     FeatureCollection:
       type: object
       required: [type, features]
@@ -1756,7 +1756,7 @@ components:
             method: { type: string, enum: [app, written, verbal] }
             by: { type: string, description: '본인 / 보호자 김OO 등' }
             version: { type: string, examples: [v1], description: '동의서 버전 (A13). 동의 문구가 바뀌면 올라가고, 이전 버전 가구는 재동의 대상' }
-        landslide_zone: { type: [string, 'null'], description: '산사태 취약지역·위험지도 1·2등급 100m 안이면 그 이름 (우선순위 근거)' }
+        landslide_zone: { type: [string, 'null'], description: '지정 산사태 취약지역 지점 100m 안이면 "산사태 취약지역 (이름) 거리m" (우선순위 근거)' }
         note: { type: [string, 'null'], description: '방문 참고 (출입 방법 등). 진단명 등 의료정보는 적지 않는다' }
         active: { type: boolean, description: 'false 면 목록·대피 대상에서 빠짐 (PATCH active)' }
         updated_at: { type: string, format: date-time }

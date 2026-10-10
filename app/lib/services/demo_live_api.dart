@@ -22,11 +22,11 @@ class DemoLiveApi extends LiveApi {
     _h(3, '구룡포리 청각장애 주민 댁', '구룡포읍 구룡포리 (가상 주소)', 35.9881, 129.5536, 1, ['hearing'],
         note: '청각 — 문자보다 방문 확인 우선'),
     _h(4, '병포리 시각장애 어르신 댁', '구룡포읍 병포리 (가상 주소)', 35.9822, 129.5455, 2, ['elderly', 'vision'],
-        caregiver: '생활지원사 (가상)', landslide: '산사태위험지도 2등급 비탈 60m'),
+        caregiver: '생활지원사 (가상)', landslide: '산사태 취약지역 (구평리 산172임) 60m'),
     _h(5, '하정리 청각장애 어르신 댁', '구룡포읍 하정리 (가상 주소)', 35.9928, 129.5602, 2, ['elderly', 'hearing'],
         note: '보청기 사용 — 문을 크게 두드려 주세요'),
     _h(6, '석병리 해안 시각장애 주민 댁', '구룡포읍 석병리 (가상 주소)', 35.9649, 129.5684, 1, ['vision'],
-        landslide: '산사태위험지도 1등급 비탈 40m', hasApp: true, source: 'self'),
+        landslide: '산사태 취약지역 (병포리 산1-2임) 40m', hasApp: true, source: 'self'),
   ];
   /// 서버 시연 가구를 쓸 때도 이만큼만 보여 준다
   static const maxDemoHouseholds = 6;

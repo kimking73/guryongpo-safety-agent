@@ -17,7 +17,7 @@ HH_ROW = {"id": HID, "label": "삼정리 김OO 어르신 댁", "address": "구�
           "members": 1, "needs": ["elderly", "living_alone"], "linked_user_id": None, "caregiver_user_id": CG_ID,
           "caregiver_nickname": "생활지원사 박OO", "source": "caregiver", "consent_at": NOW, "consent_method": "written",
           "consent_by": "본인", "consent_version": "v1", "note": None, "active": True, "updated_at": NOW,
-          "landslide_g1_m": 40, "landslide_designated": None, "landslide_g12": True}
+          "landslide_zone_m": 40, "landslide_zone_name": "병포리 산1-2임"}
 HH_KEY = "FROM care.households h\nLEFT JOIN users cu"
 
 
@@ -28,9 +28,9 @@ def _user(fake_db):
 
 # ------------------------------------------------------------------ 표시
 @pytest.mark.parametrize("row,label", [
-    ({"landslide_g1_m": 40}, "산사태위험지도 1등급 비탈 40m"),
-    ({"landslide_designated": "병포리 산1-2임"}, "산사태 취약지역 (병포리 산1-2임)"),
-    ({"landslide_g12": True}, "산사태위험지도 1·2등급 비탈 100m 이내"),
+    ({"landslide_zone_m": 40, "landslide_zone_name": "병포리 산1-2임"}, "산사태 취약지역 (병포리 산1-2임) 40m"),
+    ({"landslide_zone_m": 0, "landslide_zone_name": None}, "산사태 취약지역 0m"),
+    ({"landslide_zone_m": None, "landslide_zone_name": "병포리 산1-2임"}, None),
     ({}, None),
 ])
 def test_landslide_label(row, label):
@@ -87,7 +87,7 @@ def test_admin_households_list_and_detail(client, fake_db):
          "note": None, "responder_id": STAFF_ID, "responder_nickname": "방재단 김OO"}]
     lst = client.get("/api/v1/admin/households", headers=STAFF, params={"needs": "living_alone", "q": "삼정리"}).json()
     assert_spec(lst, "/admin/households")
-    assert lst[0]["landslide_zone"] == "산사태위험지도 1등급 비탈 40m" and lst[0]["caregiver"]["nickname"] == "생활지원사 박OO"
+    assert lst[0]["landslide_zone"] == "산사태 취약지역 (병포리 산1-2임) 40m" and lst[0]["caregiver"]["nickname"] == "생활지원사 박OO"
     d = client.get(f"/api/v1/admin/households/{HID}", headers=STAFF).json()
     assert_spec(d, "/admin/households/{household_id}")
     assert d["recent_visits"][0]["result"] == "not_home"

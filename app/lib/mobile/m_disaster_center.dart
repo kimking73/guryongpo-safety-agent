@@ -3241,7 +3241,7 @@ void _showMapLegend(BuildContext context,
               row(fill(Colors.white, border: _hazardColor(HazardKind.flood)),
                   '파란 테두리 = 침수', '수위계·맨홀 주변 반경 100~500m'),
               row(fill(Colors.white, border: _hazardColor(HazardKind.slide)),
-                  '갈색 테두리 = 산사태', '호우 특보 × 산사태위험지도 비탈 100m·지정 취약지역'),
+                  '갈색 테두리 = 산사태', '호우 특보 × 산사태 취약지역 100m'),
               if (hidesTownWide)
                 row(icon(Icons.visibility_off_outlined, Colors.black54),
                     '호우·강풍 특보는 칠하지 않음',
