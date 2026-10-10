@@ -152,7 +152,8 @@ def make_client() -> OpenAI:
     timeout_ms = int(os.environ.get("OPENAI_TIMEOUT_MS") or DEFAULT_TIMEOUT_MS)
     # 응답 대기 한도. 넘으면 예외가 나고 호출한 노드가 규칙 대체(키워드 분류·템플릿 문장 등)로 넘어간다.
     # SDK 기본 재시도(2회)는 한도를 몇 배로 늘리므로 끈다 — 실패하면 바로 대체.
-    return OpenAI(api_key=api_key, timeout=timeout_ms / 1000, max_retries=0)
+    from .tracing import wrap_client   # LangSmith 추적을 켰을 때만 감싼다 (tracing.py)
+    return wrap_client(OpenAI(api_key=api_key, timeout=timeout_ms / 1000, max_retries=0))
 
 
 class OpenAIClassifier:

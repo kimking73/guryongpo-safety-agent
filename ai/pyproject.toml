@@ -5,6 +5,8 @@ description = "구룡가디언 AI agent (LangGraph multi-agent)"
 requires-python = ">=3.11"
 dependencies = [
     "langgraph>=1.0",
+    # LangSmith 추적 (선택, guardian_ai/tracing.py). langgraph가 이미 끌어오지만 직접 import하므로 적는다
+    "langsmith>=0.3",
     "pydantic>=2.7",
     "openai>=3.22",
     "fastapi>=0.115",
