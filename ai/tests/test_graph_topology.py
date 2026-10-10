@@ -44,10 +44,21 @@ def test_chat_runs_only_selected_specialists_and_merges():
     assert final["final_answer"] and not final["used_fallback"]
 
 
-def test_no_specialist_goes_straight_to_advisor():
+def test_no_specialist_gets_direct_reply_without_advisor_or_checks():
+    """인사처럼 전문 agent가 필요 없는 말: 행동 권고·검증을 거치지 않고 서비스 안내만 (위험 여부를 말하지 않는다)."""
     final, visited = run(G.build_graph(), chat("안녕하세요"))
-    assert not any(n in G.SPECIALISTS for n in visited)
-    assert final["final_answer"] == "현재 확인된 위험 없음"
+    assert visited == [G.MANAGER, G.DIRECT_REPLY]
+    assert final["final_answer"] == G.SERVICE_INTRO and not final["used_fallback"]
+    assert "위험" not in final["final_answer"]
+
+
+def test_alert_without_agents_still_goes_to_advisor():
+    """alert 모드는 질문이 없다 — 고를 agent가 없어도 예전처럼 행동 권고로."""
+    g = G.build_graph({G.MANAGER: lambda s: {"selected_agents": [], "specialist_results": G.RESET, "checks": G.RESET}})
+    final, visited = run(g, {"mode": "alert", "user": USER, "risk_event": RiskEvent(
+        disaster=DisasterType.FLOOD, level=RiskLevel.WARNING, location=Location(lat=35.99, lon=129.56),
+        issued_at=datetime(2026, 10, 10))})
+    assert G.ACTION_ADVISOR in visited and G.DIRECT_REPLY not in visited
 
 
 def test_failed_check_retries_then_falls_back():

@@ -68,37 +68,23 @@ def test_calm_info_question_has_no_advice(make_service):
     assert res.decision_path == "평시 > 정보 안내" and res.follow_up is None and "지금 할 일" not in res.answer
 
 
-def test_calm_preparation_asks_dependents(make_service):
+def test_calm_preparation_gives_checklist_without_asking_dependents(make_service):
     res = ask(make_service(Phase.NONE), "태풍 대비는 어떻게 해야 해?")
-    assert res.decision_path == "평시(대비) > 사용자 정보 확인"
-    assert res.follow_up == A.QUESTIONS["dependents"] and res.answer.endswith(A.QUESTIONS["dependents"])
+    assert res.decision_path == "평시(대비) > 체크리스트" and res.follow_up is None
     assert "지금 할 일" in res.answer
 
 
-def test_before_with_known_dependents_gives_checklist(make_service):
-    res = ask(make_service(Phase.BEFORE), "태풍이 온다는데 뭘 준비해야 해?", profile(age=40, has_dependents=False))
+def test_before_gives_checklist(make_service):
+    res = ask(make_service(Phase.BEFORE), "태풍이 온다는데 뭘 준비해야 해?", profile(age=40))
     assert res.decision_path == "재난 전 > 체크리스트" and res.follow_up is None and "지금 할 일" in res.answer
 
 
-def test_dependents_answer_continues_to_checklist(make_service):
-    """질문 → 사용자 답 → 서버 프로필 반영 → 다음 질문에서 체크리스트 (대화형 분기). 서버 프로필은 가짜(test_memory.FakeWriter)"""
-    from test_memory import FakeWriter
-    svc = make_service(Phase.BEFORE)
-    svc.writer = FakeWriter()
-    svc.user_source = svc.writer.source
-    uid = f"tree-{uuid.uuid4().hex[:8]}"
-    first = ask(svc, "태풍 오기 전에 뭘 해야 해?", UserProfile(user_id=uid, age=40), remember=True, user_id=uid)
-    assert first.follow_up == A.QUESTIONS["dependents"]
-    ask(svc, "아니요, 혼자 살아서 함께 대피할 가족은 없어요.", UserProfile(user_id=uid, age=40),
-        conversation_id=first.conversation_id, remember=True, user_id=uid)
-    for _ in range(30):                                          # 프로필 반영은 답변 뒤 백그라운드
-        if any("has_dependents" in fields for _, fields in svc.writer.calls):
-            break
-        time.sleep(1)
-    svc.writer.profile["has_dependents"] = False                 # 가짜 서버: 받은 값을 프로필에 (FakeWriter 는 보행만 흉내)
-    third = ask(svc, "그럼 태풍 준비는 뭘 하면 돼?", UserProfile(user_id=uid, age=40),
-                conversation_id=first.conversation_id, remember=True, user_id=uid)
-    assert third.decision_path == "재난 전 > 체크리스트", f"동반자 답이 반영되지 않음: {svc.writer.calls}"
+def test_user_info_only_statement_is_confirmed_without_risk_or_checklist(make_service):
+    """자기 정보만 말하면 들은 내용만 확인 — 위험 여부·할 일·agent 없음 (2026-10-10)."""
+    res = ask(make_service(Phase.DURING), "저는 72살이고 어업을 하고 있어요")
+    assert res.selected_agents == [] and res.decision_path == "" and res.follow_up is None
+    assert "72" in res.answer and "지금 할 일" not in res.answer and "위험" not in res.answer and res.card is None
+
 
 
 # --- 재난 중 ---------------------------------------------------------------------

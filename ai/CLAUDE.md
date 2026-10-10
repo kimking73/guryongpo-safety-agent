@@ -4,7 +4,7 @@
 1. Read `.claude/docs/timeline.md` → status table, "다음 세션 시작점", "이월 항목", work log.
 2. From `코드/`: `git pull` (teammates push to `main`), then `docker compose up -d` and `docker compose ps`
    (db, api, ai all healthy). If `.env` changed since the ai container started: `docker compose up -d --force-recreate ai`.
-3. Baseline tests: `.venv/bin/python -m pytest -q` → **208 passed** (2026-10-08). `-m "db and not live"` needs local db + `AI_DB_*`
+3. Baseline tests: `.venv/bin/python -m pytest -q` → **213 passed** (2026-10-10). `-m "db and not live"` needs local db + `AI_DB_*`
    in `.env` (plain `-m db` also runs paid live tests). `-m live` calls real OpenAI (routing, B3 injection, extractor; a few 원).
    If `docker compose ps` hangs, restart the OrbStack app (happened 2026-10-08); VM checks still work.
    Other lanes' baselines: server 220 passed·8 skipped, route 76, app 101 with 7 known failures (see timeline "다음 세션 시작점";
@@ -56,7 +56,11 @@
   `ActionPlan.evidence` for the checker; `call_emergency` rule (D3); `decide_phase` (before/during/after 24 h/none) via
   `make_manager(phase_of=…)`. The advisor follows the user's decision tree (`action.decide`, agent-design.md 4절):
   phase → danger (`hazards_at`) → can_move / damage (classifier fields from the conversation, keyword fallback) → 119 /
-  shelter route / one follow-up question; response `decision_path`, `follow_up`. Forecasts: `tools.get_forecast` (KMA
+  shelter route / one follow-up question; response `decision_path`, `follow_up`. Since 2026-10-10 (user decision): the to-do list
+  is attached only when the user asked for action/preparation/evacuation (classifier `wants_action`) or the location is in the
+  danger branch / 119 / alert mode — otherwise situation only (`재난 중 > 정보 안내`); the dependents follow-up question is gone;
+  no agent selected in chat → `graph.direct_reply` (service intro, or "알려 주신 내용(…)" echo of classifier `user_info`) and END,
+  never the advisor's "현재 확인된 위험 없음". Answer style rules: `llm.STYLE_RULES` (conclusion first, 1–2 numbers). Forecasts: `tools.get_forecast` (KMA
   ultra-short + short, evidence named 오늘/내일/모레). Default graph (tests) uses no-DB advisor and phase 'during'.
   `ChatService()` wires the real nodes; `DEFAULT_NODES`/`ChatService(classifier=…)` stay offline for tests.
 - B5 (2026-10-03, in progress — only the real Google voice round trip is left, waiting for `secrets/gcp-voice.json`):

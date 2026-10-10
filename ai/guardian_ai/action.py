@@ -113,7 +113,7 @@ def pick_guides(results: list[SpecialistResult], phase: Phase, user: UserProfile
 
 
 # --- 판단 로직 (사용자 정의 트리, 2026-10-03) --------------------------------------------
-# 재난 전: 대비 행동요령 + 예보 → 필요한 사용자 정보(동반자) 조사 → 체크리스트
+# 재난 전: 대비 행동요령 + 예보 → 체크리스트 (동반자 되묻기는 2026-10-10 삭제)
 # 재난 중: 행동요령 → 위험 정도(위치 × 위험 영역) → 안전: 행동요령·실시간 정보 / 위험 지역: 이동 가능?
 #          → 불가: 119 구조 요청(맨 앞) / 가능: 대피소 경로
 # 재난 후: 행동요령 → 피해 유무(대화) → 없음: 실시간 현황 / 있음: 실시간 현황·임시 거주지·주의사항·보험·법률
@@ -122,8 +122,9 @@ def pick_guides(results: list[SpecialistResult], phase: Phase, user: UserProfile
 # 평시에 행동 권고를 붙일 질문 (대비·행동을 묻는 말). 재난 전·중·후에는 항상 붙인다
 ACTION_WORDS = ("어떻게", "뭘 해", "무엇을 해", "해야", "대비", "준비", "대피", "피해야", "조심", "주의", "할 일", "행동")
 
+PHASE_LABEL = {Phase.NONE: "평시", Phase.BEFORE: "재난 전", Phase.DURING: "재난 중", Phase.AFTER: "재난 후"}
+
 QUESTIONS = {
-    "dependents": "함께 대피해야 할 어린이·어르신이나 거동이 불편한 가족이 있나요?",
     "can_move": "지금 스스로 안전한 곳까지 이동하실 수 있나요?",
     "damage": "집이나 건물에 침수·파손 같은 피해가 있나요?",
 }
@@ -152,13 +153,8 @@ def decide(state: GuardianState, fetch: Fetch | None = None, use_data: bool = Tr
     user = state.get("user")
 
     if phase in (Phase.BEFORE, Phase.NONE):
-        d = Decision(path=["재난 전" if phase == Phase.BEFORE else "평시(대비)"], guide_phase=Phase.BEFORE)
-        if user is None or user.has_dependents is None:
-            d.path.append("사용자 정보 확인")
-            d.question = QUESTIONS["dependents"]
-        else:
-            d.path.append("체크리스트")
-        return d
+        # 동반자 여부 되묻기는 없앴다 (2026-10-10 사용자 결정 — 10-09부터 동반자 정보를 저장하지 않아 매번 다시 물었다)
+        return Decision(path=["재난 전" if phase == Phase.BEFORE else "평시(대비)", "체크리스트"], guide_phase=Phase.BEFORE)
 
     if phase == Phase.AFTER:
         d = Decision(path=["재난 후"], guide_phase=Phase.AFTER,
@@ -296,11 +292,17 @@ def make_action_advisor(writer: ActionWriter | None = None, fetch: Fetch | None 
             # 지원·복구만 물은 질문 (2026-10-08): 판단 로직(동반자·피해 되묻기)을 타지 않고 제도 안내로 끝낸다
             plan = ActionPlan(phase=phase, risk_level=RiskLevel.NORMAL, steps=[], decision_path=["지원·복구", "정보 안내"])
             return {"action_plan": plan, "draft": "\n\n".join(parts)}
-        if phase == Phase.NONE and not any(w in (state.get("question") or "") for w in ACTION_WORDS):
-            # 평시에 정보만 묻는 질문("내일 비 와?")에는 행동 권고·질문을 붙이지 않는다
-            plan = ActionPlan(phase=phase, risk_level=RiskLevel.NORMAL, steps=[], decision_path=["평시", "정보 안내"])
-            return {"action_plan": plan, "draft": "\n\n".join(parts)}
+        # '지금 할 일'은 사용자가 행동·대비·대피를 물었거나 현재 위치가 위험 지역일 때만 붙인다 (2026-10-10 사용자 결정).
+        # wants_action: 분류기가 본 값. None(규칙 대체·기본 그래프)이면 예전 규칙 — 평시는 행동을 묻는 말이 있을 때만, 그 밖엔 항상
+        asked = state.get("wants_action")
+        if asked is None:
+            asked = phase != Phase.NONE or any(w in (state.get("question") or "") for w in ACTION_WORDS)
         decision = decide(state, fetch=fetch, use_data=use_guides)
+        if not (asked or state.get("mode") == "alert" or "위험 지역" in decision.path or decision.emergency):
+            # 상황만 물은 질문("비 얼마나 와?", "내일 비 와?"): 행동 권고·되묻기 없이 상황 설명만
+            plan = ActionPlan(phase=phase, risk_level=RiskLevel.NORMAL, steps=[],
+                              decision_path=[PHASE_LABEL[phase], "정보 안내"])
+            return {"action_plan": plan, "draft": compose_summaries(results)}
         if any(r.agent == Specialist.RECOVERY_SUPPORT for r in results):
             # 보험·복구 제도는 지원·복구 agent가 DB로 안내한다 → '확인되지 않음' 메모를 빼 서로 어긋나지 않게
             decision.notes = [n for n in decision.notes if n.key != "보험·법률 정보"]

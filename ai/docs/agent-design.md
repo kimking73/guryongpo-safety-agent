@@ -15,7 +15,8 @@ flowchart TD
     EV([Risk engine 경고 · alert 모드]) --> M
     M[관리자 agent<br/>재난 단계 판정 · agent 선택]
     M -. 선택된 것만 병렬 .-> L[산사태] & R[강수·침수] & W[강풍·태풍] & S[생활안전] & P[위치·경로] & RS[지원·복구]
-    M -. 선택 없음 .-> A
+    M -. 선택 없음 (chat) .-> D[바로 답하기<br/>인사 안내 · 들은 정보 확인] --> OUT0([최종 답변])
+    M -. 선택 없음 (alert) .-> A
     L & R & W & S & P & RS --> A[행동 권고 agent<br/>규칙 트리 + 문장화]
     A -. chat .-> I[사용자 의도 검증]
     A --> H[환각 검증]
@@ -38,7 +39,7 @@ flowchart TD
 | 루프 1 한도 초과 시 fallback 답변 | 검증 못 한 답을 내보내지 않음 |
 | 루프 2 한도 초과 시 다듬기 전 초안 반환 | 이미 검증된 내용이므로 형식만 포기 |
 | alert 모드 추가 (의도 검증 생략) | 선제 경고(A5)를 같은 그래프로 생성. 사용자 질문이 없어 의도 검증 불필요 |
-| 선택된 agent가 없으면 행동 권고로 직행 | 인사·일반 질문의 빠른 경로 |
+| 선택된 agent가 없으면 `direct_reply`로 끝 (2026-10-10, 예전엔 행동 권고로 직행) | 인사·자기 정보만 말한 경우 — 행동 권고가 "현재 확인된 위험 없음"이라고 답해 경보 중에도 틀린 위험 판단처럼 보였다. 수치·사실을 말하지 않으므로 검증·다듬기도 생략. alert 모드는 예전처럼 행동 권고 |
 
 ## 2. 노드
 
@@ -51,6 +52,7 @@ flowchart TD
 | `life_safety_agent` | 미세먼지·자외선 등급 (행동요령은 행동 권고가 원문으로) | current_location | specialist_results | get_life_safety | O |
 | `location_route_agent` | 위치 기반 경고, 대피소까지 안전 경로 (바다 위면 항구 경유) | user, current_location | specialist_results (route 포함) | get_risk_at, get_facilities, request_route, request_sea_route | O |
 | `recovery_support_agent` | 보험·피해 신고·복구 지원 제도를 [공통 보험]·[공통 피해 신고·복구]·[내 직업 지원·복구]로 안내 (2026-10-08, `recovery.py`). 직업 = 서버 프로필, 질문에 재난이 있으면 그 재난 제도만, DB에 없으면 "등록된 제도 없음" | question, user | specialist_results | get_support_programs | O |
+| `direct_reply` | 전문 agent가 필요 없는 말에 바로 답 (인사 → 서비스 안내, 자기 정보만 말함 → 들은 내용 확인). 이전 턴의 카드·행동 권고를 비움 | user_info | final_answer, voice_text, card, action_plan | - | X |
 | `action_advisor` | 판단 트리로 행동 우선순위 결정 → 전문 agent 결과와 합쳐 초안 작성 | phase, specialist_results, user | action_plan, draft | get_action_guides, get_facilities | 문장화만 |
 | `intent_check` | 초안이 질문 의도에 답하는지 (chat만). 실제 서비스는 아래 `hallucination_check`와 한 번의 LLM 호출로 함께 (B5) | question, history, draft | checks.intent | - | O |
 | `hallucination_check` | 초안의 수치·사실이 evidence와 일치하는지 | draft, specialist_results[].evidence, action_plan | checks.hallucination | - | 숫자는 규칙 대조 + LLM |
@@ -87,7 +89,7 @@ B3 구현 (2026-10-01):
 | 그룹 | 필드 | 비고 |
 | --- | --- | --- |
 | 입력 | mode, user, current_location, question, risk_event, history, user_memory | mode = `chat` 또는 `alert`, user_memory = 사용자 기억 문장 (아래 기억 절) |
-| 관리자 | phase, selected_agents, manager_feedback | |
+| 관리자 | phase, selected_agents, manager_feedback, destination_query, can_move, damage, wants_action, user_info | wants_action = 행동·대비·대피를 물었는가(분류기, 모르면 None), user_info = 묻는 것 없이 자기 정보만 말했을 때 들은 내용 |
 | 전문 → 권고 | specialist_results, action_plan, draft | specialist_results는 병렬 누적 reducer, 재시도 시 RESET |
 | 루프 1 | checks, retry_count, verdict | checks는 병렬 병합 reducer |
 | 루프 2 | verified_draft, polished, polish_feedback, polish_retry_count, polish_verdict | |
@@ -127,7 +129,7 @@ flowchart TD
 행동 권고 agent는 `get_action_guides`로 가져온 원문만 인용하고, 인용한 id를 `ActionPlan.guide_ids`에 남긴다.
 
 판단 로직 (사용자 정의, 2026-10-03 — `action.decide`가 코드로 따라간다):
-- 재난 전·평시(대비): 대비 행동요령 + 예보(`get_forecast`) → 동반자 정보가 없으면 "함께 대피해야 할 가족이 있나요?" → 있으면 체크리스트
+- 재난 전·평시(대비): 대비 행동요령 + 예보(`get_forecast`) → 체크리스트 (동반자 여부 되묻기는 2026-10-10 삭제 — 10-09부터 동반자 정보를 저장하지 않는다)
 - 재난 중: 사용자 위치가 발효 중인 침수·산사태 영역(주의 이상) 안인가(`hazards_at`, 판정 불가·위치 모름 → 위험 지역)
   - 안전: 재난 중 행동요령 + 실시간 정보
   - 위험 지역: 이동 가능? 분류기의 `can_move`(대화) → 모르면 프로필(보행 불편·휠체어·75세 이상·동반자면 질문, 아니면 가능)
@@ -135,7 +137,12 @@ flowchart TD
     - 모름: 안내(경로 포함) + "지금 스스로 안전한 곳까지 이동하실 수 있나요?"
 - 재난 후: 재난 후 행동요령 → 분류기의 `damage`(대화) → 모름: 질문 / 없음: 실시간 현황 / 있음: 현황·임시 거주·주의사항·보험·법률
   (통제 도로·보험·법률은 데이터가 없어 "확인되지 않음")
-- 평시에 정보만 묻는 질문("내일 비 와?")은 행동 권고·질문을 붙이지 않는다.
+- **'지금 할 일'을 붙이는 조건 (2026-10-10 사용자 결정)**: 사용자가 행동·대비·대피를 물었거나(분류기 `wants_action`), 현재 위치가 위험 지역 분기이거나
+  (판정 불가·위치 모름 포함), 119 분기이거나, alert 모드일 때만. 그 밖에 상황만 물은 질문("비 얼마나 와?", "내일 비 와?")은 재난 중에도
+  상황 설명만 — `decision_path` = "재난 중 > 정보 안내", 원문 조회·작성 호출 없음. 분류기가 실패해 `wants_action`을 모르면 예전 규칙
+  (평시는 `ACTION_WORDS`가 있을 때만, 그 밖의 단계는 항상).
+- 묻는 것 없이 자기 정보만 말하면("저는 72살이고 어업을 해요") 분류기가 agent 없이 `user_info`("72살, 어업")만 채운다 →
+  `direct_reply`가 "알려 주신 내용(72살, 어업)을 앞으로 안내에 반영할게요."로 답한다. 프로필 반영은 지금처럼 답한 뒤 백그라운드.
 - 응답: `decision_path`("재난 중 > 위험 지역 > 이동 가능"), `follow_up`(질문), `call_emergency`, `route`. 사용자가 답하면 다음 질문에서
   분류기가 대화로 `can_move`·`damage`를 판정해 다음 분기로 간다.
 

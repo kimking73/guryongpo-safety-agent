@@ -49,6 +49,14 @@ class Classification(BaseModel):
         "갈 수 있다고 말함 → yes, 대화에 근거 없음 → unknown"))
     damage: Literal["yes", "no", "unknown"] = Field(default="unknown", description=(
         "사용자의 집·시설에 재난 피해(침수·파손·정전 등)가 있다고 말했는가. 있다 → yes, 없다 → no, 근거 없음 → unknown"))
+    # '지금 할 일'을 붙일지 (2026-10-10 사용자 결정: 물었을 때 + 위험 지역 안일 때만 — action.py)
+    wants_action: bool = Field(default=True, description=(
+        "사용자가 무엇을 해야 하는지·대비 방법·대피(어디로, 어떻게 가는지, 가도 되는지)를 물었으면 true. "
+        "상황·수치·예보만 물었으면(예: '비 얼마나 와?', '내일 태풍 와?') false"))
+    # 묻는 것 없이 자기 정보만 말한 경우 (2026-10-10): 전문 agent 없이 들은 내용만 되짚어 확인한다 (graph.direct_reply)
+    user_info: str | None = Field(default=None, description=(
+        "사용자가 아무것도 묻지 않고 자기 정보(나이·직업·이동 수단·시각/청각·집·자주 가는 곳)만 말했으면 "
+        "들은 내용을 사용자가 말한 그대로 짧게 (예: '72세, 어업', '집은 구룡포초등학교 근처'). 질문이 있거나 자기 정보가 아니면 null"))
 
 
 # 전문 agent 역할 (docs/agent-design.md 2절과 맞춘다)
@@ -77,6 +85,10 @@ SYSTEM_PROMPT = f"""너는 포항 구룡포 재난 대응 서비스 '구룡가�
 - 보험·보상·지원금·피해 신고·복구 지원을 묻는 질문은 recovery_support_agent를 고른다. 재난 종류가 함께 나오면
   ("태풍 피해 지원") 그 재난 agent도 함께 고른다.
 - 인사, 서비스 사용법 등 재난·안전과 무관한 질문은 빈 목록.
+- 사용자가 묻는 것 없이 자기 정보만 말하면("저는 72살이고 어업을 해요", "우리 집은 ○○ 근처야") 빈 목록으로 두고 user_info를 채운다.
+  직업을 말했다고 recovery_support_agent를, 집·장소를 말했다고 location_route_agent를 고르지 않는다.
+  정보와 질문이 함께 있으면("72살인데 지금 대피해야 해?") 질문에 맞는 agent를 고르고 user_info는 null.
+- wants_action은 행동·대비·대피를 물었을 때만 true. 상황만 물었으면 false.
 - 이전 대화가 있으면 지시어("거기", "그럼")를 이전 대화로 해석한다. destination도 "거기"를 이전 대화의 장소 이름으로 바꿔 쓴다.
 - can_move·damage는 질문과 이전 대화에서 사용자가 직접 말한 것만으로 정한다. 추측하지 말고 모르면 unknown.
 - destination은 사용자가 가려는 곳을 말했을 때만 채운다 ("구룡포항까지 어떻게 가?" → 구룡포항, "집에 가도 돼?" → 집,
