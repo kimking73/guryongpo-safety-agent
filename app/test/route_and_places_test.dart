@@ -10,6 +10,7 @@ import 'package:guryongpo_safety/disaster_center.dart';
 import 'package:guryongpo_safety/main.dart';
 import 'package:guryongpo_safety/mobile/onboarding.dart' show Onboarding;
 import 'package:guryongpo_safety/models/domain_models.dart';
+import 'package:guryongpo_safety/origin_picker.dart' show originLabelProvider;
 import 'package:guryongpo_safety/repositories/mock_repository.dart';
 import 'package:guryongpo_safety/repositories/remote_repository.dart';
 import 'package:guryongpo_safety/services/account_service.dart';
@@ -293,6 +294,76 @@ void main() {
     expect(find.byType(RouteMap), findsNothing);
     // 예전 '대피소 경로 · 이름' 머리줄은 경로 안내 한 덩어리로 합쳤다 (2026-10-10) — 경로가 열려 있으면 종료 버튼이 보인다
     expect(find.byTooltip('경로 안내 종료'), findsOneWidget);
+    await t.pumpWidget(const SizedBox());
+    await t.pump(const Duration(seconds: 1));
+  });
+
+  test('경로 방식 켜고 끄기 (2026-10-11): 안전한 경로·오르막 회피는 함께 고를 수 있고, 둘 다 끄면 최단 거리', () {
+    expect(routeTypeOf(safe: false, uphill: false), RouteType.nearest);
+    expect(routeTypeOf(safe: true, uphill: false), RouteType.safest);
+    expect(routeTypeOf(safe: true, uphill: true), RouteType.flat);
+    expect(routeTypeOf(safe: false, uphill: true), RouteType.uphill);
+    expect(RouteType.uphill.strategy, 'uphill'); // 경로 서버 strategy (route/guardian_route/service.py NO_AVOID)
+    for (final t in RouteType.values) {
+      expect(routeTypeOf(safe: t.avoidsHazards, uphill: t.avoidsUphill), t, reason: '$t');
+    }
+    // 목업도 오르막만 회피 경로를 준다 (가까운 경로 예시를 바탕으로)
+    final r = MockSafetyRepository().exampleRoute('gym', UserMode.user, RouteType.uphill);
+    expect(r.routeType, RouteType.uphill);
+  });
+
+  testWidgets('출발 5가지 (2026-10-11): 현위치·집·내 장소·GPS 선택·직접 입력, GPS 선택 → 지도를 누른 곳이 현재 위치', (t) async {
+    t.view.physicalSize = const Size(1280, 1600);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.reset);
+    final onError = FlutterError.onError;
+    FlutterError.onError = (d) {
+      if (d.library != 'image resource service') onError?.call(d);
+    };
+    addTearDown(() => FlutterError.onError = onError);
+    SharedPreferences.setMockInitialValues({'profile_setup_complete': true});
+    Onboarding.setConsented();
+    Onboarding.setDone();
+    appRouter.go('/');
+    final container = ProviderContainer(overrides: [repo.overrideWithValue(MockSafetyRepository())]);
+    addTearDown(container.dispose);
+    await t.pumpWidget(UncontrolledProviderScope(container: container, child: const GuryongpoApp()));
+    for (var i = 0; i < 10; i++) {
+      await t.pump(const Duration(milliseconds: 300));
+    }
+    await t.tap(find.widgetWithText(MapMenuButton, '경로 안내'));
+    for (var i = 0; i < 5; i++) {
+      await t.pump(const Duration(milliseconds: 150));
+    }
+    // 경로 안내를 열면 대피소 고르기 창이 먼저 뜬다 (기존 동작) — 닫고 시작
+    Navigator.of(t.element(find.byType(BottomSheet))).pop();
+    await t.pump(const Duration(milliseconds: 500));
+    await t.ensureVisible(find.text('출발:'));
+    await t.pump(const Duration(milliseconds: 300));
+    await t.tap(find.text('출발:'));
+    for (var i = 0; i < 6; i++) {
+      await t.pump(const Duration(milliseconds: 150));
+    }
+    for (final l in ['현위치', '집', '내 장소', 'GPS 선택', '직접 입력']) {
+      expect(find.textContaining(l), findsWidgets, reason: l);
+    }
+    await t.tap(find.text('GPS 선택'));
+    for (var i = 0; i < 6; i++) {
+      await t.pump(const Duration(milliseconds: 150));
+    }
+    expect(container.read(mapPickMode), isTrue);
+    expect(find.textContaining('지도에서 출발할 곳을 눌러 주세요'), findsWidgets);
+    // 지도를 누른 것처럼
+    const p = LatLng(35.9930, 129.5520);
+    t.widget<DisasterDashboard>(find.byType(DisasterDashboard)).onMapPick!(p);
+    for (var i = 0; i < 6; i++) {
+      await t.pump(const Duration(milliseconds: 150));
+    }
+    expect(container.read(mapPickMode), isFalse);
+    final here = container.read(userLocation);
+    expect(here.position, p);
+    expect(here.manual, isTrue);
+    expect(container.read(originLabelProvider), 'GPS 선택 위치'); // 출발 버튼 글자
     await t.pumpWidget(const SizedBox());
     await t.pump(const Duration(seconds: 1));
   });

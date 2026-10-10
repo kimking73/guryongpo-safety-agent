@@ -268,7 +268,7 @@ class _RouteOption extends StatelessWidget {
             padding: const EdgeInsets.all(12),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [
-                Icon(switch (result.type) { RouteType.nearest => Icons.bolt, RouteType.safest => Icons.shield_outlined, RouteType.flat => Icons.trending_flat }, color: const Color(0xff16803c)),
+                Icon(switch (result.type) { RouteType.nearest => Icons.bolt, RouteType.safest => Icons.shield_outlined, RouteType.flat || RouteType.uphill => Icons.trending_flat }, color: const Color(0xff16803c)),
                 const SizedBox(width: 6),
                 Expanded(child: Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold))),
                 if (r != null) FilledButton.tonal(onPressed: onShow, child: const Text('지도에서 보기')),

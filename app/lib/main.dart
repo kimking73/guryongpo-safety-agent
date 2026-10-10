@@ -27,6 +27,7 @@ import 'disaster_center.dart';
 import 'live_screens.dart';
 import 'patrol_screens.dart';
 import 'origin_picker.dart';
+import 'route_planner.dart';
 import 'custom_route.dart';
 import 'login_screen.dart';
 import 'services/demo_mode.dart';
@@ -39,7 +40,6 @@ import 'ui/tokens.dart' show buildAppTheme;
 import 'mobile/ai_chat.dart' as m;
 import 'mobile/app_shell.dart' as m;
 import 'mobile/evac_sos.dart' as m;
-import 'mobile/dashboard_cards.dart' as m show RouteSummaryRows;
 import 'mobile/m_core.dart' as m;
 import 'mobile/m_patrol_screens.dart' as m;
 import 'mobile/onboarding.dart' as m;
@@ -57,6 +57,19 @@ final offline = StateProvider<bool>((_) => false);
 final routeFacilityId = StateProvider<String?>((_) => null);
 final routeFacilitySnapshot = StateProvider<Facility?>((_) => null);
 final routeStartOrigin = StateProvider<LatLng?>((_) => null);
+
+/// 경로 안내 '출발:'에서 고른 곳 (집·내 장소·검색, 2026-10-10). null = 현위치.
+/// 앱의 현재 위치(userLocation)는 바꾸지 않고 경로 출발점만 바꾼다
+class RoutePoint {
+  const RoutePoint(this.label, this.at);
+  final String label;
+  final LatLng at;
+}
+
+final routeOriginPoint = StateProvider<RoutePoint?>((_) => null);
+
+/// 출발 'GPS 선택'(2026-10-11): 켜져 있으면 대시보드 지도를 누른 곳이 현재 위치가 된다 (바다면 해상 경로 안내)
+final mapPickMode = StateProvider<bool>((_) => false);
 
 /// 길찾기(custom_route.dart)로 정한 목적지 id. 출발지가 내 위치가 아니면 이동 중 경로 재확인(GPS)을 끈다
 const customRouteId = 'custom';
@@ -371,7 +384,7 @@ void startRouteToShelter(WidgetRef ref, String shelterId,
       ?.where((f) => f.id == shelterId)
       .firstOrNull;
   ref.read(routeFacilitySnapshot.notifier).state = facility;
-  ref.read(routeStartOrigin.notifier).state = ref.read(userLocation).position;
+  ref.read(routeStartOrigin.notifier).state = ref.read(routeOriginPoint)?.at ?? ref.read(userLocation).position;
   ref.read(routeFacilityId.notifier).state = shelterId;
 }
 
@@ -1297,7 +1310,17 @@ class StatusLine extends ConsumerWidget {
               shape: const CircleBorder(),
               child: InkWell(
                 customBorder: const CircleBorder(),
-                onTap: () => c.push('/alerts-hub'),
+                // 알림 화면이 열려 있으면 종을 다시 눌러 닫는다 (2026-10-10)
+                onTap: () {
+                  final router = GoRouter.of(c);
+                  if (router.routerDelegate.currentConfiguration.uri.path != '/alerts-hub') {
+                    c.push('/alerts-hub');
+                  } else if (router.canPop()) {
+                    router.pop();
+                  } else {
+                    router.go('/');
+                  }
+                },
                 child: const SizedBox(
                     width: 52, height: 52, child: Icon(Icons.notifications_rounded, color: GK.navy, size: 28)),
               ),
@@ -1317,7 +1340,9 @@ class Dashboard extends ConsumerWidget {
       this.extraPolylines = const [],
       this.mapOnly = false,
       this.showFacilities = false,
-      this.focusPoint});
+      this.focusPoint,
+      this.routePanel,
+      this.onRouteOpen});
 
   /// 방재단 현황(2026-10-09)이 대시보드 지도 칸만 쓸 때 (DisasterDashboard 참고)
   final List<Polygon> extraPolygons;
@@ -1327,6 +1352,9 @@ class Dashboard extends ConsumerWidget {
   /// 방재단 지도: 대피소·의료시설을 늘 그리고, 목록에서 고른 가구로 지도를 옮긴다 (2026-10-09)
   final bool showFacilities;
   final LatLng? focusPoint;
+  /// 방재단 현황(2026-10-11): 경로 안내 칸을 대시보드 출발→도착 대신 '내 방문 경로'로, 경로 안내를 열 때 뜨는 창도 바꾼다
+  final Widget? routePanel;
+  final VoidCallback? onRouteOpen;
   @override
   Widget build(BuildContext c, WidgetRef ref) {
     final route = ref.watch(routeFacilityId);
@@ -1340,7 +1368,7 @@ class Dashboard extends ConsumerWidget {
         ref.watch(facilitiesProvider).valueOrNull ?? const <Facility>[];
     final destination = route == null ? null : routeDestination(ref, route);
     final live = demo ? null : ref.watch(liveDashboardProvider).valueOrNull;
-    final sea = demo || mapOnly ? null : ref.watch(seaRoutePlanProvider).valueOrNull;
+    final sea = demo ? null : ref.watch(seaRoutePlanProvider).valueOrNull;
     return DisasterDashboard(
       extraPolygons: extraPolygons,
       extraMarkers: extraMarkers,
@@ -1376,11 +1404,10 @@ class Dashboard extends ConsumerWidget {
               ref.invalidate(windPointsProvider);
             },
       // '출발: …' 표시와 '주소로 길찾기' 버튼은 뺐다 (2026-10-09 사용자 요청). 위치 확인은 지도의 '현위치' 버튼
-      // 경로 안내 한 덩어리: 출발지·이동 수단·경로 방식·목적지·시간 (휴대폰 화면과 같은 줄, 2026-10-10)
-      routePlanner: mapOnly ? null : const m.RouteSummaryRows(withRouteTypes: true),
-      routeExtras: route != null && !demo
-          ? GkPill('이동 중 안내', icon: Icons.navigation_rounded, big: true, onTap: () => c.push('/route-follow'))
-          : null,
+      // 경로 안내 한 덩어리: 출발 → 도착·이동 수단·경로 방식·시간 (2026-10-10). 방재단 현황 지도(mapOnly)도 같은 것을 쓴다.
+      // '이동 중 안내' 버튼은 뺐다 (2026-10-10 사용자 요청)
+      routePlanner: routePanel ?? const RoutePlanner(),
+      onMapPick: ref.watch(mapPickMode) ? (p) => RoutePlanner.useMapPoint(c, ref, p) : null,
       where: ref.watch(whereNowProvider).when(
           data: (w) => w,
           loading: () => const WhereNow(WhereKind.checking),
@@ -1394,7 +1421,7 @@ class Dashboard extends ConsumerWidget {
       },
       onSeaRoute: () => c.push('/sea-route'),
       // 바다 위면 경로 안내에서 바로 해상 경로를 받아 지도에 그린다 (2026-10-10 사용자 요청)
-      seaRoutePanel: demo || mapOnly ? null : const SeaRoutePanel(),
+      seaRoutePanel: demo ? null : const SeaRoutePanel(),
       seaRouteLines: sea == null ? const [] : seaRoutePolylines(sea),
       seaRouteMarkers: sea == null ? const [] : seaRouteMarkers(sea),
       routeActive: route != null,
@@ -1409,11 +1436,13 @@ class Dashboard extends ConsumerWidget {
       routeLoading: routeAsync?.isLoading ?? false,
       routeError: routeAsync?.hasError == true ? '${routeAsync?.error}' : null,
       routeType: routeType,
-      onChooseFacility: () => showModalBottomSheet<void>(
-        context: c,
-        showDragHandle: true,
-        builder: (_) => const ShelterPickerSheet(),
-      ),
+      // 방재단 현황은 대피소 고르기 대신 우선 확인 가구 고르기 창 (onRouteOpen, 2026-10-11)
+      onChooseFacility: onRouteOpen ??
+          () => showModalBottomSheet<void>(
+                context: c,
+                showDragHandle: true,
+                builder: (_) => const ShelterPickerSheet(),
+              ),
       travelMode: ref.watch(travelMode),
       onTravelModeChanged: (m) => ref.read(travelMode.notifier).state = m,
       // 경로 방식은 목적지를 고르기 전에도 정해 둔다 — 고른 목적지 경로가 이 방식으로 나온다 (routeProvider 가 routeKind 를 본다)
@@ -2672,6 +2701,8 @@ class _AiScreenState extends ConsumerState<AiScreen> {
         '지금 침수 위험이 있어?',
         if (hasJob) '재난 후 내가 받을 수 있는 보험이 있는지 알려줘' else '도보로 안전하게 갈 수 있어?',
         '대피할 때 뭘 해야 해?',
+        // 대시보드 '재난 후 지원 · 복구' 카드를 대신한다 (2026-10-11 사용자 요청)
+        '내가 받을 수 있는 재난 지원 혹은 복구 사항 알려줘',
       ];
 
   Widget _avatar() => Container(

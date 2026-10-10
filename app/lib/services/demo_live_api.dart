@@ -3,36 +3,33 @@ import 'dart:math' as math;
 import 'live_api.dart';
 
 /// 시연 모드용 방재단 데이터 (2026-10-05). 시연 모드에서 방재단 화면(patrol_screens.dart, C8)이 [LiveApi] 대신 이 클래스를 쓴다.
-/// 가구 목록: 서버 DB의 시연 가구(GET /api/v1/demo/households — '/internal/simulate demo_households'가 넣은 '[시연] …' 14곳)를
-/// 먼저 쓰고, 서버에 없거나 연결이 안 되면 아래 앱 안 12곳. 이름·주소·전화는 모두 가상이다.
+/// 가구 목록: 앱 안 6곳 (시각·청각·지체 예시). 예전엔 서버 DB의 시연 가구(GET /api/v1/demo/households)를
+/// 먼저 썼지만 장애 유형이 대리 등록(시각·청각·지체)과 달라 뺐다 (2026-10-11). 이름·주소·전화는 모두 가상이다.
 /// 대피 상황 (2026-10-09): 앱 안 예시 대피 상황 하나 — 가구별 응답·배정·업무 단계는 이 앱 메모리에만 있고 서버로 보내지 않는다
 /// (실제 응답·배정 데이터와 분리). '대피 경보 팝업' 시연 경보가 진행 중이면 '앱 사용자 (나 · 시연)'가 대상에 들어가고
 /// 상태 = 팝업에서 고른 시연 응답.
 class DemoLiveApi extends LiveApi {
   DemoLiveApi();
 
+  /// 앱 안 시연 가구 6곳 (2026-10-10 사용자 요청: 시연 데이터를 줄이고 이름의 '[시연]' 표시는 뗀다 — 독거노인 분류도 서비스 대상 아님).
+  /// 장애 유형은 시각·청각·지체만 (2026-10-11 사용자 요청 — 가구 대리 등록이 묻는 유형과 같게. 지체 = mobility_limited).
+  /// 앞 4곳은 구룡포항 둘레 대피 경보 지역 안 (우선 확인 가구에 나온다)
   static final _households = <Map<String, dynamic>>[
-    _h(1, '[시연] 구룡포리 어르신 댁 1', '구룡포읍 구룡포리 (가상 주소)', 35.9881, 129.5536, 1, ['elderly', 'living_alone'],
+    _h(1, '구룡포리 지체장애 어르신 댁', '구룡포읍 구룡포리 (가상 주소)', 35.9862, 129.5519, 2, ['elderly', 'mobility_limited'],
         note: '대문 옆 초인종 고장 — 문을 두드려 주세요'),
-    _h(2, '[시연] 구룡포리 어르신 댁 2', '구룡포읍 구룡포리 (가상 주소)', 35.9862, 129.5519, 2, ['elderly', 'mobility_limited']),
-    _h(3, '[시연] 병포리 휠체어 가구', '구룡포읍 병포리 (가상 주소)', 35.9808, 129.5482, 3, ['wheelchair'],
-        note: '경사로 없음, 2인 이동 필요'),
-    _h(4, '[시연] 병포리 와상 어르신 댁', '구룡포읍 병포리 (가상 주소)', 35.9822, 129.5455, 2, ['elderly', 'bedridden'],
-        caregiver: '생활지원사 (가상)', landslide: '산사태위험지도 2등급 비탈 60m'),
-    _h(5, '[시연] 삼정리 독거 어르신 댁', '구룡포읍 삼정리 (가상 주소)', 36.0012, 129.5698, 1, ['elderly', 'living_alone', 'hearing'],
+    _h(2, '병포리 지체장애 주민 댁', '구룡포읍 병포리 (가상 주소)', 35.9808, 129.5482, 3, ['mobility_limited'],
+        note: '휠체어 사용 · 경사로 없음, 2인 이동 필요'),
+    _h(3, '구룡포리 청각장애 주민 댁', '구룡포읍 구룡포리 (가상 주소)', 35.9881, 129.5536, 1, ['hearing'],
         note: '청각 — 문자보다 방문 확인 우선'),
-    _h(6, '[시연] 삼정리 영유아 가구', '구룡포읍 삼정리 (가상 주소)', 35.9986, 129.5664, 4, ['infant']),
-    _h(7, '[시연] 석병리 해안 어르신 댁', '구룡포읍 석병리 (가상 주소)', 35.9649, 129.5684, 1, ['elderly', 'vision'],
-        landslide: '산사태위험지도 1등급 비탈 40m'),
-    _h(8, '[시연] 눌태리 산비탈 가구', '구룡포읍 눌태리 (가상 주소)', 35.9732, 129.5391, 2, ['elderly', 'cognitive'],
-        caregiver: '생활지원사 (가상)', landslide: '산사태위험지도 1등급 비탈 25m'),
-    _h(9, '[시연] 하정리 의료기기 사용 가구', '구룡포읍 하정리 (가상 주소)', 35.9928, 129.5602, 2, ['medical_device'],
-        note: '산소발생기 사용 — 정전 시 우선 확인'),
-    _h(10, '[시연] 구평리 반려동물 가구', '구룡포읍 구평리 (가상 주소)', 36.0108, 129.5751, 1, ['elderly', 'pet']),
-    _h(11, '[시연] 성동리 보행 불편 가구', '구룡포읍 성동리 (가상 주소)', 35.9779, 129.5268, 2, ['mobility_limited']),
-    _h(12, '[시연] 장길리 어촌 어르신 댁', '구룡포읍 장길리 (가상 주소)', 35.9558, 129.5734, 1, ['elderly', 'living_alone'],
-        hasApp: true, source: 'self'),
+    _h(4, '병포리 시각장애 어르신 댁', '구룡포읍 병포리 (가상 주소)', 35.9822, 129.5455, 2, ['elderly', 'vision'],
+        caregiver: '생활지원사 (가상)', landslide: '산사태위험지도 2등급 비탈 60m'),
+    _h(5, '하정리 청각장애 어르신 댁', '구룡포읍 하정리 (가상 주소)', 35.9928, 129.5602, 2, ['elderly', 'hearing'],
+        note: '보청기 사용 — 문을 크게 두드려 주세요'),
+    _h(6, '석병리 해안 시각장애 주민 댁', '구룡포읍 석병리 (가상 주소)', 35.9649, 129.5684, 1, ['vision'],
+        landslide: '산사태위험지도 1등급 비탈 40m', hasApp: true, source: 'self'),
   ];
+  /// 서버 시연 가구를 쓸 때도 이만큼만 보여 준다
+  static const maxDemoHouseholds = 6;
   static var _seq = 100;
 
   static Map<String, dynamic> _h(int n, String label, String address, double lat, double lng, int members, List<String> needs,
@@ -187,7 +184,7 @@ class DemoLiveApi extends LiveApi {
         'id': incidentId,
         'hazard': 'flood',
         'level': 'warning',
-        'title': '[시연] 호우 경보 · 구룡포항 저지대 침수 대피',
+        'title': '호우 경보 · 구룡포항 저지대 침수 대피',
         'source': 'demo',
         'started_at': _started.toIso8601String(),
         'closed_at': null,
@@ -253,17 +250,17 @@ class DemoLiveApi extends LiveApi {
   /// 시연 기록 지우기 (테스트·시연 다시 시작)
   static void resetDemoIncident() => _state.clear();
 
+  /// 서버 시연 가구 표시명의 '[시연] ' 머리 떼기 (서버는 이 머리로 시연 가구를 가려내므로 서버 데이터는 그대로 둔다)
+  static String stripDemoPrefix(String label) => label.startsWith('[시연]') ? label.substring('[시연]'.length).trimLeft() : label;
+
   /// 시연 모드에서 대리 등록한 가구 (앱을 끄면 사라짐)
   static final _added = <Map<String, dynamic>>[];
 
+  /// 가구 목록 = 늘 앱 안 6곳 (시각·청각·지체 예시, 2026-10-11 사용자 요청). 서버 DB 시연 가구(와상·의료기기 등, 레인 A)는
+  /// 장애 유형이 대리 등록과 달라 더 쓰지 않는다
   @override
-  Future<List<Map<String, dynamic>>> adminHouseholds() async {
-    try {
-      final server = await demoHouseholds();
-      if (server.isNotEmpty) return [...server, for (final h in _added) Map<String, dynamic>.from(h)];
-    } catch (_) {}
-    return [for (final h in [..._households, ..._added]) Map<String, dynamic>.from(h)];
-  }
+  Future<List<Map<String, dynamic>>> adminHouseholds() async =>
+      [for (final h in [..._households, ..._added]) Map<String, dynamic>.from(h)];
 
   @override
   Future<Map<String, dynamic>> adminOverview() async {
@@ -288,7 +285,7 @@ class DemoLiveApi extends LiveApi {
   @override
   Future<Map<String, dynamic>> createHousehold(Map<String, dynamic> body) async {
     final h = {
-      ..._h(++_seq, '[시연] ${body['label'] ?? '새 가구'}', '${body['address'] ?? '주소 미입력'}',
+      ..._h(++_seq, '${body['label'] ?? '새 가구'}', '${body['address'] ?? '주소 미입력'}',
           ((body['location'] as Map?)?['lat'] as num? ?? 35.99).toDouble(), ((body['location'] as Map?)?['lng'] as num? ?? 129.55).toDouble(),
           (body['members'] as num? ?? 1).toInt(), [for (final n in body['needs'] as List? ?? const []) '$n'],
           note: body['note'] as String?),

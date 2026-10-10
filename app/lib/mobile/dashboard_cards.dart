@@ -7,7 +7,6 @@ import 'package:latlong2/latlong.dart';
 import '../live_screens.dart';
 import '../main.dart';
 import '../models/domain_models.dart';
-import '../dashboard_parts.dart' show ShelterPickerSheet;
 import '../origin_picker.dart';
 import '../services/account_service.dart';
 import '../ui/tokens.dart';
@@ -543,11 +542,8 @@ Future<void> showWeatherDetail(BuildContext context, WeatherItem w) => showModal
 // ------------------------------------------------------------------ 지도 카드 아래 경로 요약 (2줄)
 
 /// 1줄: 출발지(집·현위치·내 장소) + 도보/자동차. 2줄: 출발 → 대피소, 시간·거리.
-/// [withRouteTypes] (웹 대시보드 경로 안내, 2026-10-10): 1·2줄 사이에 경로 방식(최단·안전·오르막 회피)과 설명,
-/// 2줄에 목적지 바꾸기 버튼 — 예전 '경로 방식' 묶음과 '대피소 경로 · 이름 · 변경' 머리줄을 이것 하나로 합쳤다
 class RouteSummaryRows extends ConsumerWidget {
-  const RouteSummaryRows({super.key, this.withRouteTypes = false});
-  final bool withRouteTypes;
+  const RouteSummaryRows({super.key});
 
   Future<void> _pick(BuildContext context, WidgetRef ref, String key) async {
     final active = ref.read(routeFacilityId);
@@ -627,35 +623,6 @@ class RouteSummaryRows extends ConsumerWidget {
           onChanged: (m) => ref.read(travelMode.notifier).state = m,
         ),
       ]),
-      if (withRouteTypes) ...[
-        const SizedBox(height: 8),
-        Semantics(
-          label: '경로 방식 선택',
-          child: SegmentedPill<RouteType>(
-            height: 42,
-            items: [
-              for (final t in mode.routeTypes)
-                switch (t) {
-                  RouteType.nearest => (t, '최단 거리', FontAwesomeIcons.arrowRightLong),
-                  RouteType.safest => (t, '안전한 경로', FontAwesomeIcons.shieldHalved),
-                  RouteType.flat => (t, '오르막 회피', FontAwesomeIcons.arrowTrendDown),
-                },
-            ],
-            value: kind,
-            onChanged: (t) => ref.read(routeKind.notifier).state = t,
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(6, 6, 4, 0),
-          child: Text(
-              switch (kind) {
-                RouteType.nearest => '가장 짧은 길이에요. 위험 구역을 피하지 않고, 지나는 구역은 알려 드려요.',
-                RouteType.safest => '침수·산사태 위험 구역(주의 이상)을 피해서 가요.',
-                RouteType.flat => '위험 구역을 피하면서 가파른 오르막을 되도록 줄여요.',
-              },
-              style: dsText(13, color: Ds.muted, height: 1.4)),
-        ),
-      ],
       const SizedBox(height: 8),
       Padding(
         padding: const EdgeInsets.only(left: 4, right: 2),
@@ -684,15 +651,6 @@ class RouteSummaryRows extends ConsumerWidget {
                 icon: FontAwesomeIcons.diamondTurnRight,
                 onPressed: () => startRouteToShelter(ref, nearestShelterId(ref), routeType: kind))
           else ...[
-            if (withRouteTypes) ...[
-              CircleButton(FontAwesomeIcons.arrowRightArrowLeft,
-                  size: 40,
-                  bg: Ds.bg,
-                  tooltip: '목적지 바꾸기',
-                  onPressed: () => showModalBottomSheet<void>(
-                      context: context, showDragHandle: true, builder: (_) => const ShelterPickerSheet())),
-              const SizedBox(width: 6),
-            ],
             CircleButton(FontAwesomeIcons.xmark,
                 size: 40, bg: Ds.bg, tooltip: '경로 안내 종료', onPressed: () => ref.read(routeFacilityId.notifier).state = null),
             const SizedBox(width: 6),

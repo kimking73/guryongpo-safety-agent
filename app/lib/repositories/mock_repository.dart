@@ -198,15 +198,16 @@ class MockSafetyRepository implements SafetyRepository {
   SafetyRoute exampleRoute(
       String facilityId, UserMode userMode, RouteType routeType) {
     // 오르막 회피(2026-10-07 추가)는 목업 예시가 없어 안전 경로 예시를 그대로 쓴다
-    final key = routeType == RouteType.flat ? RouteType.safest : routeType;
+    // 오르막만 회피(2026-10-11)는 위험 구역을 피하지 않으니 가까운 경로 예시를 쓴다
+    final key = switch (routeType) { RouteType.flat => RouteType.safest, RouteType.uphill => RouteType.nearest, _ => routeType };
     final route = _routes['${userMode.name}/${key.name}/$facilityId'];
     if (route == null) {
       throw StateError('No map route is configured for $facilityId.');
     }
-    if (routeType != RouteType.flat) return route;
+    if (routeType == key) return route;
     return SafetyRoute(
         shelterId: route.shelterId,
-        routeType: RouteType.flat,
+        routeType: routeType,
         polylinePoints: route.polylinePoints,
         distanceMeters: route.distanceMeters,
         estimatedMinutes: route.estimatedMinutes,

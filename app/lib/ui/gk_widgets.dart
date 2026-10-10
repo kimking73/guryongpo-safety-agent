@@ -94,9 +94,11 @@ class GkCardHeader extends StatelessWidget {
 /// 알약 버튼·칩. filled = 남색 바탕, 아니면 연한 남색(tint) 바탕
 class GkPill extends StatelessWidget {
   const GkPill(this.label,
-      {super.key, this.icon, this.onTap, this.filled = false, this.trailingIcon, this.bg, this.fg, this.big = false});
+      {super.key, this.icon, this.leading, this.onTap, this.filled = false, this.trailingIcon, this.bg, this.fg, this.big = false});
   final String label;
   final IconData? icon, trailingIcon;
+  /// 글자 앞 위젯 (icon 대신, 예: Font Awesome 아이콘)
+  final Widget? leading;
   final VoidCallback? onTap;
   final bool filled, big;
   final Color? bg, fg;
@@ -116,7 +118,8 @@ class GkPill extends StatelessWidget {
           child: Padding(
           padding: EdgeInsets.symmetric(horizontal: big ? 22 : 16, vertical: big ? 14 : 10),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            if (icon != null) ...[Icon(icon, size: fs + 5, color: foreground), const SizedBox(width: 8)],
+            if (icon != null) ...[Icon(icon, size: fs + 5, color: foreground), const SizedBox(width: 8)]
+            else if (leading != null) ...[leading!, const SizedBox(width: 10)],
             Flexible(
                 child: Text(label,
                     overflow: TextOverflow.ellipsis,

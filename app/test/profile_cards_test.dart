@@ -78,9 +78,9 @@ void main() {
     await setSize(t, 1280);
     await t.pumpWidget(app());
     await t.pumpAndSettle();
-    final labels = ['나이', '접근성 지원', '이동 수단', '직업', '집', '내 장소'];
+    final labels = ['나이', '장애 유형', '접근성 지원', '이동 수단', '직업', '집', '내 장소'];
     final ys = [for (final l in labels) t.getTopLeft(find.text(l).first).dy];
-    expect(ys, [...ys]..sort(), reason: '나이 → 접근성 지원 → 이동 수단 → 직업 → 집 → 내 장소 순서');
+    expect(ys, [...ys]..sort(), reason: '나이 → 장애 유형 → 접근성 지원 → 이동 수단 → 직업 → 집 → 내 장소 순서');
     expect(find.text('설정 안 함'), findsOneWidget);
     expect(find.text('내 장소 추가하기'), findsOneWidget);
     for (final s in ['음성 안내 자동 재생', '진동 알림', '화면 점멸', '청각 지원', '시각 지원', '재난 푸시 알림']) {
@@ -92,7 +92,7 @@ void main() {
     }
     expect(find.textContaining('음성 언어'), findsNothing);
     expect(find.textContaining('접근성 자세히'), findsNothing);
-    expect(find.text('바다 위 대피 경로'), findsOneWidget);
+    expect(find.text('바다 위 대피 경로'), findsNothing); // 사용자 화면 시연 버튼은 뺐다 (2026-10-11)
     expect(find.text('방재단 현황 (시연)'), findsOneWidget); // 시연 모드는 시연 데이터 화면으로 바로
   });
 
@@ -118,13 +118,35 @@ void main() {
     expect(saved.getString('optional_profile'), allOf(contains('"age":"70"'), contains('"transport":"휠체어"')));
   });
 
+  testWidgets('장애 유형 (2026-10-11): 지체·청각 고르고 저장 → 요약·프로필 키, 해당 없음은 나머지를 끈다', (t) async {
+    await setSize(t, 1280);
+    await t.pumpWidget(app());
+    await t.pumpAndSettle();
+    await t.tap(find.text('수정'));
+    await t.pumpAndSettle();
+    for (final l in ['지체', '청각', '시각', '해당 없음']) {
+      expect(find.widgetWithText(FilterChip, l), findsOneWidget, reason: l);
+    }
+    await t.tap(find.widgetWithText(FilterChip, '해당 없음'));
+    await t.tap(find.widgetWithText(FilterChip, '지체'));
+    await t.tap(find.widgetWithText(FilterChip, '청각'));
+    await t.pumpAndSettle();
+    expect(t.widget<FilterChip>(find.widgetWithText(FilterChip, '해당 없음')).selected, isFalse);
+    await t.tap(find.widgetWithText(FilledButton, '저장'));
+    await t.pumpAndSettle();
+    expect(find.text('지체 · 청각'), findsOneWidget);
+    final saved = (await SharedPreferences.getInstance()).getString('optional_profile');
+    expect(saved, allOf(contains('"지체 지원":"지원 필요"'), contains('"청각 지원":"지원 필요"'), contains('"시각 지원":"필요 없음"')));
+  });
+
   testWidgets('시각 지원 스위치 → 접근성 지원 요약 (켬 → 시각, 끔 → 사용 안 함)', (t) async {
     await setSize(t, 1280);
     await t.pumpWidget(app());
     await t.pumpAndSettle();
     await t.tap(find.widgetWithText(GkSwitchRow, '시각 지원'));
     await t.pumpAndSettle();
-    expect(find.widgetWithText(GkInfoRow, '시각'), findsOneWidget);
+    // 장애 유형·접근성 지원은 같은 프로필 키(시각 지원)를 본다 — 두 줄 모두 '시각' (2026-10-11)
+    expect(find.widgetWithText(GkInfoRow, '시각'), findsNWidgets(2));
     await t.tap(find.widgetWithText(GkSwitchRow, '시각 지원'));
     await t.pumpAndSettle();
     expect(find.widgetWithText(GkInfoRow, '사용 안 함'), findsOneWidget);
@@ -175,13 +197,10 @@ void main() {
     expect(find.text('방재단 화면'), findsOneWidget);
   });
 
-  testWidgets('좁은 화면(360px): 넘침 없음, 안전 기능·로그인 칸 세로 배치', (t) async {
+  testWidgets('좁은 화면(360px): 넘침 없음, 로그인 버튼 아래에 로그인 칸', (t) async {
     await setSize(t, 360, 5000);
     await t.pumpWidget(app(demo: false, api: FakeTeamApi()));
     await t.pumpAndSettle();
-    final sea = t.getTopLeft(find.text('바다 위 대피 경로'));
-    final team = t.getTopLeft(find.text('방재단 로그인'));
-    expect(team.dy, greaterThan(sea.dy));
     await t.tap(find.text('방재단 로그인'));
     await t.pumpAndSettle();
     final field = t.getTopLeft(find.widgetWithText(TextField, '예: GRP-1234'));

@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart' hide Path;
 import 'package:url_launcher/url_launcher.dart';
@@ -11,7 +12,7 @@ import 'services/account_service.dart';
 import 'services/location_service.dart';
 import 'services/demo_mode.dart';
 import 'models/domain_models.dart';
-import 'mobile/dashboard_cards.dart' show WeatherSection;
+import 'mobile/dashboard_cards.dart' show WeatherSection, warningIcon;
 import 'ui/gk_theme.dart';
 import 'ui/gk_widgets.dart';
 import 'ui/map_menu.dart';
@@ -211,15 +212,19 @@ Color _hazardColor(HazardKind k) => switch (k) {
       HazardKind.overlap => Colors.purple.shade800,
       HazardKind.storm => Colors.indigo.shade800,
     };
+/// 바람 화살표 색 = 침수와 같은 세 단계 색 (2026-10-10): 경보 기준 이상 심각 · 주의보 기준 이상 경계 · 그 아래 주의
 Color _windColor(double averageSpeed, double gustSpeed) {
-  if (averageSpeed >= 21 || gustSpeed >= 26) return Colors.red.shade800;
-  if (averageSpeed >= 14 || gustSpeed >= 20) return Colors.deepOrange;
-  return Colors.blueGrey.shade700;
+  if (averageSpeed >= 21 || gustSpeed >= 26) return _floodColor('심각');
+  if (averageSpeed >= 14 || gustSpeed >= 20) return _floodColor('경계');
+  return _floodColor('주의');
 }
+
+/// 산사태는 단계 없이 한 색 (산사태 취약 지역 표시, 2026-10-10)
+const _slideColor = Color(0xff8d6e63);
 
 enum _DashboardMode { emergency, facilities }
 
-/// 재난 지도 하위 항목 (2026-10-10): 전체 재난 표시 · 침수 격자 · 강풍 · 산사태 위험 지역 + 끝에 따로 '태풍 지도 열기'.
+/// 재난 지도 하위 항목 (2026-10-10): 위험 재난 표시 · 침수 격자 · 강풍 · 산사태 위험 지역 + 끝에 따로 '태풍 지도 열기'.
 /// 태풍은 이 지도(구룡포 일대)에 그리지 않으므로 켜고 끄는 항목이 아니다 — 누르면 태풍 화면으로 간다
 const _mapKinds = [HazardKind.flood, HazardKind.wind, HazardKind.slide];
 
@@ -270,6 +275,7 @@ class DisasterDashboard extends StatefulWidget {
     this.liveBottom,
     this.routeExtras,
     this.routePlanner,
+    this.onMapPick,
     this.warnings = const [],
     this.messages,
     this.messagesReason,
@@ -322,6 +328,8 @@ class DisasterDashboard extends StatefulWidget {
   final Widget? routeExtras;
   /// 경로 안내 한 덩어리 (출발지·이동 수단·경로 방식·목적지·시간, 2026-10-10). 있으면 예전 경로 방식 묶음·경로 머리줄 대신 쓴다
   final Widget? routePlanner;
+  /// 출발 'GPS 선택' 중이면 지도를 누른 곳을 넘긴다 (2026-10-11). null이면 평소처럼 침수 칸 설명
+  final ValueChanged<LatLng>? onMapPick;
   /// 디자인 = web-prototype (2026-10-08): '경보·주의보' 카드의 기상청 특보 (/dashboard warnings 위젯 items)
   final List<Map<String, dynamic>> warnings;
   /// 빨간 '최근 재난문자' 카드 (/dashboard disaster_messages items, null = 수집 전 → messagesReason) · 없으면 서버 머리 경고(headline)
@@ -363,13 +371,18 @@ class DisasterDashboard extends StatefulWidget {
 class _DisasterDashboardState extends State<DisasterDashboard> {
   _DashboardMode dashboardMode = _DashboardMode.emergency;
   /// 재난 지도에서 켠 재난 (여러 개 동시). 처음엔 모두 켬
-  final layers = <HazardKind>{..._mapKinds};
-  /// 지도 층 셋(침수·강풍·산사태)이 모두 켜지면 종합 보기: 침수는 심각만, 겹침 표식·요약 범례 (예전 '전체 재난 표시' 화면)
-  bool get compositeView => _mapKinds.every(layers.contains);
+  final layers = <HazardKind>{};
+  /// '위험 재난 표시' (2026-10-10, 사용자 결정): 빨강(심각) 침수·강풍 + 산사태 취약 지역만. 처음엔 이것만 켬.
+  /// 켜면 개별 재난 선택은 꺼지고, 개별 재난을 고르면 꺼진다
+  bool dangerOnly = true;
+  /// '위험 재난 표시'가 켜지면 종합 보기: 침수·강풍은 심각만, 산사태는 취약 지역 모두, 범례도 심각 한 칸
+  bool get compositeView => dangerOnly;
   /// 지도에 그리는 위험 층. 경로 모드는 경로가 피하는 침수·산사태
   Set<HazardKind> get _visible => dashboardMode == _DashboardMode.facilities
       ? const {HazardKind.flood, HazardKind.slide}
-      : {...layers, if (compositeView) HazardKind.overlap};
+      : dangerOnly
+          ? const {..._mapKinds, HazardKind.overlap}
+          : {...layers};
   /// 상위 메뉴의 하위 항목이 펼쳐져 있는지 (보고 있는 메뉴 하나만 펼친다)
   bool submenuOpen = true;
   bool locating = false;
@@ -413,6 +426,10 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
       }
     },
     onTap: (_, point) {
+      if (widget.onMapPick != null) {
+        widget.onMapPick!(point);
+        return;
+      }
       if (!_visible.contains(HazardKind.flood)) return;
       final grids = _grids;
       final cell = grids
@@ -453,18 +470,16 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
     super.dispose();
   }
 
-  /// 재난 하나 켜기·끄기 (여러 개 동시 선택)
+  /// 재난 하나 켜기·끄기 (여러 개 동시 선택). 고르면 '위험 재난 표시'는 꺼진다
   void toggleLayer(HazardKind kind) => setState(() {
+        dangerOnly = false;
         if (!layers.remove(kind)) layers.add(kind);
       });
 
-  /// '전체 재난 표시': 모두 켜져 있으면 모두 끄고, 아니면 모두 켠다
-  void toggleAll() => setState(() {
-        if (_mapKinds.every(layers.contains)) {
-          layers.clear();
-        } else {
-          layers.addAll(_mapKinds);
-        }
+  /// '위험 재난 표시' 켜기·끄기 (켜면 개별 선택은 비운다)
+  void toggleDanger() => setState(() {
+        dangerOnly = !dangerOnly;
+        if (dangerOnly) layers.clear();
       });
 
   void setDashboardMode(_DashboardMode mode) {
@@ -516,21 +531,24 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
         onTap: locating ? null : () => locate(ctl),
       );
 
-  /// 재난 지도 하위 항목: 전체 재난 표시 · 침수 격자 · 강풍 · 산사태 위험 지역 (여러 개 선택) / 태풍 지도 열기 (화면 이동)
+  /// 재난 지도 하위 항목: 위험 재난 표시 · 침수 격자 · 강풍 · 산사태 위험 지역 (여러 개 선택) / 태풍 지도 열기 (화면 이동)
   Widget _emergencyLayerControls() {
-    final allOn = _mapKinds.every(layers.contains);
     MapMenuButton item(HazardKind k, String label, String icon) => MapMenuButton(
-        label: label, icon: icon, kind: MapButtonKind.check, selected: layers.contains(k), onTap: () => toggleLayer(k));
+        label: label,
+        icon: icon,
+        kind: MapButtonKind.check,
+        selected: !dangerOnly && layers.contains(k),
+        onTap: () => toggleLayer(k));
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
         MapButtonGroup(label: '표시할 재난 (여러 개 선택)', children: [
           MapMenuButton(
-              label: '전체 재난 표시',
+              label: '위험 재난 표시',
               icon: MapIcons.all,
               kind: MapButtonKind.check,
-              selected: allOn,
-              tooltip: allOn ? '모든 재난 끄기' : '모든 재난 켜기',
-              onTap: toggleAll),
+              selected: dangerOnly,
+              tooltip: '심각 단계 침수·강풍과 산사태 취약 지역만 보기',
+              onTap: toggleDanger),
           item(HazardKind.flood, '침수 격자', MapIcons.flood),
           item(HazardKind.wind, '강풍', MapIcons.wind),
           item(HazardKind.slide, '산사태 위험 지역', MapIcons.landslide),
@@ -545,7 +563,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
             tooltip: '태풍 경로와 구룡포 영향을 넓은 지도에서 보기',
             onTap: () => context.push('/typhoon', extra: 'local')),
       ]),
-      if (layers.isEmpty) ...[
+      if (!dangerOnly && layers.isEmpty) ...[
         const SizedBox(height: 8),
         const MapNotice(text: '켜진 재난이 없어 지도에 위험 정보를 표시하지 않아요. 보고 싶은 재난을 골라 주세요.'),
       ],
@@ -612,6 +630,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
             RouteType.nearest => '최단 거리: 이동 거리가 가장 짧은 경로예요. 위험 구역을 피하지 않고, 지나는 구역은 알려 드려요.',
             RouteType.safest => '안전한 경로: 지금 판정된 침수·산사태 위험 구역(주의 이상)을 피해서 가요.',
             RouteType.flat => '오르막 회피: 위험 구역을 피하면서, 도로 경사(고도 자료)로 가파른 오르막을 되도록 줄여요.',
+            RouteType.uphill => '오르막 회피: 도로 경사(고도 자료)로 가파른 오르막을 되도록 줄여요. 위험 구역은 피하지 않아요.',
           },
           style: const TextStyle(fontSize: 15, color: GK.muted, height: 1.45)),
     ]);
@@ -688,14 +707,6 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
         ),
       for (final p in savedPlaces) (p.position, p.name),
     ];
-    final legendParts = [
-      if (visible.contains(HazardKind.flood)) '침수',
-      if (visible.contains(HazardKind.wind)) '강풍',
-      if (visible.contains(HazardKind.slide)) '산사태',
-    ];
-    final legendTitle = compositeView || legendParts.isEmpty
-        ? '지도 범례'
-        : '${legendParts.join('·')} 범례';
     return FlutterMap(
               mapController: ctl,
               options: options,
@@ -704,12 +715,15 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                   urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                   userAgentPackageName: 'guryongpo.safety.demo',
                 ),
-                if (visible.contains(HazardKind.flood))
+                // 침수는 큰 원(위험 판정 영역)만 (2026-10-10). 격자 칸은 원이 하나도 없을 때(예시 데이터)만 그린다
+                if (visible.contains(HazardKind.flood) &&
+                    !widget.riskAreas.any((a) => a.hazard == 'flood'))
                   PolygonLayer(
                       polygons: _disasterFloodPolygons(floodGrids,
                           severeOnly: compositeView)),
                 if (widget.riskAreas.isNotEmpty)
-                  PolygonLayer(polygons: hazardAreaPolygons(widget.riskAreas)),
+                  PolygonLayer(
+                      polygons: hazardAreaPolygons(widget.riskAreas, kinds: visible, severeOnly: compositeView)),
                 if (widget.extraPolygons.isNotEmpty) PolygonLayer(polygons: widget.extraPolygons),
                 if (widget.extraPolylines.isNotEmpty) PolylineLayer(polylines: widget.extraPolylines),
                 if (routeMode && widget.seaRouteLines.isNotEmpty) PolylineLayer(polylines: widget.seaRouteLines),
@@ -734,29 +748,25 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                   ]),
                 MarkerLayer(
                   markers: [
-                    if (visible.contains(HazardKind.flood))
-                      ...floodGridDotMarkers(context, floodGrids, severeOnly: compositeView),
                     // 수위계 위치 (2026-10-07): 침수 영역 원의 중심 = 판정 원인 센서의 실제 좌표 (포항 DT 수위계·맨홀)
                     if (visible.contains(HazardKind.flood))
-                      ...floodSensorMarkers(context, widget.riskAreas),
+                      ...floodSensorMarkers(context, widget.riskAreas, severeOnly: compositeView),
                     if (visible.contains(HazardKind.wind) && !widget.demo)
                       for (final w in widget.windPoints)
+                        if (!compositeView || w.$2 >= 21)
                         Marker(
                           point: w.$1,
                           width: 76,
                           height: 64,
+                          // 화살표만 (2026-10-10): 크고 붉을수록 강함, 숫자는 누르면 나오는 상세에서
                           child: GestureDetector(
                             onTap: () => _showLiveWind(context, w),
-                            child: Column(children: [
-                              // 화살표는 불어가는 방향 = 풍향(불어오는 방향) + 180°
-                              Transform.rotate(
-                                angle: (w.$3 + 180) * math.pi / 180,
-                                child: Icon(Icons.navigation,
-                                    color: _windColor(w.$2, w.$2), size: 18 + math.min(w.$2, 24)),
-                              ),
-                              Text('${w.$2.toStringAsFixed(1)}m/s',
-                                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
-                            ]),
+                            // 화살표는 불어가는 방향 = 풍향(불어오는 방향) + 180°
+                            child: Transform.rotate(
+                              angle: (w.$3 + 180) * math.pi / 180,
+                              child: Icon(Icons.navigation,
+                                  color: _windColor(w.$2, w.$2), size: 18 + math.min(w.$2, 24)),
+                            ),
                           ),
                         ),
                     if (visible.contains(HazardKind.wind) && widget.demo)
@@ -766,32 +776,22 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                         (LatLng(35.9855, 129.5530), 10.0, '동풍'),
                         (LatLng(35.9955, 129.5480), 7.0, '동풍'),
                       ])
+                        if (!compositeView || w.$2 >= 21)
                         Marker(
                           point: w.$1,
                           width: 76,
                           height: 64,
                           child: GestureDetector(
                             onTap: () => _showWind(context, w.$1, w.$2, w.$3),
-                            child: Column(
-                              children: [
-                                Transform.rotate(
-                                  angle: (w.$3 == '북동풍' ? 225 : 270) *
-                                      math.pi /
-                                      180,
-                                  child: Icon(
-                                    Icons.navigation,
-                                    color: _windColor(w.$2, w.$2 + 9),
-                                    size: 18 + w.$2,
-                                  ),
-                                ),
-                                Text(
-                                  '${w.$2.toInt()}m/s',
-                                  style: const TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ],
+                            child: Transform.rotate(
+                              angle: (w.$3 == '북동풍' ? 225 : 270) *
+                                  math.pi /
+                                  180,
+                              child: Icon(
+                                Icons.navigation,
+                                color: _windColor(w.$2, w.$2 + 9),
+                                size: 18 + w.$2,
+                              ),
                             ),
                           ),
                         ),
@@ -928,14 +928,6 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                 ),
                 if (widget.extraMarkers.isNotEmpty) MarkerLayer(markers: widget.extraMarkers),
                 if (routeMode && widget.seaRouteMarkers.isNotEmpty) MarkerLayer(markers: widget.seaRouteMarkers),
-                mapLegendButton(context,
-                    routeMode: routeMode,
-                    visible: visible,
-                    hasRoute: route != null,
-                    hasDestination: destination != null,
-                    hasSea: (route?.seaPoints.length ?? 0) > 1,
-                    showFacilities: routeMode || widget.showFacilities,
-                    showPlaces: !widget.mapOnly),
                 // 판단에 필요한 경고는 범례 안에 숨기지 않고 지도에 바로 (2026-10-09): 위험 구역을 못 피한 경로
                 if (route != null && (route.stillInside.isNotEmpty || !route.hazardsOk))
                   Positioned(
@@ -944,124 +936,19 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                     bottom: 8,
                     child: RouteHazardBanner(route: route),
                   ),
-                if (!routeMode)
-                  Positioned(
-                    left: 8,
-                    top: 8,
-                    child: Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(9),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(legendTitle,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold)),
-                            if (compositeView) ...const [
-                              Text('재난 표식은 영향 위치',
-                                  style: TextStyle(fontSize: 11)),
-                              Text('바람 화살표는 방향·세기',
-                                  style: TextStyle(fontSize: 11)),
-                              Text('침수는 심각 단계만 표시',
-                                  style: TextStyle(fontSize: 11)),
-                            ],
-                            if (!compositeView &&
-                                visible.contains(HazardKind.flood)) ...const [
-                              Text('격자색은 서버 위험 단계',
-                                  style: TextStyle(fontSize: 11)),
-                              Text('실측 수심 구간 기준이 아님',
-                                  style: TextStyle(fontSize: 10)),
-                            ],
-                            if (!compositeView &&
-                                visible.contains(HazardKind.flood) &&
-                                widget.demo)
-                              const Text('목업 격자는 예시 데이터',
-                                  style: TextStyle(fontSize: 10)),
-                            if (!compositeView &&
-                                visible.contains(HazardKind.slide))
-                              Text(widget.demo ? '산사태 표식은 목업 알림 위치입니다.' : '산사태는 판정된 위험 영역으로 표시',
-                                  style: const TextStyle(fontSize: 11)),
-                            Text(widget.demo ? '가상 시연 데이터' : widget.simulated ? '시연 측정값 · 실측과 같은 판정 규칙' : '실측 · 서버 위험 판정',
-                                style: const TextStyle(fontSize: 10)),
-                          ],
-                        ),
-                      ),
-                    ),
+                // 범례는 지도 왼쪽 위에 늘 펼쳐 둔다 (2026-10-10: '범례' 버튼·침수 범례·침수 위험 단계 상자 대신 하나로)
+                Positioned(
+                  left: 8,
+                  top: 8,
+                  child: MapLegendCard(
+                    visible: visible,
+                    severeOnly: !routeMode && compositeView,
+                    showFacilities: routeMode || widget.showFacilities,
+                    hasDestination: destination != null,
+                    hasRoute: route != null,
+                    hasSea: (route?.seaPoints.length ?? 0) > 1,
                   ),
-                if (!routeMode &&
-                    !compositeView &&
-                    (visible.contains(HazardKind.flood) ||
-                        visible.contains(HazardKind.wind)))
-                  Positioned(
-                    right: 8,
-                    bottom: 8,
-                    child: Card(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 230),
-                        child: Padding(
-                          padding: const EdgeInsets.all(9),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (visible.contains(HazardKind.flood)) ...[
-                                const Text('침수 위험 단계',
-                                    style:
-                                        TextStyle(fontWeight: FontWeight.bold)),
-                                for (final item in const [
-                                  ('주의', '주의'),
-                                  ('경계', '경계'),
-                                  ('심각', '심각')
-                                ])
-                                  Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Container(
-                                        width: 12,
-                                        height: 12,
-                                        color: _floodColor(item.$1)
-                                            .withValues(alpha: .7),
-                                      ),
-                                      const SizedBox(width: 5),
-                                      Text(item.$2,
-                                          style: const TextStyle(fontSize: 10)),
-                                    ],
-                                  ),
-                              ],
-                              if (visible.contains(HazardKind.flood) &&
-                                  visible.contains(HazardKind.wind))
-                                const Divider(height: 12),
-                              if (visible.contains(HazardKind.wind)) ...[
-                                const Text('강풍 기준',
-                                    style:
-                                        TextStyle(fontWeight: FontWeight.bold)),
-                                const Text('화살표: 불어가는 방향 · 크기·색: 풍속',
-                                    style: TextStyle(fontSize: 10)),
-                                const Text('주의보: 평균 14m/s 또는 순간 20m/s',
-                                    style: TextStyle(fontSize: 10)),
-                                const Text('경보: 평균 21m/s 또는 순간 26m/s',
-                                    style: TextStyle(fontSize: 10)),
-                                TextButton(
-                                  style: TextButton.styleFrom(
-                                    padding: EdgeInsets.zero,
-                                    visualDensity: VisualDensity.compact,
-                                    tapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
-                                  ),
-                                  onPressed: () => launchUrl(Uri.parse(
-                                    'https://www.weather.go.kr/w/forecast/guide/standard.do',
-                                  )),
-                                  child: const Text('기상청 공식 기준 보기',
-                                      style: TextStyle(fontSize: 10)),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
+                ),
               ],
             );
   }
@@ -1165,34 +1052,28 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
         : [
             for (final w in widget.warnings) '${w['label'] ?? w['region_name'] ?? ''}'.trim()
           ].where((l) => l.isNotEmpty).toSet().toList();
+    // 기상청 특보만 (2026-10-10): 서버 위험 판정 칩(강우·산사태·침수·강풍 …)은 지도에서 보므로 뺀다.
+    // 아이콘은 휴대폰 화면과 같은 Font Awesome (웹에서 Material 날씨 아이콘이 빈칸으로 보였다)
     final chips = <Widget>[
       for (final l in labels)
         GkPill(l,
-            icon: _warningIcon(l),
+            leading: FaIcon(warningIcon(l), size: 20, color: l.contains('경보') ? Colors.white : GK.navy),
             filled: l.contains('경보'),
             big: true,
             onTap: () => context.push('/alerts-hub')),
-      if (!widget.demo)
-        for (final i in widget.riskItems)
-          GkPill('${i['label']} · ${_levelKoFromServer('${i['level'] ?? 'normal'}')}',
-              icon: Icons.warning_rounded,
-              bg: gkLevelOf('${i['level']}').bg,
-              fg: gkLevelOf('${i['level']}').fg,
-              trailingIcon: Icons.chevron_right_rounded,
-              onTap: () => _focusRiskItem(i)),
     ];
     final none = chips.isEmpty;
     return GkCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         GkCardHeader('경보 · 주의보',
             icon: Icons.warning_rounded,
-            trailing: Text(widget.demo ? '기상청 · 가상 시연' : '기상청 · 위험 판정',
+            trailing: Text(widget.demo ? '기상청 · 가상 시연' : '기상청',
                 style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: GK.muted))),
         const SizedBox(height: 16),
         if (none)
           const Padding(
             padding: EdgeInsets.only(bottom: 12),
-            child: Text('지금 발효 중인 특보와 주의 이상 위험 판정이 없습니다.',
+            child: Text('지금 발효 중인 특보가 없습니다.',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: GK.green)),
           ),
         Wrap(spacing: 10, runSpacing: 10, children: chips),
@@ -1203,51 +1084,9 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
     );
   }
 
-  /// 특보 이름 → 아이콘 (휴대폰 화면 warningIcon 과 같은 짝)
-  IconData _warningIcon(String l) => switch (l) {
-        _ when l.contains('태풍') => Icons.cyclone_rounded,
-        _ when l.contains('풍랑') || l.contains('해일') => Icons.waves_rounded,
-        _ when l.contains('강풍') => Icons.air_rounded,
-        _ when l.contains('호우') => Icons.thunderstorm_rounded,
-        _ when l.contains('대설') => Icons.ac_unit_rounded,
-        _ when l.contains('폭염') || l.contains('한파') => Icons.thermostat_rounded,
-        _ when l.contains('건조') => Icons.local_fire_department_rounded,
-        _ => Icons.campaign_rounded,
-      };
-
-  void _focusRiskItem(Map<String, dynamic> i) {
-    final loc = i['location'] as Map?;
-    if (loc == null) return;
-    final kind = switch (i['hazard']) {
-      'landslide' => HazardKind.slide,
-      'strong_wind' || 'high_seas' => HazardKind.wind,
-      'typhoon' => HazardKind.storm,
-      _ => HazardKind.flood,
-    };
-    setState(() => layers.add(kind));
-    mapController.move(LatLng((loc['lat'] as num).toDouble(), (loc['lng'] as num).toDouble()), 15);
-  }
-
-  /// 아래쪽 바로가기 카드 (메뉴에서 빠진 지원 및 복구·태풍 정보, 2026-10-08)
-  Widget _linkCard(BuildContext context, IconData icon, String title, String desc, String route) => GkCard(
-        onTap: () => context.push(route),
-        child: Row(children: [
-          GkCircleIcon(icon, size: 56),
-          const SizedBox(width: 16),
-          Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title, style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800)),
-            const SizedBox(height: 2),
-            Text(desc, style: const TextStyle(fontSize: 16, color: GK.muted)),
-          ])),
-          const GkCircleIcon(Icons.chevron_right_rounded, size: 40, bg: GK.bg),
-        ]),
-      );
-
   @override
   Widget build(BuildContext context) {
     final routeMode = dashboardMode == _DashboardMode.facilities;
-    final visible = _visible;
     final wide = MediaQuery.sizeOf(context).width >= 1100;
     final narrow = MediaQuery.sizeOf(context).width < 600;
     final map = ClipRRect(
@@ -1306,7 +1145,9 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
             if (routeMode &&
                 (widget.selectedDestination != null ||
                     widget.where.kind == WhereKind.land ||
-                    widget.where.noGps))
+                    widget.where.noGps ||
+                    // 바다 위여도 출발지를 바꿀 수 있게 (GPS 선택 · 2026-10-11) — RoutePlanner 가 바다면 출발 줄만 보인다
+                    (widget.where.kind == WhereKind.sea && widget.routePlanner != null)))
               _integratedRoutePanel(context),
             const SizedBox(height: 12),
             if (wide)
@@ -1323,16 +1164,6 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
             else ...[
               SizedBox(height: narrow ? 380 : 460, child: map),
               if (!routeMode) ...[const SizedBox(height: 12), places],
-            ],
-            if (!routeMode && visible.contains(HazardKind.slide)) ...[
-              const SizedBox(height: 10),
-              ListTile(
-                leading: const GkCircleIcon(Icons.terrain_rounded, size: 40),
-                title: const Text('산림청 산사태 위험지도(2025)'),
-                subtitle: const Text('공식 산사태 위험지도 열기 · 위험등급 1~5(1등급이 가장 높음). 앱 지도에는 판정된 산사태 위험 영역만 표시합니다.'),
-                trailing: const Icon(Icons.open_in_new_rounded),
-                onTap: () => launchUrl(Uri.parse('https://sansatai.forest.go.kr/mhms_pub/mhms/lndsInfo/lndsMapViewPage.do')),
-              ),
             ],
           ]),
         );
@@ -1354,10 +1185,9 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
         const SizedBox(height: 28),
         // 날씨 = 휴대폰 화면과 같은 작은 칸 (2026-10-10 사용자 요청: 크기·규격 통일). 누르면 자세한 설명
         WeatherSection(demo: widget.demo),
-        const SizedBox(height: 24),
-        // 태풍 정보 카드는 뺐다 — 지도 카드 '전체 재난 표시' 오른쪽 태풍 지도 버튼과 중복 (2026-10-10 사용자 요청).
-        // 시연 버튼 카드(3주차 안전 기능 시연)도 뺐다 — 대피 현황·프로필·방재단 대시보드·경로 안내와 모두 중복
-        _linkCard(context, Icons.health_and_safety_rounded, '재난 후 지원 · 복구', '보험·피해 신고·직업별 지원 안내', '/support'),
+        // 태풍 정보 카드는 뺐다 — 지도 카드 재난 지도 메뉴 오른쪽 태풍 지도 버튼과 중복 (2026-10-10 사용자 요청).
+        // 시연 버튼 카드(3주차 안전 기능 시연)도 뺐다 — 대피 현황·프로필·방재단 대시보드·경로 안내와 모두 중복.
+        // 재난 후 지원 · 복구 카드도 뺐다 — AI 대화창 추천 질문으로 묻는다 (2026-10-11 사용자 요청)
       ],
     );
   }
@@ -1559,19 +1389,27 @@ void _showHazard(BuildContext c, DemoHazard h) => showModalBottomSheet<void>(
     );
 // ── 대시보드·경로 지도 공통 위험 층 (2026-10-07: 경로 안내 지도를 대시보드 지도와 같게) ──────────────
 
-/// 위험 영역 면: 채움색 = 위험 단계, 테두리색 = 재난 종류 (파랑 침수·갈색 산사태). 시연 모드면 읍 전체 특보는 뺀다
-List<Polygon> hazardAreaPolygons(List<RiskArea> areas) => [
+/// 위험 영역 → 지도 재난 구분 (산사태·침수·강풍, 그 밖은 null = 늘 그림)
+HazardKind? _areaKind(String hazard) => switch (hazard) {
+      'landslide' => HazardKind.slide,
+      'flood' || 'heavy_rain' => HazardKind.flood,
+      'strong_wind' || 'wind' || 'high_seas' => HazardKind.wind,
+      _ => null,
+    };
+
+/// 위험 영역 면 (2026-10-10): 침수·강풍은 채움·테두리 모두 위험 단계 색, 산사태는 단계 없이 한 색(취약 지역).
+/// kinds = 켠 재난만 (null 이면 모두), severeOnly = '위험 재난 표시' (침수·강풍은 심각만, 산사태는 모두).
+/// 시연 모드면 읍 전체 특보는 뺀다
+List<Polygon> hazardAreaPolygons(List<RiskArea> areas, {Set<HazardKind>? kinds, bool severeOnly = false}) => [
       for (final area in DemoData.mapAreas(areas))
+        if ((kinds == null || _areaKind(area.hazard) == null || kinds.contains(_areaKind(area.hazard))) &&
+            (!severeOnly || area.hazard == 'landslide' || area.level == '심각'))
         for (final ring in area.polygons)
           if (ring.length >= 3)
             Polygon(
               points: ring,
-              color: _floodColor(area.level).withValues(alpha: .22),
-              borderColor: _hazardColor(area.hazard == 'landslide'
-                  ? HazardKind.slide
-                  : area.hazard == 'wind'
-                      ? HazardKind.wind
-                      : HazardKind.flood),
+              color: (area.hazard == 'landslide' ? _slideColor : _floodColor(area.level)).withValues(alpha: .22),
+              borderColor: area.hazard == 'landslide' ? _slideColor : _floodColor(area.level),
               borderStrokeWidth: 2,
             ),
     ];
@@ -1601,8 +1439,9 @@ List<Marker> floodGridDotMarkers(BuildContext context, List<FloodGrid> grids,
     ];
 
 /// 수위계 표식: 침수 영역 원의 중심(판정 원인 센서 실제 좌표). 누르면 센서 측정값
-List<Marker> floodSensorMarkers(BuildContext context, List<RiskArea> areas) => [
+List<Marker> floodSensorMarkers(BuildContext context, List<RiskArea> areas, {bool severeOnly = false}) => [
       for (final a in _floodSensors(DemoData.mapAreas(areas)))
+        if (!severeOnly || a.level == '심각')
         Marker(
           point: a.sensor!,
           width: 30,
@@ -1615,18 +1454,107 @@ List<Marker> floodSensorMarkers(BuildContext context, List<RiskArea> areas) => [
                 decoration: BoxDecoration(
                     color: Colors.white,
                     shape: BoxShape.circle,
-                    border: Border.all(color: _hazardColor(HazardKind.flood), width: 2),
+                    border: Border.all(color: _sensorColor(a.level), width: 2),
                     boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 3)]),
-                child: Icon(Icons.water_drop,
-                    size: 18,
-                    color: a.level == '정상' || a.level == '관심'
-                        ? _hazardColor(HazardKind.flood)
-                        : _floodColor(a.level)),
+                child: Icon(Icons.water_drop, size: 18, color: _sensorColor(a.level)),
               ),
             ),
           ),
         ),
     ];
+
+/// 수위계 표식 색: 주의 이상은 단계 색, 그 아래는 회색 (파란 테두리 없앰, 2026-10-10)
+Color _sensorColor(String level) =>
+    const ['주의', '경계', '심각'].contains(level) ? _floodColor(level) : Colors.blueGrey.shade400;
+
+/// 지도 왼쪽 위에 늘 펼쳐 두는 범례 (2026-10-10, 사용자 결정): 지금 켠 층에 맞는 것만.
+/// 색 = 위험 단계는 침수·강풍만, 산사태는 취약 지역 한 색. 수치는 쓰지 않는다
+class MapLegendCard extends StatelessWidget {
+  const MapLegendCard(
+      {super.key,
+      required this.visible,
+      this.severeOnly = false,
+      this.showFacilities = false,
+      this.hasDestination = false,
+      this.hasRoute = false,
+      this.hasSea = false});
+  final Set<HazardKind> visible;
+  /// '위험 재난 표시': 심각 단계만 그리므로 범례도 심각 한 칸
+  final bool severeOnly;
+  final bool showFacilities, hasDestination, hasRoute, hasSea;
+
+  @override
+  Widget build(BuildContext context) {
+    const label = TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: GK.navy);
+    const note = TextStyle(fontSize: 11, color: GK.muted, height: 1.3);
+    Widget swatch(Color c) => Container(
+        width: 16,
+        height: 12,
+        decoration: BoxDecoration(
+            color: c.withValues(alpha: .35),
+            borderRadius: BorderRadius.circular(3),
+            border: Border.all(color: c, width: 2)));
+    Widget mark(IconData i, Color c) => SizedBox(width: 18, child: Icon(i, color: c, size: 17));
+    Widget section(String t) => Padding(
+        padding: const EdgeInsets.only(top: 8, bottom: 3),
+        child: Text(t, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: GK.navy)));
+    Widget row(Widget m, String t, [String? n]) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          m,
+          const SizedBox(width: 6),
+          Flexible(
+              child: Text.rich(TextSpan(children: [
+            TextSpan(text: t, style: label),
+            if (n != null) TextSpan(text: '  $n', style: note),
+          ]))),
+        ]));
+    final leveled = visible.contains(HazardKind.flood) || visible.contains(HazardKind.wind);
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 220),
+      child: Material(
+        color: Colors.white.withValues(alpha: .94),
+        elevation: 1,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 2, 10, 8),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+            if (leveled) ...[
+              section('위험 단계'),
+              Wrap(spacing: 8, runSpacing: 2, children: [
+                for (final l in severeOnly ? const ['심각'] : const ['주의', '경계', '심각'])
+                  Row(mainAxisSize: MainAxisSize.min, children: [
+                    swatch(_floodColor(l)),
+                    const SizedBox(width: 4),
+                    Text(l, style: label),
+                  ]),
+              ]),
+            ],
+            if (visible.contains(HazardKind.slide)) ...[
+              section('산사태'),
+              row(swatch(_slideColor), '산사태 취약 지역'),
+            ],
+            if (visible.contains(HazardKind.wind)) ...[
+              section('바람'),
+              row(mark(Icons.navigation, _windColor(21, 21)), '화살표', '불어가는 쪽 · 크고 붉을수록 강함'),
+            ],
+            section('주요 표식'),
+            row(mark(Icons.my_location, _riskColor('경계')), '현위치', '색 = 지금 위치의 위험 단계'),
+            if (showFacilities) ...[
+              row(mark(Icons.health_and_safety, Colors.teal.shade800), '대피소'),
+              row(mark(Icons.local_hospital, Colors.red.shade700), '의료시설'),
+            ],
+            if (hasDestination) row(mark(Icons.location_on, Colors.blue.shade800), '목적지'),
+            if (hasRoute)
+              row(SizedBox(width: 18, child: Container(height: 4, color: Colors.blue.shade800)), '안내 경로'),
+            if (hasSea)
+              row(SizedBox(width: 18, child: Container(height: 3, color: Colors.teal.shade700)), '바닷길'),
+          ]),
+        ),
+      ),
+    );
+  }
+}
 
 /// 지도 오른쪽 위 '범례' 버튼 (FlutterMap children 안에 둔다)
 Widget mapLegendButton(BuildContext context,
@@ -1728,9 +1656,6 @@ void _showLiveWind(BuildContext c, (LatLng, double, double, String, String?) w) 
         '실측 (기상청 AWS·포항 디지털 트윈 대기 센서)',
       ),
     );
-
-String _levelKoFromServer(String level) =>
-    const {'watch': '관심', 'advisory': '주의', 'warning': '경보', 'critical': '위험'}[level] ?? '정상';
 
 String _hhmm(String? iso) {
   final t = DateTime.tryParse(iso ?? '')?.toLocal();
@@ -3271,14 +3196,6 @@ void _showMapLegend(BuildContext context,
       decoration: BoxDecoration(
           color: c.withValues(alpha: .35),
           border: Border.all(color: border ?? c, width: 2)));
-  Widget dot(Color c) => Container(
-      width: 14,
-      height: 14,
-      decoration: BoxDecoration(
-          color: c,
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white, width: 2),
-          boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 2)]));
   Widget line(Color c, {bool dotted = false}) => SizedBox(
       width: 22,
       child: dotted
@@ -3339,24 +3256,22 @@ void _showMapLegend(BuildContext context,
             const Text('지도 범례',
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             // ---------------------------------------------------------------- 기본
-            if (hasAreas) ...[
+            // 색 = 위험 단계는 침수·강풍만, 산사태는 취약 지역 한 색 (2026-10-10). 색 이름·수치는 쓰지 않는다
+            if (visible.contains(HazardKind.flood) || visible.contains(HazardKind.wind)) ...[
               section('위험 단계'),
               Wrap(spacing: 8, runSpacing: 6, children: [
-                chip(fill(_floodColor('주의')), '노랑 · 주의'),
-                chip(fill(_floodColor('경계')), '주황 · 경계'),
-                chip(fill(_floodColor('심각')), '빨강 · 심각'),
+                chip(fill(_floodColor('주의')), '주의'),
+                chip(fill(_floodColor('경계')), '경계'),
+                chip(fill(_floodColor('심각')), '심각'),
               ]),
-              section('재난 구분'),
-              Wrap(spacing: 8, runSpacing: 6, children: [
-                if (visible.contains(HazardKind.flood))
-                  chip(fill(Colors.white, border: _hazardColor(HazardKind.flood)), '파란 테두리 · 침수'),
-                if (visible.contains(HazardKind.slide))
-                  chip(fill(Colors.white, border: _hazardColor(HazardKind.slide)), '갈색 테두리 · 산사태'),
-              ]),
+            ],
+            if (visible.contains(HazardKind.slide)) ...[
+              section('산사태'),
+              Wrap(spacing: 8, runSpacing: 6, children: [chip(fill(_slideColor), '산사태 취약 지역')]),
             ],
             if (visible.contains(HazardKind.wind)) ...[
               section('바람'),
-              row(icon(Icons.navigation, _windColor(21, 21)), '화살표', '바람이 불어가는 쪽 · 클수록·붉을수록 셈'),
+              row(icon(Icons.navigation, _windColor(21, 21)), '화살표', '바람이 불어가는 쪽 · 크고 붉을수록 강함'),
             ],
             section('주요 표식'),
             row(icon(Icons.my_location, _riskColor('경계')), '현위치', '색 = 지금 위치의 위험 단계'),
@@ -3384,18 +3299,15 @@ void _showMapLegend(BuildContext context,
                 childrenPadding: const EdgeInsets.only(bottom: 8),
                 expandedCrossAxisAlignment: CrossAxisAlignment.start,
                 title: const Text('범례 자세히', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
-                subtitle: const Text('센서·격자·묶음 표시, 판단 근거와 출처', style: TextStyle(fontSize: 12)),
+                subtitle: const Text('센서·묶음 표시, 판단 근거와 출처', style: TextStyle(fontSize: 12)),
                 children: [
                   if (hasAreas) ...[
-                    section('채움색과 테두리색'),
-                    row(fill(_floodColor('경계'), border: _hazardColor(HazardKind.flood)), '채움색 = 위험 단계',
-                        '테두리색 = 재난 종류. 같은 면이 두 정보를 함께 보여 줍니다'),
                     section('판단 근거·범위·출처'),
                     if (visible.contains(HazardKind.flood))
-                      row(fill(Colors.white, border: _hazardColor(HazardKind.flood)), '침수',
+                      row(fill(_floodColor('경계')), '침수',
                           '수위계·맨홀 측정값(포항 디지털 트윈) 기준, 센서 주변 반경 100~500m. 서버 위험 판정 단계이며 실측 수심 구간이 아님'),
                     if (visible.contains(HazardKind.slide))
-                      row(fill(Colors.white, border: _hazardColor(HazardKind.slide)), '산사태',
+                      row(fill(_slideColor), '산사태',
                           '호우 특보(기상청) × 산사태위험지도 비탈 100m · 지정 취약지역'),
                   ],
                   if (visible.contains(HazardKind.flood)) ...[
@@ -3407,27 +3319,23 @@ void _showMapLegend(BuildContext context,
                             decoration: BoxDecoration(
                                 color: Colors.white,
                                 shape: BoxShape.circle,
-                                border: Border.all(color: _hazardColor(HazardKind.flood), width: 2)),
+                                border: Border.all(color: _floodColor('경계'), width: 2)),
                             child: Icon(Icons.water_drop, size: 14, color: _floodColor('경계'))),
                         '물방울',
                         '침수 판정의 원인 센서(수위계·맨홀) 실제 위치 = 침수 원의 중심. 색 = 단계, 누르면 측정값'),
-                    section('침수 격자'),
-                    row(fill(_floodColor('경계')), '작은 칸',
-                        '침수 영역을 약 100m 칸으로 나눈 것 (경로가 피하는 범위와 같음)'),
-                    row(dot(_floodColor('경계')), '칸 가운데 점', '칸 위치 표시일 뿐 측정 지점이 아님 — 누르면 그 칸의 단계·출처'),
                   ],
                   if (visible.contains(HazardKind.wind)) ...[
                     section('바람 기준'),
-                    row(icon(Icons.navigation, _windColor(10, 10)), '회색', '평균 14m/s 미만'),
-                    row(icon(Icons.navigation, _windColor(14, 14)), '주황', '평균 14m/s 이상 (강풍주의보 기준)'),
-                    row(icon(Icons.navigation, _windColor(21, 21)), '빨강', '평균 21m/s 이상 (강풍경보 기준)'),
+                    row(icon(Icons.navigation, _windColor(10, 10)), '주의', '강풍주의보 기준 아래'),
+                    row(icon(Icons.navigation, _windColor(14, 14)), '경계', '강풍주의보 기준 이상'),
+                    row(icon(Icons.navigation, _windColor(21, 21)), '심각', '강풍경보 기준 이상'),
                   ],
                   section('표식 더 보기'),
                   if (showFacilities) row(facilityMark, '숫자 원', '가까운 시설 묶음 — 누르면 그곳으로 확대'),
                   if (!routeMode && showPlaces)
                     row(icon(Icons.home, _riskColor('정상')), '등록한 집·직장', '색 = 그 장소의 위험 단계'),
                   row(icon(Icons.my_location, _riskColor('정상')), '현위치 색',
-                      '초록 정상 → 노랑 주의 → 주황 경계 → 빨강 심각'),
+                      '정상 → 주의 → 경계 → 심각'),
                   if (hasDestination) row(icon(Icons.local_hospital, Colors.blue.shade800), '목적지 십자', '고른 곳이 병원이면 십자 표시'),
                   if (hidesTownWide) ...[
                     section('지도에 칠하지 않는 기상특보'),
