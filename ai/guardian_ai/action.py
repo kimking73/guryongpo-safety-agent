@@ -266,6 +266,17 @@ def template_steps(decision: Decision, guides: list[dict[str, Any]], route: dict
     return steps
 
 
+# 재난 상황 agent(침수·산사태·강풍태풍·생활안전)의 조각은 한 문단으로 잇는다 — agent마다 문단이 나뉘면 짧은 답도 길고 끊겨 보인다 (2026-10-10)
+SEPARATE_PARAGRAPH = {Specialist.LOCATION_ROUTE, Specialist.RECOVERY_SUPPORT}
+
+
+def compose_summaries(results) -> str:
+    """전문 agent 조각 → 답 본문. 재난 상황은 한 문단, 대피 경로·지원 안내는 각각 다음 문단."""
+    hazard = " ".join(r.summary.strip() for r in results if r.summary.strip() and r.agent not in SEPARATE_PARAGRAPH)
+    others = [r.summary.strip() for r in results if r.summary.strip() and r.agent in SEPARATE_PARAGRAPH]
+    return "\n\n".join(p for p in [hazard, *others] if p)
+
+
 # (질문, 사용자 상황·분기, 원문 목록, 재시도 사유) → 할 일 문장들. 실패하면 예외
 ActionWriter = Callable[[str, str, str, str], list[str]]
 
@@ -329,7 +340,7 @@ def make_action_advisor(writer: ActionWriter | None = None, fetch: Fetch | None 
         logger.info("행동 권고 [%s] 분기=%s 재난=%s 원문=%s 경로=%s 질문=%s", how, path,
                     main.agent.value if main else None, [g["id"] for g in guides], bool(route), bool(decision.question))
 
-        draft = "\n\n".join(parts)
+        draft = compose_summaries(results)
         # 위험 지역 판단은 코드가 맨 앞에 밝힌다. 전문 agent는 이 판단을 모른 채 "위험 단계 정상"만 쓸 수 있어
         # 검증기가 "위험을 낮춰 말함"으로 막았다 (2026-10-03 live)
         if "위험 지역" in decision.path:
