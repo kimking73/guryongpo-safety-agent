@@ -34,30 +34,50 @@ const needKo = {
   'hearing': '청각', 'vision': '시각', 'cognitive': '인지', 'medical_device': '의료기기', 'infant': '영유아', 'pet': '반려동물',
 };
 
-/// 취약 가구 분류 — 방재단 지도 아이콘·필터. 장애인 가구는 대피 상황이 아니어도 지도에 표시 (2026-10-05).
-/// 독거노인 분류는 뺐다 — 서비스 대상이 아님 (사용자 결정 2026-10-10)
-const disabilityNeeds = {'wheelchair', 'hearing', 'vision', 'cognitive', 'bedridden', 'mobility_limited'};
+/// 취약 가구 분류 — 방재단 지도 아이콘·필터. 대피 상황이 아니어도 지도에 표시 (2026-10-05).
+/// 시각·청각·지체 장애로 나눈다 (2026-10-11 사용자 요청 — 가구 대리 등록이 묻는 유형과 같게). '기타 취약 가구'는 없앴다:
+/// 세 유형이 없는 가구는 지도·필터에 나오지 않는다. 휠체어·와상은 지체로 본다
+enum VulnerableKind { vision, hearing, mobility }
+
 Set<String> _needSet(Object? needs) => {for (final x in needs as List? ?? const []) '$x'};
-bool isDisabledHousehold(Object? needs) => _needSet(needs).any(disabilityNeeds.contains);
-
-enum VulnerableKind { disabled, other }
-
-/// 지도 아이콘 하나를 고른다: 장애가 있으면 장애인, 그 밖은 기타
-VulnerableKind vulnerableKind(Object? needs) => isDisabledHousehold(needs) ? VulnerableKind.disabled : VulnerableKind.other;
-const kindKo = {VulnerableKind.disabled: '장애인', VulnerableKind.other: '기타 취약'};
-const kindIcon = {VulnerableKind.disabled: Icons.accessible, VulnerableKind.other: Icons.home};
-const kindColor = {
-  VulnerableKind.disabled: Color(0xff6a1b9a),
-  VulnerableKind.other: Color(0xff546e7a),
+const _kindNeeds = {
+  VulnerableKind.vision: {'vision'},
+  VulnerableKind.hearing: {'hearing'},
+  VulnerableKind.mobility: {'mobility_limited', 'wheelchair', 'bedridden'},
 };
 
-/// 지도·목록 필터
-enum HouseholdFilter { all, disabled }
+/// 가구의 장애 유형들 (시각 → 청각 → 지체 순)
+List<VulnerableKind> vulnerableKinds(Object? needs) {
+  final s = _needSet(needs);
+  return [for (final k in VulnerableKind.values) if (_kindNeeds[k]!.any(s.contains)) k];
+}
 
-bool matchesFilter(HouseholdFilter f, Object? needs) => switch (f) {
-      HouseholdFilter.all => true,
-      HouseholdFilter.disabled => isDisabledHousehold(needs),
-    };
+/// 지도 아이콘 하나를 고른다 (여러 유형이면 앞의 것). 세 유형이 없으면 null
+VulnerableKind? vulnerableKind(Object? needs) => vulnerableKinds(needs).firstOrNull;
+bool isDisabledHousehold(Object? needs) => vulnerableKind(needs) != null;
+const kindKo = {VulnerableKind.vision: '시각장애', VulnerableKind.hearing: '청각장애', VulnerableKind.mobility: '지체장애'};
+const kindIcon = {
+  VulnerableKind.vision: Icons.blind_rounded,
+  VulnerableKind.hearing: Icons.hearing_disabled_rounded,
+  VulnerableKind.mobility: Icons.accessible_rounded,
+};
+const kindColor = {
+  VulnerableKind.vision: Color(0xff1565c0),
+  VulnerableKind.hearing: Color(0xff00796b),
+  VulnerableKind.mobility: Color(0xff6a1b9a),
+};
+
+/// 지도·목록 필터: 전체(세 유형 모두) · 시각 · 청각 · 지체
+enum HouseholdFilter { all, vision, hearing, mobility }
+
+const _filterKind = {
+  HouseholdFilter.vision: VulnerableKind.vision,
+  HouseholdFilter.hearing: VulnerableKind.hearing,
+  HouseholdFilter.mobility: VulnerableKind.mobility,
+};
+
+bool matchesFilter(HouseholdFilter f, Object? needs) =>
+    f == HouseholdFilter.all ? isDisabledHousehold(needs) : vulnerableKinds(needs).contains(_filterKind[f]);
 
 /// 대피 상태 (A12) → 한글·색. 명단 정렬도 서버(priority_rank)를 따르고 앱은 표시만 한다
 const statusKo = {'need_help': '도움 필요', 'no_response': '미응답', 'evacuating': '대피 중', 'evacuated': '대피 완료'};
@@ -558,7 +578,7 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
     try {
       final list = await api.adminIncidents();
       final id = list.any((i) => i['id'] == incidentId) ? incidentId : (list.isEmpty ? null : '${list.first['id']}');
-      // 등록 취약 가구는 대피 상황과 상관없이 늘 지도에 (장애인 가구 평시 확인)
+      // 등록 취약 가구는 대피 상황과 상관없이 늘 지도에 (장애 가구 평시 확인)
       final hh = await api.adminHouseholds();
       if (!mounted) return;
       setState(() {
@@ -733,7 +753,7 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text('진행 중인 대피 상황이 없습니다', style: dsText(16, weight: FontWeight.w800)),
-                  Text('평시에도 장애인 가구를 지도에서 확인할 수 있어요. 대피 상황이 생기면 대상 가구가 번호(우선순위)로 바뀌어요.',
+                  Text('평시에도 장애 가구를 지도에서 확인할 수 있어요. 대피 상황이 생기면 대상 가구가 번호(우선순위)로 바뀌어요.',
                       style: dsText(13, color: Ds.muted, height: 1.45)),
                 ]),
               ),
@@ -803,7 +823,7 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
       ];
 }
 
-/// 전체 / 장애인 필터 (개수 포함)
+/// 전체 / 시각 / 청각 / 지체 필터 (개수 포함)
 class _FilterBar extends StatelessWidget {
   const _FilterBar({required this.households, required this.filter, required this.onChanged});
   final List<Map<String, dynamic>> households;
@@ -820,8 +840,8 @@ class _FilterBar extends StatelessWidget {
     return Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
         child: Wrap(spacing: 8, runSpacing: 6, children: [
-          chip(HouseholdFilter.all, '등록 취약 가구 전체', Icons.home_work_outlined, kindColor[VulnerableKind.other]!),
-          chip(HouseholdFilter.disabled, '장애인', kindIcon[VulnerableKind.disabled]!, kindColor[VulnerableKind.disabled]!),
+          chip(HouseholdFilter.all, '등록 장애 가구 전체', Icons.home_work_outlined, Ds.navy),
+          for (final e in _filterKind.entries) chip(e.key, kindKo[e.value]!, kindIcon[e.value]!, kindColor[e.value]!),
         ]));
   }
 }
@@ -837,8 +857,7 @@ class _MapLegend extends StatelessWidget {
       if (withTargets)
         item(CircleAvatar(radius: 8, backgroundColor: statusColor('need_help'),
             child: const Text('1', style: TextStyle(fontSize: 10, color: Colors.white))), '대피 대상 (번호 = 우선순위, 색 = 상태)'),
-      item(icon(VulnerableKind.disabled), '장애인 가구'),
-      item(icon(VulnerableKind.other), '기타 취약 가구'),
+      for (final k in VulnerableKind.values) item(icon(k), '${kindKo[k]} 가구'),
     ]);
   }
 }
@@ -973,7 +992,7 @@ class _MapPoint {
   final int? rank;              // 대피 대상이면 우선순위
   final String? status;         // 대피 대상이면 대피 상태
   final String label;
-  final VulnerableKind? kind;   // 등록 가구(대피 대상 아님)면 장애인·기타
+  final VulnerableKind? kind;   // 등록 가구(대피 대상 아님)면 시각·청각·지체
   final String? detail;
 }
 

@@ -1364,9 +1364,7 @@ class Dashboard extends ConsumerWidget {
       this.extraPolylines = const [],
       this.mapOnly = false,
       this.showFacilities = false,
-      this.focusPoint,
-      this.routePanel,
-      this.onRouteOpen});
+      this.focusPoint});
 
   /// 방재단 현황(2026-10-09)이 대시보드 지도 칸만 쓸 때 (DisasterDashboard 참고)
   final List<Polygon> extraPolygons;
@@ -1376,12 +1374,11 @@ class Dashboard extends ConsumerWidget {
   /// 방재단 지도: 대피소·의료시설을 늘 그리고, 목록에서 고른 가구로 지도를 옮긴다 (2026-10-09)
   final bool showFacilities;
   final LatLng? focusPoint;
-  /// 방재단 현황(2026-10-11): 경로 안내 칸을 대시보드 출발→도착 대신 '내 방문 경로'로, 경로 안내를 열 때 뜨는 창도 바꾼다
-  final Widget? routePanel;
-  final VoidCallback? onRouteOpen;
   @override
   Widget build(BuildContext c, WidgetRef ref) {
-    final route = ref.watch(routeFacilityId);
+    // 방재단 현황(mapOnly)은 대시보드에서 정한 개인 경로(목적지·경로선·해상 경로)를 보이지 않는다 (2026-10-11 사용자 요청 —
+    // 대시보드 경로 안내는 개인용, 방재단 경로 안내는 방문 경로로 따로)
+    final route = mapOnly ? null : ref.watch(routeFacilityId);
     // 화면은 김다인 대시보드 UI 하나. 시연 모드면 가상 시나리오, 아니면 서버 실측 데이터로 채운다 (2026-10-05)
     // 앱 안 가상 화면은 서버 없이 실행(APP_MODE=mock)할 때만. 서버 연결이면 시연 모드도 실측 화면 + 서버 시연 데이터
     final demo = !AppConfig.isRemote;
@@ -1392,7 +1389,7 @@ class Dashboard extends ConsumerWidget {
         ref.watch(facilitiesProvider).valueOrNull ?? const <Facility>[];
     final destination = route == null ? null : routeDestination(ref, route);
     final live = demo ? null : ref.watch(liveDashboardProvider).valueOrNull;
-    final sea = demo ? null : ref.watch(seaRoutePlanProvider).valueOrNull;
+    final sea = demo || mapOnly ? null : ref.watch(seaRoutePlanProvider).valueOrNull;
     return DisasterDashboard(
       extraPolygons: extraPolygons,
       extraMarkers: extraMarkers,
@@ -1430,8 +1427,8 @@ class Dashboard extends ConsumerWidget {
       // '출발: …' 표시와 '주소로 길찾기' 버튼은 뺐다 (2026-10-09 사용자 요청). 위치 확인은 지도의 '현위치' 버튼
       // 경로 안내 한 덩어리: 출발 → 도착·이동 수단·경로 방식·시간 (2026-10-10). 방재단 현황 지도(mapOnly)도 같은 것을 쓴다.
       // '이동 중 안내' 버튼은 뺐다 (2026-10-10 사용자 요청)
-      routePlanner: routePanel ?? const RoutePlanner(),
-      onMapPick: ref.watch(mapPickMode) ? (p) => RoutePlanner.useMapPoint(c, ref, p) : null,
+      routePlanner: mapOnly ? null : const RoutePlanner(),
+      onMapPick: !mapOnly && ref.watch(mapPickMode) ? (p) => RoutePlanner.useMapPoint(c, ref, p) : null,
       where: ref.watch(whereNowProvider).when(
           data: (w) => w,
           loading: () => const WhereNow(WhereKind.checking),
@@ -1445,7 +1442,7 @@ class Dashboard extends ConsumerWidget {
       },
       onSeaRoute: () => c.push('/sea-route'),
       // 바다 위면 경로 안내에서 바로 해상 경로를 받아 지도에 그린다 (2026-10-10 사용자 요청)
-      seaRoutePanel: demo ? null : const SeaRoutePanel(),
+      seaRoutePanel: demo || mapOnly ? null : const SeaRoutePanel(),
       seaRouteLines: sea == null ? const [] : seaRoutePolylines(sea),
       seaRouteMarkers: sea == null ? const [] : seaRouteMarkers(sea),
       routeActive: route != null,
@@ -1460,9 +1457,7 @@ class Dashboard extends ConsumerWidget {
       routeLoading: routeAsync?.isLoading ?? false,
       routeError: routeAsync?.hasError == true ? '${routeAsync?.error}' : null,
       routeType: routeType,
-      // 방재단 현황은 대피소 고르기 대신 우선 확인 가구 고르기 창 (onRouteOpen, 2026-10-11)
-      onChooseFacility: onRouteOpen ??
-          () => showModalBottomSheet<void>(
+      onChooseFacility: () => showModalBottomSheet<void>(
                 context: c,
                 showDragHandle: true,
                 builder: (_) => const ShelterPickerSheet(),

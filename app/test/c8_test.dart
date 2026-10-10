@@ -96,16 +96,19 @@ const _households = [
 ];
 
 void main() {
-  test('취약 가구 분류: 장애인·기타 (독거노인 분류 없음 — 서비스 대상 아님, 2026-10-10)', () {
-    expect(vulnerableKind(['hearing']), VulnerableKind.disabled);
-    expect(vulnerableKind(['elderly', 'living_alone']), VulnerableKind.other);
-    expect(vulnerableKind(['elderly', 'living_alone', 'wheelchair']), VulnerableKind.disabled);
-    expect(vulnerableKind(['infant']), VulnerableKind.other);
-    expect(HouseholdFilter.values, [HouseholdFilter.all, HouseholdFilter.disabled]);
-    expect(matchesFilter(HouseholdFilter.disabled, ['elderly', 'living_alone']), isFalse);
+  test('취약 가구 분류: 시각·청각·지체 (기타 취약 없음 — 2026-10-11, 휠체어·와상 = 지체)', () {
+    expect(vulnerableKind(['hearing']), VulnerableKind.hearing);
+    expect(vulnerableKind(['elderly', 'living_alone']), isNull);
+    expect(vulnerableKind(['elderly', 'living_alone', 'wheelchair']), VulnerableKind.mobility);
+    expect(vulnerableKind(['infant']), isNull);
+    expect(vulnerableKinds(['vision', 'mobility_limited']), [VulnerableKind.vision, VulnerableKind.mobility]);
+    expect(HouseholdFilter.values, [HouseholdFilter.all, HouseholdFilter.vision, HouseholdFilter.hearing, HouseholdFilter.mobility]);
+    expect(matchesFilter(HouseholdFilter.all, ['elderly', 'living_alone']), isFalse);
+    expect(matchesFilter(HouseholdFilter.mobility, ['bedridden']), isTrue);
+    expect(registeredSupport({'kind': 'household', 'needs': ['hearing', 'wheelchair']}), ['청각장애', '지체장애']);
   });
 
-  testWidgets('대피 상황이 없어도 장애인 가구가 지도에 나오고 필터로 고른다 (독거노인 필터·범례 없음)', (t) async {
+  testWidgets('대피 상황이 없어도 장애 가구가 지도에 나오고 시각·청각·지체 필터로 고른다 (기타 취약 가구 없음)', (t) async {
     _tall(t);
     final s = FakeServer({
       'GET /api/v1/admin/incidents': (_) => <Object>[],
@@ -118,17 +121,22 @@ void main() {
     await _settle(t);
     expect(find.text('진행 중인 대피 경보가 없습니다'), findsOneWidget);
     expect(find.text('도움 필요'), findsNothing); // 경보가 없으면 0 집계 대신 '경보 없음'
-    expect(find.text('장애인 2'), findsOneWidget);       // 거동 불편 김○○ + 청각장애
+    expect(find.text('등록 장애 가구 전체 2'), findsOneWidget);   // 거동 불편 김○○ + 청각장애
+    expect(find.text('지체장애 1'), findsOneWidget);
+    expect(find.text('청각장애 1'), findsOneWidget);
+    expect(find.text('시각장애 0'), findsOneWidget);
+    expect(find.textContaining('기타 취약'), findsNothing);
     expect(find.textContaining('독거노인'), findsNothing);
-    // 지도 마커: 장애인 아이콘 2 + 기타 2 (목록 아이콘과 범례도 같은 아이콘을 쓴다)
-    expect(find.byIcon(Icons.accessible), findsWidgets);
-    // 등록 가구 목록 카드는 뺐다 (2026-10-10) — 지도 표식(툴팁)으로 확인
+    expect(find.text('장애인 가구'), findsNothing);
+    expect(find.text('지체장애 가구'), findsOneWidget);   // 범례
+    // 등록 가구 목록 카드는 뺐다 (2026-10-10) — 지도 표식(툴팁)으로 확인. 세 유형이 없는 가구는 지도에 없다
     Finder marker(String label) => find.byWidgetPredicate((w) => w is Tooltip && (w.message ?? '').startsWith(label));
-    expect(marker('[시연] 호미로 독거 어르신 댁 · 기타 취약'), findsOneWidget);
-    await t.tap(find.text('장애인 2'));
-    await _settle(t);
-    expect(marker('[시연] 시장 옆 청각장애 주민 댁'), findsOneWidget);
+    expect(marker('[시연] 김○○ 댁 · 지체장애'), findsOneWidget);
     expect(marker('[시연] 호미로 독거 어르신 댁'), findsNothing);
+    await t.tap(find.text('청각장애 1'));
+    await _settle(t);
+    expect(marker('[시연] 시장 옆 청각장애 주민 댁 · 청각장애'), findsOneWidget);
+    expect(marker('[시연] 김○○ 댁'), findsNothing);
     expect(marker('[시연] 영유아 가구'), findsNothing);
   });
 
@@ -263,7 +271,7 @@ void main() {
     final first = t.getTopLeft(find.text('[시연] 김○○ 댁').first).dy;
     final second = t.getTopLeft(find.text('[시연] 박○○ 댁').first).dy;
     expect(first, lessThan(second));
-    expect(find.textContaining('도움 필요 · 장애', findRichText: true), findsOneWidget);   // 등록된 needs(보행 불편)만 장애로
+    expect(find.textContaining('도움 필요 · 지체장애', findRichText: true), findsOneWidget);   // 등록된 needs(보행 불편)만 장애로, 유형까지
     // 실제 서버에는 업무 단계 칸이 없다 — 단계 바꾸기 없이 배정만
     expect(find.text('배정 0가구 · 미배정 2가구'), findsOneWidget);
     expect(find.text('업무 단계 바꾸기'), findsNothing);
@@ -291,7 +299,9 @@ void main() {
     expect(find.textContaining('마지막 방문'), findsOneWidget);
     expect(find.text('대피 완료'), findsWidgets);
     // 김○○는 대피 완료가 되어 우선 확인 목록에서 빠지고, 박○○가 1번
-    expect(find.textContaining('도움 필요 · 장애', findRichText: true), findsNothing);
+    expect(find.textContaining('도움 필요 · 지체장애', findRichText: true), findsNothing);
+    // 방문 결과는 그 가구 줄 이름 옆에 남는다 (2026-10-11 사용자 요청)
+    expect(find.textContaining('방문: 함께 대피함'), findsOneWidget);
     // 주민 대피 완료 ≠ 방재단 업무 완료: 배정 현황은 그대로 미배정
     expect(find.text('배정 0가구 · 미배정 2가구'), findsOneWidget);
     await t.pumpWidget(const SizedBox.shrink()); // 10초 갱신 타이머 정리
@@ -346,7 +356,7 @@ void main() {
     expect(result, isTrue);
   });
 
-  testWidgets("내 방문 경로: '경로에 추가'한 곳만 최단·우선순위 최단 두 경로로 받는다 (2026-10-09)", (t) async {
+  testWidgets("방재단 경로 안내: 창에서 '경로 추가'한 곳만 자동으로 최단·우선순위 최단 두 경로를 받는다 (2026-10-11)", (t) async {
     final d = _detail();
     final ts = [for (final x in d['targets'] as List) Map<String, dynamic>.from(x as Map)];
     d['targets'] = [
@@ -354,7 +364,7 @@ void main() {
       {...ts[1], 'priority_tier': 2},
       {...ts[0], 'id': 't-3', 'label': '[시연] 안 넣은 댁', 'priority_rank': 3, 'priority_tier': 4},
     ];
-    Object? sent;
+    final sent = <Map>[];
     Map<String, dynamic> plan(List<String> ids) => {
           'order': [for (var i = 0; i < ids.length; i++) {'id': ids[i], 'seq': i + 1, 'tier': 4, 'leg_distance_m': 300, 'leg_duration_s': 240}],
           'distance_m': 1200, 'duration_s': 900, 'geometry': '_p~iF~ps|U_ulLnnqC', 'still_inside': <String>[],
@@ -364,8 +374,9 @@ void main() {
       'GET /api/v1/admin/households': (_) => <Object>[],
       'GET /api/v1/admin/incidents/inc-1': (_) => d,
       'POST /api/route/visits': (o) {
-        sent = o.data;
-        return {'mode': 'walk', 'shortest': plan(['t-2', 't-1']), 'priority': plan(['t-1', 't-2']), 'blocked_zones': <String>[], 'hazards_ok': true};
+        sent.add(o.data as Map);
+        final ids = [for (final x in (o.data as Map)['stops'] as List) '${x['id']}'];
+        return {'mode': 'walk', 'shortest': plan(ids.reversed.toList()), 'priority': plan(ids), 'blocked_zones': <String>[], 'hazards_ok': true};
       },
     });
     _tall(t);
@@ -375,31 +386,30 @@ void main() {
     ]));
     await _settle(t);
 
-    // 내 방문 경로는 지도 카드 '경로 안내' 칸에 있다 (2026-10-11) — 경로 안내를 열기 전엔 없다
+    // 우선 확인 가구 줄에는 경로 추가 아이콘이 없다 — 지도 카드 '경로 안내'로만
+    expect(find.byTooltip('경로에 추가'), findsNothing);
     expect(find.text('내 방문 경로'), findsNothing);
-    // 경로 안내를 열면 대피소 고르기 대신 '경로에 넣을 가구' 창 (우선 확인 가구) — 박○○·김○○를 넣고 t-3은 안 넣음
-    await t.ensureVisible(find.widgetWithText(MapMenuButton, '경로 안내'));
-    await t.tap(find.widgetWithText(MapMenuButton, '경로 안내'));
+    await t.ensureVisible(find.widgetWithText(PillButton, '경로 안내'));
+    await t.tap(find.widgetWithText(PillButton, '경로 안내'));
     await _settle(t);
-    expect(find.text('경로에 넣을 가구'), findsOneWidget);
+    expect(find.text('방문 경로 안내'), findsOneWidget);
     expect(find.text('대피소·의료시설 선택'), findsNothing);
-    await t.tap(find.widgetWithText(CheckboxListTile, '[시연] 박○○ 댁'));
+    // 박○○(2번)·김○○(1번)를 넣고 t-3은 안 넣음. 목록 순서 = 우선 확인 순서 (김○○ 먼저)
+    await t.tap(find.widgetWithText(PillButton, '경로 추가').at(1));
     await _settle(t);
-    await t.tap(find.widgetWithText(CheckboxListTile, '[시연] 김○○ 댁'));
+    await t.tap(find.widgetWithText(PillButton, '경로 추가').first);
     await _settle(t);
-    await t.tap(find.widgetWithText(PillButton, '완료'));
+    expect(find.widgetWithText(PillButton, '추가됨'), findsNWidgets(2));
+    await t.tap(find.widgetWithText(PillButton, '2곳 경로 계산'));
     await _settle(t);
+    // 창을 닫으면 바로 계산 (계산 버튼 없음)
+    expect(sent, hasLength(1));
+    expect([for (final x in sent.last['stops'] as List) (x['id'], x['tier'])], [('t-1', 2), ('t-2', 4)]);   // 명단(순위) 순서로 보냄
+    expect(sent.last['mode'], 'walk');
     expect(find.text('내 방문 경로'), findsOneWidget);
     expect(find.text('경로에 넣은 곳 2/10'), findsOneWidget);
-    expect(find.byTooltip('경로에서 빼기'), findsNWidgets(4));   // 경로 안내 칸 2 + 우선 확인 목록 줄 아이콘 2
+    expect(find.byTooltip('경로에서 빼기'), findsNWidgets(2));
     expect(find.text('출발:'), findsOneWidget);                 // 대시보드 경로 안내와 같은 출발 칸
-    expect(find.text('2곳 경로 계산'), findsOneWidget);
-    await t.ensureVisible(find.text('2곳 경로 계산'));
-    await t.tap(find.text('2곳 경로 계산'));
-    await _settle(t);
-    final body = sent! as Map;
-    expect([for (final x in body['stops'] as List) (x['id'], x['tier'])], [('t-1', 2), ('t-2', 4)]);   // 명단(순위) 순서로 보냄
-    expect(body['mode'], 'walk');
 
     expect(find.text('도보 · 총 1.2km · 약 15분'), findsOneWidget);
     double y(String label) => t.getTopLeft(find.descendant(of: find.byType(ListTile), matching: find.text(label)).first).dy;
@@ -409,13 +419,14 @@ void main() {
     await _settle(t);
     expect(y('[시연] 김○○ 댁'), lessThan(y('[시연] 박○○ 댁')));   // 우선순위: t-1 → t-2
 
-    // 하나를 빼면 결과가 지워지고 1곳으로 다시 계산 (경로 안내 칸의 둘째 줄 = 박○○)
+    // 하나를 빼면 1곳으로 자동 재계산
     final remove = find.byTooltip('경로에서 빼기').at(1);
     await t.ensureVisible(remove);
     await t.tap(remove);
     await _settle(t);
-    expect(find.text('1곳 경로 계산'), findsOneWidget);
-    expect(find.text('우선순위 최단 경로'), findsNothing);
+    expect(sent, hasLength(2));
+    expect([for (final x in sent.last['stops'] as List) x['id']], ['t-1']);
+    expect(find.text('경로에 넣은 곳 1/10'), findsOneWidget);
     await t.pumpWidget(const SizedBox.shrink());
   });
 
@@ -456,7 +467,7 @@ void main() {
     expect(left.dy, right.dy);
     expect(left.dx, lessThan(right.dx));
     expect(find.byTooltip('방문 결과'), findsWidgets);
-    expect(find.byTooltip('경로에 추가'), findsWidgets);
+    expect(find.byTooltip('경로에 추가'), findsNothing);   // 경로 추가는 지도 '경로 안내' 창으로 (2026-10-11)
     await t.pumpWidget(const SizedBox.shrink());
     await t.pump(const Duration(minutes: 1));   // 남은 타이머 정리
   });
@@ -479,7 +490,10 @@ void main() {
     expect(find.text('앱 사용자 (나 · 시연)'), findsWidgets);   // 응답 전 = 응답 없음으로 우선 확인 (+ 배정 현황)
     // 시연 가구는 6곳, 이름에 '[시연]' 머리 없음 (2026-10-10)
     expect(find.textContaining('[시연]'), findsNothing);
-    expect(find.text('등록 취약 가구 전체 6'), findsOneWidget);
+    expect(find.text('등록 장애 가구 전체 6'), findsOneWidget);   // 시각 2 · 청각 2 · 지체 2
+    for (final k in ['시각장애 2', '청각장애 2', '지체장애 2']) {
+      expect(find.text(k), findsOneWidget, reason: k);
+    }
     int count(String status) =>
         int.parse(t.widget<Text>(find.byKey(ValueKey('evac-count-$status'))).textSpan!.toPlainText().split(' ').first);
     final noResp = count('no_response'), help = count('need_help');
