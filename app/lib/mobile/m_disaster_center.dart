@@ -9,7 +9,6 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../services/account_service.dart';
 import '../services/location_service.dart';
-import '../services/app_config.dart';
 import '../services/demo_mode.dart';
 import '../models/domain_models.dart';
 import 'dashboard_cards.dart';
@@ -466,61 +465,6 @@ class _MDisasterDashboardState extends State<MDisasterDashboard> {
   void focusOn(LatLng point) {
     setState(() => focus = point);
     mapController.move(point, 15);
-  }
-
-  Widget _personalizedMockAlerts(BuildContext context) {
-    if (AppConfig.isRemote || !widget.demo) return const SizedBox.shrink();
-    final grids = _grids;
-    final alerts = <(String, String, LatLng, String)>[];
-    for (final key in ['home', 'work']) {
-      final position = _position(savedProfile, key);
-      if (position == null) continue;
-      final level = _riskForPosition(position, grids);
-      if (level == '미확인') continue;
-      final isHome = key == 'home';
-      final name = (savedProfile['${key}Name'] ?? '').trim().isEmpty
-          ? (isHome ? '집' : '직장')
-          : savedProfile['${key}Name']!;
-      final address = savedProfile['${key}Address'] ?? '주소 미등록';
-      alerts.add((
-        '$name 주변 침수 위험 · $level',
-        '$address 주변의 침수 위험을 가정한 사용자 맞춤 목업 경고입니다.',
-        position,
-        level,
-      ));
-    }
-    if (alerts.isEmpty) return const SizedBox.shrink();
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('사용자 맞춤형 선제 경고 · 예시',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 6),
-            for (final alert in alerts)
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.notifications_active_outlined,
-                    color: _riskColor(alert.$4)),
-                title: Text(alert.$1,
-                    style: const TextStyle(fontWeight: FontWeight.w600)),
-                subtitle: Text(alert.$2),
-                onTap: () => focusOn(alert.$3),
-              ),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                onPressed: () => context.go('/alerts-hub'),
-                icon: const Icon(Icons.open_in_new),
-                label: const Text('선제 경고 전체 보기'),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   @override
@@ -1029,7 +973,6 @@ class _MDisasterDashboardState extends State<MDisasterDashboard> {
         },
         levelAt: widget.demo ? null : _levelAt,
       ),
-      _personalizedMockAlerts(context),
       const SizedBox(height: 16),
       AppCard(
         padding: const EdgeInsets.symmetric(horizontal: 4),

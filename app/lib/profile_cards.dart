@@ -747,6 +747,69 @@ class _SafetyFeaturesCardState extends ConsumerState<SafetyFeaturesCard> {
   }
 }
 
+/// 방재단 로그인 상태 (2026-10-10 사용자 요청, 휴대폰 화면의 방재단 로그인 카드 모양): 방재단원으로 로그인했을 때만 보인다.
+/// 로그아웃 = 서버 역할 내려놓기 (DELETE /api/v1/user/role). 시연 모드는 역할 없이 방재단 화면을 여는 것이라 로그아웃이 없다
+class TeamStatusCard extends ConsumerStatefulWidget {
+  const TeamStatusCard({super.key});
+  @override
+  ConsumerState<TeamStatusCard> createState() => _TeamStatusCardState();
+}
+
+class _TeamStatusCardState extends ConsumerState<TeamStatusCard> {
+  bool busy = false;
+
+  Future<void> _logout() async {
+    setState(() => busy = true);
+    try {
+      await ref.read(liveApiProvider).dropRole();
+      ref.invalidate(meProvider);
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('방재단에서 로그아웃했어요.')));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(liveError(e))));
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext c) {
+    final demo = ref.watch(showDemoProvider);
+    final real = !demo && isPatrolRole('${ref.watch(meProvider).valueOrNull?['role'] ?? ''}');
+    if (!demo && !real) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: GkCard(
+        padding: gkCompactPad,
+        child: Row(children: [
+          const GkCircleIcon(Icons.badge_rounded, size: 52, bg: GK.navy, fg: Colors.white, iconSize: 26),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('방재단 로그인', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: GK.ink)),
+              Text(demo ? '시연 모드 · 방재단 화면을 예시 데이터로 봐요' : '방재단원으로 로그인했어요',
+                  style: const TextStyle(fontSize: 15, color: GK.muted, height: 1.4)),
+            ]),
+          ),
+          if (real) ...[
+            const SizedBox(width: 10),
+            TextButton.icon(
+              style: TextButton.styleFrom(
+                  backgroundColor: GK.bg,
+                  foregroundColor: GK.ink,
+                  minimumSize: const Size(0, 48),
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  shape: const StadiumBorder()),
+              onPressed: busy ? null : _logout,
+              icon: const Icon(Icons.logout_rounded, size: 20),
+              label: Text(busy ? '처리 중' : '로그아웃', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+            ),
+          ],
+        ]),
+      ),
+    );
+  }
+}
+
 class _FeatureButton extends StatelessWidget {
   const _FeatureButton({required this.icon, required this.label, required this.onTap, this.filled = false, this.expanded});
   final IconData icon;

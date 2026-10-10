@@ -3,10 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:guryongpo_safety/main.dart';
+import 'package:guryongpo_safety/mobile/onboarding.dart' show Onboarding;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:guryongpo_safety/ai_chat.dart';
-import 'package:guryongpo_safety/app_shell.dart';
-import 'package:guryongpo_safety/dashboard_cards.dart';
+import 'package:guryongpo_safety/mobile/ai_chat.dart';
+import 'package:guryongpo_safety/mobile/app_shell.dart';
+import 'package:guryongpo_safety/mobile/dashboard_cards.dart';
 
 void main() {
   test('서버 단계 → 디자인 단계', () {
@@ -99,7 +100,9 @@ void main() {
       if (d.library != 'image resource service') onError?.call(d);
     };
     addTearDown(() => FlutterError.onError = onError);
-    SharedPreferences.setMockInitialValues({});
+    // 전에 이 기기에서 동의·내 정보를 끝냈어도(옛 저장값) 앱을 새로 열면 처음 화면부터 (2026-10-10 사용자 결정)
+    SharedPreferences.setMockInitialValues({'onboarding_consent_v1': true, 'onboarding_done_v1': true});
+    Onboarding.reset();
     appBooted = false;
     appRouter.go('/');
     await t.pumpWidget(const ProviderScope(child: GuryongpoApp()));
@@ -123,7 +126,22 @@ void main() {
     }
     expect(appRouter.state.matchedLocation, '/setup');
     expect(find.text('2 / 2'), findsOneWidget);
-    expect((await SharedPreferences.getInstance()).getBool('onboarding_consent_v1'), isTrue);
+    expect(Onboarding.consented, isTrue);
+    // 내 정보(2/2)를 끝내야 대시보드
+    // (화면 맨 아래에 걸려 탭이 빗나가므로 버튼 동작을 직접 부른다 — 확인할 것은 화면 순서)
+    t.widget<TextButton>(find.widgetWithText(TextButton, '나중에 입력할게요')).onPressed!();
+    for (var i = 0; i < 6; i++) {
+      await t.pump(const Duration(milliseconds: 300));
+    }
+    expect(appRouter.state.matchedLocation, '/');
+    // 앱을 다시 열면(새로고침) 다시 동의 화면부터
+    Onboarding.reset();
+    appBooted = false;
+    appRouter.go('/');
+    for (var i = 0; i < 8; i++) {
+      await t.pump(const Duration(milliseconds: 300));
+    }
+    expect(appRouter.state.matchedLocation, '/login');
     await t.pumpWidget(const SizedBox());
     await t.pump(const Duration(seconds: 1));
   });
@@ -137,7 +155,9 @@ void main() {
       if (d.library != 'image resource service') onError?.call(d);
     };
     addTearDown(() => FlutterError.onError = onError);
-    SharedPreferences.setMockInitialValues({'onboarding_consent_v1': true});
+    SharedPreferences.setMockInitialValues({});
+    Onboarding.reset();
+    Onboarding.setConsented();
     appBooted = false;
     appRouter.go('/');
     await t.pumpWidget(const ProviderScope(child: GuryongpoApp()));

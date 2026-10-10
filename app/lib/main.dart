@@ -39,6 +39,7 @@ import 'ui/tokens.dart' show buildAppTheme;
 import 'mobile/ai_chat.dart' as m;
 import 'mobile/app_shell.dart' as m;
 import 'mobile/evac_sos.dart' as m;
+import 'mobile/dashboard_cards.dart' as m show RouteSummaryRows;
 import 'mobile/m_core.dart' as m;
 import 'mobile/m_patrol_screens.dart' as m;
 import 'mobile/onboarding.dart' as m;
@@ -720,7 +721,7 @@ final appRouter = GoRouter(
           from != null && from.startsWith('/') && !from.startsWith('/login') && !from.startsWith('/boot') && !from.startsWith('/setup')
               ? from
               : '/';
-      // 첫 화면 (2026-10-09 사용자 요청, 웹·앱 공통): 이 기기에서 아직 동의하지 않았으면 동의·로그인(1/2)부터
+      // 첫 화면 (2026-10-09 사용자 요청, 웹·앱 공통): 앱을 열 때마다 동의·로그인(1/2) → 내 정보(2/2) → 대시보드 (2026-10-10)
       if (!m.Onboarding.consented && loc != '/login') {
         return Uri(path: '/login', queryParameters: {'from': state.uri.toString()}).toString();
       }
@@ -840,7 +841,6 @@ class _BootScreenState extends ConsumerState<BootScreen> {
 
   Future<void> start() async {
     final a = await AuthService().initialize();
-    await m.Onboarding.load();
     // 프로필에서 '직접 지정'한 출발 위치가 있으면 그 위치로 시작 (계정 정보를 내려받은 뒤)
     await restoreSavedOrigin(ref);
     await AccountService().clearLegacyMode();
@@ -1340,6 +1340,7 @@ class Dashboard extends ConsumerWidget {
         ref.watch(facilitiesProvider).valueOrNull ?? const <Facility>[];
     final destination = route == null ? null : routeDestination(ref, route);
     final live = demo ? null : ref.watch(liveDashboardProvider).valueOrNull;
+    final sea = demo || mapOnly ? null : ref.watch(seaRoutePlanProvider).valueOrNull;
     return DisasterDashboard(
       extraPolygons: extraPolygons,
       extraMarkers: extraMarkers,
@@ -1375,6 +1376,8 @@ class Dashboard extends ConsumerWidget {
               ref.invalidate(windPointsProvider);
             },
       // '출발: …' 표시와 '주소로 길찾기' 버튼은 뺐다 (2026-10-09 사용자 요청). 위치 확인은 지도의 '현위치' 버튼
+      // 경로 안내 한 덩어리: 출발지·이동 수단·경로 방식·목적지·시간 (휴대폰 화면과 같은 줄, 2026-10-10)
+      routePlanner: mapOnly ? null : const m.RouteSummaryRows(withRouteTypes: true),
       routeExtras: route != null && !demo
           ? GkPill('이동 중 안내', icon: Icons.navigation_rounded, big: true, onTap: () => c.push('/route-follow'))
           : null,
@@ -1390,6 +1393,10 @@ class Dashboard extends ConsumerWidget {
         return ref.read(userLocation).position;
       },
       onSeaRoute: () => c.push('/sea-route'),
+      // 바다 위면 경로 안내에서 바로 해상 경로를 받아 지도에 그린다 (2026-10-10 사용자 요청)
+      seaRoutePanel: demo || mapOnly ? null : const SeaRoutePanel(),
+      seaRouteLines: sea == null ? const [] : seaRoutePolylines(sea),
+      seaRouteMarkers: sea == null ? const [] : seaRouteMarkers(sea),
       routeActive: route != null,
       facilities: facilities,
       riskAreas: ref.watch(riskAreasProvider).valueOrNull ?? const <RiskArea>[],
@@ -2842,7 +2849,8 @@ class _AiScreenState extends ConsumerState<AiScreen> {
 }
 
 /// 사용자 = web-prototype UserPage (2026-10-08) → 2026-10-09 간결하게:
-/// 왼쪽 내 정보(요약·내 장소)·AI가 반영한 정보·로그인 계정·선택 정보, 오른쪽 알림·시연 모드·안전 기능(바다 위 대피 경로·방재단 로그인).
+/// 왼쪽 내 정보(요약·내 장소)·AI가 반영한 정보·로그인 계정, 오른쪽 알림·시연 모드·안전 기능(바다 위 대피 경로·방재단 로그인)·방재단 로그인 상태.
+/// 선택 정보 카드는 2026-10-10 사용자 요청으로 뺐다 (휴대폰 화면은 그대로)
 /// 경고·대피 확인·재난 후 지원·내 가구 등록은 여기 진입점만 뺐다 (화면은 대시보드 카드·알림 종 등에서 그대로)
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
@@ -2855,14 +2863,13 @@ class ProfileScreen extends ConsumerWidget {
       const ServerProfileRefresh(),
       if (AppConfig.isRemote) gap,
       const AccountCard(),
-      gap,
-      OptionalDetailsCard(key: ValueKey('optional-${ref.watch(profileRevision)}')),
     ]);
     final right = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       const ProfileAlertsCard(),
       gap,
       if (AppConfig.isRemote) ...[const DemoModeSwitch(), gap],
       const SafetyFeaturesCard(),
+      const TeamStatusCard(),
     ]);
     return ListView(padding: gkPagePadding(c), children: [
       const GkPageTitle('사용자'),

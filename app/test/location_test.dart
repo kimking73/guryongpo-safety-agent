@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:guryongpo_safety/main.dart';
+import 'package:guryongpo_safety/mobile/onboarding.dart' show Onboarding;
 import 'package:guryongpo_safety/models/domain_models.dart';
 import 'package:guryongpo_safety/repositories/mock_repository.dart';
 import 'package:guryongpo_safety/services/location_service.dart';
@@ -33,6 +34,7 @@ Future<OriginSpy> boot(WidgetTester t, LocationService gps) async {
   FlutterError.onError = (d) { if (d.library != 'image resource service') onError?.call(d); };
   addTearDown(() => FlutterError.onError = onError);
   SharedPreferences.setMockInitialValues({'profile_setup_complete': true});
+  Onboarding.setConsented(); Onboarding.setDone();
   final spy = OriginSpy();
   await t.pumpWidget(ProviderScope(overrides: [repo.overrideWithValue(spy), locationService.overrideWithValue(gps)], child: const GuryongpoApp()));
   for (var i = 0; i < 10; i++) { await t.pump(const Duration(milliseconds: 300)); }

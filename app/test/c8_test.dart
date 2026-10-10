@@ -121,12 +121,14 @@ void main() {
     expect(find.text('독거노인 1'), findsOneWidget);
     // 지도 마커: 장애인 아이콘 2 + 독거노인 1 + 기타 1 (목록 아이콘과 범례도 같은 아이콘을 쓴다)
     expect(find.byIcon(Icons.accessible), findsWidgets);
-    expect(find.text('[시연] 영유아 가구'), findsOneWidget);
+    // 등록 가구 목록 카드는 뺐다 (2026-10-10) — 지도 표식(툴팁)으로 확인
+    Finder marker(String label) => find.byWidgetPredicate((w) => w is Tooltip && (w.message ?? '').startsWith(label));
+    expect(marker('[시연] 영유아 가구'), findsOneWidget);
     await t.tap(find.text('독거노인 1'));
     await _settle(t);
-    expect(find.text('[시연] 호미로 독거 어르신 댁'), findsOneWidget);
-    expect(find.text('[시연] 시장 옆 청각장애 주민 댁'), findsNothing);
-    expect(find.text('[시연] 영유아 가구'), findsNothing);
+    expect(marker('[시연] 호미로 독거 어르신 댁'), findsOneWidget);
+    expect(marker('[시연] 시장 옆 청각장애 주민 댁'), findsNothing);
+    expect(marker('[시연] 영유아 가구'), findsNothing);
   });
 
   test('역할: 방재단·관리자만 (돌봄 담당·주민 제외)', () {
@@ -254,17 +256,17 @@ void main() {
     expect(find.text('시연 · 예시 데이터'), findsNothing);
     expect(find.text('예시 위치 · 실제 지도 연결 전'), findsNothing);
     // 우선 확인 가구: 도움 필요 김○○(1번)가 응답 없음 박○○(2번)보다 위
-    final first = t.getTopLeft(find.text('[시연] 김○○ 댁')).dy;
-    final second = t.getTopLeft(find.text('[시연] 박○○ 댁')).dy;
+    final first = t.getTopLeft(find.text('[시연] 김○○ 댁').first).dy;
+    final second = t.getTopLeft(find.text('[시연] 박○○ 댁').first).dy;
     expect(first, lessThan(second));
     expect(find.text('도움 필요 · 장애'), findsOneWidget);   // 등록된 needs(보행 불편)만 장애로
     // 실제 서버에는 업무 단계 칸이 없다 — 단계 바꾸기 없이 배정만
-    expect(find.text('배정 0곳 · 미배정 2곳'), findsOneWidget);
+    expect(find.text('배정 0가구 · 미배정 2가구'), findsOneWidget);
     expect(find.text('업무 단계 바꾸기'), findsNothing);
 
     // 목록을 누르면 그 가구 정보와 할 일
-    await t.ensureVisible(find.text('[시연] 김○○ 댁'));
-    await t.tap(find.text('[시연] 김○○ 댁'));
+    await t.ensureVisible(find.text('[시연] 김○○ 댁').first);
+    await t.tap(find.text('[시연] 김○○ 댁').first);
     await _settle(t);
     expect(find.text('1번 · [시연] 김○○ 댁'), findsOneWidget);
     await t.ensureVisible(find.text('방문 결과').first);
@@ -284,7 +286,7 @@ void main() {
     // 김○○는 대피 완료가 되어 우선 확인 목록에서 빠지고, 박○○가 1번
     expect(find.text('도움 필요 · 장애'), findsNothing);
     // 주민 대피 완료 ≠ 방재단 업무 완료: 배정 현황은 그대로 미배정
-    expect(find.text('배정 0곳 · 미배정 2곳'), findsOneWidget);
+    expect(find.text('배정 0가구 · 미배정 2가구'), findsOneWidget);
     await t.pumpWidget(const SizedBox.shrink()); // 10초 갱신 타이머 정리
   });
 
@@ -370,8 +372,8 @@ void main() {
     expect(find.text('경로에 추가한 곳이 없습니다'), findsOneWidget);
     // 우선 확인 목록에서 박○○·김○○ 순서로 골라 넣는다 — t-3은 안 넣음
     Future<void> add(String label) async {
-      await t.ensureVisible(find.text(label));
-      await t.tap(find.text(label));
+      await t.ensureVisible(find.text(label).first);
+      await t.tap(find.text(label).first);
       await _settle(t);
       await t.ensureVisible(find.text('경로에 추가'));
       await t.tap(find.text('경로에 추가'));
@@ -457,28 +459,34 @@ void main() {
     expect(count('need_help'), help + 1);
 
     // 배정: 내가 맡기 → 배정 수 +1, 업무 = 가는 중. 업무 단계 바꾸기 → 방문 중
-    int assigned() => int.parse(RegExp(r'배정 ([0-9]+)곳').firstMatch(t.widget<Text>(find.textContaining('곳 · 미배정')).data!)!.group(1)!);
-    Finder chip(String label) => find.ancestor(of: find.textContaining(RegExp('^$label [0-9]+\$')), matching: find.byType(ChoiceChip));
+    int assigned() => int.parse(RegExp(r'배정 ([0-9]+)가구').firstMatch(t.widget<Text>(find.textContaining('가구 · 미배정')).data!)!.group(1)!);
+    Finder chip(String label) => find.textContaining(RegExp('^$label [0-9]+\$'));
+    Finder step(String label) => find.byWidgetPredicate((w) => w is Semantics && w.properties.label == '진행 단계: $label');
     final before = assigned();
-    final unassignedChip = int.parse(RegExp(r'([0-9]+)$').firstMatch(t.widget<Text>(find.textContaining(RegExp(r'^미배정 [0-9]+$'))).data!)!.group(1)!);
-    await t.tap(find.text('내가 맡기').first);
+    final unassignedChip = int.parse(RegExp(r'([0-9]+)$').firstMatch(t.widget<Text>(chip('미배정')).data!)!.group(1)!);
+    // 배정 카드를 고르면 그 카드에만 '내가 맡기'가 나온다 (우선 확인 목록이 위, 배정 현황이 아래)
+    await t.ensureVisible(find.text('앱 사용자 (나 · 시연)').last);
+    await t.tap(find.text('앱 사용자 (나 · 시연)').last);
+    await _settle(t);
+    await t.tap(find.text('내가 맡기'));
     await _settle(t);
     expect(assigned(), before + 1);
     expect(find.textContaining(RegExp('^미배정 ${unassignedChip - 1}\$')), findsOneWidget);
-    final mine = find.ancestor(of: find.textContaining('내가 담당 · 주민 응답'), matching: find.byType(Material)).first;
+    final mine = find.ancestor(of: find.textContaining('주민 응답 '), matching: find.byType(Material)).first;
+    expect(find.descendant(of: mine, matching: find.text('나')), findsOneWidget);
     expect(find.descendant(of: mine, matching: find.text('가는 중')), findsOneWidget);
-    expect(find.descendant(of: mine, matching: find.text('출발(지금)')), findsOneWidget);
+    expect(find.descendant(of: mine, matching: step('출발 (1/4)')), findsOneWidget);
     await t.tap(find.descendant(of: mine, matching: find.text('업무 단계 바꾸기')));
     await t.pumpAndSettle();
     await t.tap(find.text('방문 중').last);
     await _settle(t);
-    final mine2 = find.ancestor(of: find.textContaining('내가 담당 · 주민 응답'), matching: find.byType(Material)).first;
-    expect(find.descendant(of: mine2, matching: find.text('방문(지금)')), findsOneWidget);
+    final mine2 = find.ancestor(of: find.textContaining('주민 응답 '), matching: find.byType(Material)).first;
+    expect(find.descendant(of: mine2, matching: step('방문 (2/4)')), findsOneWidget);
     // 상태 칩으로 거르면 그 상태만
     await t.tap(chip('방문 중'));
     await _settle(t);
-    expect(find.textContaining('내가 담당'), findsWidgets);
-    expect(find.text('출발(지금)'), findsNothing);
+    expect(find.text('나'), findsWidgets);
+    expect(step('출발 (1/4)'), findsNothing);
     await t.pumpWidget(const SizedBox.shrink());
   });
 }

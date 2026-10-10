@@ -68,6 +68,7 @@ class MapMenuButton extends StatefulWidget {
     this.onTap,
     this.tooltip,
     this.big = false,
+    this.trailing,
   });
   final String label;
   final String icon;
@@ -78,6 +79,8 @@ class MapMenuButton extends StatefulWidget {
   /// null 이면 사용할 수 없음 (흐리게)
   final VoidCallback? onTap;
   final String? tooltip;
+  /// 글자 뒤에 붙는 작은 아이콘 (예: 다른 화면으로 가는 버튼의 바깥 화살표). 있으면 남색 테두리로 다른 버튼과 구분한다
+  final String? trailing;
 
   @override
   State<MapMenuButton> createState() => _MapMenuButtonState();
@@ -100,7 +103,7 @@ class _MapMenuButtonState extends State<MapMenuButton> {
                 ? GK.tint
                 : Colors.white;
     final fg = !enabled ? GK.grey : (on ? Colors.white : GK.navy);
-    final border = !enabled ? GK.line : (on ? GK.navy : (menu ? GK.tint : GK.line));
+    final border = !enabled ? GK.line : (on || w.trailing != null ? GK.navy : (menu ? GK.tint : GK.line));
     final fs = w.big ? 19.0 : 16.0;
 
     // 선택 표시 (색 말고도 보이게): 체크 = 동그라미 안 체크, 라디오 = 동그라미 안 점, 메뉴 = 접힘·펼침 화살표
@@ -145,6 +148,7 @@ class _MapMenuButtonState extends State<MapMenuButton> {
               softWrap: true,
               style: TextStyle(fontSize: fs, fontWeight: FontWeight.w700, color: fg, height: 1.25))),
       if (!markFirst && mark != null) ...[const SizedBox(width: 6), mark],
+      if (w.trailing != null) ...[const SizedBox(width: 6), MapIcon(w.trailing!, size: fs, color: fg)],
     ]);
 
     Widget button = Material(

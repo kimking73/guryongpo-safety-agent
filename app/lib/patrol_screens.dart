@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'disaster_center.dart' show WhereKind;
 import 'live_screens.dart';
 import 'main.dart';
 import 'models/domain_models.dart';
@@ -72,10 +73,10 @@ bool matchesFilter(HouseholdFilter f, Object? needs) => switch (f) {
 /// 대피 상태 (A12) → 한글·색. 명단 정렬도 서버(priority_rank)를 따르고 앱은 표시만 한다
 const statusKo = {'need_help': '도움 필요', 'no_response': '응답 없음', 'evacuating': '대피 중', 'evacuated': '대피 완료'};
 Color statusColor(String? s) => switch (s) {
-      'need_help' => const Color(0xffc62828),
-      'no_response' => const Color(0xffe65100),
-      'evacuating' => const Color(0xffc99a06),
-      'evacuated' => const Color(0xff2e7d32),
+      'need_help' => GK.red,
+      'no_response' => const Color(0xff8e2a1e),
+      'evacuating' => const Color(0xffc25a0c),
+      'evacuated' => const Color(0xff178a4c),
       _ => Colors.grey,
     };
 
@@ -712,66 +713,61 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
   }
 
   // ------------------------------------------------------------------ ② 주민 대피 현황
+  /// 디자인 (2026-10-10 사용자 요청): 큰 제목 · '구룡포읍 자율방재단 · 갱신 시각' · 상태 4칸 (흰 칸, 색 원 아이콘, 오른쪽 큰 숫자)
   Widget _summary(BuildContext c, List<Map<String, dynamic>> targets, Map<String, dynamic>? incident, bool closed) {
-    final updated = updatedAt == null ? '갱신 전' : '${_hms(updatedAt!)} 갱신';
-    return GkCard(
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text('주민 대피 현황', style: Theme.of(c).textTheme.headlineSmall),
-        const SizedBox(height: 2),
-        Text('구룡포읍 · 구룡포 자율방재단 · $updated', style: Theme.of(c).textTheme.bodySmall),
-        if (error != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: _Notice(Icons.sync_problem_rounded, '연결 오류 · 마지막으로 받은 정보를 보여 줍니다 (30초 뒤 다시 시도)', error!, GK.orangeInk),
-          ),
-        if (incidents!.length > 1)
-          DropdownButton<String>(
-              isExpanded: true,
-              value: incidentId,
-              items: [for (final i in incidents!) DropdownMenuItem(value: '${i['id']}', child: Text('${i['title']}', overflow: TextOverflow.ellipsis))],
-              onChanged: (v) {
-                setState(() {
-                  incidentId = v;
-                  detail = null;
-                  selected = null;
-                  focus = null;
-                  _clearVisit(pick: true);
-                });
-                _loadDetail();
-              }),
-        const SizedBox(height: 12),
-        if (incidentId == null)
-          const _Notice(Icons.verified_user_outlined, '진행 중인 대피 경보가 없습니다',
-              '경보가 시작되면 응답 대상과 상태별 집계가 여기에 나옵니다. 평시에도 아래 지도에서 등록 취약 가구를 볼 수 있습니다.', GK.muted)
-        else ...[
-          if (incident != null)
-            Row(children: [
-              Icon(Icons.campaign_rounded, color: levelColor(incident['level'] as String?)),
-              const SizedBox(width: 6),
-              Expanded(
-                  child: Text('${incident['title']}',
-                      maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700))),
-              const SizedBox(width: 6),
-              Text(closed ? '종료됨' : '${hhmm(incident['started_at'])} 시작', style: Theme.of(c).textTheme.bodySmall),
-            ]),
+    final updated = updatedAt == null ? '갱신 전' : '갱신 ${_hms(updatedAt!)}';
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      const Text('주민 대피 현황', style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800, color: GK.ink, height: 1.25)),
+      const SizedBox(height: 4),
+      Text('구룡포읍 자율방재단 · $updated', style: const TextStyle(fontSize: 17, color: GK.muted)),
+      if (error != null)
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: _Notice(Icons.sync_problem_rounded, '연결 오류 · 마지막으로 받은 정보를 보여 줍니다 (30초 뒤 다시 시도)', error!, GK.orangeInk),
+        ),
+      if (incidents!.length > 1)
+        DropdownButton<String>(
+            isExpanded: true,
+            value: incidentId,
+            items: [for (final i in incidents!) DropdownMenuItem(value: '${i['id']}', child: Text('${i['title']}', overflow: TextOverflow.ellipsis))],
+            onChanged: (v) {
+              setState(() {
+                incidentId = v;
+                detail = null;
+                selected = null;
+                focus = null;
+                _clearVisit(pick: true);
+              });
+              _loadDetail();
+            }),
+      const SizedBox(height: 14),
+      if (incidentId == null)
+        const _Notice(Icons.verified_user_outlined, '진행 중인 대피 경보가 없습니다',
+            '경보가 시작되면 응답 대상과 상태별 집계가 여기에 나옵니다. 평시에도 아래 지도에서 등록 취약 가구를 볼 수 있습니다.', GK.muted)
+      else ...[
+        if (incident != null) ...[
+          Row(children: [
+            Icon(Icons.campaign_rounded, color: levelColor(incident['level'] as String?)),
+            const SizedBox(width: 6),
+            Expanded(
+                child: Text('${incident['title']}',
+                    maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700))),
+            const SizedBox(width: 6),
+            Text(closed ? '종료됨' : '${hhmm(incident['started_at'])} 시작', style: Theme.of(c).textTheme.bodySmall),
+          ]),
           const SizedBox(height: 10),
-          if (detail == null)
-            const _Notice(Icons.hourglass_top_rounded, '불러오는 중', '응답 대상과 상태를 받고 있습니다.', GK.muted)
-          else ...[
-            _StatusGrid(counts: {for (final s in residentStatuses) s: targets.where((t) => t['status'] == s).length}),
-            const SizedBox(height: 8),
-            Text('집계 단위 = 곳 (등록 가구 하나 또는 앱 사용자 한 명). 응답 없음 = 이번 경보의 응답 대상 중 아직 응답하지 않은 곳',
-                style: Theme.of(c).textTheme.bodySmall),
-          ],
         ],
-      ]),
-    );
+        if (detail == null)
+          const _Notice(Icons.hourglass_top_rounded, '불러오는 중', '응답 대상과 상태를 받고 있습니다.', GK.muted)
+        else
+          _StatusGrid(counts: {for (final s in residentStatuses) s: targets.where((t) => t['status'] == s).length}),
+      ],
+    ]);
   }
 
   // ------------------------------------------------------------------ ③ 지도
   Widget _mapSection(BuildContext c, List<Map<String, dynamic>> targets, Map<String, int> numbers, bool demo) {
     final sel = targets.where((t) => '${t['id']}' == selected).firstOrNull;
-    final selHousehold = sel == null ? _shownHouseholds.where((h) => '${h['id']}' == selected).firstOrNull : null;
     final points = incidentId == null
         ? _householdPoints(const {})
         : [
@@ -780,54 +776,46 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
               if (latLng(t['location']) != null)
                 _MapPoint('${t['id']}', latLng(t['location'])!, numbers['${t['id']}'], t['status'] as String?, '${t['label']}'),
           ];
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
-        Text('우선 확인 가구·대피소 지도', style: Theme.of(c).textTheme.titleLarge),
-        if (demo) const _Tag('예시 위치 · 실제 지도 연결 전', icon: Icons.info_outline_rounded),
+    return GkCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Wrap(spacing: 10, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.end, children: [
+          const Text('지도', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: GK.ink)),
+          Text(incidentId == null ? '등록 취약 가구 · 대피소' : '우선 확인 가구 · 대피소',
+              style: const TextStyle(fontSize: 17, color: GK.muted, height: 1.6)),
+          if (demo) const _Tag('예시 위치 · 실제 지도 연결 전', icon: Icons.info_outline_rounded),
+        ]),
+        const SizedBox(height: 8),
+        _map(points, geoJsonRings(detail?['area'])),
+        _FilterBar(households: households ?? const [], filter: filter, onChanged: (f) => setState(() => filter = f)),
+        _MapLegend(withTargets: incidentId != null),
+        if (sel != null) ...[
+          const SizedBox(height: 10),
+          _TargetDetail(
+              t: sel,
+              no: numbers['${sel['id']}'],
+              closed: detail?['closed_at'] != null,
+              inRoute: visitStops.contains('${sel['id']}'),
+              onVisit: () => _visit(sel),
+              onRoute: () => _toggleRoute(sel),
+              onClose: () => setState(() => selected = null)),
+        ],
       ]),
-      const SizedBox(height: 4),
-      Text(
-          incidentId == null
-              ? '평시: 등록 취약 가구 위치입니다. 표식을 누르면 그 가구 정보를 봅니다.'
-              : '번호 = 아래 우선 확인 가구 목록 번호. 표식을 누르면 그 가구 정보를, 목록을 누르면 지도에서 위치를 보여 줍니다. 지도 카드의 크게 보기로 확대할 수 있습니다.',
-          style: Theme.of(c).textTheme.bodySmall),
-      _FilterBar(households: households ?? const [], filter: filter, onChanged: (f) => setState(() => filter = f)),
-      _map(points, geoJsonRings(detail?['area'])),
-      const SizedBox(height: 8),
-      _MapLegend(withTargets: incidentId != null),
-      if (sel != null) ...[
-        const SizedBox(height: 10),
-        _TargetDetail(
-            t: sel,
-            no: numbers['${sel['id']}'],
-            closed: detail?['closed_at'] != null,
-            inRoute: visitStops.contains('${sel['id']}'),
-            onVisit: () => _visit(sel),
-            onRoute: () => _toggleRoute(sel),
-            onClose: () => setState(() => selected = null)),
-      ],
-      // 평시: 등록 취약 가구 목록 (고른 가구가 맨 앞). 대피 상황 중에는 대상이 아닌 등록 가구를 지도에서 눌렀을 때만
-      if (incidentId == null) ...[
-        const SizedBox(height: 10),
-        for (final h in _shownHouseholds) _HouseholdTile(h: h, selected: selected == '${h['id']}'),
-        if (_shownHouseholds.isEmpty) const Text('조건에 맞는 등록 가구가 없습니다'),
-      ] else if (selHousehold != null) ...[const SizedBox(height: 10), _HouseholdTile(h: selHousehold, selected: true)],
-    ]);
+    );
   }
 
   // ------------------------------------------------------------------ ④ 우선 확인 가구
   Widget _prioritySection(BuildContext c, List<Map<String, dynamic>> priority, Map<String, int> numbers, bool closed) {
     return GkCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text('우선 확인 가구', style: Theme.of(c).textTheme.titleLarge),
-        const SizedBox(height: 2),
-        Text.rich(
-          TextSpan(style: Theme.of(c).textTheme.bodySmall, children: const [
+        const Text('우선 확인 가구', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: GK.ink)),
+        const SizedBox(height: 4),
+        const Text.rich(
+          TextSpan(style: TextStyle(fontSize: 16, color: GK.muted, height: 1.5), children: [
             TextSpan(text: '위험지역 안', style: TextStyle(color: GK.redDark, fontWeight: FontWeight.w800)),
-            TextSpan(text: ' 도움 필요 → 응답 없음 순. 등록된 지원 필요 정보(장애)가 있으면 같은 상태 안에서 먼저'),
+            TextSpan(text: ' 가구만 · 도움 필요+장애 › 도움 필요 › 응답 없음+장애 › 응답 없음'),
           ]),
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 14),
         if (incidentId == null)
           const _Notice(Icons.verified_user_outlined, '대피 경보가 없어 우선 확인할 곳이 없습니다', null, GK.muted)
         else if (detail == null)
@@ -859,40 +847,53 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
         if (w != 0) return w;
         return (numbers['${a['id']}'] ?? 999).compareTo(numbers['${b['id']}'] ?? 999);
       });
-    Widget chip(WorkStatus? w) {
-      final n = w == null ? targets.length : (counts[w] ?? 0);
-      return ChoiceChip(
-        avatar: w == null ? null : Icon(workIcon[w], size: 18, color: workColor[w]),
-        label: Text('${w == null ? '전체' : workKo[w]} $n'),
-        selected: workFilter == w,
-        onSelected: (_) => setState(() => workFilter = w),
+    // 단계 칩 (디자인: 연회색 알약 · 색 점 · 이름 개수). 누르면 그 단계만, 다시 누르면 전체
+    Widget chip(WorkStatus w) {
+      final on = workFilter == w;
+      return Semantics(
+        button: true,
+        selected: on,
+        child: Material(
+          color: GK.bg,
+          shape: StadiumBorder(side: BorderSide(color: on ? GK.navy : Colors.transparent, width: 2)),
+          child: InkWell(
+            customBorder: const StadiumBorder(),
+            onTap: () => setState(() => workFilter = on ? null : w),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 48),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Container(width: 14, height: 14, decoration: BoxDecoration(color: workColor[w], shape: BoxShape.circle)),
+                  const SizedBox(width: 8),
+                  Text('${workKo[w]} ${counts[w] ?? 0}', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: GK.ink)),
+                ]),
+              ),
+            ),
+          ),
+        ),
       );
     }
 
     return GkCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Wrap(spacing: 10, runSpacing: 4, alignment: WrapAlignment.spaceBetween, crossAxisAlignment: WrapCrossAlignment.center, children: [
-          Text('방재단 배정 현황', style: Theme.of(c).textTheme.titleLarge),
-          Text('배정 $assigned곳 · 미배정 ${targets.length - assigned}곳',
-              style: const TextStyle(fontWeight: FontWeight.w800, color: GK.muted)),
+          const Text('방재단 배정 현황', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: GK.ink)),
+          Text('배정 $assigned가구 · 미배정 ${targets.length - assigned}가구',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: GK.muted)),
         ]),
-        const SizedBox(height: 2),
-        Text('방재단 업무 상태는 주민 대피 응답과 따로입니다. 주민이 대피 완료로 답해도 업무는 저절로 완료되지 않습니다.',
-            style: Theme.of(c).textTheme.bodySmall),
         if (!supports)
           Padding(
             padding: const EdgeInsets.only(top: 4),
-            child: Text('업무 단계(가는 중·방문 중·대피 동행·완료)는 서버에 저장 칸이 아직 없어 배정·미배정까지만 표시합니다.',
+            child: Text('업무 단계(가는 중·방문 중·대피 중·대피 완료)는 서버에 저장 칸이 아직 없어 배정·미배정까지만 표시합니다.',
                 style: Theme.of(c).textTheme.bodySmall?.copyWith(color: GK.orangeInk, fontWeight: FontWeight.w600)),
           ),
-        const SizedBox(height: 10),
-        // 상태 필터: 잘리지 않게 줄바꿈
+        const SizedBox(height: 12),
         Wrap(spacing: 8, runSpacing: 8, children: [
-          chip(null),
           for (final w in WorkStatus.values)
             if (w != WorkStatus.assigned || (counts[w] ?? 0) > 0) chip(w),
         ]),
-        const SizedBox(height: 10),
+        const SizedBox(height: 14),
         if (detail == null)
           const LinearProgressIndicator()
         else if (targets.isEmpty)
@@ -902,10 +903,10 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
         else
           for (final t in shown)
             Padding(
-              padding: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.only(bottom: 10),
               child: _AssignCard(
                   t: t,
-                  no: numbers['${t['id']}'],
+                  selected: '${t['id']}' == selected,
                   closed: closed,
                   supportsWork: supports,
                   onAssign: () => _assign(t),
@@ -1209,8 +1210,8 @@ const workKo = {
   WorkStatus.unassigned: '미배정',
   WorkStatus.enRoute: '가는 중',
   WorkStatus.visiting: '방문 중',
-  WorkStatus.escorting: '대피 동행',
-  WorkStatus.done: '완료',
+  WorkStatus.escorting: '대피 중',
+  WorkStatus.done: '대피 완료',
   WorkStatus.assigned: '배정됨 · 단계 미연결',
 };
 const workWire = {
@@ -1228,11 +1229,11 @@ const workIcon = {
   WorkStatus.assigned: Icons.assignment_ind_outlined,
 };
 const workColor = {
-  WorkStatus.unassigned: GK.redDark,
-  WorkStatus.enRoute: GK.orangeInk,
+  WorkStatus.unassigned: Color(0xffc9372c),
+  WorkStatus.enRoute: Color(0xffc8691c),
   WorkStatus.visiting: GK.navy,
-  WorkStatus.escorting: Color(0xff4b5aa8),
-  WorkStatus.done: GK.green,
+  WorkStatus.escorting: Color(0xff5b6690),
+  WorkStatus.done: Color(0xff178a4c),
   WorkStatus.assigned: GK.muted,
 };
 
@@ -1341,21 +1342,22 @@ class _ConnectionBar extends ConsumerWidget {
   }
 }
 
-/// ② 상태별 집계 카드 — 휴대폰 폭이면 2열
+/// ② 상태별 집계 칸 (디자인: 흰 칸 · 색 원 아이콘 · 이름 · 오른쪽 큰 숫자). 넓으면 4열, 아니면 2열
 class _StatusGrid extends StatelessWidget {
   const _StatusGrid({required this.counts});
   final Map<String, int> counts;
-  static const _style = {
-    'need_help': (Icons.sos_rounded, GK.redDark, GK.redTint),
-    'no_response': (Icons.notifications_paused_rounded, GK.orangeInk, GK.orangeTint),
-    'evacuating': (Icons.directions_walk_rounded, GK.navy, GK.tint),
-    'evacuated': (Icons.check_circle_rounded, GK.green, Color(0xFFE3F4EA)),
+  static const _icon = {
+    'need_help': Icons.support_rounded,
+    'no_response': Icons.headset_mic_rounded,
+    'evacuating': Icons.directions_walk_rounded,
+    'evacuated': Icons.check_rounded,
   };
   @override
   Widget build(BuildContext c) => LayoutBuilder(builder: (c, box) {
-        final cols = box.maxWidth < 560 ? 2 : 4;
-        const gap = 10.0;
+        final cols = box.maxWidth < 900 ? 2 : 4;
+        const gap = 12.0;
         final w = (box.maxWidth - gap * (cols - 1)) / cols;
+        final narrow = w < 240;
         return Wrap(spacing: gap, runSpacing: gap, children: [
           for (final s in residentStatuses)
             SizedBox(
@@ -1364,22 +1366,22 @@ class _StatusGrid extends StatelessWidget {
                 label: '${statusKo[s]} ${counts[s] ?? 0}곳',
                 excludeSemantics: true,
                 child: Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(color: _style[s]!.$3, borderRadius: BorderRadius.circular(GK.radiusInner)),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Row(children: [
-                      GkCircleIcon(_style[s]!.$1, size: 34, bg: Colors.white, fg: _style[s]!.$2),
-                      const SizedBox(width: 8),
-                      Flexible(
-                          child: Text(statusKo[s]!,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontWeight: FontWeight.w800, color: _style[s]!.$2))),
-                    ]),
-                    const SizedBox(height: 6),
-                    Text.rich(key: ValueKey('evac-count-$s'), TextSpan(children: [
-                      TextSpan(text: '${counts[s] ?? 0}', style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800, color: GK.ink)),
-                      const TextSpan(text: ' 곳', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: GK.muted)),
-                    ])),
+                  constraints: const BoxConstraints(minHeight: 84),
+                  padding: EdgeInsets.fromLTRB(narrow ? 12 : 16, 12, narrow ? 14 : 20, 12),
+                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(GK.radiusInner)),
+                  child: Row(children: [
+                    GkCircleIcon(_icon[s]!, size: narrow ? 44 : 56, bg: statusColor(s), fg: Colors.white, iconSize: narrow ? 22 : 28),
+                    SizedBox(width: narrow ? 10 : 14),
+                    Expanded(
+                        child: Text(statusKo[s]!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: narrow ? 16 : 19, fontWeight: FontWeight.w800, color: GK.ink))),
+                    Text.rich(
+                        key: ValueKey('evac-count-$s'),
+                        TextSpan(
+                            text: '${counts[s] ?? 0}',
+                            style: TextStyle(fontSize: narrow ? 32 : 40, fontWeight: FontWeight.w800, color: statusColor(s), height: 1))),
                   ]),
                 ),
               ),
@@ -1406,7 +1408,7 @@ class _NoCircle extends StatelessWidget {
       );
 }
 
-/// ④ 우선 확인 가구 한 줄: 번호 · 이름 · 응답 상태 · 위치 요약 · 담당
+/// ④ 우선 확인 가구 한 줄 (디자인): 상태색 옅은 바탕 · 번호 원 · 이름 + 상태 · 위치 · 오른쪽 담당('김방재 배정' / 빨간 '미배정')
 class _PriorityRow extends StatelessWidget {
   const _PriorityRow({required this.t, required this.no, required this.selected, required this.onTap});
   final Map<String, dynamic> t;
@@ -1417,11 +1419,11 @@ class _PriorityRow extends StatelessWidget {
   Widget build(BuildContext c) {
     final status = t['status'] as String?;
     final dis = registeredSupport(t);
-    final assignee = assigneeText(t);
-    final assigneeStyle = TextStyle(
-        fontWeight: FontWeight.w800, color: t['assigned_to'] == null ? GK.redDark : GK.muted, fontSize: 15);
+    final a = t['assigned_to'] as Map?;
+    final assignee = a == null ? '미배정' : (a['is_me'] == true ? '내가 맡음' : '${a['nickname'] ?? '방재단'} 배정');
+    final assigneeStyle = TextStyle(fontWeight: FontWeight.w800, color: a == null ? GK.redDark : GK.muted, fontSize: 17);
     return Material(
-      color: status == 'need_help' ? const Color(0xFFF8ECEB) : GK.bg,
+      color: Color.alphaBlend(statusColor(status).withValues(alpha: status == 'need_help' ? .10 : .07), GK.bg),
       shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(GK.radiusInner),
           side: selected ? const BorderSide(color: GK.navy, width: 2) : BorderSide.none),
@@ -1429,22 +1431,22 @@ class _PriorityRow extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 12, 14, 12),
+          padding: const EdgeInsets.fromLTRB(16, 14, 18, 14),
           child: LayoutBuilder(builder: (c, box) {
             final narrow = box.maxWidth < 420;
             final info = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Wrap(spacing: 8, runSpacing: 2, crossAxisAlignment: WrapCrossAlignment.center, children: [
-                Text('${t['label']}', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+                Text('${t['label']}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: GK.ink)),
                 Text([statusKo[status] ?? '$status', if (dis.isNotEmpty) '장애'].join(' · '),
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: statusColor(status))),
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: statusColor(status))),
               ]),
               Text(t['address'] == null ? '위치 정보: 지도 표식 참고' : '${t['address']}',
-                  maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(c).textTheme.bodySmall),
+                  maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 16, color: GK.muted)),
               if (narrow) Text(assignee, style: assigneeStyle),
             ]);
             return Row(children: [
-              _NoCircle(no, status),
-              const SizedBox(width: 12),
+              _NoCircle(no, status, size: 40),
+              const SizedBox(width: 14),
               Expanded(child: info),
               if (!narrow) ...[
                 const SizedBox(width: 10),
@@ -1521,88 +1523,103 @@ class _TargetDetail extends StatelessWidget {
   }
 }
 
-/// ⑤ 배정 현황 카드: 가구 · 위치 · 담당 · 업무 상태 · 진행 단계(출발 → 방문 → 대피 동행 → 완료)
+/// ⑤ 배정 현황 카드 (디자인): 이름 + 위치 · 오른쪽 담당(배지 아이콘 + 이름)과 업무 상태 알약 · 4칸 진행 막대(출발 → 방문 → 대피 동행 → 완료).
+/// 카드를 누르면 지도에서 위치를 보여 주고, 고른 카드에만 '내가 맡기'·'업무 단계 바꾸기'가 나온다
 class _AssignCard extends StatelessWidget {
   const _AssignCard(
       {required this.t,
-      required this.no,
+      required this.selected,
       required this.closed,
       required this.supportsWork,
       required this.onAssign,
       required this.onWork,
       required this.onTap});
   final Map<String, dynamic> t;
-  final int? no;
-  final bool closed, supportsWork;
+  final bool selected, closed, supportsWork;
   final VoidCallback onAssign, onTap;
   final ValueChanged<WorkStatus> onWork;
   @override
   Widget build(BuildContext c) {
     final w = workStatusOf(t);
-    final mine = (t['assigned_to'] as Map?)?['is_me'] == true;
+    final a = t['assigned_to'] as Map?;
+    final mine = a?['is_me'] == true;
     final status = t['status'] as String?;
+    final who = a == null ? null : (mine ? '나' : '${a['nickname'] ?? '방재단'}');
     return Material(
       color: GK.bg,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(GK.radiusInner)),
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(GK.radiusInner),
+          side: selected ? const BorderSide(color: GK.navy, width: 2) : BorderSide.none),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+          padding: const EdgeInsets.fromLTRB(18, 16, 16, 12),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
               Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text.rich(
-                    TextSpan(children: [
-                      if (no != null) TextSpan(text: '$no번 ', style: const TextStyle(color: GK.muted, fontWeight: FontWeight.w800)),
-                      TextSpan(text: '${t['label']}', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
-                    ]),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  if (t['address'] != null)
-                    Text('${t['address']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(c).textTheme.bodySmall),
-                  Text('${assigneeText(t)} · 주민 응답 ${statusKo[status] ?? status}',
-                      maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                ]),
+                child: Text.rich(
+                  TextSpan(children: [
+                    TextSpan(text: '${t['label']}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: GK.ink)),
+                    if (t['address'] != null)
+                      TextSpan(text: '   ${t['address']}', style: const TextStyle(fontSize: 16, color: GK.muted)),
+                  ]),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              const SizedBox(width: 8),
+              if (who != null) ...[
+                const SizedBox(width: 8),
+                Semantics(
+                  label: '담당 $who',
+                  excludeSemantics: true,
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    const Icon(Icons.badge_rounded, size: 20, color: GK.navy),
+                    const SizedBox(width: 4),
+                    Text(who, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: GK.navy)),
+                  ]),
+                ),
+              ],
+              const SizedBox(width: 10),
               _WorkPill(w),
             ]),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             _WorkProgress(w),
-            if (!closed)
-              Wrap(spacing: 6, runSpacing: 0, children: [
-                TextButton.icon(
-                    onPressed: onAssign,
-                    icon: Icon(mine ? Icons.person_remove_alt_1_outlined : Icons.person_add_alt_1_outlined),
-                    label: Text(mine ? '맡기 취소' : '내가 맡기')),
-                if (supportsWork && t['assigned_to'] != null)
-                  PopupMenuButton<WorkStatus>(
-                    tooltip: '업무 단계 바꾸기',
-                    onSelected: onWork,
-                    itemBuilder: (_) => [
-                      for (final s in const [WorkStatus.enRoute, WorkStatus.visiting, WorkStatus.escorting, WorkStatus.done])
-                        PopupMenuItem(
-                            value: s,
-                            child: Row(children: [
-                              Icon(workIcon[s], color: workColor[s]),
-                              const SizedBox(width: 8),
-                              Text(workKo[s]!),
-                              if (s == w) const Text('  (지금)'),
-                            ])),
-                    ],
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-                      child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(Icons.swap_horiz_rounded, color: GK.navy, size: 20),
-                        SizedBox(width: 4),
-                        Text('업무 단계 바꾸기', style: TextStyle(color: GK.navy, fontWeight: FontWeight.w700)),
-                      ]),
+            if (selected) ...[
+              const SizedBox(height: 6),
+              Text('주민 응답 ${statusKo[status] ?? status}', style: const TextStyle(fontSize: 14, color: GK.muted)),
+              if (!closed)
+                Wrap(spacing: 6, runSpacing: 0, children: [
+                  TextButton.icon(
+                      onPressed: onAssign,
+                      icon: Icon(mine ? Icons.person_remove_alt_1_outlined : Icons.person_add_alt_1_outlined),
+                      label: Text(mine ? '맡기 취소' : '내가 맡기')),
+                  if (supportsWork && a != null)
+                    PopupMenuButton<WorkStatus>(
+                      tooltip: '업무 단계 바꾸기',
+                      onSelected: onWork,
+                      itemBuilder: (_) => [
+                        for (final s in const [WorkStatus.enRoute, WorkStatus.visiting, WorkStatus.escorting, WorkStatus.done])
+                          PopupMenuItem(
+                              value: s,
+                              child: Row(children: [
+                                Icon(workIcon[s], color: workColor[s]),
+                                const SizedBox(width: 8),
+                                Text(workKo[s]!),
+                                if (s == w) const Text('  (지금)'),
+                              ])),
+                      ],
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(Icons.swap_horiz_rounded, color: GK.navy, size: 20),
+                          SizedBox(width: 4),
+                          Text('업무 단계 바꾸기', style: TextStyle(color: GK.navy, fontWeight: FontWeight.w700)),
+                        ]),
+                      ),
                     ),
-                  ),
-              ]),
+                ]),
+            ],
           ]),
         ),
       ),
@@ -1610,64 +1627,51 @@ class _AssignCard extends StatelessWidget {
   }
 }
 
-/// 업무 상태 알약 (아이콘 + 글자)
+/// 업무 상태 알약 (디자인: 상태색 바탕 · 흰 글자)
 class _WorkPill extends StatelessWidget {
   const _WorkPill(this.w);
   final WorkStatus w;
   @override
-  Widget build(BuildContext c) {
-    final unassigned = w == WorkStatus.unassigned;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-          color: unassigned ? GK.red : Colors.white,
-          borderRadius: BorderRadius.circular(999),
-          border: unassigned ? null : Border.all(color: workColor[w]!, width: 1.5)),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(workIcon[w], size: 16, color: unassigned ? Colors.white : workColor[w]),
-        const SizedBox(width: 4),
-        Text(w == WorkStatus.assigned ? '배정됨' : workKo[w]!,
-            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: unassigned ? Colors.white : workColor[w])),
-      ]),
-    );
-  }
+  Widget build(BuildContext c) => Container(
+        constraints: const BoxConstraints(minHeight: 40),
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(color: workColor[w], borderRadius: BorderRadius.circular(999)),
+        child: Text(w == WorkStatus.assigned ? '배정됨' : workKo[w]!,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Colors.white)),
+      );
 }
 
-/// 진행 단계 막대: 지난 칸·지금 칸은 남색, 지금 칸 글자는 굵게 + '(지금)'. 모르면 회색과 안내
+/// 진행 단계 막대 (디자인): 지난 칸·지금 칸은 업무 상태 색, 그 칸 글자는 진하게. 모르면 회색과 안내
 class _WorkProgress extends StatelessWidget {
   const _WorkProgress(this.w);
   final WorkStatus w;
   @override
   Widget build(BuildContext c) {
     final step = workStep(w);
-    final note = switch (w) {
-      WorkStatus.unassigned => '담당이 정해지면 시작',
-      WorkStatus.assigned => '단계 정보 없음 (서버 연결 필요)',
-      _ => null,
-    };
+    final note = w == WorkStatus.assigned ? '단계 정보 없음 (서버 연결 필요)' : null;
     return Semantics(
-      label: step < 0 ? '진행 단계: ${note ?? '없음'}' : '진행 단계: ${workSteps[step]} (${step + 1}/4)',
+      label: step < 0 ? '진행 단계: ${note ?? '시작 전'}' : '진행 단계: ${workSteps[step]} (${step + 1}/4)',
       excludeSemantics: true,
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Row(children: [
           for (var i = 0; i < workSteps.length; i++) ...[
-            if (i > 0) const SizedBox(width: 4),
+            if (i > 0) const SizedBox(width: 6),
             Expanded(
               child: Column(children: [
                 Container(
-                  height: 6,
-                  decoration: BoxDecoration(
-                      color: i <= step ? (step == 3 ? GK.green : GK.navy) : GK.line, borderRadius: BorderRadius.circular(3)),
+                  height: 8,
+                  decoration: BoxDecoration(color: i <= step ? workColor[w] : GK.line, borderRadius: BorderRadius.circular(4)),
                 ),
-                const SizedBox(height: 4),
-                Text(i == step ? '${workSteps[i]}(지금)' : workSteps[i],
+                const SizedBox(height: 6),
+                Text(workSteps[i],
                     textAlign: TextAlign.center,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: i == step ? FontWeight.w800 : FontWeight.w500,
-                        color: i == step ? GK.ink : (i < step ? GK.muted : GK.grey))),
+                        fontSize: 15,
+                        fontWeight: i <= step ? FontWeight.w800 : FontWeight.w500,
+                        color: i <= step ? GK.ink : GK.grey)),
               ]),
             ),
           ],
@@ -1789,26 +1793,6 @@ IconData personIcon(VulnerableKind? kind) => switch (kind) {
       _ => Icons.person_rounded,
     };
 
-class _HouseholdTile extends StatelessWidget {
-  const _HouseholdTile({required this.h, required this.selected});
-  final Map<String, dynamic> h;
-  final bool selected;
-  @override
-  Widget build(BuildContext c) => Card(
-      color: selected ? Theme.of(c).colorScheme.primaryContainer : null,
-      child: ListTile(
-          leading: Icon(kindIcon[vulnerableKind(h['needs'])], color: kindColor[vulnerableKind(h['needs'])]),
-          title: Text('${h['label']}'),
-          subtitle: Text([
-            if (h['address'] != null) '${h['address']}',
-            needsText(h['needs']),
-            if (h['landslide_zone'] != null) '⚠ ${h['landslide_zone']}',
-          ].where((x) => x.isNotEmpty).join(' · ')),
-          trailing: h['phone'] != null
-              ? IconButton(icon: const Icon(Icons.phone), onPressed: () => launchUrl(Uri.parse('tel:${h['phone']}')))
-              : null));
-}
-
 /// 방문 결과 입력: 결과 고르기 → 메모 → POST .../visits. 기록하면 true
 Future<bool> showVisitSheet(BuildContext context, WidgetRef ref,
     {required String incidentId, required Map<String, dynamic> target}) async {
@@ -1910,6 +1894,78 @@ List<Polyline> dashedLine(List<LatLng> pts, Color color, {double width = 5, int 
 
 const seaColor = Color(0xff1565c0), landColor = Color(0xff2e7d32), portColor = Colors.deepOrange;
 
+/// 대시보드 '경로 안내' (2026-10-10 사용자 요청): 지금 위치(GPS 또는 직접 지정한 출발지)가 바다 위면 화면을 따로 열지 않고
+/// 그 위치에서 바로 해상 경로(바다 → 가까운 항구 → 대피소)를 받아 대시보드 지도에 그린다. 바다가 아니면 null
+final seaRoutePlanProvider = FutureProvider<SeaRoutePlan?>((ref) async {
+  final where = await ref.watch(whereNowProvider.future);
+  if (where.kind != WhereKind.sea) return null;
+  final p = ref.watch(userLocation).position;
+  final r = await ref.watch(liveApiProvider).seaRoute(p.latitude, p.longitude);
+  return SeaRoutePlan(r, p);
+});
+
+/// 대시보드 지도에 겹쳐 그릴 해상 경로: 바닷길(파란 점선) + 항구에서 대피소까지 육상 경로(초록)
+List<Polyline> seaRoutePolylines(SeaRoutePlan p) => [
+      if (p.landPoints.length >= 2) Polyline(points: p.landPoints, color: Colors.white, strokeWidth: 9),
+      if (p.landPoints.length >= 2) Polyline(points: p.landPoints, color: landColor, strokeWidth: 5),
+      ...dashedLine(p.seaPoints, seaColor),
+    ];
+
+/// 배 위치(출발)·항구 접안점·도착 대피소 표시
+List<Marker> seaRouteMarkers(SeaRoutePlan p) => [
+      Marker(point: p.origin, width: 36, height: 36, child: const Icon(Icons.sailing, color: seaColor, size: 32)),
+      if (p.berth != null)
+        Marker(point: p.berth!, width: 34, height: 34, child: const Icon(Icons.anchor, color: portColor, size: 30)),
+      if (latLng(p.destination) != null)
+        Marker(point: latLng(p.destination)!, width: 34, height: 34, alignment: Alignment.topCenter,
+            child: const Icon(Icons.health_and_safety, color: landColor, size: 32)),
+    ];
+
+/// 대시보드 경로 안내의 바다 위 안내 칸: 찾는 중 / 못 찾음(다시 찾기) / 1. 항구까지 바닷길 2. 항구에서 대피소까지
+class SeaRoutePanel extends ConsumerWidget {
+  const SeaRoutePanel({super.key});
+  @override
+  Widget build(BuildContext c, WidgetRef ref) {
+    final plan = ref.watch(seaRoutePlanProvider);
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      const Text('지금 위치가 바다 위로 확인됐어요. 가까운 항구까지 바닷길과 항구에서 대피소까지 길을 지도에 그려요.',
+          style: TextStyle(fontSize: 15, color: GK.muted, height: 1.45)),
+      const SizedBox(height: 8),
+      ...plan.when(
+        loading: () => const [
+          Row(children: [
+            SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+            SizedBox(width: 10),
+            Text('해상 경로를 찾고 있어요'),
+          ]),
+        ],
+        error: (e, _) => [
+          Card(
+              child: ListTile(
+                  leading: const Icon(Icons.error_outline),
+                  title: const Text('해상 경로를 불러오지 못했어요'),
+                  subtitle: Text(liveError(e)),
+                  trailing: IconButton(
+                      tooltip: '다시 찾기',
+                      icon: const Icon(Icons.refresh),
+                      onPressed: () => ref.invalidate(seaRoutePlanProvider)))),
+        ],
+        data: (p) => p == null
+            ? const <Widget>[]
+            : [
+                const Wrap(spacing: 14, runSpacing: 6, children: [
+                  _Legend(color: seaColor, label: '바닷길', dashed: true),
+                  _Legend(color: portColor, label: '항구 접안점'),
+                  _Legend(color: landColor, label: '항구 → 대피소'),
+                ]),
+                const SizedBox(height: 6),
+                SeaRouteSummary(plan: p),
+              ],
+      ),
+    ]);
+  }
+}
+
 class LiveSeaRouteScreen extends ConsumerStatefulWidget {
   const LiveSeaRouteScreen({super.key});
   @override
@@ -2008,7 +2064,7 @@ class _LiveSeaRouteScreenState extends ConsumerState<LiveSeaRouteScreen> {
       const SizedBox(height: 8),
       if (error != null) Card(child: ListTile(leading: const Icon(Icons.error_outline), title: Text(error!))),
       if (origin == null && error == null) const Card(child: ListTile(leading: Icon(Icons.touch_app_outlined), title: Text('지도에서 배 위치(바다)를 눌러 주세요'))),
-      if (p != null) _SeaRouteSummary(plan: p),
+      if (p != null) SeaRouteSummary(plan: p),
     ]);
   }
 }
@@ -2028,8 +2084,8 @@ class _Legend extends StatelessWidget {
       ]);
 }
 
-class _SeaRouteSummary extends StatelessWidget {
-  const _SeaRouteSummary({required this.plan});
+class SeaRouteSummary extends StatelessWidget {
+  const SeaRouteSummary({super.key, required this.plan});
   final SeaRoutePlan plan;
   @override
   Widget build(BuildContext c) {

@@ -98,7 +98,10 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
     }
 
-    const all = ['전체 재난 표시', '태풍', '침수 격자', '강풍', '산사태 위험 지역'];
+    const all = ['전체 재난 표시', '침수 격자', '강풍', '산사태 위험 지역'];
+    // 태풍은 켜고 끄는 항목이 아니라 끝에 따로 있는 '태풍 지도 열기' (다른 화면으로 이동)
+    expect(find.widgetWithText(MapMenuButton, '태풍'), findsNothing);
+    expect(btn('태풍 지도 열기').kind, MapButtonKind.action);
     // 처음: 재난 지도 메뉴가 펼쳐져 있고 재난은 모두 켜짐 (종합 보기)
     expect(btn('재난 지도').expanded, isTrue);
     expect(btn('경로 안내').expanded, isFalse);
@@ -135,11 +138,9 @@ void main() {
 
     // 하나씩 다 켜면 '전체' 표시도 켜진다
     await tap('침수 격자');
-    await tap('산사태 위험 지역');
     expect(btn('전체 재난 표시').selected, isFalse);
-    await tap('태풍');
+    await tap('산사태 위험 지역');
     expect(btn('전체 재난 표시').selected, isTrue);
-    expect(find.textContaining('태풍 경로는 구룡포 밖까지'), findsOneWidget);
     // 일부만 켜져 있을 때 '전체' → 모두 켬
     await tap('강풍');
     expect(btn('전체 재난 표시').selected, isFalse);

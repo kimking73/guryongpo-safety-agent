@@ -9,10 +9,9 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'services/account_service.dart';
 import 'services/location_service.dart';
-import 'services/app_config.dart';
 import 'services/demo_mode.dart';
 import 'models/domain_models.dart';
-import 'prototype_safety_screens.dart';
+import 'mobile/dashboard_cards.dart' show WeatherSection;
 import 'ui/gk_theme.dart';
 import 'ui/gk_widgets.dart';
 import 'ui/map_menu.dart';
@@ -220,8 +219,8 @@ Color _windColor(double averageSpeed, double gustSpeed) {
 
 enum _DashboardMode { emergency, facilities }
 
-/// 재난 지도 하위 항목 순서 (2026-10-09): 태풍 · 침수 격자 · 강풍 · 산사태 위험 지역. 지도에 층을 그리는 건 뒤의 셋
-const _filterKinds = [HazardKind.storm, HazardKind.flood, HazardKind.wind, HazardKind.slide];
+/// 재난 지도 하위 항목 (2026-10-10): 전체 재난 표시 · 침수 격자 · 강풍 · 산사태 위험 지역 + 끝에 따로 '태풍 지도 열기'.
+/// 태풍은 이 지도(구룡포 일대)에 그리지 않으므로 켜고 끄는 항목이 아니다 — 누르면 태풍 화면으로 간다
 const _mapKinds = [HazardKind.flood, HazardKind.wind, HazardKind.slide];
 
 /// 지금 위치가 육지·바다인지 (경로 안내 메뉴, 2026-10-09). checking = 판별 중, unknown = 판별 못 함 → '위치 확인 필요'
@@ -270,6 +269,7 @@ class DisasterDashboard extends StatefulWidget {
     this.liveTop,
     this.liveBottom,
     this.routeExtras,
+    this.routePlanner,
     this.warnings = const [],
     this.messages,
     this.messagesReason,
@@ -284,6 +284,9 @@ class DisasterDashboard extends StatefulWidget {
     this.where = const WhereNow(WhereKind.unknown),
     this.onLocate,
     this.onSeaRoute,
+    this.seaRoutePanel,
+    this.seaRouteLines = const [],
+    this.seaRouteMarkers = const [],
     this.showFacilities = false,
     this.focusPoint,
   });
@@ -317,6 +320,8 @@ class DisasterDashboard extends StatefulWidget {
   final Widget? liveTop, liveBottom;
   /// 경로 패널에 붙일 것 (출발 위치·길찾기·이동 중 안내)
   final Widget? routeExtras;
+  /// 경로 안내 한 덩어리 (출발지·이동 수단·경로 방식·목적지·시간, 2026-10-10). 있으면 예전 경로 방식 묶음·경로 머리줄 대신 쓴다
+  final Widget? routePlanner;
   /// 디자인 = web-prototype (2026-10-08): '경보·주의보' 카드의 기상청 특보 (/dashboard warnings 위젯 items)
   final List<Map<String, dynamic>> warnings;
   /// 빨간 '최근 재난문자' 카드 (/dashboard disaster_messages items, null = 수집 전 → messagesReason) · 없으면 서버 머리 경고(headline)
@@ -341,6 +346,11 @@ class DisasterDashboard extends StatefulWidget {
   final Future<LatLng> Function()? onLocate;
   /// '해상 경로 안내' 버튼
   final VoidCallback? onSeaRoute;
+  /// 바다 위일 때 경로 안내 칸에 바로 보여 줄 해상 경로 안내 (있으면 '해상 경로 안내' 버튼 대신, 2026-10-10)
+  final Widget? seaRoutePanel;
+  /// 바다 위일 때 경로 안내 모드에서 지도에 겹쳐 그릴 해상 경로 선·표시
+  final List<Polyline> seaRouteLines;
+  final List<Marker> seaRouteMarkers;
   /// 경로 모드가 아니어도 대피소·의료시설을 그린다 (방재단 지도, 2026-10-09)
   final bool showFacilities;
   /// 바뀌면 지도를 이 점으로 옮기고 확대한다 (방재단 목록에서 가구를 고를 때)
@@ -353,7 +363,7 @@ class DisasterDashboard extends StatefulWidget {
 class _DisasterDashboardState extends State<DisasterDashboard> {
   _DashboardMode dashboardMode = _DashboardMode.emergency;
   /// 재난 지도에서 켠 재난 (여러 개 동시). 처음엔 모두 켬
-  final layers = <HazardKind>{..._filterKinds};
+  final layers = <HazardKind>{..._mapKinds};
   /// 지도 층 셋(침수·강풍·산사태)이 모두 켜지면 종합 보기: 침수는 심각만, 겹침 표식·요약 범례 (예전 '전체 재난 표시' 화면)
   bool get compositeView => _mapKinds.every(layers.contains);
   /// 지도에 그리는 위험 층. 경로 모드는 경로가 피하는 침수·산사태
@@ -450,10 +460,10 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
 
   /// '전체 재난 표시': 모두 켜져 있으면 모두 끄고, 아니면 모두 켠다
   void toggleAll() => setState(() {
-        if (_filterKinds.every(layers.contains)) {
+        if (_mapKinds.every(layers.contains)) {
           layers.clear();
         } else {
-          layers.addAll(_filterKinds);
+          layers.addAll(_mapKinds);
         }
       });
 
@@ -506,37 +516,35 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
         onTap: locating ? null : () => locate(ctl),
       );
 
-  /// 재난 지도 하위 항목: 전체 재난 표시 · 태풍 · 침수 격자 · 강풍 · 산사태 위험 지역 (여러 개 선택)
+  /// 재난 지도 하위 항목: 전체 재난 표시 · 침수 격자 · 강풍 · 산사태 위험 지역 (여러 개 선택) / 태풍 지도 열기 (화면 이동)
   Widget _emergencyLayerControls() {
-    final allOn = _filterKinds.every(layers.contains);
+    final allOn = _mapKinds.every(layers.contains);
     MapMenuButton item(HazardKind k, String label, String icon) => MapMenuButton(
         label: label, icon: icon, kind: MapButtonKind.check, selected: layers.contains(k), onTap: () => toggleLayer(k));
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      MapButtonGroup(label: '표시할 재난 (여러 개 선택)', children: [
+      Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+        MapButtonGroup(label: '표시할 재난 (여러 개 선택)', children: [
+          MapMenuButton(
+              label: '전체 재난 표시',
+              icon: MapIcons.all,
+              kind: MapButtonKind.check,
+              selected: allOn,
+              tooltip: allOn ? '모든 재난 끄기' : '모든 재난 켜기',
+              onTap: toggleAll),
+          item(HazardKind.flood, '침수 격자', MapIcons.flood),
+          item(HazardKind.wind, '강풍', MapIcons.wind),
+          item(HazardKind.slide, '산사태 위험 지역', MapIcons.landslide),
+        ]),
+        // 태풍은 켜고 끄는 층이 아니라 다른 화면으로 가는 버튼 — 묶음 밖에 두고 바깥으로 나가는 아이콘을 붙여 구분한다
+        // (태풍 경로는 구룡포 밖까지 넓게 봐야 해서 이 지도에 그리지 않는다)
         MapMenuButton(
-            label: '전체 재난 표시',
-            icon: MapIcons.all,
-            kind: MapButtonKind.check,
-            selected: allOn,
-            tooltip: allOn ? '모든 재난 끄기' : '모든 재난 켜기',
-            onTap: toggleAll),
-        item(HazardKind.storm, '태풍', MapIcons.typhoon),
-        item(HazardKind.flood, '침수 격자', MapIcons.flood),
-        item(HazardKind.wind, '강풍', MapIcons.wind),
-        item(HazardKind.slide, '산사태 위험 지역', MapIcons.landslide),
+            label: '태풍 지도 열기',
+            icon: MapIcons.typhoon,
+            kind: MapButtonKind.action,
+            trailing: MapIcons.external,
+            tooltip: '태풍 경로와 구룡포 영향을 넓은 지도에서 보기',
+            onTap: () => context.push('/typhoon', extra: 'local')),
       ]),
-      // 태풍은 이 지도(구룡포 일대)에 그리지 않는다 — 태풍 경로는 넓은 지도에서 봐야 한다 (태풍 화면)
-      if (layers.contains(HazardKind.storm)) ...[
-        const SizedBox(height: 8),
-        MapNotice(
-          text: '태풍 경로는 구룡포 밖까지 넓게 봐야 해서 이 지도에는 그리지 않아요. 태풍 지도에서 경로와 구룡포 영향을 확인하세요.',
-          action: MapMenuButton(
-              label: '태풍 지도 열기',
-              icon: MapIcons.external,
-              kind: MapButtonKind.action,
-              onTap: () => context.push('/typhoon', extra: 'local')),
-        ),
-      ],
       if (layers.isEmpty) ...[
         const SizedBox(height: 8),
         const MapNotice(text: '켜진 재난이 없어 지도에 위험 정보를 표시하지 않아요. 보고 싶은 재난을 골라 주세요.'),
@@ -556,6 +564,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
       return const MapNotice(text: '현재 위치가 육지인지 바다인지 확인하고 있어요.');
     }
     if (where.kind == WhereKind.sea) {
+      if (widget.seaRoutePanel != null) return widget.seaRoutePanel!;
       return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         MapButtonGroup(label: '해상 경로', children: [
           MapMenuButton(
@@ -583,15 +592,15 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
           tooltip: types.contains(t) ? t.description : '${widget.travelMode.label}에서는 쓸 수 없어요',
           onTap: types.contains(t) ? () => widget.onRouteTypeChanged?.call(t) : null,
         );
+    final noGpsNotice = MapNotice(
+        warn: true,
+        title: '위치 확인이 필요해요',
+        text: '${where.reason ?? '현재 위치를 확인하지 못했습니다.'} 확인 전에는 구룡포 기본 위치에서 출발하는 경로를 보여 드려요.',
+        action: locateAction);
+    // 경로 방식은 아래 경로 안내 덩어리(routePlanner) 안에서 고른다 (2026-10-10)
+    if (widget.routePlanner != null) return where.noGps ? noGpsNotice : const SizedBox.shrink();
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      if (where.noGps) ...[
-        MapNotice(
-            warn: true,
-            title: '위치 확인이 필요해요',
-            text: '${where.reason ?? '현재 위치를 확인하지 못했습니다.'} 확인 전에는 구룡포 기본 위치에서 출발하는 경로를 보여 드려요.',
-            action: locateAction),
-        const SizedBox(height: 8),
-      ],
+      if (where.noGps) ...[noGpsNotice, const SizedBox(height: 8)],
       MapButtonGroup(label: '경로 방식 (하나만 선택)', children: [
         type(RouteType.nearest, '최단 거리', MapIcons.shortest),
         type(RouteType.safest, '안전한 경로', MapIcons.safe),
@@ -611,61 +620,6 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
   void focusOn(LatLng point) {
     setState(() => focus = point);
     mapController.move(point, 15);
-  }
-
-  Widget _personalizedMockAlerts(BuildContext context) {
-    if (AppConfig.isRemote || !widget.demo) return const SizedBox.shrink();
-    final grids = _grids;
-    final alerts = <(String, String, LatLng, String)>[];
-    for (final key in ['home', 'work']) {
-      final position = _position(savedProfile, key);
-      if (position == null) continue;
-      final level = _riskForPosition(position, grids);
-      if (level == '미확인') continue;
-      final isHome = key == 'home';
-      final name = (savedProfile['${key}Name'] ?? '').trim().isEmpty
-          ? (isHome ? '집' : '직장')
-          : savedProfile['${key}Name']!;
-      final address = savedProfile['${key}Address'] ?? '주소 미등록';
-      alerts.add((
-        '$name 주변 침수 위험 · $level',
-        '$address 주변의 침수 위험을 가정한 사용자 맞춤 목업 경고입니다.',
-        position,
-        level,
-      ));
-    }
-    if (alerts.isEmpty) return const SizedBox.shrink();
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('사용자 맞춤형 선제 경고 · 예시',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 6),
-            for (final alert in alerts)
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.notifications_active_outlined,
-                    color: _riskColor(alert.$4)),
-                title: Text(alert.$1,
-                    style: const TextStyle(fontWeight: FontWeight.w600)),
-                subtitle: Text(alert.$2),
-                onTap: () => focusOn(alert.$3),
-              ),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                onPressed: () => context.go('/alerts-hub'),
-                icon: const Icon(Icons.open_in_new),
-                label: const Text('선제 경고 전체 보기'),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   @override
@@ -758,6 +712,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                   PolygonLayer(polygons: hazardAreaPolygons(widget.riskAreas)),
                 if (widget.extraPolygons.isNotEmpty) PolygonLayer(polygons: widget.extraPolygons),
                 if (widget.extraPolylines.isNotEmpty) PolylineLayer(polylines: widget.extraPolylines),
+                if (routeMode && widget.seaRouteLines.isNotEmpty) PolylineLayer(polylines: widget.seaRouteLines),
                 if (route != null && route.polylinePoints.length > 1)
                   PolylineLayer(polylines: [
                     Polyline(
@@ -972,6 +927,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                   ],
                 ),
                 if (widget.extraMarkers.isNotEmpty) MarkerLayer(markers: widget.extraMarkers),
+                if (routeMode && widget.seaRouteMarkers.isNotEmpty) MarkerLayer(markers: widget.seaRouteMarkers),
                 mapLegendButton(context,
                     routeMode: routeMode,
                     visible: visible,
@@ -1201,41 +1157,36 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
     );
   }
 
-  /// '경보·주의보' 카드 — 기상청 특보 + 서버 위험 판정(누르면 지도 이동) + 태풍 정보
+  /// '경보·주의보' 카드 — 기상청 특보(경보는 진한 색, 주의보는 연한 색) + 서버 위험 판정(누르면 지도 이동).
+  /// 시연은 휴대폰 화면과 같은 가상 특보 네 가지 (2026-10-10)
   Widget _warningsCard(BuildContext context) {
-    final chips = <Widget>[];
-    for (final w in widget.warnings) {
-      final lv = gkLevelOf('${w['level']}');
-      chips.add(GkPill('${w['label'] ?? w['region_name']}',
-          icon: Icons.campaign_rounded,
-          filled: lv == gkLevels[3],
-          trailingIcon: Icons.chevron_right_rounded,
-          onTap: () => context.push('/alerts-hub')));
-    }
-    if (widget.demo) {
-      for (final h in demoHazards) {
-        chips.add(GkPill('${h.id} · ${h.name}',
-            icon: _hazardIcon(h.kind), trailingIcon: Icons.chevron_right_rounded, onTap: () => _focusHazard(context, h)));
-      }
-    } else {
-      for (final i in widget.riskItems) {
-        final lv = gkLevelOf('${i['level']}');
-        chips.add(GkPill('${i['label']} · ${_levelKoFromServer('${i['level'] ?? 'normal'}')}',
-            icon: Icons.warning_rounded,
-            bg: lv.bg,
-            fg: lv.fg,
-            trailingIcon: Icons.chevron_right_rounded,
-            onTap: () => _focusRiskItem(i)));
-      }
-    }
-    chips.add(GkPill('태풍 정보', icon: Icons.cyclone_rounded, trailingIcon: Icons.chevron_right_rounded,
-        onTap: () => context.push('/typhoon', extra: 'local')));
-    final none = widget.warnings.isEmpty && (widget.demo ? false : widget.riskItems.isEmpty);
+    final labels = widget.demo
+        ? const ['태풍 경보', '풍랑 경보', '강풍 주의보', '호우 주의보']
+        : [
+            for (final w in widget.warnings) '${w['label'] ?? w['region_name'] ?? ''}'.trim()
+          ].where((l) => l.isNotEmpty).toSet().toList();
+    final chips = <Widget>[
+      for (final l in labels)
+        GkPill(l,
+            icon: _warningIcon(l),
+            filled: l.contains('경보'),
+            big: true,
+            onTap: () => context.push('/alerts-hub')),
+      if (!widget.demo)
+        for (final i in widget.riskItems)
+          GkPill('${i['label']} · ${_levelKoFromServer('${i['level'] ?? 'normal'}')}',
+              icon: Icons.warning_rounded,
+              bg: gkLevelOf('${i['level']}').bg,
+              fg: gkLevelOf('${i['level']}').fg,
+              trailingIcon: Icons.chevron_right_rounded,
+              onTap: () => _focusRiskItem(i)),
+    ];
+    final none = chips.isEmpty;
     return GkCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         GkCardHeader('경보 · 주의보',
             icon: Icons.warning_rounded,
-            trailing: Text(widget.demo ? '가상 시연' : '기상청 · 위험 판정',
+            trailing: Text(widget.demo ? '기상청 · 가상 시연' : '기상청 · 위험 판정',
                 style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: GK.muted))),
         const SizedBox(height: 16),
         if (none)
@@ -1246,21 +1197,23 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
           ),
         Wrap(spacing: 10, runSpacing: 10, children: chips),
         const SizedBox(height: 14),
-        Text(none ? '알림 종에서 받은 경고와 예보를 볼 수 있어요.' : '항목을 누르면 지도에서 위치를 보여 줘요. 해안가와 방파제 접근을 피하고 가까운 대피소를 확인하세요.',
+        Text(none ? '알림 종에서 받은 경고와 예보를 볼 수 있어요.' : '해안가와 방파제 접근을 피하고 가까운 대피소 위치를 확인하세요.',
             style: const TextStyle(fontSize: 16, color: GK.muted, height: 1.5)),
       ]),
     );
   }
 
-  void _focusHazard(BuildContext context, DemoHazard h) {
-    setState(() {
-      selected = h;
-      focus = h.point;
-      layers.add(h.kind);
-    });
-    mapController.move(h.point, 15);
-    _showHazard(context, h);
-  }
+  /// 특보 이름 → 아이콘 (휴대폰 화면 warningIcon 과 같은 짝)
+  IconData _warningIcon(String l) => switch (l) {
+        _ when l.contains('태풍') => Icons.cyclone_rounded,
+        _ when l.contains('풍랑') || l.contains('해일') => Icons.waves_rounded,
+        _ when l.contains('강풍') => Icons.air_rounded,
+        _ when l.contains('호우') => Icons.thunderstorm_rounded,
+        _ when l.contains('대설') => Icons.ac_unit_rounded,
+        _ when l.contains('폭염') || l.contains('한파') => Icons.thermostat_rounded,
+        _ when l.contains('건조') => Icons.local_fire_department_rounded,
+        _ => Icons.campaign_rounded,
+      };
 
   void _focusRiskItem(Map<String, dynamic> i) {
     final loc = i['location'] as Map?;
@@ -1398,23 +1351,13 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
         GkColumns(minWidth: 440, children: [_messageCard(context), _warningsCard(context)]),
         const SizedBox(height: 20),
         mapCard,
-        _personalizedMockAlerts(context),
         const SizedBox(height: 28),
-        Wrap(spacing: 12, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-          Text('지금 구룡포 날씨', style: TextStyle(fontSize: narrow ? 24 : 30, fontWeight: FontWeight.w800)),
-          Text(widget.demo ? '· 가상 시연 자료' : '· ${widget.updatedText ?? '실시간 관측·예보'}',
-              style: TextStyle(fontSize: narrow ? 17 : 22, fontWeight: FontWeight.w600, color: GK.muted)),
-        ]),
-        const SizedBox(height: 10),
-        const GkLevelLegend(),
-        const SizedBox(height: 14),
-        if (widget.demo) const _RealtimeCards() else if (widget.liveBottom != null) widget.liveBottom!,
+        // 날씨 = 휴대폰 화면과 같은 작은 칸 (2026-10-10 사용자 요청: 크기·규격 통일). 누르면 자세한 설명
+        WeatherSection(demo: widget.demo),
         const SizedBox(height: 24),
-        GkColumns(minWidth: 440, children: [
-          _linkCard(context, Icons.health_and_safety_rounded, '재난 후 지원 · 복구', '보험·피해 신고·직업별 지원 안내', '/support'),
-          _linkCard(context, Icons.cyclone_rounded, '태풍 정보', '태풍 경로와 구룡포 영향', '/typhoon'),
-        ]),
-        if (widget.demo) ...[const SizedBox(height: 20), const PrototypeFeatureLinks()],
+        // 태풍 정보 카드는 뺐다 — 지도 카드 '전체 재난 표시' 오른쪽 태풍 지도 버튼과 중복 (2026-10-10 사용자 요청).
+        // 시연 버튼 카드(3주차 안전 기능 시연)도 뺐다 — 대피 현황·프로필·방재단 대시보드·경로 안내와 모두 중복
+        _linkCard(context, Icons.health_and_safety_rounded, '재난 후 지원 · 복구', '보험·피해 신고·직업별 지원 안내', '/support'),
       ],
     );
   }
@@ -1425,6 +1368,40 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
     final warning = destination == null
         ? null
         : shelterExclusion(destination, widget.riskAreas);
+    if (widget.routePlanner != null) {
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        widget.routePlanner!,
+        if (warning != null)
+          ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.warning_amber_rounded, color: Colors.deepOrange),
+            title: Text(warning),
+            subtitle: Text(destination?.type == FacilityType.medical
+                ? '의료시설은 선택할 수 있지만, 위험 구역 경고를 확인하세요.'
+                : '위험 구역 내 대피소입니다. 안전한 대체 시설을 우선 확인하세요.'),
+          ),
+        if (widget.routeError != null)
+          ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.route_outlined),
+            title: const Text('경로를 불러오지 못했습니다. 지도와 시설 표시는 유지됩니다.'),
+            subtitle: Text(widget.routeError!),
+            trailing: widget.onRetryRoute == null
+                ? null
+                : IconButton(tooltip: '경로 다시 찾기', onPressed: widget.onRetryRoute, icon: const Icon(Icons.refresh)),
+          ),
+        if (route != null && destination != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+            child: Text(
+                '최대 오르막 ${route.maxUphillPercent}%${route.hazardsOk ? '' : ' · 위험 정보 확인 불가'} · ${route.riskAvoidanceSummary}',
+                style: const TextStyle(fontSize: 15, color: GK.muted, height: 1.45)),
+          ),
+        if (widget.routeExtras != null) ...[const SizedBox(height: 8), widget.routeExtras!],
+      ]);
+    }
     return Card(
       margin: const EdgeInsets.only(top: 10),
       child: Padding(
@@ -2048,37 +2025,6 @@ void _placeDetail(
         ],
       ),
     );
-
-class _RealtimeCards extends StatelessWidget {
-  const _RealtimeCards();
-  @override
-  Widget build(BuildContext c) => GkMetricGrid(
-        children: [
-          _rainfallMetric(),
-          _metric(Icons.navigation, '바람', '평균 21 · 순간 30m/s',
-              '북동풍 · 화살표는 바람이 불어가는 방향', '해안 시연지점 · 14:00', Colors.deepOrange,
-              rotation: math.pi * 1.25),
-          _metric(Icons.waves, '파고', '유의 3.2m', '최대파고 4.8m · 높은 파도 예시',
-              '해상 시연지점 · 14:00', Colors.blue),
-          _metric(Icons.height, '수위', '현재 2.4m', '최근 1시간 +0.3m · 침수 깊이와 별도 지표',
-              '수위 시연지점 · 14:00', Colors.teal),
-        ],
-      );
-}
-
-Widget _rainfallMetric() {
-  const hourlyRain = <(String, double)>[('09시', 8), ('10시', 12), ('11시', 17), ('12시', 24), ('13시', 31), ('14시', 38)];
-  return GkMetricCard(
-    icon: Icons.water_drop_rounded,
-    title: '강수',
-    value: '38 mm/h',
-    description: '매우 강한 비 · 오늘 누적 130mm (예시)',
-    footnote: '강수 시연지점 · 14:00 · 가상 시연 자료',
-    badge: '예시',
-    level: 'warning',
-    extra: _rainBars(hourlyRain),
-  );
-}
 
 /// 자료 구분 배지: 예시(가상) · 실측 · 예보 · 자료 없음
 Widget _badge(String text) => Container(

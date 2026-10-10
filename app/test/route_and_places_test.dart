@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:guryongpo_safety/dashboard_parts.dart';
 import 'package:guryongpo_safety/disaster_center.dart';
 import 'package:guryongpo_safety/main.dart';
+import 'package:guryongpo_safety/mobile/onboarding.dart' show Onboarding;
 import 'package:guryongpo_safety/models/domain_models.dart';
 import 'package:guryongpo_safety/repositories/mock_repository.dart';
 import 'package:guryongpo_safety/repositories/remote_repository.dart';
@@ -147,7 +148,9 @@ void main() {
     };
     addTearDown(() => FlutterError.onError = onError);
     SharedPreferences.setMockInitialValues(
-        {'profile_setup_complete': true, 'onboarding_consent_v1': true, 'onboarding_done_v1': true});
+        {'profile_setup_complete': true});
+    Onboarding.setConsented();
+    Onboarding.setDone();
     appRouter.go('/');
     final container = ProviderContainer(
         overrides: [repo.overrideWithValue(RouteAnsweringRepo())]);
@@ -193,7 +196,8 @@ void main() {
       ),
     );
     expect(find.byTooltip('경로 안내 종료'), findsOneWidget);
-    expect(find.widgetWithText(MapMenuButton, '최단 거리'), findsOneWidget);
+    // 경로 방식은 경로 안내 한 덩어리(RouteSummaryRows) 안에서 고른다 (2026-10-10)
+    expect(find.text('최단 거리'), findsOneWidget);
     await t.ensureVisible(find.byTooltip('경로 안내 종료'));
     await t.pump();
     await t.tap(find.byTooltip('경로 안내 종료'));
@@ -201,7 +205,7 @@ void main() {
       await t.pump(const Duration(milliseconds: 100));
     }
     expect(find.byType(DisasterDashboard), findsOneWidget);
-    expect(find.text('대피·의료시설'), findsOneWidget);
+    expect(find.text('경로 보기'), findsOneWidget);
     expect(
         container
             .read(chatMessages)
@@ -223,7 +227,9 @@ void main() {
     };
     addTearDown(() => FlutterError.onError = onError);
     SharedPreferences.setMockInitialValues(
-        {'profile_setup_complete': true, 'onboarding_consent_v1': true, 'onboarding_done_v1': true});
+        {'profile_setup_complete': true});
+    Onboarding.setConsented();
+    Onboarding.setDone();
     appRouter.go('/');
     await t.pumpWidget(ProviderScope(
         overrides: [repo.overrideWithValue(MockSafetyRepository())],
@@ -235,12 +241,13 @@ void main() {
     for (var i = 0; i < 5; i++) {
       await t.pump(const Duration(milliseconds: 150));
     }
-    expect(find.text('구룡포 실내체육관 (예시)'), findsOneWidget);
+    // 실내체육관은 목록과 경로 안내 줄(가까운 대피소) 두 곳에 나온다
+    expect(find.text('구룡포 실내체육관 (예시)'), findsWidgets);
     expect(find.text('구룡포 의료지원소 (예시)'), findsOneWidget);
-    // 경로 방식은 '경로 안내' 하위 항목에서 하나만 고른다 (2026-10-09)
-    expect(find.widgetWithText(MapMenuButton, '최단 거리'), findsOneWidget);
-    expect(find.widgetWithText(MapMenuButton, '안전한 경로'), findsOneWidget);
-    expect(find.widgetWithText(MapMenuButton, '오르막 회피'), findsOneWidget);
+    // 경로 방식은 경로 안내 한 덩어리 안에서 하나만 고른다 (2026-10-10)
+    expect(find.text('최단 거리'), findsOneWidget);
+    expect(find.text('안전한 경로'), findsOneWidget);
+    expect(find.text('오르막 회피'), findsOneWidget);
     await t.pumpWidget(const SizedBox());
     await t.pump(const Duration(seconds: 1));
   });
@@ -257,7 +264,9 @@ void main() {
     };
     addTearDown(() => FlutterError.onError = onError);
     SharedPreferences.setMockInitialValues(
-        {'profile_setup_complete': true, 'onboarding_consent_v1': true, 'onboarding_done_v1': true});
+        {'profile_setup_complete': true});
+    Onboarding.setConsented();
+    Onboarding.setDone();
     appRouter.go('/');
     await t.pumpWidget(ProviderScope(
         overrides: [repo.overrideWithValue(MockSafetyRepository())],
@@ -269,20 +278,21 @@ void main() {
     for (var i = 0; i < 4; i++) {
       await t.pump(const Duration(milliseconds: 200));
     }
-    await t.tap(find.text('구룡포 실내체육관 (예시)').first);
+    await t.tap(find.text('구룡포 실내체육관 (예시)').last);
     for (var i = 0; i < 4; i++) {
       await t.pump(const Duration(milliseconds: 200));
     }
-    await t.ensureVisible(find.widgetWithText(MapMenuButton, '안전한 경로'));
+    await t.ensureVisible(find.text('안전한 경로'));
     await t.pump();
-    await t.tap(find.widgetWithText(MapMenuButton, '안전한 경로'));
+    await t.tap(find.text('안전한 경로'));
     for (var i = 0; i < 8; i++) {
       await t.pump(const Duration(milliseconds: 300));
     }
     expect(errors.where((e) => e.contains('cameraConstraint')), isEmpty);
     expect(find.byType(DisasterDashboard), findsOneWidget);
     expect(find.byType(RouteMap), findsNothing);
-    expect(find.textContaining('경로 · 구룡포'), findsOneWidget);
+    // 예전 '대피소 경로 · 이름' 머리줄은 경로 안내 한 덩어리로 합쳤다 (2026-10-10) — 경로가 열려 있으면 종료 버튼이 보인다
+    expect(find.byTooltip('경로 안내 종료'), findsOneWidget);
     await t.pumpWidget(const SizedBox());
     await t.pump(const Duration(seconds: 1));
   });

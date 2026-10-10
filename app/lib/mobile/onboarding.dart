@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:go_router/go_router.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_shell.dart' show WebWidth;
 import 'profile_screen.dart';
@@ -16,44 +15,22 @@ import '../ui/widgets.dart';
 
 
 /// 첫 화면 (디자인 온보딩). 1/2 = 필수 동의 + 로그인(/login), 2/2 = 내 정보(/setup, 모두 선택·건너뛰기 가능).
-/// 동의·2단계 완료 여부는 기기에 저장 — BootScreen이 [loadOnboardingState]로 읽어 라우터 redirect가 쓴다
+/// 앱을 열 때마다(웹은 새로 열기·새로고침마다) 처음부터 보여 준다 — 2026-10-10 사용자 결정.
+/// 그래서 동의·완료 여부를 기기에 저장하지 않고 메모리에만 둔다. 로그인·입력한 내 정보는 그대로 남아 미리 채워진다.
+/// 기기에 저장해 '한 번 동의하면 건너뛰기'로 되돌리지 말 것 (test/design_ui_test.dart 가 지킴)
 class Onboarding {
   Onboarding._();
-  static const _consentKey = 'onboarding_consent_v1', _doneKey = 'onboarding_done_v1';
   static bool consented = false;
   static bool done = false;
 
-  static Future<void> load() async {
-    try {
-      final p = await SharedPreferences.getInstance();
-      consented = p.getBool(_consentKey) ?? false;
-      done = p.getBool(_doneKey) ?? false;
-    } catch (_) {}
-  }
+  static Future<void> setConsented() async => consented = true;
 
-  static Future<void> setConsented() async {
-    consented = true;
-    try {
-      await (await SharedPreferences.getInstance()).setBool(_consentKey, true);
-    } catch (_) {}
-  }
+  static Future<void> setDone() async => done = true;
 
   /// 처음 화면(동의·로그인·내 정보)을 다시 보기 — 시연용. 입력한 내 정보·로그인은 그대로 둔다
   static Future<void> reset() async {
     consented = false;
     done = false;
-    try {
-      final p = await SharedPreferences.getInstance();
-      await p.remove(_consentKey);
-      await p.remove(_doneKey);
-    } catch (_) {}
-  }
-
-  static Future<void> setDone() async {
-    done = true;
-    try {
-      await (await SharedPreferences.getInstance()).setBool(_doneKey, true);
-    } catch (_) {}
   }
 }
 
@@ -470,8 +447,9 @@ class _MLoginScreenState extends ConsumerState<MLoginScreen> {
     final auth = ref.watch(authService);
     final account = AuthService.ready ? (ref.watch(accountProvider).valueOrNull ?? auth.account) : null;
     final signedIn = account != null && !account.isAnonymous;
-    // 예시 데이터 모드(서버 없음)는 로그인을 쓰지 않으니 동의만 하면 된다
-    final loggedIn = !AuthService.enabled || signedIn;
+    // 예시 데이터 모드(서버 없음)는 로그인을 쓰지 않으니 동의만 하면 된다.
+    // 로컬 개발 dev uid(AppConfig.devUid)도 로그인으로 본다 — 라우터(AuthService.signedIn)와 같게
+    final loggedIn = !AuthService.enabled || signedIn || AuthService.signedIn;
     final ready = consented && loggedIn;
     if (!useMobileUi) return _webBuild(account, signedIn, loggedIn, ready);
     // 흰 바탕 한 장 (그림대로). 넓은 화면(웹)은 가운데 600px
