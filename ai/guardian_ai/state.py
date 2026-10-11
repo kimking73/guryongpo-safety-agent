@@ -215,17 +215,13 @@ class GuardianState(TypedDict, total=False):
     action_plan: ActionPlan | None
     draft: str                           # 검증 전 답변
 
-    # 검증 루프 1 (의도 + 환각, 병렬)
+    # 환각 검증 (다듬기 뒤 한 번) + 재시도
     checks: Annotated[dict[str, CheckResult], merge_checks]
     retry_count: int                     # 최대 MAX_RETRY
     verdict: Literal["pass", "retry", "fallback"]
 
-    # 다듬기 + 검증 루프 2
-    verified_draft: str                  # 루프 1 통과 초안 (루프 2 실패 시 fallback)
+    # 다듬기 (행동 권고 다음, 환각 검증 앞)
     polished: str
-    polish_feedback: str
-    polish_retry_count: int              # 최대 MAX_POLISH_RETRY
-    polish_verdict: Literal["pass", "fail", "retry", "give_up"]
     voice_text: str                      # 음성으로 읽을 2~3문장 (B5, polish.py)
     card: dict[str, Any] | None          # 앱 카드: headline·chips·steps·sources·call_emergency (B5, polish.build_card)
 
@@ -235,4 +231,3 @@ class GuardianState(TypedDict, total=False):
 
 
 MAX_RETRY = 1
-MAX_POLISH_RETRY = 1

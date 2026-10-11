@@ -74,10 +74,11 @@
   ultra-short + short, evidence named 오늘/내일/모레). Default graph (tests) uses no-DB advisor and phase 'during'.
   `ChatService()` wires the real nodes; `DEFAULT_NODES`/`ChatService(classifier=…)` stay offline for tests.
 - B5 (2026-10-03, in progress — only the real Google voice round trip is left, waiting for `secrets/gcp-voice.json`):
-  intent check rides on the content checker's call (`OpenAIFactChecker(checks_intent=True)`, effort low by default —
-  `OPENAI_VERIFY_EFFORT`; the service's `intent_check` node is a no-op). `polish.py`: `build_card` (code picks chips from
-  Evidence) + `OpenAIPolisher` only for drafts > 600 chars + `voice_text`; `make_final_check` = rule number check →
-  `polish_feedback` (#3 fixed). `ChatResponse.card`·`voice_text`·`timings`. `voice.py` (ffmpeg → Google STT/TTS v1),
+  order since 2026-10-11 (user decision): action_advisor → polish → hallucination_check → verify_gate (pass → finalize,
+  fail → manager once (`MAX_RETRY` 1), then fallback); intent check and the post-polish re-check loop were removed.
+  Content checker `OpenAIFactChecker` (effort low by default — `OPENAI_VERIFY_EFFORT`; all steps at once via
+  `OPENAI_REASONING_EFFORT`). `polish.py`: `build_card` (code picks chips from Evidence) + `OpenAIPolisher` only for
+  drafts > 600 chars + `voice_text`; a retry passes `manager_feedback` to the polisher. `ChatResponse.card`·`voice_text`·`timings`. `voice.py` (ffmpeg → Google STT/TTS v1),
   `api.py` `/api/voice` (multipart) and `/api/tts`; no key → 503. Latency targets: text 15 s, voice 20 s; measured text
   7–19 s, one retry 30–35 s. Live tree test: `tests/test_tree_live.py -m "live and db"` (11 cases, ~6 min).
 - Data: tools read PostgreSQL directly with read-only role `AI_DB_*` (`../db/init/07_ai_readonly.sh`); every tool takes
@@ -124,7 +125,8 @@ Flutter app/web (teammate C). This lane (B) also owns GraphHopper routing and GC
 | `guardian_ai/graph.py` | Default (stub) nodes, manager (keyword fallbacks, follow-up continuation), routing functions, `build_graph()` (graph.py:470) |
 | `guardian_ai/tools.py` | Read-only DB tools (risk, observations, warnings, messages, zones, facilities, life safety, action guides), `request_route`; allowlist `AGENT_TOOLS` |
 | `guardian_ai/flood.py` | Rain/flood agent: `collect` → `build_evidence` → writer or `template_summary`; `make_rain_flood_agent(writer, fetch)` |
-| `guardian_ai/verify.py` | Hallucination + intent check: `check_numbers` (rule), `make_hallucination_check(checker)` (checker may return (fact, intent)) |
+| `guardian_ai/route_brief.py` | AI route brief for the dashboard map card (2026-10-11): `POST /api/ai/route-brief` — evidence by code (route facts from the app + `hazards_at` + warnings + rain/wind), one LLM call (`OpenAIRouteBriefWriter`, 8 s limit), `check_numbers` + false-"avoided" guard, template fallback, 60 s cache. Not part of the chat graph |
+| `guardian_ai/verify.py` | Hallucination check on the polished answer + voice text: `check_numbers` (rule), `make_hallucination_check(checker)` |
 | `guardian_ai/specialists.py` | Landslide·wind/typhoon·life-safety agents (`make_specialist`) |
 | `guardian_ai/recovery.py` | Recovery/support agent (2026-10-08): `support_programs` → [공통 보험]·[공통 피해 신고·복구]·[내 직업 지원·복구] by the profile's occupation (`job_targets`), question hazard filter (`hazard_of`), `make_recovery_support_agent`; advisor skips the decision tree when it is the only agent |
 | `guardian_ai/location.py` | Location/route agent: safe shelter, `find_place` destination, route |

@@ -8,13 +8,11 @@
         → manager                관리자: 재난 단계 판정 + 필요한 전문 agent 선택
         → 전문 agent (병렬)        산사태 / 강수·침수 / 강풍·태풍 / 생활안전 / 위치·경로 중 선택된 것만
         → action_advisor          행동 권고: 결과를 모아 행동 우선순위 + 답변 초안
-        → intent_check ┐          (병렬) 의도 검증: 질문에 맞게 답했나  ※ alert 모드는 생략
-          hallucination_check ┘   (병렬) 환각 검증: 숫자·사실이 근거(DB)와 맞나
-        → verify_gate             검증 합류: 통과 / 재시도(관리자로) / 포기(fallback)
-        → polish                  답변 다듬기: 표·요약·쉬운 문장
-        → final_hallucination_check  다듬다가 내용이 바뀌지 않았나
-        → final_check_gate        통과 / 다시 다듬기 / 포기(다듬기 전 초안 사용)
+        → polish                  답변 다듬기: 긴 글 요약·쉬운 문장·음성 문장·카드
+        → hallucination_check     환각 검증: 다듬은 답의 숫자·사실이 근거(DB)와 맞나
+        → verify_gate             통과(finalize) / 재시도(관리자로, 1회) / 포기(fallback)
         → finalize                최종 답변 확정
+    (2026-10-11 사용자 결정: 검증을 다듬기 뒤 한 번으로. 의도 검증·다듬기 뒤 재검증 루프는 없앴다)
 
 LangGraph 기본 개념
 ------------------
@@ -41,10 +39,8 @@ from langgraph.types import Send
 from .action import ACTION_WORDS, NOT_READY, make_action_advisor  # noqa: F401 — NOT_READY는 테스트·밖에서 G.NOT_READY로 쓴다
 from .verify import make_hallucination_check
 from .state import (
-    MAX_POLISH_RETRY,   # 다듬기 재시도 한도 (1회)
     MAX_RETRY,          # 검증 실패 시 관리자부터 다시 하는 한도 (1회)
     RESET,              # reducer에 보내면 누적된 값을 비우는 신호
-    CheckResult,
     DisasterType,
     GuardianState,
     Phase,
@@ -64,12 +60,9 @@ logger = logging.getLogger(__name__)
 MANAGER = "manager"
 DIRECT_REPLY = "direct_reply"
 ACTION_ADVISOR = "action_advisor"
-INTENT_CHECK = "intent_check"
 HALLUCINATION_CHECK = "hallucination_check"
 VERIFY_GATE = "verify_gate"
 POLISH = "polish"
-FINAL_HALLUCINATION_CHECK = "final_hallucination_check"
-FINAL_CHECK_GATE = "final_check_gate"
 FINALIZE = "finalize"
 FALLBACK = "fallback"
 
@@ -170,12 +163,8 @@ def alert_agents(event: RiskEvent) -> list[Specialist]:
 # checkpointer로 대화를 이어 가면 state가 턴 사이에 남기 때문이다 (code_check_list.md 2번).
 _NEW_TURN_RESET = {
     "retry_count": 0,
-    "polish_retry_count": 0,
     "manager_feedback": "",
-    "polish_feedback": "",
     "verdict": None,
-    "polish_verdict": None,
-    "verified_draft": "",
     "polished": "",
     "voice_text": "",
     "card": None,
@@ -351,31 +340,22 @@ def direct_reply(state: GuardianState) -> dict:
             "draft": answer}
 
 
-def intent_check(state: GuardianState) -> dict:
-    """사용자 의도 검증: 초안이 질문에 제대로 답하는지 확인한다 (B5).
-
-    결과는 checks["intent"]에 기록한다. hallucination_check와 동시에 실행되므로
-    서로 다른 키에 써야 merge_checks reducer가 둘을 합칠 수 있다.
-    """
-    return {"checks": {"intent": CheckResult(ok=True)}}
-
-
-# 환각 검증 (B3): 초안의 숫자·사실이 전문 agent가 남긴 evidence와 일치하는지 확인한다 → verify.py.
+# 환각 검증 (B3): 다듬은 답의 숫자·사실이 전문 agent가 남긴 evidence와 일치하는지 확인한다 → verify.py.
 # 기본은 숫자 검사(규칙)만. 서비스는 LLM 내용 검사까지 붙인 것으로 바꿔 끼운다 (service.py).
 hallucination_check = make_hallucination_check()
 
 
 def verify_gate(state: GuardianState) -> dict:
-    """검증 합류 지점: 병렬로 돌린 검증 결과를 모아 다음 행동을 정한다.
+    """환각 검증 결과로 다음 행동을 정한다.
 
-    - 모두 통과          → verdict="pass",     이 초안을 verified_draft로 저장 (루프 2 실패 시 대비)
-    - 실패 + 한도 이내(실패 한도)    → verdict="retry",    실패 사유를 관리자에게 전달, retry_count 증가
-    - 실패 + 한도 초과    → verdict="fallback", 안전 안내로 종료
+    - 통과              → verdict="pass"     (finalize로)
+    - 실패 + 한도 이내   → verdict="retry",    실패 사유를 관리자에게 전달, retry_count 증가
+    - 실패 + 한도 초과   → verdict="fallback", 안전 안내로 종료
     실제 이동은 아래 route_verdict가 verdict 값을 보고 결정한다.
     """
     failed = [f"[{k}] {c.feedback}" for k, c in state.get("checks", {}).items() if not c.ok]
     if not failed:
-        return {"verdict": "pass", "verified_draft": state.get("draft", "")}
+        return {"verdict": "pass"}
     retry = state.get("retry_count", 0)
     if retry < MAX_RETRY:
         return {"verdict": "retry", "retry_count": retry + 1, "manager_feedback": "\n".join(failed)}
@@ -383,50 +363,17 @@ def verify_gate(state: GuardianState) -> dict:
 
 
 def polish(state: GuardianState) -> dict:
-    """답변 다듬기 agent: 수치는 표로, 긴 글은 요약, 문장은 쉽게 (B5).
-
-    재검증에 실패해 다시 들어온 경우 polish_feedback을 반영해서 다시 다듬는다.
-    """
-    return {"polished": state.get("verified_draft", "")}
-
-
-def final_hallucination_check(state: GuardianState) -> dict:
-    """환각 재검증: 다듬는 과정에서 숫자·사실이 바뀌지 않았는지 확인한다.
-
-    "pass" 또는 "fail"을 polish_verdict에 기록한다.
-    재시도 여부 판단은 바로 다음 노드(final_check_gate)가 한다.
-    """
-    return {"polish_verdict": "pass"}
-
-
-def final_check_gate(state: GuardianState) -> dict:
-    """환각 재검증 결과로 다시 다듬을지 정한다.
-
-    - 통과          → 그대로 둠 (finalize로)
-    - 실패 + 한도 이내 → polish_verdict="retry"   (다시 polish로)
-    - 실패 + 한도 초과 → polish_verdict="give_up" (finalize에서 다듬기 전 초안 사용)
-    """
-    if state.get("polish_verdict") == "pass":
-        return {}
-    retry = state.get("polish_retry_count", 0)
-    if retry < MAX_POLISH_RETRY:
-        return {"polish_verdict": "retry", "polish_retry_count": retry + 1}
-    return {"polish_verdict": "give_up"}
+    """답변 다듬기 agent: 긴 글은 요약, 문장은 쉽게 (B5). 기본 그래프는 초안 그대로 (서비스가 polish.make_polish로 바꿔 끼운다)."""
+    return {"polished": state.get("draft", "")}
 
 
 def finalize(state: GuardianState) -> dict:
-    """최종 답변을 확정한다."""
-    if state.get("polish_verdict") == "pass":
-        return {"final_answer": state.get("polished", ""), "used_fallback": False}
-    # 다듬은 답변이 끝내 검증을 못 넘었다 → 모양은 덜 예뻐도
-    # 루프 1에서 이미 검증을 통과한 초안을 그대로 내보낸다. 음성 문장도 그 초안에서 코드로 다시 만든다.
-    from .polish import fallback_voice
-    draft = state.get("verified_draft", "")
-    return {"final_answer": draft, "used_fallback": False, "voice_text": fallback_voice(state, draft)}
+    """최종 답변을 확정한다: 검증을 통과한 다듬은 답."""
+    return {"final_answer": state.get("polished") or state.get("draft", ""), "used_fallback": False}
 
 
 def fallback(state: GuardianState) -> dict:
-    """루프 1 검증을 한도까지 실패한 경우: 확실한 최소 안내만 한다.
+    """검증을 한도까지 실패한 경우: 확실한 최소 안내만 한다.
 
     재난 상황에서 틀린 정보를 주는 것보다 "모른다 + 안전 행동"이 낫다.
     used_fallback=True는 로그·품질 측정(J4)에 쓴다.
@@ -434,6 +381,9 @@ def fallback(state: GuardianState) -> dict:
     return {
         "final_answer": "정확한 정보를 확인하지 못했습니다. 위급하면 119에 연락하고 가까운 대피소로 이동하세요.",
         "used_fallback": True,
+        # 다듬기가 검증보다 먼저 돌므로, 떨어진 답의 음성 문장·카드가 남지 않게 비운다 (2026-10-11)
+        "voice_text": "정확한 정보를 확인하지 못했습니다. 위급하면 119에 연락하고 가까운 대피소로 이동하세요.",
+        "card": None,
     }
 
 
@@ -443,12 +393,9 @@ DEFAULT_NODES: dict[str, Node] = {
     DIRECT_REPLY: direct_reply,
     **{s.value: _specialist_stub(s) for s in Specialist},   # 전문 agent 6개 (지원·복구 2026-10-08)
     ACTION_ADVISOR: action_advisor,
-    INTENT_CHECK: intent_check,
+    POLISH: polish,
     HALLUCINATION_CHECK: hallucination_check,
     VERIFY_GATE: verify_gate,
-    POLISH: polish,
-    FINAL_HALLUCINATION_CHECK: final_hallucination_check,
-    FINAL_CHECK_GATE: final_check_gate,
     FINALIZE: finalize,
     FALLBACK: fallback,
 }
@@ -472,29 +419,13 @@ def route_specialists(state: GuardianState) -> list[Send] | str:
     return [Send(Specialist(s).value, state) for s in selected]
 
 
-def route_checks(state: GuardianState) -> list[str]:
-    """action_advisor 다음: 어떤 검증을 돌릴지.
-
-    - chat:  의도 검증 + 환각 검증을 동시에
-    - alert: 사용자 질문이 없으니 의도 검증은 의미가 없다 → 환각 검증만
-    """
-    if state.get("mode") == "alert":
-        return [HALLUCINATION_CHECK]
-    return [INTENT_CHECK, HALLUCINATION_CHECK]
-
-
 def route_verdict(state: GuardianState) -> str:
     """verify_gate 다음: verdict 값에 따라 이동."""
     return {
-        "pass": POLISH,        # 통과 → 다듬기
-        "retry": MANAGER,      # 재시도 → 관리자부터 다시 (루프 1)
+        "pass": FINALIZE,      # 통과 → 최종 확정
+        "retry": MANAGER,      # 재시도 → 관리자부터 다시
         "fallback": FALLBACK,  # 한도 초과 → 안전 안내
     }[state["verdict"]]
-
-
-def route_polish(state: GuardianState) -> str:
-    """final_check_gate 다음: "retry"면 다시 다듬기(루프 2), 나머지는 최종 확정."""
-    return POLISH if state.get("polish_verdict") == "retry" else FINALIZE
 
 
 # ===========================================================================
@@ -529,16 +460,11 @@ def build_graph(overrides: dict[str, Node] | None = None, checkpointer=None):
         # 병렬로 실행된 agent들이 모두 끝나면 action_advisor가 "한 번만" 실행된다 (fan-in)
         g.add_edge(s, ACTION_ADVISOR)
 
-    # [2단계] 검증 루프 1: 행동 권고 → 검증(병렬) → 합류 → 통과/재시도/fallback
-    g.add_conditional_edges(ACTION_ADVISOR, route_checks, [INTENT_CHECK, HALLUCINATION_CHECK])
-    g.add_edge(INTENT_CHECK, VERIFY_GATE)
+    # [2단계] 행동 권고 → 다듬기 → 환각 검증 → 통과/재시도/fallback
+    g.add_edge(ACTION_ADVISOR, POLISH)
+    g.add_edge(POLISH, HALLUCINATION_CHECK)
     g.add_edge(HALLUCINATION_CHECK, VERIFY_GATE)
-    g.add_conditional_edges(VERIFY_GATE, route_verdict, [POLISH, MANAGER, FALLBACK])
-
-    # [3단계] 검증 루프 2: 다듬기 → 환각 재검증 → 통과/다시 다듬기/포기
-    g.add_edge(POLISH, FINAL_HALLUCINATION_CHECK)
-    g.add_edge(FINAL_HALLUCINATION_CHECK, FINAL_CHECK_GATE)
-    g.add_conditional_edges(FINAL_CHECK_GATE, route_polish, [POLISH, FINALIZE])
+    g.add_conditional_edges(VERIFY_GATE, route_verdict, [FINALIZE, MANAGER, FALLBACK])
 
     # [종료] 정상 종료 또는 fallback 종료
     g.add_edge(FINALIZE, END)

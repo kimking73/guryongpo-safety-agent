@@ -1,10 +1,9 @@
-"""답변 다듬기 (B5): 카드형 필드(코드) + 쉬운 문장·음성용 문장(LLM 한 번) + 다듬은 뒤 숫자 재검증(규칙).
+"""답변 다듬기 (B5): 카드형 필드(코드) + 쉬운 문장·음성용 문장(LLM 한 번). 검증은 이 뒤의 환각 검증이 한다 (2026-10-11).
 
 - 카드(`build_card`): 제목(판단 분기 + 가장 높은 위험), 핵심 수치 칩(근거에서 코드가 고름 — LLM이 숫자를 만들지 않게),
   할 일(행동 권고 그대로), 출처, 119 여부. 앱이 카드로 그릴 수 있게 응답에 따로 싣는다.
-- 문장(`OpenAIPolisher`): 검증을 통과한 초안을 쉬운 말로, 길면 요약, 음성용 2~3문장. 짧은 초안·평시 정보 답은 생략(지연 절약).
-- 재검증(`make_final_check`): 다듬은 글·음성 문장의 숫자가 근거와 맞는지 규칙으로만(`verify.check_numbers`, AI 호출 없음).
-  실패 사유는 `polish_feedback`으로 넘겨 한 번 다시 다듬는다(code_check_list #3). 그래도 실패면 다듬기 전 초안.
+- 문장(`OpenAIPolisher`): 행동 권고가 만든 초안을 쉬운 말로, 길면 요약, 음성용 2~3문장. 짧은 초안·평시 정보 답은 생략(지연 절약).
+- 다듬은 글이 검증에서 떨어져 관리자부터 다시 돌 때는 그 실패 사유(`manager_feedback`)를 다듬기에도 넘긴다.
 """
 
 from __future__ import annotations
@@ -15,7 +14,6 @@ from typing import Any, Callable
 
 from .flood import LEVEL_KO
 from .state import Evidence, GuardianState, RiskLevel, Specialist
-from .verify import check_numbers
 
 logger = logging.getLogger(__name__)
 
@@ -102,14 +100,15 @@ Polisher = Callable[[str, bool, str], tuple[str, str]]
 
 def make_polish(polisher: Polisher | None = None):
     def polish(state: GuardianState) -> dict:
-        draft = state.get("verified_draft", "")
+        draft = state.get("draft", "")
         card = build_card(state)
         plan = state.get("action_plan")
         info_only = plan is not None and plan.decision_path[-1:] == ["정보 안내"]
         if polisher is None or len(draft) < SKIP_POLISH_CHARS or info_only:
             return {"polished": draft, "voice_text": fallback_voice(state, draft), "card": card}
         try:
-            text, voice = polisher(draft, len(draft) > SUMMARIZE_CHARS, state.get("polish_feedback") or "")
+            feedback = (state.get("manager_feedback") or "") if state.get("verdict") == "retry" else ""
+            text, voice = polisher(draft, len(draft) > SUMMARIZE_CHARS, feedback)
             return {"polished": text, "voice_text": voice, "card": card}
         except Exception as e:  # noqa: BLE001 — 다듬기 실패로 답이 끊기면 안 된다
             logger.warning("다듬기 실패 → 초안 그대로 (%s: %s)", type(e).__name__, e)
@@ -117,15 +116,3 @@ def make_polish(polisher: Polisher | None = None):
     polish.__name__ = "polish"
     return polish
 
-
-def make_final_check():
-    """다듬은 글·음성 문장의 숫자 재검증 (규칙만). 실패 사유는 polish_feedback으로 (#3)."""
-    def final_hallucination_check(state: GuardianState) -> dict:
-        text = (state.get("polished") or "") + "\n" + (state.get("voice_text") or "")
-        result = check_numbers(text, all_evidence(state))
-        if result.ok:
-            return {"polish_verdict": "pass", "polish_feedback": ""}
-        logger.info("다듬기 재검증 실패: %s", result.feedback)
-        return {"polish_verdict": "fail", "polish_feedback": result.feedback}
-    final_hallucination_check.__name__ = "final_hallucination_check"
-    return final_hallucination_check

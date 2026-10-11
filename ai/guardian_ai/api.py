@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import state as S
 from .auth import signed_in_uid
+from .route_brief import RouteBriefRequest, RouteBriefResponse, RouteBriefService
 from .service import ChatRequest, ChatResponse, ChatService
 from .voice import MAX_BYTES, BadAudio, GoogleVoice, NoSpeech, VoiceUnavailable, to_pcm16k
 from .usage import get_tracker
@@ -48,9 +49,22 @@ def get_service() -> ChatService:
     return ChatService()
 
 
+@lru_cache
+def get_route_brief() -> RouteBriefService:
+    """AI 경로 설명 (route_brief.py). 테스트는 dependency_overrides로 바꾼다."""
+    from .llm import OpenAIRouteBriefWriter
+    return RouteBriefService(writer=OpenAIRouteBriefWriter())
+
+
 @app.get("/api/ai/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.post("/api/ai/route-brief", response_model=RouteBriefResponse)
+def route_brief(req: RouteBriefRequest, service: RouteBriefService = Depends(get_route_brief)) -> RouteBriefResponse:
+    """지도에 그린 경로의 주의할 점·위험 요소 (대시보드 'AI 경로 설명' 칸, 2026-10-11). 대화 그래프를 거치지 않는다."""
+    return service.brief(req)
 
 
 @app.get("/api/ai/usage")

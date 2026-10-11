@@ -12,6 +12,7 @@ import 'services/account_service.dart';
 import 'services/location_service.dart';
 import 'services/demo_mode.dart';
 import 'models/domain_models.dart';
+import 'route_brief_card.dart';
 import 'weather_section.dart' show WeatherSection, warningIcon;
 import 'ui/gk_theme.dart';
 import 'ui/wind_badge.dart';
@@ -933,6 +934,15 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                     right: 8,
                     bottom: 8,
                     child: RouteHazardBanner(route: route),
+                  ),
+                // AI 경로 설명 (2026-10-11): 경로가 있을 때 지도 오른쪽 위. 좁은 화면은 접힌 채로 (범례와 겹치지 않게)
+                if (route != null)
+                  Positioned(
+                    right: 8,
+                    top: 8,
+                    child: RouteBriefCard(
+                        maxWidth: MediaQuery.sizeOf(context).width < 700 ? 240 : 320,
+                        startCollapsed: MediaQuery.sizeOf(context).width < 700),
                   ),
                 // 범례는 지도 왼쪽 위에 늘 펼쳐 둔다 (2026-10-10: '범례' 버튼·침수 범례·침수 위험 단계 상자 대신 하나로)
                 Positioned(
