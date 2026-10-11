@@ -76,8 +76,6 @@ class MProfileScreen extends ConsumerWidget {
       const _AccountCard(),
       const SizedBox(height: 14),
       const _TeamLoginCard(),
-      const SizedBox(height: 14),
-      const _MoreCard(),
       Padding(
           padding: const EdgeInsets.symmetric(vertical: 16),
           child: Text('앱 버전 ${AppConfig.build}',
@@ -330,20 +328,6 @@ class _AlertSettingsCardState extends ConsumerState<_AlertSettingsCard> {
           trailing: NavySwitch(
               label: '재난 푸시 알림', value: push, onChanged: pushBusy || !AppConfig.isRemote ? null : _togglePush),
         ),
-        SettingRow(
-          topBorder: true,
-          icon: FontAwesomeIcons.language,
-          title: '음성 언어',
-          trailing: SizedBox(
-            width: 150,
-            child: SegmentedPill<String>(
-              height: 32,
-              items: const [('한국어', '한국어', null), ('English', 'English', null)],
-              value: ref.watch(voiceLanguage),
-              onChanged: (v) => ref.read(voiceLanguage.notifier).state = v,
-            ),
-          ),
-        ),
       ]),
     );
   }
@@ -583,41 +567,7 @@ class _TeamLoginCardState extends ConsumerState<_TeamLoginCard> {
   }
 }
 
-// ------------------------------------------------------------------ 더 보기 (탭에서 옮긴 화면)
-
-class _MoreCard extends ConsumerWidget {
-  const _MoreCard();
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final demo = ref.watch(showDemoProvider);
-    final rows = <(FaIconData, String, String, String)>[
-      (FontAwesomeIcons.triangleExclamation, '선제 경고·알림', '내 위치·등록 장소 맞춤 경고, 재난문자', '/alerts-hub'),
-      (FontAwesomeIcons.hurricane, '태풍 정보', '태풍 경로와 구룡포 영향', '/typhoon'),
-      (FontAwesomeIcons.handHoldingHeart, '지원 및 복구', '직업에 맞는 보험·피해 신고·복구 지원', '/support'),
-      (FontAwesomeIcons.personCircleCheck, '경고·대피 확인', '받은 경고와 내 대피 응답', '/alerts'),
-      (FontAwesomeIcons.peopleRoof, '내 가구 등록', '도움이 필요한 가족을 방재단에 알리기', '/household'),
-      (FontAwesomeIcons.ship, '바다 위 대피 경로', '배 위에서 가까운 항구로', '/sea-route'),
-      (FontAwesomeIcons.universalAccess, '접근성 세부 설정', '큰 글씨·청각·시각 지원', '/accessibility'),
-      if (demo) (FontAwesomeIcons.personRunning, '대피 확인 시연', '대피 경보 화면 흐름 시연', '/evacuation'),
-      if (demo) (FontAwesomeIcons.microphoneLines, '음성 대피 확인 시연', '말로 대피 상태 알리기', '/evacuation-voice'),
-    ];
-    return AppCard(
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        const CardTitle('더 보기'),
-        const SizedBox(height: 4),
-        for (final (i, r) in rows.indexed)
-          SettingRow(
-            topBorder: i > 0,
-            icon: r.$1,
-            title: r.$2,
-            subtitle: r.$3,
-            onTap: () => context.push(r.$4),
-            trailing: const FaIcon(FontAwesomeIcons.chevronRight, size: 13, color: Ds.muted),
-          ),
-      ]),
-    );
-  }
-}
+// '음성 언어'·'더 보기' 카드는 뺐다 (2026-10-11 사용자 요청). 태풍 정보는 대시보드 날씨 아래 '태풍 정보 자세히 보기'
 
 // ------------------------------------------------------------------ 내 정보 입력·수정 (온보딩 2단계와 같은 모양)
 
@@ -631,12 +581,7 @@ class ProfileForm extends ConsumerStatefulWidget {
 }
 
 class _ProfileFormState extends ConsumerState<ProfileForm> {
-  final age = TextEditingController(),
-      home = TextEditingController(),
-      work = TextEditingController(),
-      placeName = TextEditingController(),
-      placeAddr = TextEditingController(),
-      job = TextEditingController();
+  final age = TextEditingController(), home = TextEditingController(), job = TextEditingController();
   Set<String> dis = {};
   String transport = '';
   Map<String, String> loaded = {};
@@ -653,7 +598,6 @@ class _ProfileFormState extends ConsumerState<ProfileForm> {
         loaded = p;
         age.text = p['age'] ?? '';
         home.text = p['homeAddress'] ?? '';
-        work.text = p['workAddress'] ?? '';
         job.text = jobsOf(p).join(', ');
         dis = disabilitiesOf(p);
         transport = p['transport'] ?? '';
@@ -664,7 +608,7 @@ class _ProfileFormState extends ConsumerState<ProfileForm> {
 
   @override
   void dispose() {
-    for (final c in [age, home, work, placeName, placeAddr, job]) {
+    for (final c in [age, home, job]) {
       c.dispose();
     }
     super.dispose();
@@ -706,18 +650,7 @@ class _ProfileFormState extends ConsumerState<ProfileForm> {
       }
 
       await geocode('home', home.text, '집');
-      await geocode('work', work.text, '직장');
       await AccountService().saveOptionalProfile(p);
-      if (placeName.text.trim().isNotEmpty && placeAddr.text.trim().isNotEmpty) {
-        final r = await GeocodingService().resolve(placeAddr.text.trim());
-        await AccountService().addPlace(SavedPlace(
-            id: DateTime.now().microsecondsSinceEpoch.toString(),
-            name: placeName.text.trim(),
-            type: '기타',
-            address: r.address,
-            position: r.position));
-        ref.invalidate(placesProvider);
-      }
       // 장애 유형에 맞춰 알림 방식 자동 설정 (디자인: 시각 → 음성, 청각 → 진동·점멸)
       final store = ref.read(prototypeSafetyProvider);
       final a = store.accessibility;
@@ -828,7 +761,6 @@ class _ProfileFormState extends ConsumerState<ProfileForm> {
         Wrap(spacing: 8, runSpacing: 8, children: [
           for (final t in const [
             ('도보', Icons.directions_walk_rounded),
-            ('휠체어', Icons.accessible_rounded),
             ('자동차', Icons.directions_car_rounded)
           ])
             _webChoice(t.$1, t.$2, transport == t.$1, () => setState(() => transport = transport == t.$1 ? '' : t.$1)),
@@ -841,12 +773,6 @@ class _ProfileFormState extends ConsumerState<ProfileForm> {
         const SizedBox(height: 22),
         _webLabel('집 주소', sub: '(선택)', first: true),
         _webField(home, '예: 구룡포읍 호미로 152'),
-        _webLabel('내 장소', sub: '(선택 · 자주 가는 곳)'),
-        Row(children: [
-          Expanded(flex: 2, child: _webField(placeName, '이름 · 예: 구룡포 시장')),
-          const SizedBox(width: 10),
-          Expanded(flex: 3, child: _webField(placeAddr, '주소 · 예: 구룡포읍 구룡포길 1')),
-        ]),
         _webLabel('직업', sub: '(선택)'),
         _webField(job, '예: 어업'),
         const SizedBox(height: 10),
@@ -903,15 +829,11 @@ class _ProfileFormState extends ConsumerState<ProfileForm> {
       ]),
       _label('이동 수단', sub: '(선택)'),
       Wrap(spacing: 8, runSpacing: 8, children: [
-        for (final t in const [('도보', FontAwesomeIcons.personWalking), ('휠체어', FontAwesomeIcons.wheelchair), ('자동차', FontAwesomeIcons.car)])
+        for (final t in const [('도보', FontAwesomeIcons.personWalking), ('자동차', FontAwesomeIcons.car)])
           _choice(t.$1, t.$2, transport == t.$1, () => setState(() => transport = transport == t.$1 ? '' : t.$1)),
       ]),
       _label('집 주소', icon: FontAwesomeIcons.house),
       field(home, '예: 구룡포읍 호미로 152'),
-      _label('내 장소', sub: '(선택)', icon: FontAwesomeIcons.bookmark),
-      field(placeName, '장소 이름 · 예: 구룡포 시장'),
-      const SizedBox(height: 8),
-      field(placeAddr, '주소 · 예: 구룡포읍 구룡포길 1'),
       _label('직업', sub: '(선택)', icon: FontAwesomeIcons.briefcase),
       field(job, '예: 어업'),
       const SizedBox(height: 8),
@@ -922,10 +844,6 @@ class _ProfileFormState extends ConsumerState<ProfileForm> {
             if (!cur.contains(j)) job.text = [...cur, j].join(', ');
           }),
       ]),
-      if (!widget.onboarding) ...[
-        _label('직장 주소', sub: '(선택)', icon: FontAwesomeIcons.building),
-        field(work, '예: 구룡포읍 구룡포항'),
-      ],
       const SizedBox(height: 28),
       PillButton(busy ? '저장 중…' : (widget.onboarding ? '시작하기' : '저장'),
           height: 60, fontSize: 20, onPressed: busy ? null : _save),

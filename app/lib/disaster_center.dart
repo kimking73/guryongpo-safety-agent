@@ -2038,8 +2038,12 @@ Widget _badge(String text) => Container(
 
 /// 실측 '실시간 정보' (2026-10-05): 김다인 디자인(_rainfallMetric·_metric) 그대로, 값은 서버 /dashboard 위젯
 class LiveRealtimeCards extends StatelessWidget {
-  const LiveRealtimeCards({super.key, required this.widgets, this.simulated = false});
+  const LiveRealtimeCards({super.key, required this.widgets, this.simulated = false, this.only});
   final List<Map<String, dynamic>> widgets;
+  /// 이 카드만 보인다 (null = 전부). rain·wind·wave·water·forecast 또는 생활 안전 hazard(fine_dust·ultrafine_dust·uv).
+  /// 대시보드 날씨 칸을 누르면 그 항목 카드만 (2026-10-11 사용자 요청)
+  final Set<String>? only;
+  bool _want(String k) => only == null || only!.contains(k);
   /// 서버 시연 데이터면 배지 '실측' → '시연'
   final bool simulated;
   String get _obs => simulated ? '시연' : '실측';
@@ -2055,10 +2059,12 @@ class LiveRealtimeCards extends StatelessWidget {
     final rain = _w('rain'), wind = _w('wind'), wave = _w('wave'), water = _w('water_level');
     final life = _w('life_safety'), fc = _w('forecast');
     return GkMetricGrid(children: [
+      if (_want('rain'))
       _ok(rain)
           ? _liveRainfall(rain, simulated: simulated)
           : _metric(Icons.water_drop_outlined, '강수', '자료 없음', '${rain['reason']}', '구룡포 AWS', Colors.indigo,
               badge: '자료 없음', suffix: ''),
+      if (_want('wind'))
       _ok(wind)
           ? _metric(Icons.navigation, '바람', '평균 ${_n(wind['value'])} · 순간 ${_n(wind['wind_gust'])}m/s',
               '${_windFromKo(wind['wind_dir'])} · 화살표는 바람이 불어가는 방향', '${wind['station_name']} · ${_hhmm('${wind['observed_at']}')}',
@@ -2066,6 +2072,7 @@ class LiveRealtimeCards extends StatelessWidget {
               rotation: wind['wind_dir'] is num ? ((wind['wind_dir'] as num) + 180) * math.pi / 180 : 0, badge: _obs, suffix: simulated ? ' · 시연값' : ' · 기상청 관측',
               level: wind['level'] as String?)
           : _metric(Icons.navigation, '바람', '자료 없음', '${wind['reason']}', '구룡포 AWS', Colors.deepOrange, badge: '자료 없음', suffix: ''),
+      if (_want('wave'))
       _ok(wave)
           ? _metric(
               Icons.waves,
@@ -2077,10 +2084,11 @@ class LiveRealtimeCards extends StatelessWidget {
               badge: '예보',
               suffix: simulated ? ' · 시연 예보' : ' · 기상청 단기예보')
           : _metric(Icons.waves, '파고', '자료 없음', '${wave['reason']}', '구룡포항 앞바다', Colors.blue, badge: '자료 없음', suffix: ''),
-      _liveWater(water),
-      if (_ok(fc)) _liveForecast(fc),
+      if (_want('water')) _liveWater(water),
+      if (_want('forecast') && _ok(fc)) _liveForecast(fc),
       if (_ok(life))
         for (final i in life['items'] as List? ?? const [])
+          if (_want('${(i as Map)['hazard']}'))
           _metric(
               Icons.wb_sunny_outlined,
               '${(i as Map)['label']}',

@@ -39,36 +39,39 @@ const needKo = {
   'hearing': '청각', 'vision': '시각', 'cognitive': '인지', 'medical_device': '의료기기', 'infant': '영유아', 'pet': '반려동물',
 };
 
-/// 취약 가구 분류 — 방재단 지도 아이콘·필터 (사용자 요청 2026-10-05: 장애인·독거노인은 대피 상황이 아니어도 지도에 표시)
+/// 취약 가구 분류 — 방재단 지도 아이콘·필터 (장애인은 대피 상황이 아니어도 지도에 표시).
+/// 독거노인 분류·필터는 뺐다 (2026-10-11 사용자 요청: 독거 자료가 없음) → 장애 유형별 필터
 const disabilityNeeds = {'wheelchair', 'hearing', 'vision', 'cognitive', 'bedridden', 'mobility_limited'};
 Set<String> _needSet(Object? needs) => {for (final x in needs as List? ?? const []) '$x'};
 bool isDisabledHousehold(Object? needs) => _needSet(needs).any(disabilityNeeds.contains);
-bool isElderlyAlone(Object? needs) => _needSet(needs).containsAll(const {'elderly', 'living_alone'});
 
-enum VulnerableKind { disabled, elderlyAlone, other }
+enum VulnerableKind { disabled, other }
 
-/// 지도 아이콘 하나를 고른다: 장애가 있으면 장애인, 아니면 독거노인, 그 밖은 기타 (둘 다면 장애인 아이콘, 필터는 둘 다에 걸림)
-VulnerableKind vulnerableKind(Object? needs) => isDisabledHousehold(needs)
-    ? VulnerableKind.disabled
-    : isElderlyAlone(needs)
-        ? VulnerableKind.elderlyAlone
-        : VulnerableKind.other;
-const kindKo = {VulnerableKind.disabled: '장애인', VulnerableKind.elderlyAlone: '독거노인', VulnerableKind.other: '기타 취약'};
-const kindIcon = {VulnerableKind.disabled: Icons.accessible, VulnerableKind.elderlyAlone: Icons.elderly, VulnerableKind.other: Icons.home};
+/// 지도 아이콘 하나를 고른다: 장애가 있으면 장애인, 그 밖은 기타
+VulnerableKind vulnerableKind(Object? needs) =>
+    isDisabledHousehold(needs) ? VulnerableKind.disabled : VulnerableKind.other;
+const kindKo = {VulnerableKind.disabled: '장애인', VulnerableKind.other: '기타 취약'};
+const kindIcon = {VulnerableKind.disabled: Icons.accessible, VulnerableKind.other: Icons.home};
 const kindColor = {
   VulnerableKind.disabled: Color(0xff6a1b9a),
-  VulnerableKind.elderlyAlone: Color(0xff00695c),
   VulnerableKind.other: Color(0xff546e7a),
 };
 
-/// 지도·목록 필터
-enum HouseholdFilter { all, disabled, elderlyAlone }
+/// 지도·목록 필터: 전체 / 시각 / 청각 / 지체.
+/// 지체 = 휠체어·와상·보행 불편 (server/app/priority.py DISABILITY_NEEDS 와 같은 묶음)
+enum HouseholdFilter { all, vision, hearing, physical }
 
-bool matchesFilter(HouseholdFilter f, Object? needs) => switch (f) {
-      HouseholdFilter.all => true,
-      HouseholdFilter.disabled => isDisabledHousehold(needs),
-      HouseholdFilter.elderlyAlone => isElderlyAlone(needs),
-    };
+const physicalNeeds = {'wheelchair', 'bedridden', 'mobility_limited'};
+
+bool matchesFilter(HouseholdFilter f, Object? needs) {
+  final n = _needSet(needs);
+  return switch (f) {
+    HouseholdFilter.all => true,
+    HouseholdFilter.vision => n.contains('vision'),
+    HouseholdFilter.hearing => n.contains('hearing'),
+    HouseholdFilter.physical => n.any(physicalNeeds.contains),
+  };
+}
 
 /// 대피 상태 (A12) → 한글·색. 명단 정렬도 서버(priority_rank)를 따르고 앱은 표시만 한다
 const statusKo = {'need_help': '도움 필요', 'no_response': '응답 없음', 'evacuating': '대피 중', 'evacuated': '대피 완료'};
@@ -474,32 +477,53 @@ class _DelegatedForm extends ConsumerStatefulWidget {
   ConsumerState<_DelegatedForm> createState() => _DelegatedFormState();
 }
 
+/// 대리 등록 화면 (2026-10-11 사용자 요청으로 단순화): 이름·주소(필수)·연락처·장애 유형 + 동의 확인 하나.
+/// 집 위치는 주소를 좌표로 바꿔 넣는다(서버 HouseholdInput.location 필수). 함께 사는 사람 수·기타 도움·메모는 뺐다.
+/// 동의: 서버가 consent_method·consent_by 를 필수로 받는다 → 확인 체크 하나로 '구두 · 본인 또는 보호자'를 보낸다
 class _DelegatedFormState extends ConsumerState<_DelegatedForm> {
   final draft = _HouseholdDraft();
-  final consentBy = TextEditingController();
-  String method = 'written';
-  bool confirmed = false, busy = false;
+  /// 장애 유형 → 서버 needs (B13 '장애' = 시각·청각·지체)
+  static const _disability = {'vision': '시각', 'hearing': '청각', 'mobility_limited': '지체'};
+  bool none = false, confirmed = false, busy = false;
   String? message;
 
   @override
   void dispose() {
     draft.dispose();
-    consentBy.dispose();
     super.dispose();
   }
 
+  void _toggle(String k) => setState(() {
+        if (k == 'none') {
+          none = !none;
+          if (none) draft.needs.clear();
+        } else {
+          none = false;
+          draft.needs.contains(k) ? draft.needs.remove(k) : draft.needs.add(k);
+        }
+      });
+
   Future<void> _save() async {
-    if (draft.label.text.trim().isEmpty || draft.location == null || consentBy.text.trim().isEmpty) {
-      setState(() => message = '이름·집 위치·동의한 사람을 모두 넣어 주세요.');
+    if (draft.label.text.trim().isEmpty || draft.address.text.trim().isEmpty) {
+      setState(() => message = '이름과 주소를 넣어 주세요.');
       return;
     }
-    setState(() => busy = true);
+    setState(() {
+      busy = true;
+      message = null;
+    });
     try {
+      final r = await GeocodingService().resolve(draft.address.text.trim());
+      draft
+        ..location = r.position
+        ..address.text = r.address;
       final h = await ref.read(liveApiProvider).createHousehold(
-          {...draft.body(), 'consent_method': method, 'consent_by': consentBy.text.trim()});
+          {...draft.body(), 'consent_method': 'verbal', 'consent_by': '본인 또는 보호자'});
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${h['label']} 가구를 등록했습니다.')));
       context.pop();
+    } on GeocodingException catch (e) {
+      setState(() => message = e.message);
     } catch (e) {
       setState(() => message = liveError(e));
     } finally {
@@ -510,24 +534,32 @@ class _DelegatedFormState extends ConsumerState<_DelegatedForm> {
   @override
   Widget build(BuildContext c) => LivePage(title: '가구 대리 등록', children: [
         const Text('앱을 쓰지 않는 어르신 등을 방재단이 대신 등록합니다. 등록 전에 본인(또는 보호자)에게 민감정보 수집·제공 동의를 받아야 합니다.'),
+        const SizedBox(height: 12),
+        TextField(controller: draft.label,
+            decoration: const InputDecoration(labelText: '이름 또는 호칭 (필수)', border: OutlineInputBorder())),
         const SizedBox(height: 8),
-        _HouseholdFields(draft: draft, onChanged: () => setState(() {}), labelHint: '이름 또는 호칭 (필수)',
-            here: ref.watch(userLocation).position),
-        const Text('민감정보 동의 (별도)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        TextField(controller: draft.address,
+            decoration: const InputDecoration(
+                labelText: '주소 (필수)', hintText: '예: 구룡포읍 호미로 152', border: OutlineInputBorder())),
+        const SizedBox(height: 8),
+        TextField(controller: draft.phone, keyboardType: TextInputType.phone,
+            decoration: const InputDecoration(labelText: '연락처', border: OutlineInputBorder())),
+        const SizedBox(height: 16),
+        const Text('장애 유형 (선택 · 중복 가능)', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 6),
-        TextField(controller: consentBy,
-            decoration: const InputDecoration(labelText: '동의한 사람 (예: 본인, 딸 김○○)', border: OutlineInputBorder())),
-        const SizedBox(height: 6),
-        SegmentedButton<String>(
-            segments: const [ButtonSegment(value: 'written', label: Text('서면 동의')), ButtonSegment(value: 'verbal', label: Text('구두 동의'))],
-            selected: {method},
-            onSelectionChanged: (v) => setState(() => method = v.first)),
+        Wrap(spacing: 6, runSpacing: 6, children: [
+          for (final e in _disability.entries)
+            FilterChip(label: Text(e.value), selected: draft.needs.contains(e.key), onSelected: (_) => _toggle(e.key)),
+          FilterChip(label: const Text('해당 없음'), selected: none, onSelected: (_) => _toggle('none')),
+        ]),
+        const SizedBox(height: 8),
         CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
             value: confirmed,
             onChanged: (v) => setState(() => confirmed = v ?? false),
-            title: const Text('수집 항목·목적·보관 기간·철회 방법을 설명하고 동의를 받았습니다'),
+            title: const Text('본인(또는 보호자)에게 민감정보(장애 정보) 수집·제공 동의를 받았습니다'),
             subtitle: Text('동의서 버전 $consentVersion')),
-        FilledButton(onPressed: busy || !confirmed ? null : _save, child: const Text('등록')),
+        FilledButton(onPressed: busy || !confirmed ? null : _save, child: Text(busy ? '등록 중…' : '등록')),
         if (message != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(message!)),
       ]);
 }
@@ -588,7 +620,7 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
     try {
       final list = await api.adminIncidents();
       final id = list.any((i) => i['id'] == incidentId) ? incidentId : (list.isEmpty ? null : '${list.first['id']}');
-      // 등록 취약 가구는 대피 상황과 상관없이 늘 지도에 (장애인·독거노인 평시 확인)
+      // 등록 취약 가구는 대피 상황과 상관없이 늘 지도에 (장애인 평시 확인)
       final hh = await api.adminHouseholds();
       if (!mounted) return;
       setState(() {
@@ -706,8 +738,6 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
         const SizedBox(height: 20),
         // ⑤ 방재단 배정 현황
         _assignSection(c, targets, numbers, closed),
-        const SizedBox(height: 20),
-        _visitCard(targets, numbers),
       ],
     ]);
   }
@@ -787,7 +817,11 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
         const SizedBox(height: 8),
         _map(points, geoJsonRings(detail?['area'])),
         _FilterBar(households: households ?? const [], filter: filter, onChanged: (f) => setState(() => filter = f)),
-        _MapLegend(withTargets: incidentId != null),
+        // 지도 범례 대신 방문 경로 안내 (2026-10-11 사용자 요청, 휴대폰 화면과 같게)
+        if (incidentId != null) ...[
+          const SizedBox(height: 12),
+          _visitCard(targets, numbers),
+        ],
         if (sel != null) ...[
           const SizedBox(height: 10),
           _TargetDetail(
@@ -1055,12 +1089,19 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
     String km(num m) => m >= 1000 ? '${(m / 1000).toStringAsFixed(1)}km' : '${m.round()}m';
     String min(num s) => '${(s / 60).ceil()}분';
     String noOf(Map<String, dynamic> t) => numbers['${t['id']}'] == null ? '' : '${numbers['${t['id']}']}번 · ';
-    return GkCard(
+    // Material 바탕 (Container 색이면 ListTile 누름 효과가 가려진다)
+    return Material(
+      color: GK.bg,
+      borderRadius: BorderRadius.circular(GK.radiusInner),
+      child: Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Row(children: [
-            Icon(Icons.route_rounded, color: GK.navy),
-            SizedBox(width: 6),
-            Text('내 방문 경로', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          Row(children: [
+            const Icon(Icons.route_rounded, color: GK.navy),
+            const SizedBox(width: 6),
+            const Text('방문 경로 안내', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const Spacer(),
+            Text('${picked.length}/$maxVisitStops곳', style: const TextStyle(color: GK.muted, fontWeight: FontWeight.w700)),
           ]),
           Text("우선 확인 가구에서 '경로에 추가'한 곳을 모두 도는 길입니다. 위험 구역은 피하고, 방문할 집이 있는 구역만 들어갑니다.",
               style: Theme.of(context).textTheme.bodySmall),
@@ -1105,26 +1146,35 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
                   _clearVisit();
                 }),
               ),
-              FilledButton.icon(
-                onPressed: visitLoading || picked.isEmpty ? null : () => _calcVisit(picked),
-                icon: visitLoading
-                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.alt_route_rounded),
-                label: Text('${picked.length}곳 경로 계산'),
-              ),
             ]),
+            const SizedBox(height: 10),
+            // 최단 / 우선순위 두 버튼 (휴대폰과 같게): 처음 누르면 두 경로를 한 번에 받고, 그 뒤엔 보이는 경로만 바꾼다
+            Row(children: [
+              for (final (tab, text, icon) in const [
+                ('shortest', '최단 경로', Icons.arrow_right_alt_rounded),
+                ('priority', '우선순위 경로', Icons.format_list_numbered_rounded),
+              ]) ...[
+                if (tab == 'priority') const SizedBox(width: 8),
+                Expanded(
+                  child: (plan != null && visitTab == tab)
+                      ? FilledButton.icon(
+                          onPressed: () => setState(() => visitTab = tab), icon: Icon(icon), label: Text(text))
+                      : FilledButton.tonalIcon(
+                          onPressed: visitLoading || picked.isEmpty
+                              ? null
+                              : () {
+                                  setState(() => visitTab = tab);
+                                  if (visitResult == null) _calcVisit(picked);
+                                },
+                          icon: Icon(icon),
+                          label: Text(text)),
+                ),
+              ],
+            ]),
+            if (visitLoading) const Padding(padding: EdgeInsets.only(top: 8), child: LinearProgressIndicator()),
             if (visitError != null) Padding(padding: const EdgeInsets.only(top: 6), child: Text(visitError!, style: const TextStyle(color: Colors.red))),
             if (plan != null) ...[
               const SizedBox(height: 10),
-              SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(value: 'shortest', label: Text('최단 경로')),
-                  ButtonSegment(value: 'priority', label: Text('우선순위 최단 경로')),
-                ],
-                selected: {visitTab},
-                onSelectionChanged: (v) => setState(() => visitTab = v.first),
-              ),
-              const SizedBox(height: 6),
               Text('${visitMode.label} · 총 ${km(plan['distance_m'] as num)} · 약 ${min(plan['duration_s'] as num)}',
                   style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               Text(visitTab == 'priority' ? '순위 단계(도움 요청+장애 → 도움 요청 → 응답 없음+장애 → …)를 지키고, 같은 단계 안에서 가장 짧게' : '순위와 상관없이 가장 짧게',
@@ -1148,7 +1198,7 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
             ],
           ],
         ]),
-    );
+    ));
   }
 
   /// 필터에 맞는 등록 가구 (선택한 가구를 맨 앞으로)
@@ -1682,7 +1732,7 @@ class _WorkProgress extends StatelessWidget {
   }
 }
 
-/// 전체 / 장애인 / 독거노인 필터 (개수 포함)
+/// 전체 / 시각 / 청각 / 지체 필터 (개수 포함)
 class _FilterBar extends StatelessWidget {
   const _FilterBar({required this.households, required this.filter, required this.onChanged});
   final List<Map<String, dynamic>> households;
@@ -1700,30 +1750,10 @@ class _FilterBar extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 6),
         child: Wrap(spacing: 8, runSpacing: 6, children: [
           chip(HouseholdFilter.all, '등록 취약 가구 전체', Icons.home_work_outlined, kindColor[VulnerableKind.other]!),
-          chip(HouseholdFilter.disabled, '장애인', kindIcon[VulnerableKind.disabled]!, kindColor[VulnerableKind.disabled]!),
-          chip(HouseholdFilter.elderlyAlone, '독거노인', kindIcon[VulnerableKind.elderlyAlone]!, kindColor[VulnerableKind.elderlyAlone]!),
+          chip(HouseholdFilter.vision, '시각', Icons.visibility_rounded, kindColor[VulnerableKind.disabled]!),
+          chip(HouseholdFilter.hearing, '청각', Icons.hearing_rounded, kindColor[VulnerableKind.disabled]!),
+          chip(HouseholdFilter.physical, '지체', Icons.accessible_rounded, kindColor[VulnerableKind.disabled]!),
         ]));
-  }
-}
-
-class _MapLegend extends StatelessWidget {
-  const _MapLegend({required this.withTargets});
-  final bool withTargets;
-  @override
-  Widget build(BuildContext c) {
-    Widget item(Widget mark, String label) => Row(mainAxisSize: MainAxisSize.min, children: [mark, const SizedBox(width: 4), Text(label)]);
-    Widget icon(VulnerableKind k) => CircleAvatar(radius: 10, backgroundColor: kindColor[k], child: Icon(personIcon(k), size: 14, color: Colors.white));
-    return Wrap(spacing: 14, runSpacing: 4, children: [
-      if (withTargets) ...[
-        item(const _NoCircle(1, 'need_help', size: 20), '우선 확인 번호 (목록과 같음, 색 = 응답 상태)'),
-        item(Container(width: 18, height: 12, decoration: BoxDecoration(border: Border.all(color: Colors.red.shade700, width: 2))),
-            '빨간 테두리 = 대피 경보 지역'),
-      ],
-      item(Icon(Icons.health_and_safety, color: Colors.teal.shade800, size: 20), '대피소'),
-      item(icon(VulnerableKind.disabled), '장애인 가구'),
-      item(icon(VulnerableKind.elderlyAlone), '독거노인 가구'),
-      item(icon(VulnerableKind.other), '기타 취약 가구'),
-    ]);
   }
 }
 
@@ -1734,7 +1764,7 @@ class _MapPoint {
   final int? rank;              // 우선 확인 대상이면 화면 번호 (목록 번호와 같다)
   final String? status;         // 대피 대상이면 대피 상태
   final String label;
-  final VulnerableKind? kind;   // 등록 가구(대피 대상 아님)면 장애인·독거노인·기타
+  final VulnerableKind? kind;   // 등록 가구(대피 대상 아님)면 장애인·기타
   final String? detail;
 }
 
@@ -1742,7 +1772,7 @@ class _MapPoint {
 const maxVisitStops = 10;
 
 /// 대시보드 지도 위 사람 아이콘 (2026-10-09): 대피 대상은 사람 + 우선 확인 번호(색 = 대피 상태),
-/// 등록 취약 가구는 장애인·독거노인·기타 사람 아이콘. 누르면 그 대상 정보가 지도 아래에
+/// 등록 취약 가구는 장애인·기타 사람 아이콘. 누르면 그 대상 정보가 지도 아래에
 List<Marker> _peopleMarkers(List<_MapPoint> points, String? selected, ValueChanged<String> onTap) => [
       for (final p in [...points.where((p) => p.id != selected), ...points.where((p) => p.id == selected)])
         Marker(
@@ -1786,10 +1816,9 @@ List<Marker> _peopleMarkers(List<_MapPoint> points, String? selected, ValueChang
         ),
     ];
 
-/// 지도 사람 아이콘 모양: 대피 대상(kind 없음)은 사람, 등록 가구는 장애인·어르신·사람
+/// 지도 사람 아이콘 모양: 대피 대상(kind 없음)은 사람, 등록 가구는 장애인·사람
 IconData personIcon(VulnerableKind? kind) => switch (kind) {
       VulnerableKind.disabled => Icons.accessible_rounded,
-      VulnerableKind.elderlyAlone => Icons.elderly_rounded,
       _ => Icons.person_rounded,
     };
 

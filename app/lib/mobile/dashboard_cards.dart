@@ -1,15 +1,19 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../disaster_center.dart' show LiveRealtimeCards;
 import '../live_screens.dart';
 import '../main.dart';
 import '../models/domain_models.dart';
-import '../dashboard_parts.dart' show ShelterPickerSheet;
 import '../origin_picker.dart';
 import '../services/account_service.dart';
+import '../services/geocoding_service.dart';
+import '../services/location_service.dart' show inServiceArea;
 import '../ui/tokens.dart';
 import '../ui/widgets.dart';
 
@@ -279,6 +283,13 @@ class WeatherItem {
   final String key, title, value, unit, level, note, source;
   final FaIconData icon, badge;
 
+  /// 누르면 보이는 '실시간 관측·예보 자세히' 카드 (LiveRealtimeCards.only)
+  Set<String> get detailKeys => switch (key) {
+        'river' => const {'water'},
+        'dust' => const {'fine_dust', 'ultrafine_dust'},
+        _ => {key},
+      };
+
   Color get color => level.isEmpty ? Ds.track : Ds.level(level);
   Color get onColor => level.isEmpty ? Ds.navy : Ds.onLevel(color);
   String get levelText => level.isEmpty ? '자료 없음' : level;
@@ -418,16 +429,42 @@ class WeatherSection extends ConsumerWidget {
         final cols = c.maxWidth >= 900 ? 3 : 2;
         final w = (c.maxWidth - 6 * (cols - 1)) / cols;
         return Wrap(spacing: 6, runSpacing: 6, children: [
-          for (final it in items) SizedBox(width: w, child: _WeatherTile(item: it)),
+          for (final it in items) SizedBox(width: w, child: _WeatherTile(item: it, dashboard: async?.valueOrNull)),
         ]);
       }),
+      const SizedBox(height: 6),
+      // 태풍 정보 (2026-10-11 사용자 요청 — 사용자 탭 '더 보기'에서 옮김)
+      Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => context.push('/typhoon'),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 16, 12),
+            child: Row(children: [
+              const IconCircle(FontAwesomeIcons.hurricane, size: 38, iconSize: 17),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('태풍 정보 자세히 보기', style: dsText(15, weight: FontWeight.w800)),
+                  Text('태풍 경로와 구룡포 영향', style: dsText(13, color: Ds.muted)),
+                ]),
+              ),
+              const FaIcon(FontAwesomeIcons.chevronRight, size: 13, color: Ds.muted),
+            ]),
+          ),
+        ),
+      ),
     ]);
   }
 }
 
 class _WeatherTile extends StatelessWidget {
-  const _WeatherTile({required this.item});
+  const _WeatherTile({required this.item, this.dashboard});
   final WeatherItem item;
+  /// 실측 대시보드 (시연이면 null)
+  final Map<String, dynamic>? dashboard;
 
   @override
   Widget build(BuildContext context) => Material(
@@ -435,7 +472,7 @@ class _WeatherTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          onTap: () => showWeatherDetail(context, item),
+          onTap: () => showWeatherDetail(context, item, dashboard: dashboard),
           child: Container(
             constraints: const BoxConstraints(minHeight: 64),
             padding: const EdgeInsets.all(10),
@@ -500,13 +537,18 @@ class _WeatherIcon extends StatelessWidget {
   }
 }
 
-/// 날씨 상세 (아래에서 올라오는 시트)
-Future<void> showWeatherDetail(BuildContext context, WeatherItem w) => showModalBottomSheet<void>(
+/// 날씨 상세 (아래에서 올라오는 시트). 실측이면 쉬운 설명 아래에 '실시간 관측·예보 자세히'의 그 항목 카드를 보인다
+/// (2026-10-11 사용자 요청). 시연(대시보드 없음)은 예시 값·설명만
+Future<void> showWeatherDetail(BuildContext context, WeatherItem w, {Map<String, dynamic>? dashboard}) =>
+    showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       barrierColor: const Color(0x8014225B),
-      builder: (c) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 34),
+      // 기본 시트 높이(화면의 9/16)를 넘으면 아래 '닫기'가 잘린다 → 내용 높이만큼, 넘치면 스크롤
+      isScrollControlled: true,
+      builder: (c) => SingleChildScrollView(
+        // 휴대폰 앱은 아래 탭바에 '닫기'가 가리지 않게
+        padding: EdgeInsets.fromLTRB(20, 0, 20, useMobileUi ? 110 : 34),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             _WeatherIcon(item: w, size: 72),
@@ -519,6 +561,13 @@ Future<void> showWeatherDetail(BuildContext context, WeatherItem w) => showModal
               ]),
             ),
           ]),
+          if (dashboard != null) ...[
+            const SizedBox(height: 18),
+            LiveRealtimeCards(
+                simulated: dashboard['demo'] != null,
+                only: w.detailKeys,
+                widgets: [for (final x in dashboard['widgets'] as List? ?? const []) Map<String, dynamic>.from(x as Map)]),
+          ] else ...[
           const SizedBox(height: 22),
           Text.rich(TextSpan(children: [
             TextSpan(text: w.value, style: dsText(56, weight: FontWeight.w800, color: Ds.navy, height: 1, spacing: -1.6)),
@@ -534,101 +583,265 @@ Future<void> showWeatherDetail(BuildContext context, WeatherItem w) => showModal
             const SizedBox(height: 8),
             Text(w.source, style: dsText(13, color: Ds.muted)),
           ],
+          ],
           const SizedBox(height: 24),
           PillButton('닫기', height: 58, fontSize: 18, onPressed: () => Navigator.of(c).pop()),
         ]),
       ),
     );
 
-// ------------------------------------------------------------------ 지도 카드 아래 경로 요약 (2줄)
+// ------------------------------------------------------------------ 지도 카드 아래 경로 안내 줄
 
-/// 1줄: 출발지(집·현위치·내 장소) + 도보/자동차. 2줄: 출발 → 대피소, 시간·거리.
-/// [withRouteTypes] (웹 대시보드 경로 안내, 2026-10-10): 1·2줄 사이에 경로 방식(최단·안전·오르막 회피)과 설명,
-/// 2줄에 목적지 바꾸기 버튼 — 예전 '경로 방식' 묶음과 '대피소 경로 · 이름 · 변경' 머리줄을 이것 하나로 합쳤다
-class RouteSummaryRows extends ConsumerWidget {
+/// 경로 안내 줄 (2026-10-11 사용자 요청, web-prototype RouteBar 모양):
+/// [출발지 ⌃] → [대피소 ⌄] · ⇄ · 도보/자동차 · 시간·거리.
+/// 출발지를 누르면 현위치·집·내 장소·지도에서 선택하기·주소로 찾기, 대피소를 누르면 출발지에서 가까운 순 대피소 목록.
+/// ⇄ 는 대피소 → 출발지 방향으로 다시 계산한다 (routeReversed).
+/// 넓으면 한 줄, 휴대폰은 두 줄(출발·도착 / 나머지).
+/// [withRouteTypes] (웹 대시보드): 아래에 경로 방식(최단·안전·오르막 회피)과 설명
+class RouteSummaryRows extends ConsumerStatefulWidget {
   const RouteSummaryRows({super.key, this.withRouteTypes = false});
   final bool withRouteTypes;
 
-  Future<void> _pick(BuildContext context, WidgetRef ref, String key) async {
-    final active = ref.read(routeFacilityId);
-    void reroute() {
-      if (active != null && active != customRouteId && active != aiRouteId) {
-        startRouteToShelter(ref, active, routeType: ref.read(routeKind));
-      }
-    }
+  @override
+  ConsumerState<RouteSummaryRows> createState() => _RouteSummaryRowsState();
+}
 
-    if (key == 'cur') {
-      final note = await useGpsOrigin(ref);
-      if (note != null && context.mounted) showDsToast(context, note);
-      reroute();
-      return;
+class _RouteSummaryRowsState extends ConsumerState<RouteSummaryRows> {
+  /// 지금 열린 목록 ('from' 출발지 · 'to' 대피소) — 그 칸 테두리를 강조한다
+  String? open;
+
+  /// 출발지를 바꾼 뒤: 대피소 경로를 보고 있었으면 새 출발지로 다시 계산
+  void _reroute() {
+    final active = ref.read(routeFacilityId);
+    if (active != null && active != customRouteId && active != aiRouteId) {
+      startRouteToShelter(ref, active, routeType: ref.read(routeKind), reversed: ref.read(routeReversed));
     }
-    if (key == 'home') {
-      final o = await AccountService().optionalProfile();
-      final lat = double.tryParse(o['homeLat'] ?? ''), lon = double.tryParse(o['homeLon'] ?? '');
-      if (lat == null || lon == null) {
-        if (context.mounted) showDsToast(context, '사용자 탭에서 집 주소를 먼저 등록해 주세요');
-        return;
-      }
-      final name = (o['homeName'] ?? '').trim();
-      await chooseOrigin(ref, LatLng(lat, lon), name.isEmpty ? '집' : name, address: o['homeAddress'] ?? '');
-      reroute();
-      return;
-    }
-    if (context.mounted) await showOriginPicker(context, ref);
-    reroute();
   }
 
+  Future<void> _setOrigin(LatLng p, String label, {String address = ''}) async {
+    if (!inServiceArea(p)) {
+      showDsToast(context, '구룡포 서비스 지역(경로 안내 범위) 밖이라 출발지로 쓸 수 없어요');
+      return;
+    }
+    await chooseOrigin(ref, p, label, address: address);
+    _reroute();
+  }
+
+  Future<void> _pickOrigin() async {
+    final o = await AccountService().optionalProfile();
+    final places = await AccountService().places();
+    if (!mounted) return;
+    final here = ref.read(userLocation);
+    final label = ref.read(originLabelProvider);
+    final homeLat = double.tryParse(o['homeLat'] ?? ''), homeLon = double.tryParse(o['homeLon'] ?? '');
+    final homeName = (o['homeName'] ?? '').trim().isEmpty ? '집' : o['homeName']!.trim();
+    setState(() => open = 'from');
+    final pick = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheet) => _PickSheet(title: '출발지 선택', children: [
+        _OptionRow(
+            icon: FontAwesomeIcons.locationCrosshairs,
+            label: '현위치',
+            sub: here.fromGps ? 'GPS' : '구룡포 기본 위치',
+            on: !here.manual,
+            onTap: () => Navigator.pop(sheet, 'cur')),
+        _OptionRow(
+            icon: FontAwesomeIcons.house,
+            label: '집',
+            sub: homeLat == null ? '사용자 탭에서 집 주소를 등록해 주세요' : (o['homeAddress'] ?? homeName),
+            on: here.manual && label == homeName,
+            onTap: () => Navigator.pop(sheet, 'home')),
+        if (places.isEmpty)
+          _OptionRow(
+              icon: FontAwesomeIcons.bookmark,
+              label: '내 장소',
+              sub: '등록된 장소가 없어요',
+              on: false,
+              onTap: () => Navigator.pop(sheet, 'noplace'))
+        else
+          for (final (i, p) in places.indexed)
+            _OptionRow(
+                icon: FontAwesomeIcons.bookmark,
+                label: p.name,
+                sub: p.address.isEmpty ? '내 장소' : p.address,
+                on: here.manual && label == p.name,
+                onTap: () => Navigator.pop(sheet, 'place$i')),
+        _OptionRow(
+            icon: FontAwesomeIcons.map,
+            label: '지도에서 선택하기',
+            sub: '지도를 눌러 출발지를 골라요',
+            on: false,
+            onTap: () => Navigator.pop(sheet, 'map')),
+        _OptionRow(
+            icon: FontAwesomeIcons.magnifyingGlass,
+            label: '주소로 찾기',
+            sub: '도로명 주소 · 예: 구룡포읍 호미로 152',
+            on: false,
+            onTap: () => Navigator.pop(sheet, 'addr')),
+      ]),
+    );
+    if (mounted) setState(() => open = null);
+    if (pick == null || !mounted) return;
+    switch (pick) {
+      case 'cur':
+        final note = await useGpsOrigin(ref);
+        if (note != null && mounted) showDsToast(context, note);
+        _reroute();
+      case 'home':
+        if (homeLat == null || homeLon == null) {
+          showDsToast(context, '사용자 탭에서 집 주소를 먼저 등록해 주세요');
+          return;
+        }
+        await _setOrigin(LatLng(homeLat, homeLon), homeName, address: o['homeAddress'] ?? '');
+      case 'noplace':
+        showDsToast(context, '사용자 탭에서 내 장소를 먼저 추가해 주세요');
+      case 'map':
+        final p = await showDialog<LatLng>(context: context, builder: (_) => MapPickDialog(start: here.position));
+        if (p != null && mounted) await _setOrigin(p, '지도에서 고른 위치');
+      case 'addr':
+        final r = await showDialog<GeocodedAddress>(context: context, builder: (_) => const AddressDialog());
+        if (r != null && mounted) await _setOrigin(r.position, r.address, address: r.address);
+      default:
+        final p = places[int.parse(pick.substring(5))];
+        await _setOrigin(p.position, p.name, address: p.address);
+    }
+  }
+
+  Future<void> _pickShelter(List<(Facility, double)> shelters) async {
+    final current = ref.read(routeFacilityId);
+    final areas = ref.read(riskAreasProvider).valueOrNull ?? const <RiskArea>[];
+    setState(() => open = 'to');
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheet) => _PickSheet(title: '대피소 선택 · 가까운 순', children: [
+        if (shelters.isEmpty)
+          Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text('대피소 목록을 불러오지 못했어요', style: dsText(15, color: Ds.muted))),
+        for (final (f, m) in shelters)
+          _OptionRow(
+              icon: FontAwesomeIcons.houseMedical,
+              label: f.name,
+              sub: shelterExclusion(f, areas) ?? (f.address.isEmpty ? '대피소' : f.address),
+              warn: shelterExclusion(f, areas) != null,
+              right: _km(m.round()),
+              on: f.id == current,
+              onTap: () => Navigator.pop(sheet, f.id)),
+      ]),
+    );
+    if (mounted) setState(() => open = null);
+    if (picked != null) {
+      startRouteToShelter(ref, picked, routeType: ref.read(routeKind), reversed: ref.read(routeReversed));
+    }
+  }
+
+  static String _km(int m) => m >= 1000 ? '${(m / 1000).toStringAsFixed(1)}km' : '${m}m';
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final here = ref.watch(userLocation);
     final label = ref.watch(originLabelProvider);
-    final home = ref.watch(homeLabelProvider).valueOrNull ?? '집';
-    final origin = !here.manual ? 'cur' : (label == home || label == '집' ? 'home' : 'place');
     final mode = ref.watch(travelMode);
+    final kind = ref.watch(routeKind);
+    final reversed = ref.watch(routeReversed);
     final id = ref.watch(routeFacilityId);
     final routeAsync = id == null ? null : ref.watch(routeProvider(id));
     final route = routeAsync?.valueOrNull;
     final dest = id == null ? null : routeDestination(ref, id);
-    final shelters = [...?ref.watch(facilitiesProvider).valueOrNull].where((f) => f.type == FacilityType.shelter);
-    final nearest = shelters.isEmpty ? null : shelters.where((f) => f.id == nearestShelterId(ref)).firstOrNull;
-    final fromText = switch (origin) {
-      'cur' => here.fromGps ? '현위치 · GPS' : '현위치 · 구룡포 기본 위치',
-      'home' => '집 · ${label ?? ''}',
-      _ => '내 장소 · ${label ?? '지도에서 고른 위치'}',
-    };
-    String km(int m) => m >= 1000 ? '${(m / 1000).toStringAsFixed(1)}km' : '${m}m';
-    final kind = ref.watch(routeKind);
+    const dist = Distance();
+    final shelters = [
+      for (final f in [...?ref.watch(facilitiesProvider).valueOrNull].where((f) => f.type == FacilityType.shelter))
+        (f, dist.as(LengthUnit.Meter, here.position, f.position)),
+    ]..sort((a, b) => a.$2.compareTo(b.$2));
+    final shelterRoute = id == null || (id != customRouteId && id != aiRouteId);
+    final fromName = here.manual ? (label ?? '지도에서 고른 위치') : '현위치';
+    final toName = dest?.name ?? (shelters.isEmpty ? '가까운 대피소' : shelters.first.$1.name);
+    final flipped = reversed && shelterRoute;
+    // 이동 수단 옆 예상 시간 (2026-10-11 사용자 요청): 고른 수단 = 경로 서버 계산값,
+    // 다른 수단·경로 계산 전 = 거리로 어림 (도보 4km/h, 자동차 시내 30km/h; 직선거리는 ×1.3 — remote_repository 와 같은 어림)
+    final etaMeters = route?.distanceMeters.toDouble() ?? (shelters.isEmpty ? null : shelters.first.$2 * 1.3);
+    String? eta(TravelMode m) {
+      if (route != null && m == mode) return '${route.estimatedMinutes}분';
+      if (etaMeters == null) return null;
+      final kmh = m == TravelMode.car ? 30 : 4;
+      return '${math.max(1, (etaMeters / 1000 / kmh * 60).round())}분';
+    }
+
+    final fromPill = _EndPill(fromName, open: open == 'from', onTap: _pickOrigin);
+    final toPill = _EndPill(toName, open: open == 'to', onTap: shelterRoute ? () => _pickShelter(shelters) : null);
+    final ends = Row(children: [
+      Expanded(child: flipped ? toPill : fromPill),
+      const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 6),
+          child: FaIcon(FontAwesomeIcons.arrowRightLong, size: 15, color: Ds.muted)),
+      Expanded(child: flipped ? fromPill : toPill),
+    ]);
+    final controls = [
+      if (shelterRoute)
+        CircleButton(FontAwesomeIcons.arrowRightArrowLeft,
+            size: 40,
+            bg: Ds.soft,
+            tooltip: '출발·도착 바꾸기',
+            onPressed: () {
+              ref.read(routeReversed.notifier).state = !reversed;
+              if (id != null) ref.read(routeStartOrigin.notifier).state = here.position;
+            }),
+      const SizedBox(width: 8),
+      _ModeToggle(
+        value: mode,
+        eta: {for (final m in TravelMode.values) m: eta(m)},
+        onChanged: (m) => ref.read(travelMode.notifier).state = m,
+      ),
+      const Spacer(),
+      if (id != null) ...[
+        CircleButton(FontAwesomeIcons.xmark,
+            size: 40, bg: Ds.bg, tooltip: '경로 안내 종료', onPressed: () => ref.read(routeFacilityId.notifier).state = null),
+        const SizedBox(width: 6),
+      ],
+      if (id == null)
+        PillButton('경로 보기',
+            expand: false,
+            height: 44,
+            fontSize: 15,
+            icon: FontAwesomeIcons.diamondTurnRight,
+            onPressed: shelters.isEmpty
+                ? null
+                : () => startRouteToShelter(ref, shelters.first.$1.id, routeType: kind, reversed: reversed))
+      else
+        Container(
+          height: 44,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(color: Ds.navy, borderRadius: BorderRadius.circular(Ds.pill)),
+          alignment: Alignment.center,
+          child: routeAsync!.isLoading
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : Text.rich(TextSpan(children: [
+                  TextSpan(
+                      text: route == null ? '경로 없음' : '${route.estimatedMinutes}분',
+                      style: dsText(18, weight: FontWeight.w800, color: Colors.white)),
+                  if (route != null)
+                    TextSpan(text: ' ${_km(route.distanceMeters)}', style: dsText(13, weight: FontWeight.w600, color: Colors.white)),
+                ])),
+        ),
+    ];
+
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       const SizedBox(height: 10),
-      Row(children: [
-        Expanded(
-          child: Semantics(
-            label: '출발지 선택',
-            child: SegmentedPill<String>(
-              items: const [
-                ('home', '집', FontAwesomeIcons.house),
-                ('cur', '현위치', FontAwesomeIcons.locationCrosshairs),
-                ('place', '내 장소', FontAwesomeIcons.bookmark),
-              ],
-              value: origin,
-              onChanged: (k) => _pick(context, ref, k),
-            ),
-          ),
-        ),
-        const SizedBox(width: 6),
-        SegmentedPill<TravelMode>(
-          expand: false,
-          items: const [
-            (TravelMode.walk, null, FontAwesomeIcons.personWalking),
-            (TravelMode.car, null, FontAwesomeIcons.car),
-          ],
-          value: mode,
-          onChanged: (m) => ref.read(travelMode.notifier).state = m,
-        ),
-      ]),
-      if (withRouteTypes) ...[
-        const SizedBox(height: 8),
+      LayoutBuilder(
+        builder: (_, c) => c.maxWidth >= 640
+            ? Row(children: [Expanded(child: ends), const SizedBox(width: 12), ...controls])
+            : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                ends,
+                const SizedBox(height: 10),
+                Row(children: controls),
+              ]),
+      ),
+      if (widget.withRouteTypes) ...[
+        const SizedBox(height: 10),
         Semantics(
           label: '경로 방식 선택',
           child: SegmentedPill<RouteType>(
@@ -656,65 +869,158 @@ class RouteSummaryRows extends ConsumerWidget {
               style: dsText(13, color: Ds.muted, height: 1.4)),
         ),
       ],
-      const SizedBox(height: 8),
-      Padding(
-        padding: const EdgeInsets.only(left: 4, right: 2),
-        child: Row(children: [
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('$fromText에서',
-                  maxLines: 1, overflow: TextOverflow.ellipsis, style: dsText(12, color: Ds.muted)),
-              const SizedBox(height: 1),
-              Row(children: [
-                const FaIcon(FontAwesomeIcons.houseFlag, size: 13, color: Ds.navy),
-                const SizedBox(width: 5),
-                Flexible(
-                  child: Text(dest?.name ?? nearest?.name ?? '가까운 대피소',
-                      maxLines: 1, overflow: TextOverflow.ellipsis, style: dsText(15, weight: FontWeight.w800)),
+    ]);
+  }
+}
+
+/// 도보/자동차 고르기 + 아이콘 옆 작은 예상 시간
+class _ModeToggle extends StatelessWidget {
+  const _ModeToggle({required this.value, required this.eta, required this.onChanged});
+  final TravelMode value;
+  final Map<TravelMode, String?> eta;
+  final ValueChanged<TravelMode> onChanged;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(color: Ds.soft, borderRadius: BorderRadius.circular(Ds.pill)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          for (final m in TravelMode.values)
+            Semantics(
+              selected: m == value,
+              button: true,
+              label: '${m.label}${eta[m] == null ? '' : ' 약 ${eta[m]}'}',
+              child: Material(
+                color: m == value ? Ds.navy : Colors.transparent,
+                shape: const StadiumBorder(),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: () => onChanged(m),
+                  child: Container(
+                    height: 38,
+                    constraints: const BoxConstraints(minWidth: 38),
+                    padding: EdgeInsets.symmetric(horizontal: eta[m] == null ? 0 : 10),
+                    alignment: Alignment.center,
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      FaIcon(m == TravelMode.car ? FontAwesomeIcons.car : FontAwesomeIcons.personWalking,
+                          size: 14, color: m == value ? Colors.white : Ds.navy),
+                      if (eta[m] != null) ...[
+                        const SizedBox(width: 4),
+                        Text(eta[m]!, style: dsText(12, weight: FontWeight.w700, color: m == value ? Colors.white : Ds.navy)),
+                      ],
+                    ]),
+                  ),
                 ),
-              ]),
+              ),
+            ),
+        ]),
+      );
+}
+
+/// 출발·도착 칸: 회색 pill + ⌄ (목록이 열리면 노란 테두리 + ⌃)
+class _EndPill extends StatelessWidget {
+  const _EndPill(this.text, {required this.open, required this.onTap});
+  final String text;
+  final bool open;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => Material(
+        color: open ? Colors.white : Ds.bg,
+        shape: StadiumBorder(side: BorderSide(color: open ? Ds.caution : Colors.transparent, width: 2)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Container(
+            height: 44,
+            padding: const EdgeInsets.only(left: 14, right: 10),
+            child: Row(children: [
+              Expanded(
+                  child: Text(text,
+                      maxLines: 1, overflow: TextOverflow.ellipsis, style: dsText(16, weight: FontWeight.w800))),
+              if (onTap != null) ...[
+                const SizedBox(width: 6),
+                FaIcon(open ? FontAwesomeIcons.chevronUp : FontAwesomeIcons.chevronDown, size: 12, color: Ds.muted),
+              ],
             ]),
           ),
-          const SizedBox(width: 8),
-          if (id == null)
-            PillButton('경로 보기',
-                expand: false,
-                height: 40,
-                fontSize: 14,
-                icon: FontAwesomeIcons.diamondTurnRight,
-                onPressed: () => startRouteToShelter(ref, nearestShelterId(ref), routeType: kind))
-          else ...[
-            if (withRouteTypes) ...[
-              CircleButton(FontAwesomeIcons.arrowRightArrowLeft,
-                  size: 40,
-                  bg: Ds.bg,
-                  tooltip: '목적지 바꾸기',
-                  onPressed: () => showModalBottomSheet<void>(
-                      context: context, showDragHandle: true, builder: (_) => const ShelterPickerSheet())),
-              const SizedBox(width: 6),
-            ],
-            CircleButton(FontAwesomeIcons.xmark,
-                size: 40, bg: Ds.bg, tooltip: '경로 안내 종료', onPressed: () => ref.read(routeFacilityId.notifier).state = null),
-            const SizedBox(width: 6),
-            Container(
-              height: 40,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(color: Ds.navy, borderRadius: BorderRadius.circular(Ds.pill)),
-              alignment: Alignment.center,
-              child: routeAsync!.isLoading
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                  : Text.rich(TextSpan(children: [
-                      TextSpan(
-                          text: route == null ? '경로 없음' : '${route.estimatedMinutes}분',
-                          style: dsText(17, weight: FontWeight.w800, color: Colors.white)),
-                      if (route != null)
-                        TextSpan(text: ' ${km(route.distanceMeters)}', style: dsText(12, weight: FontWeight.w600, color: Colors.white)),
-                    ])),
+        ),
+      );
+}
+
+/// 출발지·대피소 목록 시트
+class _PickSheet extends StatelessWidget {
+  const _PickSheet({required this.title, required this.children});
+  final String title;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * .75),
+          // 아래 탭바에 가리지 않게 아래 여백 (휴대폰 앱)
+          child: ListView(shrinkWrap: true, padding: EdgeInsets.fromLTRB(16, 0, 16, useMobileUi ? 110 : 16), children: [
+            Padding(
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
+                child: Text(title, style: dsText(16, weight: FontWeight.w700, color: Ds.muted))),
+            for (final c in children) Padding(padding: const EdgeInsets.only(bottom: 8), child: c),
+          ]),
+        ),
+      );
+}
+
+/// 목록 한 줄 (web-prototype OptionRow): 동그란 아이콘 · 이름/설명 · 오른쪽 거리. 고른 줄은 남색
+class _OptionRow extends StatelessWidget {
+  const _OptionRow(
+      {required this.icon,
+      required this.label,
+      required this.sub,
+      required this.on,
+      required this.onTap,
+      this.right,
+      this.warn = false});
+  final FaIconData icon;
+  final String label, sub;
+  final String? right;
+  final bool on, warn;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = on ? Colors.white : Ds.ink;
+    return Material(
+      color: on ? Ds.navy : Ds.bg,
+      borderRadius: BorderRadius.circular(20),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(children: [
+            IconCircle(warn ? FontAwesomeIcons.triangleExclamation : icon,
+                size: 42,
+                iconSize: 18,
+                bg: on ? Colors.white.withValues(alpha: .16) : Colors.white,
+                fg: on ? Colors.white : (warn ? Ds.warnDeep : Ds.navy)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: dsText(17, weight: FontWeight.w800, color: fg)),
+                const SizedBox(height: 2),
+                Text(sub,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: dsText(13, color: on ? Colors.white70 : (warn ? Ds.warnDeep : Ds.muted))),
+              ]),
             ),
-          ],
-        ]),
+            if (right != null) ...[
+              const SizedBox(width: 8),
+              Text(right!, style: dsText(15, weight: FontWeight.w700, color: fg)),
+            ],
+          ]),
+        ),
       ),
-    ]);
+    );
   }
 }
 
