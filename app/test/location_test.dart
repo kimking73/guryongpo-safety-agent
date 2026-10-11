@@ -6,7 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:guryongpo_safety/main.dart';
-import 'package:guryongpo_safety/mobile/onboarding.dart' show Onboarding;
+import 'package:guryongpo_safety/onboarding.dart' show Onboarding;
 import 'package:guryongpo_safety/models/domain_models.dart';
 import 'package:guryongpo_safety/repositories/mock_repository.dart';
 import 'package:guryongpo_safety/services/location_service.dart';
@@ -51,31 +51,33 @@ void main() {
     expect(inServiceArea(const LatLng(36.019, 129.343)), isFalse);   // 포항 시내
   });
 
-  testWidgets('구룡포 안 GPS → 위험도를 그 위치로 요청, 상단은 위치 대신 대피 현황 (2026-10-09)', (t) async {
+  // 휴대폰도 웹 화면을 쓴다 (2026-10-11) — 웹 대시보드는 위험도를 따로 묻지 않으니 쓰는 위치(userLocation)를 본다
+  testWidgets('구룡포 안 GPS → 그 위치를 쓴다, 상단은 위치 대신 대피 현황 (2026-10-09)', (t) async {
     const here = LatLng(35.9930, 129.5560);
-    final spy = await boot(t, FakeGps([here]));
-    expect(spy.origins.last, here);
+    await boot(t, FakeGps([here]));
+    expect(container(t).read(userLocation).position, here);
+    expect(container(t).read(userLocation).fromGps, isTrue);
     expect(find.text('대피 경보 없음'), findsOneWidget);
     expect(find.textContaining('GPS 위치 기준'), findsNothing);
     await done(t);
   });
 
   testWidgets('30m 안쪽 움직임은 다시 불러오지 않는다', (t) async {
-    final spy = await boot(t, FakeGps(const [LatLng(35.9930, 129.5560), LatLng(35.99305, 129.55605)]));
-    expect(spy.origins.where((o) => o == const LatLng(35.99305, 129.55605)), isEmpty);
+    await boot(t, FakeGps(const [LatLng(35.9930, 129.5560), LatLng(35.99305, 129.55605)]));
+    expect(container(t).read(userLocation).position, const LatLng(35.9930, 129.5560));
     await done(t);
   });
 
   testWidgets('구룡포 밖 GPS → 예시 위치, 이유 표시', (t) async {
-    final spy = await boot(t, FakeGps(const [LatLng(36.019, 129.343)]));
-    expect(spy.origins.last, originFor(UserMode.user));
+    await boot(t, FakeGps(const [LatLng(36.019, 129.343)]));
+    expect(container(t).read(userLocation).position, originFor(UserMode.user));
     expect(container(t).read(gpsNote), contains('구룡포 밖이라 예시 위치'));
     await done(t);
   });
 
   testWidgets('권한 거부 → 예시 위치, 이유 표시', (t) async {
-    final spy = await boot(t, FakeGps(const [], fail: const LocationUnavailable('위치 권한이 없어 예시 위치를 씁니다.')));
-    expect(spy.origins.last, originFor(UserMode.user));
+    await boot(t, FakeGps(const [], fail: const LocationUnavailable('위치 권한이 없어 예시 위치를 씁니다.')));
+    expect(container(t).read(userLocation).position, originFor(UserMode.user));
     expect(container(t).read(gpsNote), contains('위치 권한이 없어'));
     await done(t);
   });
