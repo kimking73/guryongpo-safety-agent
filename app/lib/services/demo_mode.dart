@@ -3,13 +3,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/domain_models.dart';
 import 'app_config.dart';
 
-/// 시연 모드 (2026-10-05). 끄면(기본) 실측 데이터, 켜면 서버 시연 데이터 — 실제 센서 위치에 시연 측정값(호우·침수 + 강풍)을
+/// 시연 모드 (2026-10-05). 기본은 켬 (2026-10-11 사용자 요청) — 켜면 서버 시연 데이터, 끄면 실측 데이터 — 실제 센서 위치에 시연 측정값(호우·침수 + 강풍)을
 /// 넣어 실측과 같은 판정 규칙으로 계산한 위험 영역·침수 격자·바람·실시간 정보 (api risk/demo.py). 화면은 실측과 같다.
 /// APP_MODE=mock(서버 없이 실행)이면 앱 안 가상 화면.
 
 /// 서버 시연 데이터를 쓸지 (서버 연결 + 시연 모드 켬). 저장소·API 호출이 읽는다 — 바뀌면 provider 들이 다시 받는다
 class DemoData {
-  static bool on = false;
+  static bool on = AppConfig.isRemote; // 기본 켬 (서버 연결일 때만 의미가 있다)
   /// 실측 경로 → 시연 경로 (/api/v1/X → /api/v1/demo/X)
   static String path(String live, String demo) => on ? demo : live;
 
@@ -24,7 +24,7 @@ class DemoData {
 }
 
 class DemoModeNotifier extends StateNotifier<bool> {
-  DemoModeNotifier() : super(false) {
+  DemoModeNotifier() : super(true) {
     _load();
   }
 
@@ -33,11 +33,12 @@ class DemoModeNotifier extends StateNotifier<bool> {
     DemoData.on = AppConfig.isRemote && v;
     super.state = v;
   }
-  static const _key = 'demo_mode';
+  /// 기본값을 켬으로 바꾸며 키도 새로 (2026-10-11) — 예전에 끈 기록이 남은 기기도 처음엔 시연 모드로 연다
+  static const _key = 'demo_mode_v2';
 
   Future<void> _load() async {
     try {
-      final v = (await SharedPreferences.getInstance()).getBool(_key) ?? false;
+      final v = (await SharedPreferences.getInstance()).getBool(_key) ?? true;
       if (mounted) state = v;
     } catch (_) {}
   }

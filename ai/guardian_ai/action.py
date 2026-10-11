@@ -113,7 +113,7 @@ def pick_guides(results: list[SpecialistResult], phase: Phase, user: UserProfile
 
 
 # --- 판단 로직 (사용자 정의 트리, 2026-10-03) --------------------------------------------
-# 재난 전: 대비 행동요령 + 예보 → 필요한 사용자 정보(동반자) 조사 → 체크리스트
+# 재난 전: 대비 행동요령 + 예보 → 체크리스트 (동반자 되묻기는 2026-10-10 삭제)
 # 재난 중: 행동요령 → 위험 정도(위치 × 위험 영역) → 안전: 행동요령·실시간 정보 / 위험 지역: 이동 가능?
 #          → 불가: 119 구조 요청(맨 앞) / 가능: 대피소 경로
 # 재난 후: 행동요령 → 피해 유무(대화) → 없음: 실시간 현황 / 있음: 실시간 현황·임시 거주지·주의사항·보험·법률
@@ -122,8 +122,9 @@ def pick_guides(results: list[SpecialistResult], phase: Phase, user: UserProfile
 # 평시에 행동 권고를 붙일 질문 (대비·행동을 묻는 말). 재난 전·중·후에는 항상 붙인다
 ACTION_WORDS = ("어떻게", "뭘 해", "무엇을 해", "해야", "대비", "준비", "대피", "피해야", "조심", "주의", "할 일", "행동")
 
+PHASE_LABEL = {Phase.NONE: "평시", Phase.BEFORE: "재난 전", Phase.DURING: "재난 중", Phase.AFTER: "재난 후"}
+
 QUESTIONS = {
-    "dependents": "함께 대피해야 할 어린이·어르신이나 거동이 불편한 가족이 있나요?",
     "can_move": "지금 스스로 안전한 곳까지 이동하실 수 있나요?",
     "damage": "집이나 건물에 침수·파손 같은 피해가 있나요?",
 }
@@ -152,13 +153,8 @@ def decide(state: GuardianState, fetch: Fetch | None = None, use_data: bool = Tr
     user = state.get("user")
 
     if phase in (Phase.BEFORE, Phase.NONE):
-        d = Decision(path=["재난 전" if phase == Phase.BEFORE else "평시(대비)"], guide_phase=Phase.BEFORE)
-        if user is None or user.has_dependents is None:
-            d.path.append("사용자 정보 확인")
-            d.question = QUESTIONS["dependents"]
-        else:
-            d.path.append("체크리스트")
-        return d
+        # 동반자 여부 되묻기는 없앴다 (2026-10-10 사용자 결정 — 10-09부터 동반자 정보를 저장하지 않아 매번 다시 물었다)
+        return Decision(path=["재난 전" if phase == Phase.BEFORE else "평시(대비)", "체크리스트"], guide_phase=Phase.BEFORE)
 
     if phase == Phase.AFTER:
         d = Decision(path=["재난 후"], guide_phase=Phase.AFTER,
@@ -224,6 +220,26 @@ def _route_evidence(state: GuardianState, results: list[SpecialistResult], fetch
     return L.route_info(data), [e for e in data.evidence if e.key != "기준 위치"]
 
 
+def passing_zones_note(route: dict[str, Any] | None) -> str:
+    """대피 경로가 다른 길이 없어 위험 영역을 지나면 그 사실 한 문장, 아니면 빈 문자열."""
+    n = len((route or {}).get("still_inside") or [])
+    return f"가는 길에 다른 길이 없어 위험 영역 {n}곳을 지납니다." if n else ""
+
+
+def with_passing_zones(steps: list[str], route: dict[str, Any] | None) -> list[str]:
+    """대피 경로가 위험 영역을 지나는데 '지금 할 일'이 알리지 않으면 경로 안내 문장 뒤에 코드가 붙인다.
+
+    위치·경로 agent 없이 행동 권고가 직접 경로를 구한 답("지금 비 얼마나 와?", 위험 지역 안)에서 이 사실이 어디에도 없어
+    내용 검사가 '경로 위험 누락'으로 세 번 막고 대체 답이 나갔다 (2026-10-10 VM). 작성 AI에 맡기지 않는다.
+    """
+    note = passing_zones_note(route)
+    if not note or not steps or any("위험 영역" in s for s in steps):
+        return steps
+    name = ((route or {}).get("destination") or {}).get("name") or ""
+    at = next((i for i, s in enumerate(steps) if name and name in s), 0 if "119" not in steps[0] else min(1, len(steps) - 1))
+    return [f"{s} {note}" if i == at else s for i, s in enumerate(steps)]
+
+
 def situation_text(state: GuardianState, decision: Decision, main: SpecialistResult | None,
                    route: dict[str, Any] | None) -> str:
     user = state.get("user")
@@ -246,6 +262,8 @@ def situation_text(state: GuardianState, decision: Decision, main: SpecialistRes
     if route:
         dest = route.get("destination") or {}
         lines.append(f"- 대피소 경로: {dest.get('name')}까지 {route.get('distance_m')}m, 도보 약 {-(-route.get('duration_s', 0) // 60)}분")
+        if passing_zones_note(route):
+            lines.append(f"- 경로 주의: {passing_zones_note(route)}")
     for m in state.get("user_memory") or []:
         lines.append(f"- 사용자 기억: {m}")
     return "\n".join(lines)
@@ -264,6 +282,17 @@ def template_steps(decision: Decision, guides: list[dict[str, Any]], route: dict
     steps += [f"{g['title']}: {g['content']}" for g in guides]
     steps += [f"{n.key}: {n.value}" for n in decision.notes if n.value == NOT_CONFIRMED]
     return steps
+
+
+# 재난 상황 agent(침수·산사태·강풍태풍·생활안전)의 조각은 한 문단으로 잇는다 — agent마다 문단이 나뉘면 짧은 답도 길고 끊겨 보인다 (2026-10-10)
+SEPARATE_PARAGRAPH = {Specialist.LOCATION_ROUTE, Specialist.RECOVERY_SUPPORT}
+
+
+def compose_summaries(results) -> str:
+    """전문 agent 조각 → 답 본문. 재난 상황은 한 문단, 대피 경로·지원 안내는 각각 다음 문단."""
+    hazard = " ".join(r.summary.strip() for r in results if r.summary.strip() and r.agent not in SEPARATE_PARAGRAPH)
+    others = [r.summary.strip() for r in results if r.summary.strip() and r.agent in SEPARATE_PARAGRAPH]
+    return "\n\n".join(p for p in [hazard, *others] if p)
 
 
 # (질문, 사용자 상황·분기, 원문 목록, 재시도 사유) → 할 일 문장들. 실패하면 예외
@@ -285,11 +314,17 @@ def make_action_advisor(writer: ActionWriter | None = None, fetch: Fetch | None 
             # 지원·복구만 물은 질문 (2026-10-08): 판단 로직(동반자·피해 되묻기)을 타지 않고 제도 안내로 끝낸다
             plan = ActionPlan(phase=phase, risk_level=RiskLevel.NORMAL, steps=[], decision_path=["지원·복구", "정보 안내"])
             return {"action_plan": plan, "draft": "\n\n".join(parts)}
-        if phase == Phase.NONE and not any(w in (state.get("question") or "") for w in ACTION_WORDS):
-            # 평시에 정보만 묻는 질문("내일 비 와?")에는 행동 권고·질문을 붙이지 않는다
-            plan = ActionPlan(phase=phase, risk_level=RiskLevel.NORMAL, steps=[], decision_path=["평시", "정보 안내"])
-            return {"action_plan": plan, "draft": "\n\n".join(parts)}
+        # '지금 할 일'은 사용자가 행동·대비·대피를 물었거나 현재 위치가 위험 지역일 때만 붙인다 (2026-10-10 사용자 결정).
+        # wants_action: 분류기가 본 값. None(규칙 대체·기본 그래프)이면 예전 규칙 — 평시는 행동을 묻는 말이 있을 때만, 그 밖엔 항상
+        asked = state.get("wants_action")
+        if asked is None:
+            asked = phase != Phase.NONE or any(w in (state.get("question") or "") for w in ACTION_WORDS)
         decision = decide(state, fetch=fetch, use_data=use_guides)
+        if not (asked or state.get("mode") == "alert" or "위험 지역" in decision.path or decision.emergency):
+            # 상황만 물은 질문("비 얼마나 와?", "내일 비 와?"): 행동 권고·되묻기 없이 상황 설명만
+            plan = ActionPlan(phase=phase, risk_level=RiskLevel.NORMAL, steps=[],
+                              decision_path=[PHASE_LABEL[phase], "정보 안내"])
+            return {"action_plan": plan, "draft": compose_summaries(results)}
         if any(r.agent == Specialist.RECOVERY_SUPPORT for r in results):
             # 보험·복구 제도는 지원·복구 agent가 DB로 안내한다 → '확인되지 않음' 메모를 빼 서로 어긋나지 않게
             decision.notes = [n for n in decision.notes if n.key != "보험·법률 정보"]
@@ -310,12 +345,15 @@ def make_action_advisor(writer: ActionWriter | None = None, fetch: Fetch | None 
         evidence = ([Evidence(source="action_guides", key=f"행동요령: {g['title']}", value=g["content"]) for g in guides]
                     + decision.notes + route_ev + forecast_ev)
 
+        # 위치·경로 agent가 낸 경로면 '위험 영역을 지남'은 그 agent 문단이 이미 알린다 → 여기서 직접 구한 경로일 때만 할 일에 붙인다
+        own_route = route if route_ev else None
+        shown_route = {**route, "still_inside": []} if route else None
         steps: list[str] = []
         how = "-"
         if guides or decision.emergency or route or decision.notes:
             if writer is not None:
                 try:
-                    steps = writer(state.get("question") or "", situation_text(state, decision, main, route),
+                    steps = writer(state.get("question") or "", situation_text(state, decision, main, own_route or shown_route),
                                    guide_lines(guides) or "(해당 원문 없음)", state.get("manager_feedback") or "")
                     if decision.emergency and (not steps or "119" not in steps[0]):
                         steps = [EMERGENCY_STEP, *steps]               # 이동 불가 → 구조 요청이 맨 앞 (규칙)
@@ -325,11 +363,12 @@ def make_action_advisor(writer: ActionWriter | None = None, fetch: Fetch | None 
                     steps = []
             if not steps:
                 steps, how = template_steps(decision, guides, route), "원문"
+            steps = with_passing_zones(steps, own_route)
         path = " > ".join(decision.path)
         logger.info("행동 권고 [%s] 분기=%s 재난=%s 원문=%s 경로=%s 질문=%s", how, path,
                     main.agent.value if main else None, [g["id"] for g in guides], bool(route), bool(decision.question))
 
-        draft = "\n\n".join(parts)
+        draft = compose_summaries(results)
         # 위험 지역 판단은 코드가 맨 앞에 밝힌다. 전문 agent는 이 판단을 모른 채 "위험 단계 정상"만 쓸 수 있어
         # 검증기가 "위험을 낮춰 말함"으로 막았다 (2026-10-03 live)
         if "위험 지역" in decision.path:

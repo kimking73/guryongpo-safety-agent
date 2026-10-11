@@ -28,6 +28,7 @@ import 'disaster_center.dart';
 import 'live_screens.dart';
 import 'patrol_screens.dart';
 import 'origin_picker.dart';
+import 'route_planner.dart';
 import 'custom_route.dart';
 import 'login_screen.dart';
 import 'services/demo_mode.dart';
@@ -40,7 +41,6 @@ import 'ui/tokens.dart' show buildAppTheme;
 import 'mobile/ai_chat.dart' as m;
 import 'mobile/app_shell.dart' as m;
 import 'mobile/evac_sos.dart' as m;
-import 'mobile/dashboard_cards.dart' as m show RouteSummaryRows;
 import 'mobile/m_core.dart' as m;
 import 'mobile/m_patrol_screens.dart' as m;
 import 'mobile/onboarding.dart' as m;
@@ -79,6 +79,18 @@ final routeStartOrigin = StateProvider<LatLng?>((_) => null);
 /// 경로 안내 ⇄ (2026-10-11 사용자 요청): true 면 대피소 → 출발지(현위치·집·내 장소) 방향으로 계산한다 (귀가 경로).
 /// 대피소 목록·대시보드 경로 안내 줄에서 고른 경로에만 쓴다 — AI·길찾기 경로는 그대로
 final routeReversed = StateProvider<bool>((_) => false);
+/// 경로 안내 '출발:'에서 고른 곳 (집·내 장소·검색, 2026-10-10). null = 현위치.
+/// 앱의 현재 위치(userLocation)는 바꾸지 않고 경로 출발점만 바꾼다
+class RoutePoint {
+  const RoutePoint(this.label, this.at);
+  final String label;
+  final LatLng at;
+}
+
+final routeOriginPoint = StateProvider<RoutePoint?>((_) => null);
+
+/// 출발 'GPS 선택'(2026-10-11): 켜져 있으면 대시보드 지도를 누른 곳이 현재 위치가 된다 (바다면 해상 경로 안내)
+final mapPickMode = StateProvider<bool>((_) => false);
 
 /// 길찾기(custom_route.dart)로 정한 목적지 id. 출발지가 내 위치가 아니면 이동 중 경로 재확인(GPS)을 끈다
 const customRouteId = 'custom';
@@ -419,7 +431,7 @@ void startRouteToShelter(WidgetRef ref, String shelterId,
       ?.where((f) => f.id == shelterId)
       .firstOrNull;
   ref.read(routeFacilitySnapshot.notifier).state = facility;
-  ref.read(routeStartOrigin.notifier).state = ref.read(userLocation).position;
+  ref.read(routeStartOrigin.notifier).state = ref.read(routeOriginPoint)?.at ?? ref.read(userLocation).position;
   ref.read(routeFacilityId.notifier).state = shelterId;
 }
 
@@ -773,6 +785,30 @@ class GuryongpoApp extends StatelessWidget {
 /// 로그인 준비 없이 서버를 불러 '로그인 정보를 확인하지 못했습니다'가 나므로 먼저 /boot 를 거치게 한다 (2026-10-05)
 bool appBooted = false;
 
+/// 메뉴(대시보드·AI 대화창·방재단 현황·사용자 …) 사이 이동을 깔끔하게 (2026-10-10 사용자 요청).
+/// 기기 기본 전환은 탭 이동에 맞지 않는다 — 아이폰·맥 브라우저는 새 화면이 옆에서 밀려 들어오고, 그 밖은 확대되며 들어온다.
+/// 머리줄·메뉴는 그대로 두고 안쪽 화면만: 이전 화면은 바로 가려지고 새 화면이 짧게 떠오른다.
+/// 이전 화면은 새 화면의 전환이 끝날 때까지 아래에 남아 있다(Navigator 동작) — 새 화면만 투명하게 떠오르면 그동안 이전 화면이
+/// 비쳐 잔상처럼 보였다. 그래서 화면 바탕색을 처음부터 불투명하게 깔고 그 위에서 내용만 떠오르게 한다.
+const menuFadeDuration = Duration(milliseconds: 120);
+
+List<RouteBase> _menuRoutes(List<GoRoute> routes) => [
+      for (final r in routes)
+        GoRoute(
+            path: r.path,
+            name: r.name,
+            redirect: r.redirect,
+            routes: r.routes,
+            pageBuilder: (context, state) => CustomTransitionPage<void>(
+                key: state.pageKey,
+                child: r.builder!(context, state),
+                transitionDuration: menuFadeDuration,
+                reverseTransitionDuration: Duration.zero,
+                transitionsBuilder: (context, animation, __, child) => ColoredBox(
+                    color: Theme.of(context).scaffoldBackgroundColor,
+                    child: FadeTransition(opacity: CurveTween(curve: Curves.easeOut).animate(animation), child: child)))),
+    ];
+
 final appRouter = GoRouter(
     initialLocation: '/boot',
     refreshListenable: AuthService.changes,
@@ -812,7 +848,7 @@ final appRouter = GoRouter(
   GoRoute(path: '/setup', builder: (_, s) => m.SetupScreen(from: s.uri.queryParameters['from'])),
   GoRoute(path: '/sos', builder: (_, __) => const m.SosScreen()),
   GoRoute(path: '/location', builder: (_, __) => const InitialSetupScreen()),
-  ShellRoute(builder: (_, __, child) => useMobileUi ? m.MShell(child: child) : Shell(child: child), routes: [
+  ShellRoute(builder: (_, __, child) => useMobileUi ? m.MShell(child: child) : Shell(child: child), routes: _menuRoutes([
     GoRoute(path: '/', builder: (_, __) => useMobileUi ? const m.MDashboard() : const Dashboard()),
     GoRoute(path: '/map', builder: (_, __) => const FacilitiesScreen()),
     GoRoute(path: '/alerts', builder: (_, __) => const AlertsScreen()),
@@ -870,7 +906,7 @@ final appRouter = GoRouter(
         path: '/sea-route',
         builder: (_, __) => const DemoSwitch(
             demo: SeaRouteDemoScreen(), live: LiveSeaRouteScreen())),
-  ]),
+  ])),
   GoRoute(
       path: '/facility/:id',
       builder: (_, s) => FacilityScreen(id: s.pathParameters['id']!)),
@@ -1362,7 +1398,17 @@ class StatusLine extends ConsumerWidget {
               shape: const CircleBorder(),
               child: InkWell(
                 customBorder: const CircleBorder(),
-                onTap: () => c.push('/alerts-hub'),
+                // 알림 화면이 열려 있으면 종을 다시 눌러 닫는다 (2026-10-10)
+                onTap: () {
+                  final router = GoRouter.of(c);
+                  if (router.routerDelegate.currentConfiguration.uri.path != '/alerts-hub') {
+                    c.push('/alerts-hub');
+                  } else if (router.canPop()) {
+                    router.pop();
+                  } else {
+                    router.go('/');
+                  }
+                },
                 child: const SizedBox(
                     width: 52, height: 52, child: Icon(Icons.notifications_rounded, color: GK.navy, size: 28)),
               ),
@@ -1394,7 +1440,9 @@ class Dashboard extends ConsumerWidget {
   final LatLng? focusPoint;
   @override
   Widget build(BuildContext c, WidgetRef ref) {
-    final route = ref.watch(routeFacilityId);
+    // 방재단 현황(mapOnly)은 대시보드에서 정한 개인 경로(목적지·경로선·해상 경로)를 보이지 않는다 (2026-10-11 사용자 요청 —
+    // 대시보드 경로 안내는 개인용, 방재단 경로 안내는 방문 경로로 따로)
+    final route = mapOnly ? null : ref.watch(routeFacilityId);
     // 화면은 김다인 대시보드 UI 하나. 시연 모드면 가상 시나리오, 아니면 서버 실측 데이터로 채운다 (2026-10-05)
     // 앱 안 가상 화면은 서버 없이 실행(APP_MODE=mock)할 때만. 서버 연결이면 시연 모드도 실측 화면 + 서버 시연 데이터
     final demo = !AppConfig.isRemote;
@@ -1441,11 +1489,10 @@ class Dashboard extends ConsumerWidget {
               ref.invalidate(windPointsProvider);
             },
       // '출발: …' 표시와 '주소로 길찾기' 버튼은 뺐다 (2026-10-09 사용자 요청). 위치 확인은 지도의 '현위치' 버튼
-      // 경로 안내 한 덩어리: 출발지·이동 수단·경로 방식·목적지·시간 (휴대폰 화면과 같은 줄, 2026-10-10)
-      routePlanner: mapOnly ? null : const m.RouteSummaryRows(withRouteTypes: true),
-      routeExtras: route != null && !demo
-          ? GkPill('이동 중 안내', icon: Icons.navigation_rounded, big: true, onTap: () => c.push('/route-follow'))
-          : null,
+      // 경로 안내 한 덩어리: 출발 → 도착·이동 수단·경로 방식·시간 (2026-10-10). 방재단 현황 지도(mapOnly)도 같은 것을 쓴다.
+      // '이동 중 안내' 버튼은 뺐다 (2026-10-10 사용자 요청)
+      routePlanner: mapOnly ? null : const RoutePlanner(),
+      onMapPick: !mapOnly && ref.watch(mapPickMode) ? (p) => RoutePlanner.useMapPoint(c, ref, p) : null,
       where: ref.watch(whereNowProvider).when(
           data: (w) => w,
           loading: () => const WhereNow(WhereKind.checking),
@@ -1475,10 +1522,10 @@ class Dashboard extends ConsumerWidget {
       routeError: routeAsync?.hasError == true ? '${routeAsync?.error}' : null,
       routeType: routeType,
       onChooseFacility: () => showModalBottomSheet<void>(
-        context: c,
-        showDragHandle: true,
-        builder: (_) => const ShelterPickerSheet(),
-      ),
+                context: c,
+                showDragHandle: true,
+                builder: (_) => const ShelterPickerSheet(),
+              ),
       travelMode: ref.watch(travelMode),
       onTravelModeChanged: (m) => ref.read(travelMode.notifier).state = m,
       // 경로 방식은 목적지를 고르기 전에도 정해 둔다 — 고른 목적지 경로가 이 방식으로 나온다 (routeProvider 가 routeKind 를 본다)
@@ -2736,6 +2783,8 @@ class _AiScreenState extends ConsumerState<AiScreen> {
   List<String> get suggestions => [
         '가까운 대피소는 어디야?',
         if (hasJob) '재난 후 내가 받을 수 있는 보험이 있는지 알려줘',
+        // 대시보드 '재난 후 지원 · 복구' 카드를 대신한다 (김다인 2026-10-11)
+        '내가 받을 수 있는 재난 지원 혹은 복구 사항 알려줘',
       ];
 
   Widget _avatar() => Container(

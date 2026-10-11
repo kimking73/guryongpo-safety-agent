@@ -233,10 +233,12 @@ def tree_state(phase, can_move="unknown", damage="unknown", **user):
     return {**state(), "phase": phase, "can_move": can_move, "damage": damage, "user": UserProfile(user_id="u1", **user)}
 
 
-def test_before_asks_dependents_then_checklist():
+def test_before_goes_straight_to_checklist_without_asking_dependents():
+    """동반자 여부를 되묻지 않는다 (2026-10-10) — 프로필에 값이 없어도 바로 체크리스트."""
     d = A.decide(tree_state(Phase.BEFORE), fetch=FakeDB())
-    assert d.path == ["재난 전", "사용자 정보 확인"] and d.question == A.QUESTIONS["dependents"]
-    assert A.decide(tree_state(Phase.NONE, has_dependents=False), fetch=FakeDB()).path == ["평시(대비)", "체크리스트"]
+    assert d.path == ["재난 전", "체크리스트"] and d.question is None
+    assert A.decide(tree_state(Phase.NONE), fetch=FakeDB()).path == ["평시(대비)", "체크리스트"]
+    assert "dependents" not in A.QUESTIONS
 
 
 def test_during_safe_when_outside_hazard_areas():
@@ -343,6 +345,48 @@ def test_calm_info_question_gets_no_action_list_or_question():
     out = A.make_action_advisor(fetch=FakeDB())(
         {**tree_state(Phase.NONE), "question": "내일 비 와?", "specialist_results": [result(Specialist.RAIN_FLOOD, RiskLevel.NORMAL, "내일 비 예보")]})
     assert out["draft"] == "내일 비 예보" and out["action_plan"].decision_path == ["평시", "정보 안내"]
+
+
+def _advise(wants_action, hazard_labels, phase=Phase.DURING, question="지금 비 얼마나 와?"):
+    return A.make_action_advisor(fetch=FakeDB(hazard_labels=hazard_labels))(
+        {**tree_state(phase, age=30), "question": question, "wants_action": wants_action,
+         "specialist_results": [result(Specialist.RAIN_FLOOD, RiskLevel.WARNING, "호우 위험 단계는 경보입니다.")]})
+
+
+def test_situation_only_question_outside_danger_gets_no_action_list():
+    """상황만 물었고 현재 위치가 위험 영역 밖이면 재난 중에도 '지금 할 일'을 붙이지 않는다 (2026-10-10)."""
+    out = _advise(wants_action=False, hazard_labels=None)
+    assert out["draft"] == "호우 위험 단계는 경보입니다."
+    assert out["action_plan"].steps == [] and out["action_plan"].decision_path == ["재난 중", "정보 안내"]
+    assert out["action_plan"].question is None
+
+
+def test_inside_danger_area_keeps_action_list_even_when_not_asked():
+    out = _advise(wants_action=False, hazard_labels="침수 경보")
+    assert "위험 지역" in out["action_plan"].decision_path and "위험 지역 기준으로 안내합니다" in out["draft"]
+
+
+def test_asked_for_action_gets_decision_tree_outside_danger():
+    out = _advise(wants_action=True, hazard_labels=None, question="지금 뭘 해야 해?")
+    assert out["action_plan"].decision_path == ["재난 중", "안전"]
+
+
+def test_unknown_wants_action_keeps_old_rule():
+    """규칙 대체·기본 그래프(wants_action 없음): 재난 중은 항상, 평시는 행동을 묻는 말이 있을 때만."""
+    assert _advise(wants_action=None, hazard_labels=None)["action_plan"].decision_path == ["재난 중", "안전"]
+    assert _advise(None, None, Phase.NONE, "내일 비 와?")["action_plan"].decision_path == ["평시", "정보 안내"]
+    assert _advise(None, None, Phase.NONE, "태풍 대비 어떻게 해?")["action_plan"].decision_path == ["평시(대비)", "체크리스트"]
+
+
+def test_route_through_hazard_zone_is_always_stated_in_steps():
+    """대피 경로가 위험 영역을 지나면 '지금 할 일'이 꼭 알린다 — 작성 AI가 빼도 코드가 붙인다 (2026-10-10 VM 대체 답)."""
+    route = {"destination": {"name": "구룡포 초등학교 앞"}, "distance_m": 1077, "duration_s": 780, "still_inside": ["flood_1"]}
+    steps = A.with_passing_zones(["구룡포 초등학교 앞까지 1077m, 도보 약 13분 경로로 대피하세요.", "외출을 삼가세요."], route)
+    assert steps[0].endswith("가는 길에 다른 길이 없어 위험 영역 1곳을 지납니다.") and steps[1] == "외출을 삼가세요."
+    assert A.with_passing_zones(steps, route) == steps                                   # 이미 알렸으면 그대로
+    assert A.with_passing_zones(["대피하세요."], {**route, "still_inside": []}) == ["대피하세요."]
+    emergency = A.with_passing_zones([A.EMERGENCY_STEP, "안전한 곳으로 이동하세요."], route)  # 119 문장에는 붙이지 않는다
+    assert emergency[0] == A.EMERGENCY_STEP and "위험 영역 1곳" in emergency[1]
 
 
 def test_reply_to_follow_up_reuses_previous_agents():

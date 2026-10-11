@@ -27,6 +27,7 @@ from . import graph as G
 from . import memory as M
 from . import profile_sync as P
 from . import state as S
+from . import tracing
 
 logger = logging.getLogger(__name__)
 
@@ -221,6 +222,9 @@ class ChatService:
         conversation_id = self._open_conversation(req.conversation_id, req.user_id)
         config = {"configurable": {"thread_id": conversation_id}}
         history = self.app.get_state(config).values.get("history", [])
+        # LangSmith 추적용 이름표 (켰을 때만 쓰인다, tracing.py). 사용자 id·위치는 넣지 않는다
+        run_config = {**config, "run_name": "chat", "tags": ["demo" if req.demo else "live"],
+                      "metadata": {"conversation_id": conversation_id, "demo": req.demo}}
 
         # 사용자 정보 = 서버 프로필 (2026-10-08 사용자 결정: 프로필 하나만). 앱이 함께 보낸 값은 서버 프로필이 없을 때
         # (로그인 안 함·서버 장애·테스트) 또는 서버에 아직 없는 칸에만 쓴다 — 앱도 같은 서버 프로필을 보여 주므로 같은 값이다
@@ -234,7 +238,7 @@ class ChatService:
         timings: dict[str, float] = {}
         started = last = time.perf_counter()
         # 시연 모드는 이 요청 동안만 켠다 (tools·경로 tool이 demo.is_active()를 본다. LangGraph는 병렬 노드에 contextvars를 복사)
-        with demo.active(req.demo):
+        with demo.active(req.demo), tracing.scope(req.demo):
             for chunk in self.app.stream(
                 {
                     "mode": "chat",
@@ -244,7 +248,7 @@ class ChatService:
                     "history": history,
                     "user_memory": [],
                 },
-                config,
+                run_config,
                 stream_mode="updates",
             ):
                 now = time.perf_counter()
@@ -257,7 +261,7 @@ class ChatService:
                     {k: v for k, v in timings.items() if k != "total"})
         answer = result.get("final_answer", "")
         if req.remember and token and self.extractor is not None and self.writer is not None:
-            self.executor.submit(self._collect, token, req.user_id, req.question, answer, P.describe(profile))
+            self.executor.submit(self._collect, token, req.user_id, req.question, answer, P.describe(profile), req.demo)
         # 다음 질문의 지시어 해석("거기는?")에 쓰도록 이번 문답을 기록한다.
         self.app.update_state(config, {"history": [
             *history,
@@ -289,10 +293,11 @@ class ChatService:
         """서버 종료 때: 백그라운드 프로필 반영이 끝날 때까지 기다린다 (재시작 직전 대화 내용이 빠지지 않게)."""
         self.executor.shutdown(wait=True)
 
-    def _collect(self, token: str, user_id: str, question: str, answer: str, known: list[str]) -> None:
+    def _collect(self, token: str, user_id: str, question: str, answer: str, known: list[str], demo_chat: bool = False) -> None:
         """응답 뒤 백그라운드: 이번 문답에서 사용자가 자기에 대해 말한 것을 뽑아 서버 프로필에 바로 반영. 실패는 로그만."""
         try:
-            update = self.extractor(question, answer, known)
+            with tracing.scope(demo_chat):       # 다른 스레드라 채팅의 추적 범위가 이어지지 않는다 → 여기서 다시 정한다
+                update = self.extractor(question, answer, known)
             if not update.facts:
                 return
             done = self.writer.apply(token, update.facts)

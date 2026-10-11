@@ -168,6 +168,16 @@ def test_shortest_does_not_avoid_but_reports_zones():
     assert res["still_inside"] == ["flood-009"] and res["avoided"] == [] and res["geometry"] == LINE
 
 
+def test_uphill_only_avoids_uphill_but_not_zones():
+    """오르막만 회피(uphill, 2026-10-11 — 앱에서 안전한 경로를 끄고 오르막 회피만 켬): 오르막 규칙은 넣고 위험 구역은 피하지 않는다"""
+    from guardian_route.profiles import UPHILL_RULES
+    c, sent = client([ZONE])
+    res = c.post("/api/route", json={**body("adult"), "strategy": "uphill"}).json()
+    model = sent[0]["custom_model"]
+    assert model["priority"] == UPHILL_RULES and "areas" not in model and len(sent) == 1
+    assert res["strategy"] == "uphill" and res["still_inside"] == ["flood-009"] and res["avoided"] == []
+
+
 def test_new_hazard_ahead_triggers_reroute():
     c, _ = client([ZONE])
     res = check(c, 35.9905, 129.5492)          # 앞쪽 경로(LINE)에 구역이 새로 생긴 상황

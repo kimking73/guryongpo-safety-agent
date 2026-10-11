@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import 'live_screens.dart';
 import 'main.dart';
+import 'mobile/profile_screen.dart' show disabilitiesOf;
 import 'models/domain_models.dart';
 import 'patrol_screens.dart' show isPatrolRole, roleKo;
 import 'services/account_service.dart';
@@ -75,6 +76,8 @@ class _ProfileDetailsCardState extends ConsumerState<ProfileDetailsCard> {
   final jobOtherFocus = FocusNode();
   bool jobOther = false;
   String transport = '';
+  /// 장애 유형 (2026-10-11): 'body'(지체)·'hear'(청각)·'see'(시각) 또는 'none'(해당 없음). 처음 화면(내 정보)과 같은 프로필 키
+  Set<String> dis = {};
   Map<String, String> saved = const {};
   // 보행 능력·보호 동반자·출발 위치는 여기서 묻지 않는다 (2026-10-09). 출발 위치는 대시보드 '경로 안내'에서 고른다
   bool loading = true;
@@ -88,6 +91,22 @@ class _ProfileDetailsCardState extends ConsumerState<ProfileDetailsCard> {
     '기타',
   ];
   static const transports = ['도보', '휠체어', '자동차'];
+  static const disabilityOptions = [('body', '지체'), ('hear', '청각'), ('see', '시각'), ('none', '해당 없음')];
+
+  static String disabilityText(Set<String> d) => d.isEmpty
+      ? '선택 안 함'
+      : d.contains('none')
+          ? '해당 없음'
+          : [for (final (k, l) in disabilityOptions) if (d.contains(k)) l].join(' · ');
+
+  void _toggleDis(String k) => setState(() {
+        if (k == 'none') {
+          dis = dis.contains('none') ? {} : {'none'};
+        } else {
+          dis = {...dis}..remove('none');
+          dis.contains(k) ? dis.remove(k) : dis.add(k);
+        }
+      });
 
   @override
   void initState() {
@@ -123,6 +142,7 @@ class _ProfileDetailsCardState extends ConsumerState<ProfileDetailsCard> {
     jobOther = jobList.contains('기타') || others.isNotEmpty;
     jobOtherText.text = others.join(', ');
     transport = transports.contains(p['transport']) ? p['transport']! : '';
+    dis = disabilitiesOf(p);
     if (mounted) setState(() => loading = false);
   }
 
@@ -144,11 +164,18 @@ class _ProfileDetailsCardState extends ConsumerState<ProfileDetailsCard> {
 
   Future<void> _persist({bool notify = true}) async {
     // 다른 화면이 저장한 항목(선택 정보 등)을 지우지 않게 지금 저장된 값에 이 카드 칸만 덮어쓴다
+    final before = await AccountService().optionalProfile();
+    // 장애 유형 → 시각·청각·지체 지원 (처음 화면과 같은 규칙: 고른 것 '지원 필요', 나머지 '필요 없음', 안 골랐으면 그대로)
+    String support(String key, String k) =>
+        dis.contains(k) ? '지원 필요' : (dis.isEmpty ? (before[key] ?? '') : '필요 없음');
     final p = <String, String>{
-      ...await AccountService().optionalProfile(),
+      ...before,
       for (final e in fields.entries) e.key: e.value.text.trim(),
       'transport': transport,
       'jobs': _jobList().join('|'),
+      '시각 지원': support('시각 지원', 'see'),
+      '청각 지원': support('청각 지원', 'hear'),
+      '지체 지원': support('지체 지원', 'body'),
     };
     await AccountService().saveOptionalProfile(p);
     saved = p;
@@ -188,6 +215,11 @@ class _ProfileDetailsCardState extends ConsumerState<ProfileDetailsCard> {
     ];
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       GkInfoRow(icon: Icons.cake_rounded, label: '나이', value: age.isEmpty ? '입력 안 함' : '$age세', empty: age.isEmpty),
+      GkInfoRow(
+          icon: Icons.accessible_rounded,
+          label: '장애 유형',
+          value: disabilityText(dis),
+          empty: dis.isEmpty || dis.contains('none')),
       GkInfoRow(
           icon: Icons.accessibility_new_rounded,
           label: '접근성 지원',
@@ -365,6 +397,20 @@ class _ProfileDetailsCardState extends ConsumerState<ProfileDetailsCard> {
                 ),
               ),
             ),
+          ),
+          _fieldGap,
+          _labeled(
+            '장애 유형',
+            sub: '(선택 · 중복 가능)',
+            input: false,
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              for (final (k, l) in disabilityOptions)
+                FilterChip(
+                  label: Text(l, style: const TextStyle(fontSize: 15)),
+                  selected: dis.contains(k),
+                  onSelected: (_) => _toggleDis(k),
+                ),
+            ]),
           ),
           _fieldGap,
           _labeled(
@@ -718,8 +764,7 @@ class _SafetyFeaturesCardState extends ConsumerState<SafetyFeaturesCard> {
     final role = '${ref.watch(meProvider).valueOrNull?['role'] ?? ''}';
     // 시연 모드는 방재단 화면이 시연 데이터로 바로 열린다 (실제 역할을 주지 않음). 실측은 방재단·관리자만
     final crew = demo || isPatrolRole(role);
-    final sea = _FeatureButton(
-        icon: Icons.sailing_rounded, label: '바다 위 대피 경로', onTap: () => c.push('/sea-route'));
+    // '바다 위 대피 경로' 시연 버튼은 뺐다 (2026-10-11 사용자 요청) — 바다 위면 대시보드 경로 안내가 해상 경로를 준다
     final team = _FeatureButton(
         icon: crew ? Icons.shield_rounded : Icons.badge_rounded,
         label: crew ? (demo ? '방재단 현황 (시연)' : '방재단 현황 · ${roleKo[role] ?? role}') : '방재단 로그인',
@@ -731,10 +776,7 @@ class _SafetyFeaturesCardState extends ConsumerState<SafetyFeaturesCard> {
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         const GkCardTitle('안전 기능'),
         const SizedBox(height: 12),
-        LayoutBuilder(
-            builder: (_, box) => box.maxWidth < 420
-                ? Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [sea, const SizedBox(height: 10), team])
-                : Row(children: [Expanded(child: sea), const SizedBox(width: 10), Expanded(child: team)])),
+        team,
         AnimatedSize(
           duration: const Duration(milliseconds: 180),
           alignment: Alignment.topCenter,

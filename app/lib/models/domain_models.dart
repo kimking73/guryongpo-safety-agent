@@ -254,7 +254,9 @@ class TravelSetting {
 
 /// 경로 종류 (2026-10-07 세 가지): 가까운 = 위험 회피 없는 최단 거리, 안전 = 위험 구역 회피(기본), 오르막 회피 = 위험 회피 + 오르막 회피.
 /// 걸음 속도는 셋 다 사용자 유형(성인·노약자)대로. 경로 서버 strategy: shortest · safest · flat (route/guardian_route/profiles.py)
-enum RouteType { safest, nearest, flat }
+/// uphill (2026-10-11): 안전한 경로를 끄고 오르막 회피만 켰을 때 — 오르막만 피하고 위험 구역은 피하지 않는다 (경로 서버 strategy uphill).
+/// 화면 목록(ordered·routeTypes)에는 없고 경로 안내의 두 켜고 끄기(안전·오르막)로만 고른다 (routeTypeOf)
+enum RouteType { safest, nearest, flat, uphill }
 
 extension RouteTypeInfo on RouteType {
   /// 화면에 나오는 순서
@@ -263,22 +265,30 @@ extension RouteTypeInfo on RouteType {
         RouteType.nearest => '가까운 경로',
         RouteType.safest => '안전 경로',
         RouteType.flat => '오르막 회피 경로',
+        RouteType.uphill => '오르막 회피 경로 (위험 구역 회피 없음)',
       };
   String get shortLabel => switch (this) {
         RouteType.nearest => '가까운',
         RouteType.safest => '안전',
         RouteType.flat => '오르막 회피',
+        RouteType.uphill => '오르막만 회피',
       };
   String get description => switch (this) {
         RouteType.nearest => '최단 거리 · 위험 구역을 피하지 않음 (지나는 구역은 경고)',
         RouteType.safest => '확인된 침수·산사태 위험 구역을 피함',
         RouteType.flat => '위험 구역 회피 + 오르막(경사 1/18 초과)을 피함 · 내리막은 그대로',
+        RouteType.uphill => '오르막(경사 1/18 초과)만 피함 · 위험 구역을 피하지 않음 (지나는 구역은 경고)',
       };
   String get strategy => switch (this) {
         RouteType.nearest => 'shortest',
         RouteType.safest => 'safest',
         RouteType.flat => 'flat',
+        RouteType.uphill => 'uphill',
       };
+
+  /// 위험 구역을 피하는지 · 오르막을 피하는지 (경로 안내의 두 켜고 끄기, 2026-10-11)
+  bool get avoidsHazards => this == RouteType.safest || this == RouteType.flat;
+  bool get avoidsUphill => this == RouteType.flat || this == RouteType.uphill;
 }
 
 /// 65세 이상, 휠체어 사용자 또는 보행 불편 사용자는 접근성 경로를 사용한다.
@@ -436,3 +446,9 @@ class AlertPollResult {
   final String mode;
   final Map<String, dynamic>? evacuation;
 }
+
+/// 경로 안내의 '안전한 경로'·'오르막 회피' 켜고 끄기 → 경로 종류 (2026-10-11 사용자 요청: 둘은 함께 고를 수 있다).
+/// 둘 다 끄면 최단 거리
+RouteType routeTypeOf({required bool safe, required bool uphill}) => safe
+    ? (uphill ? RouteType.flat : RouteType.safest)
+    : (uphill ? RouteType.uphill : RouteType.nearest);

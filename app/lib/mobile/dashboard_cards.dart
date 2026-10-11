@@ -11,6 +11,7 @@ import '../live_screens.dart';
 import '../main.dart';
 import '../models/domain_models.dart';
 import '../origin_picker.dart';
+import '../route_planner.dart' show RouteOptions;
 import '../services/account_service.dart';
 import '../services/geocoding_service.dart';
 import '../services/location_service.dart' show inServiceArea;
@@ -597,10 +598,9 @@ Future<void> showWeatherDetail(BuildContext context, WeatherItem w, {Map<String,
 /// 출발지를 누르면 현위치·집·내 장소·지도에서 선택하기·주소로 찾기, 대피소를 누르면 출발지에서 가까운 순 대피소 목록.
 /// ⇄ 는 대피소 → 출발지 방향으로 다시 계산한다 (routeReversed).
 /// 넓으면 한 줄, 휴대폰은 두 줄(출발·도착 / 나머지).
-/// [withRouteTypes] (웹 대시보드): 아래에 경로 방식(최단·안전·오르막 회피)과 설명
+/// 아래 줄에 경로 방식(최단 · 안전한 경로 · 오르막 회피, 안전·오르막은 함께 선택)과 설명
 class RouteSummaryRows extends ConsumerStatefulWidget {
-  const RouteSummaryRows({super.key, this.withRouteTypes = false});
-  final bool withRouteTypes;
+  const RouteSummaryRows({super.key});
 
   @override
   ConsumerState<RouteSummaryRows> createState() => _RouteSummaryRowsState();
@@ -794,7 +794,13 @@ class _RouteSummaryRowsState extends ConsumerState<RouteSummaryRows> {
       _ModeToggle(
         value: mode,
         eta: {for (final m in TravelMode.values) m: eta(m)},
-        onChanged: (m) => ref.read(travelMode.notifier).state = m,
+        onChanged: (m) {
+          ref.read(travelMode.notifier).state = m;
+          // 자동차는 오르막 회피가 없다 — 켜 둔 오르막 회피는 끈다 (RoutePlanner 와 같게)
+          if (!m.routeTypes.contains(RouteType.flat)) {
+            ref.read(routeKind.notifier).state = routeTypeOf(safe: kind.avoidsHazards, uphill: false);
+          }
+        },
       ),
       const Spacer(),
       if (id != null) ...[
@@ -840,35 +846,28 @@ class _RouteSummaryRowsState extends ConsumerState<RouteSummaryRows> {
                 Row(children: controls),
               ]),
       ),
-      if (widget.withRouteTypes) ...[
-        const SizedBox(height: 10),
-        Semantics(
-          label: '경로 방식 선택',
-          child: SegmentedPill<RouteType>(
-            height: 42,
-            items: [
-              for (final t in mode.routeTypes)
-                switch (t) {
-                  RouteType.nearest => (t, '최단 거리', FontAwesomeIcons.arrowRightLong),
-                  RouteType.safest => (t, '안전한 경로', FontAwesomeIcons.shieldHalved),
-                  RouteType.flat => (t, '오르막 회피', FontAwesomeIcons.arrowTrendDown),
-                },
-            ],
-            value: kind,
-            onChanged: (t) => ref.read(routeKind.notifier).state = t,
-          ),
+      // 경로 방식: [최단 거리] [안전한 경로 ✓] [오르막 회피 ✓] — 안전·오르막은 함께 켤 수 있다 (김다인 RoutePlanner 와 같게, 2026-10-11)
+      const SizedBox(height: 10),
+      Semantics(
+        label: '경로 방식 선택',
+        child: RouteOptions(
+          kind: kind,
+          height: 40,
+          uphillOk: mode.routeTypes.contains(RouteType.flat),
+          onChanged: (t) => ref.read(routeKind.notifier).state = t,
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(6, 6, 4, 0),
-          child: Text(
-              switch (kind) {
-                RouteType.nearest => '가장 짧은 길이에요. 위험 구역을 피하지 않고, 지나는 구역은 알려 드려요.',
-                RouteType.safest => '침수·산사태 위험 구역(주의 이상)을 피해서 가요.',
-                RouteType.flat => '위험 구역을 피하면서 가파른 오르막을 되도록 줄여요.',
-              },
-              style: dsText(13, color: Ds.muted, height: 1.4)),
-        ),
-      ],
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(6, 6, 4, 0),
+        child: Text(
+            switch (kind) {
+              RouteType.nearest => '가장 짧은 길이에요. 위험 구역을 피하지 않고, 지나는 구역은 알려 드려요.',
+              RouteType.safest => '침수·산사태 위험 구역(주의 이상)을 피해서 가요.',
+              RouteType.flat => '위험 구역을 피하면서 가파른 오르막을 되도록 줄여요.',
+              RouteType.uphill => '가파른 오르막을 되도록 줄여요. 위험 구역은 피하지 않고, 지나는 구역은 알려 드려요.',
+            },
+            style: dsText(13, color: Ds.muted, height: 1.4)),
+      ),
     ]);
   }
 }

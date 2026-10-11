@@ -74,6 +74,7 @@ const suggestedQuestions = [
   '태풍 대비 체크리스트 알려줘',
   '내 위치에서 가장 가까운 대피소 알려줘',
   '재난 후 내가 받을 수 있는 보험이 있는지 알려줘',
+  '내가 받을 수 있는 재난 지원 혹은 복구 사항 알려줘',
 ];
 
 class MAiScreen extends ConsumerStatefulWidget {

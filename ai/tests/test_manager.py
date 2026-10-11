@@ -145,6 +145,31 @@ def fake_classifier(parsed) -> OpenAIClassifier:
     return OpenAIClassifier(client=SimpleNamespace(responses=FakeResponses(parsed)), model="test-model")
 
 
+def test_user_info_only_statement_gets_confirmation_not_risk_or_checklist():
+    """묻는 것 없이 자기 정보만 말하면: agent 없음 → 들은 내용만 되짚어 확인. 이전 턴의 카드·되묻기는 비운다 (2026-10-10)."""
+    from guardian_ai.state import ActionPlan, Phase, RiskLevel
+    clf = fake_classifier(Classification(agents=[], reason="자기 정보", wants_action=False, user_info="72세, 어업"))
+    prev = {"mode": "chat", "user": USER, "question": "저는 72살이고 어업을 해요", "card": {"headline": "이전 카드"},
+            "action_plan": ActionPlan(phase=Phase.DURING, risk_level=RiskLevel.WARNING, steps=["이전 할 일"])}
+    out = G.make_manager(clf)(prev)
+    assert out["selected_agents"] == [] and out["user_info"] == "72세, 어업" and out["wants_action"] is False
+    assert G.route_specialists({**prev, **out}) == G.DIRECT_REPLY
+    reply = G.direct_reply({**prev, **out})
+    assert reply["final_answer"] == G.USER_INFO_REPLY.format(info="72세, 어업")
+    assert "위험" not in reply["final_answer"] and "할 일" not in reply["final_answer"]
+    assert reply["card"] is None and reply["action_plan"] is None
+
+
+def test_manager_passes_wants_action_and_drops_user_info_when_agents_are_selected():
+    clf = fake_classifier(Classification(agents=[Specialist.RAIN_FLOOD], reason="비", wants_action=False, user_info="72세"))
+    out = G.make_manager(clf)({"mode": "chat", "user": USER, "question": "72살인데 지금 비 얼마나 와?"})
+    assert out["wants_action"] is False and out["user_info"] is None
+    # 키워드 대체: 행동을 묻는 말이 있으면 True, 없으면 None(행동 권고가 재난 단계로 정한다)
+    kw = G.make_manager(G.keyword_classify)
+    assert kw({"mode": "chat", "user": USER, "question": "침수되면 어떻게 해야 해?"})["wants_action"] is True
+    assert kw({"mode": "chat", "user": USER, "question": "비 얼마나 와?"})["wants_action"] is None
+
+
 def test_openai_classifier_returns_agents_and_requests_structured_output():
     clf = fake_classifier(Classification(
         agents=[Specialist.RAIN_FLOOD, Specialist.LOCATION_ROUTE, Specialist.RAIN_FLOOD], reason="이동 판단"))
