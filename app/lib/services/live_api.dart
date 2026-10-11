@@ -49,6 +49,36 @@ class LiveApi {
   /// 시연용 가상 가구 (서버 DB의 '[시연] …', 역할 없이 조회) — 시연 모드 방재단 화면
   Future<List<Map<String, dynamic>>> demoHouseholds() => _list('/api/v1/demo/households');
 
+  // ---- 시연 대피 응답 (2026-10-12): 서버에 저장해 다른 계정의 방재단원 모드와 주고받는다 (server app/demo_evac.py) ----
+  // needs = '내 정보'의 장애 유형 (vision · hearing · mobility_limited). 주소·전화·실제 위치는 보내지 않는다
+  /// 새 시연 경보 시작 — 내 응답을 '응답 없음'으로, 지난 출동 기록은 지운다
+  Future<Map<String, dynamic>> demoEvacStart(List<String> needs) =>
+      _send(_api.post<Map<String, dynamic>>('/api/v1/demo/evacuation/start', data: {'needs': needs}));
+
+  /// 시연 응답 저장 (status: evacuated|evacuating|need_help, via: button|voice|dashboard|alarm)
+  Future<Map<String, dynamic>> demoEvacRespond(String status, List<String> needs, {String via = 'button'}) =>
+      _send(_api.post<Map<String, dynamic>>('/api/v1/demo/evacuation/response',
+          data: {'status': status, 'needs': needs, 'via': via}));
+
+  /// 내 시연 응답 + 방재단 출동 기록(dispatch). 진행 중인 시연이 없으면 null
+  Future<Map<String, dynamic>?> demoEvacMine() async {
+    final d = (await _api.get<Object?>('/api/v1/demo/evacuation/me')).data;
+    return d is Map ? Map<String, dynamic>.from(d) : null;
+  }
+
+  /// 최근 시연 응답 전체 (다른 계정 포함, is_me 로 내 것 구분) — 방재단원 모드 화면
+  Future<List<Map<String, dynamic>>> demoEvacResponses() => _list('/api/v1/demo/evacuation/responses');
+
+  /// 방재단 출동 기록을 그 주민에게 (departed_at·eta·responder·stage), null 이면 지운다
+  Future<void> demoEvacDispatch(String targetId, Map<String, dynamic>? dispatch) async {
+    final path = '/api/v1/demo/evacuation/${Uri.encodeComponent(targetId)}/dispatch';
+    if (dispatch == null) {
+      await _api.delete<Object?>(path);
+    } else {
+      await _api.put<Object?>(path, data: dispatch);
+    }
+  }
+
   /// 대피 상황 상세: 대상 가구(targets: priority_rank·priority_reasons·status·last_visit), 영역(area), next_poll_sec.
   /// [lat]·[lng] = 방재단원 위치 (B13: 같은 순위 안에서 가까운 순, 없으면 오래 기다린 순)
   Future<Map<String, dynamic>> incident(String id, {double? lat, double? lng}) =>

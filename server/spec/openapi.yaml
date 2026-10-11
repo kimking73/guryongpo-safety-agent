@@ -553,6 +553,99 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/Household' }
+  /demo/evacuation/start:
+    post:
+      tags: [dashboard]
+      summary: 시연 대피 경보 시작 — 내 시연 응답을 '응답 없음'으로 새로 시작 (지난 방재단 출동 기록도 지움) (2026-10-12)
+      description: |
+        시연 모드의 '대피 경보 팝업 시연'·'10초 뒤 경보 시연'을 누르면 앱이 부른다. 실제 대피 상황(care.incidents)과 분리 — FCM·이관 없음.
+        계정당 한 줄(care.demo_evac) + 이력(care.demo_evac_log). 공유 항목은 별명·응답·장애 유형뿐(주소·전화·실제 위치 없음).
+      operationId: startDemoEvacuation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DemoEvacStart' }
+      responses:
+        '200':
+          description: 내 시연 응답
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DemoEvacTarget' }
+        '401': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /demo/evacuation/response:
+    post:
+      tags: [dashboard]
+      summary: 시연 대피 응답 저장 — 대피 완료 / 대피 중 / 도움 필요 (팝업·3버튼 알림·대피 확인 카드·음성 공통, 이력 남음) (2026-10-12)
+      operationId: respondDemoEvacuation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DemoEvacResponse' }
+      responses:
+        '200':
+          description: 내 시연 응답
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DemoEvacTarget' }
+        '401': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /demo/evacuation/me:
+    get:
+      tags: [dashboard]
+      summary: 내 시연 대피 응답 + 방재단 출동 기록 — 주민 화면이 방재단 출발·도착 예정을 받는다. 진행 중인 시연이 없으면 null (2026-10-12)
+      operationId: getMyDemoEvacuation
+      responses:
+        '200':
+          description: 내 시연 응답 또는 null
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/DemoEvacTarget' }
+                  - { type: 'null' }
+        '401': { $ref: '#/components/responses/Error' }
+  /demo/evacuation/responses:
+    get:
+      tags: [dashboard]
+      summary: 최근 3시간 시연 대피 응답 전체 — 방재단원 모드 화면이 다른 계정의 응답을 읽는다 (시연 데이터라 로그인만, 역할 불필요) (2026-10-12)
+      operationId: listDemoEvacuations
+      responses:
+        '200':
+          description: 시연 경보를 시작한 순서
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DemoEvacTarget' }
+        '401': { $ref: '#/components/responses/Error' }
+  /demo/evacuation/{target_id}/dispatch:
+    parameters:
+      - { name: target_id, in: path, required: true, description: "DemoEvacTarget.id ('demo-user-<uuid>')", schema: { type: string } }
+    put:
+      tags: [dashboard]
+      summary: 방재단 출동 기록 쓰기 — '실제 출발'·업무 단계(가는 중·방문 중·완료)와 도착 예정 시각을 그 주민에게 (2026-10-12)
+      operationId: putDemoDispatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DemoDispatch' }
+      responses:
+        '204': { description: 저장됨 }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [dashboard]
+      summary: 방재단 출동 기록 지우기 (배정 해제) (2026-10-12)
+      operationId: deleteDemoDispatch
+      responses:
+        '204': { description: 지움 }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
   /support-programs:
     get:
       tags: [dashboard]
@@ -1739,6 +1832,49 @@ components:
       description: |
         elderly 65세 이상 / living_alone 독거 / mobility_limited 보행 불편 / wheelchair 휠체어 / bedridden 와상 /
         hearing 청각장애 / vision 시각장애 / cognitive 인지 저하 / medical_device 산소·투석 등 의료기기 / infant 영유아 / pet 반려동물
+    DemoNeed:
+      type: string
+      enum: [vision, hearing, mobility_limited]
+      description: 시연 주민의 장애 유형 ('내 정보'의 시각·청각·지체)
+    DemoEvacStart:
+      type: object
+      properties:
+        needs: { type: array, maxItems: 3, items: { $ref: '#/components/schemas/DemoNeed' } }
+    DemoEvacResponse:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [evacuated, evacuating, need_help] }
+        needs: { type: array, maxItems: 3, items: { $ref: '#/components/schemas/DemoNeed' } }
+        via: { type: string, enum: [button, voice, dashboard, alarm], default: button }
+    DemoDispatch:
+      type: object
+      required: [departed_at, eta]
+      properties:
+        departed_at: { type: string, description: ISO 시각 }
+        eta: { type: string, description: 도착 예정 ISO 시각 }
+        responder: { type: string, maxLength: 40, default: 시연 방재단원 }
+        stage: { type: string, enum: [en_route, visiting, done], default: en_route }
+    DemoEvacTarget:
+      type: object
+      description: 시연 주민 한 명의 대피 응답 (방재단 화면의 '앱 사용자' 대상 줄). 위치는 시연 기본점 둘레의 가상 좌표
+      required: [id, label, status, needs, minutes_since_alert, started_at, updated_at, is_me, location, dispatch, dispatch_by_me]
+      properties:
+        id: { type: string, example: demo-user-3f2a1c9e-8b7d-4e6f-a5c4-1d2e3f4a5b6c }
+        label: { type: string, description: 별명, 없으면 '시연 주민 xxxx' }
+        status: { type: string, enum: [no_response, need_help, evacuating, evacuated] }
+        needs: { type: array, items: { $ref: '#/components/schemas/DemoNeed' } }
+        minutes_since_alert: { type: integer, minimum: 0 }
+        started_at: { type: string, format: date-time }
+        responded_at: { type: [string, 'null'], format: date-time }
+        updated_at: { type: string, format: date-time }
+        is_me: { type: boolean }
+        location: { $ref: '#/components/schemas/LatLng' }
+        dispatch:
+          oneOf:
+            - { $ref: '#/components/schemas/DemoDispatch' }
+            - { type: 'null' }
+        dispatch_by_me: { type: boolean, description: 이 출동 기록을 지금 읽는 계정(방재단원)이 보냈는지 }
     Household:
       type: object
       required: [id, label, location, members, needs, source, consent]

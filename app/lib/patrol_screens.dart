@@ -703,10 +703,13 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
         updatedAt = DateTime.now();
       });
       final sec = (d['next_poll_sec'] as num?)?.toInt() ?? 10;
+      // 두 번 겹쳐 읽었으면(응답 알림 + 주기 읽기) 먼저 건 타이머를 끄고 하나만 남긴다
+      poll?.cancel();
       if (d['closed_at'] == null) poll = Timer(Duration(seconds: sec.clamp(5, 60)), _loadDetail);
     } catch (e) {
       if (!mounted) return;
       setState(() => error = liveError(e));
+      poll?.cancel();
       poll = Timer(const Duration(seconds: 30), _loadDetail);
     }
   }
