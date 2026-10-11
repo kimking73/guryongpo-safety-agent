@@ -378,6 +378,10 @@ class SafetyRoute {
     this.profile = 'adult',
     this.maxSlopePercent = 0,
     this.maxUphillPercent = 0,
+    this.ascendMeters = 0,
+    this.stepsMeters = 0,
+    this.steepUpMeters = 0,
+    this.verySteepUpMeters = 0,
     this.mode = TravelMode.walk,
     this.hazardsOk = true,
     this.encodedGeometry,
@@ -403,6 +407,9 @@ class SafetyRoute {
 
   /// 진행 방향 기준 가장 급한 오르막 (경로 서버 max_uphill_pct)
   final int maxUphillPercent;
+
+  /// AI 경로 설명용 (2026-10-11): 오르막 합계, 계단·급한 오르막(1/18 초과)·매우 급한 오르막(1/12 초과) 길이 (경로 서버 값)
+  final int ascendMeters, stepsMeters, steepUpMeters, verySteepUpMeters;
 
   /// 도보·자동차 (경로 서버 mode)
   final TravelMode mode;

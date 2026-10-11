@@ -158,7 +158,7 @@ class ChatService:
             from .location import make_location_route_agent
             from .llm import (OpenAIActionWriter, OpenAIClassifier, OpenAIFactChecker, OpenAILocationWriter,
                               OpenAIPolisher, OpenAISpecialistWriter, OpenAIWriter)
-            from .polish import make_final_check, make_polish
+            from .polish import make_polish
             from .specialists import make_landslide_agent, make_life_safety_agent, make_wind_typhoon_agent
             from .recovery import make_recovery_support_agent
             from .verify import make_hallucination_check
@@ -177,11 +177,9 @@ class ChatService:
                 S.Specialist.RECOVERY_SUPPORT.value: make_recovery_support_agent(
                     writer=OpenAISpecialistWriter(S.Specialist.RECOVERY_SUPPORT)),
                 G.ACTION_ADVISOR: make_action_advisor(writer=OpenAIActionWriter()),
-                # 내용 검사 + 의도 검증을 한 호출로 (B5). intent_check 노드는 비워 둔다 — 같은 키를 두 노드가 쓰지 않게
-                G.HALLUCINATION_CHECK: make_hallucination_check(checker=OpenAIFactChecker(checks_intent=True)),
-                G.INTENT_CHECK: lambda state: {},
+                # 행동 권고 → 다듬기 → 환각 검증 (2026-10-11). 의도 검증은 없앴다
                 G.POLISH: make_polish(polisher=OpenAIPolisher()),
-                G.FINAL_HALLUCINATION_CHECK: make_final_check(),
+                G.HALLUCINATION_CHECK: make_hallucination_check(checker=OpenAIFactChecker()),
             }
         self.app = G.build_graph(
             {G.MANAGER: G.make_manager(classifier, phase_of=phase_of), **nodes, **(overrides or {})},

@@ -47,19 +47,34 @@ def ok(req: httpx.Request) -> httpx.Response:
     return httpx.Response(200, json={"paths": [PATH]})
 
 
+def test_route_reports_steps_and_steep_uphill_lengths():
+    """계단·급한 오르막 길이: details 구간을 경로 점 사이 거리로 더한다 (AI 경로 설명용, 2026-10-11). 내리막은 세지 않는다."""
+    pts = decode_polyline(PATH["points"])
+    path = {**PATH, "details": {"average_slope": [[0, 1, 6.0], [1, 2, 9.0], [2, 3, -12.0]],
+                                "road_class": [[0, 1, "steps"], [1, 3, "residential"]]}}
+    c, seen = client(lambda req: httpx.Response(200, json={"paths": [path]}))
+    j = c.post("/api/route", json=BODY).json()
+    from guardian_route.service import _haversine_m
+    d01, d12 = _haversine_m(pts[0], pts[1]), _haversine_m(pts[1], pts[2])
+    assert j["steps_m"] == round(d01) and j["steps_m"] > 0
+    assert j["steep_up_m"] == round(d01 + d12) and j["very_steep_up_m"] == round(d12)
+    assert "road_class" in json.loads(seen[0].content)["details"]
+
+
 def test_route_converts_graphhopper_response():
     c, seen = client(ok)
     res = c.post("/api/route", json=BODY)
     assert res.status_code == 200
     assert res.json() == {"strategy": None, "mode": "walk", "profile": "adult", "distance_m": 986, "duration_s": 710,
                           "ascend_m": 10, "descend_m": 2, "max_slope_pct": 8, "max_uphill_pct": 3,   # 내리막 7.6%도 급경사로 본다
+                          "steps_m": 0, "steep_up_m": 0, "very_steep_up_m": 0,
                           "avoided": [], "still_inside": [], "geometry": PATH["points"], "source": "graphhopper",
                           "hazards_ok": True}
     # GraphHopper에는 [lon, lat] 순서, 도보 profile, 인코딩된 polyline으로 요청한다
     sent = json.loads(seen[0].content)
     assert sent["points"] == [[129.5560, 35.9905], [129.5480, 35.9868]]
     assert sent["profile"] == "foot" and sent["points_encoded"] is True
-    assert sent["details"] == ["average_slope"]
+    assert sent["details"] == ["average_slope", "road_class"]
     assert "custom_model" not in sent and len(seen) == 1     # 성인 + 위험 구역 없음 → 한 번만, 규칙 없이 부른다
 
 

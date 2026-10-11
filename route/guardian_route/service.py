@@ -18,7 +18,7 @@ from shapely.ops import substring, transform
 from . import polyline
 from .gh import GraphHopperClient, GraphHopperUnavailable, RouteNotFound
 from .hazards import DEMO_AREAS_PATH, Hazard, HazardSource, RiskAreaHazardSource, default_source
-from .profiles import PROFILE_RULES, rules_for
+from .profiles import PROFILE_RULES, SLOPE_ACCESSIBLE_MAX, SLOPE_SIDEWALK_MAX, rules_for
 from .sea import ALTERNATIVES, ApiShelterSource, SeaChart, ShelterSource, bearing_label, pick_shelter
 
 Profile = Literal["adult", "elderly"]
@@ -68,6 +68,10 @@ class RouteResponse(BaseModel):
     descend_m: int = 0                                      # 내리막 합계
     max_slope_pct: int = 0                                  # 지나는 구간 중 가장 급한 경사 (오르막·내리막 절댓값)
     max_uphill_pct: int = 0                                 # 진행 방향 기준 가장 급한 오르막 (오르막 회피 경로 비교용)
+    # 경로 설명용 길이 (2026-10-11, AI /api/ai/route-brief). 경로 서버 고도 자료 기준이라 실제와 다를 수 있다
+    steps_m: int = 0                                        # 계단 구간 길이
+    steep_up_m: int = 0                                     # 급한 오르막(1/18 초과) 길이 — very_steep_up_m 포함
+    very_steep_up_m: int = 0                                # 매우 급한 오르막(1/12 초과) 길이
     avoided: list[str] = Field(default_factory=list)       # 회피 없이 가면 지났을 위험 구역 중 이 경로가 피한 것
     still_inside: list[str] = Field(default_factory=list)  # 다른 길이 없어 이 경로도 지나는 위험 구역 (경고용)
     geometry: str                                           # 인코딩된 polyline (Google 형식, 정밀도 1e5, lat·lon 순)
@@ -239,6 +243,7 @@ class RouteService:
             descend_m=round(safe.get("descend") or 0),
             max_slope_pct=_max_slope(safe),
             max_uphill_pct=_max_uphill(safe),
+            **_detail_lengths(safe),
             avoided=avoided,
             still_inside=still_inside,
             geometry=safe["points"],
@@ -367,6 +372,36 @@ def _max_uphill(path: dict[str, Any]) -> int:
     """진행 방향 기준 가장 급한 오르막 (average_slope 양수 중 최대, 없으면 0)."""
     ups = [d[2] for d in (path.get("details") or {}).get("average_slope", []) if d[2] is not None and d[2] > 0]
     return round(max(ups)) if ups else 0
+
+
+def _detail_lengths(path: dict[str, Any]) -> dict[str, int]:
+    """계단·급한 오르막 길이(m). GraphHopper details 구간 [시작 점, 끝 점, 값]을 경로 점 사이 거리로 더한다."""
+    details = path.get("details") or {}
+    out = {"steps_m": 0, "steep_up_m": 0, "very_steep_up_m": 0}
+    if not details.get("road_class") and not details.get("average_slope"):
+        return out
+    pts = polyline.decode(path["points"])
+
+    def length(a: int, b: int) -> float:
+        return sum(_haversine_m(pts[i], pts[i + 1]) for i in range(max(a, 0), min(b, len(pts) - 1)))
+
+    steps = sum(length(a, b) for a, b, v in details.get("road_class", []) if str(v).lower() == "steps")
+    steep = very = 0.0
+    for a, b, v in details.get("average_slope", []):
+        if v is None or v <= SLOPE_SIDEWALK_MAX:
+            continue
+        seg = length(a, b)
+        steep += seg
+        if v > SLOPE_ACCESSIBLE_MAX:
+            very += seg
+    return {"steps_m": round(steps), "steep_up_m": round(steep), "very_steep_up_m": round(very)}
+
+
+def _haversine_m(p: tuple[float, float], q: tuple[float, float]) -> float:
+    """(lat, lon) 두 점 사이 거리(m)."""
+    lat1, lon1, lat2, lon2 = map(math.radians, (p[0], p[1], q[0], q[1]))
+    h = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
+    return 2 * 6371000 * math.asin(math.sqrt(h))
 
 
 def _meters_projector(lat0: float):

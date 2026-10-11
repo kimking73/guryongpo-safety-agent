@@ -317,6 +317,67 @@ class OpenAILocationWriter:
 
 
 # ---------------------------------------------------------------------------
+# AI 경로 설명 (2026-10-11) — 대시보드 지도 위 칸. route_brief.RouteBriefService(writer=OpenAIRouteBriefWriter())
+# ---------------------------------------------------------------------------
+
+class RouteBriefAnswer(BaseModel):
+    summary: str = Field(description="이 경로 한 줄: 어디까지, 거리, 시간. 피한 위험 구역이 있으면 그 사실도")
+    cautions: list[str] = Field(description="주의할 점 (오르막·계단·비·바람). 근거에 있는 것만, 최대 3개, 없으면 빈 목록")
+    hazards: list[str] = Field(description="위험한 요소 (지나는 위험 구역, 출발지·도착지 위험, 특보). 최대 3개, 없으면 빈 목록")
+
+
+ROUTE_BRIEF_PROMPT = """너는 포항 구룡포 재난 대응 서비스 '구룡가디언'의 경로 설명 도우미다.
+지도에 그려진 경로 하나에 대해, 근거 목록만 보고 그 길을 가는 사람이 알아야 할 것을 쉬운 한국어로 짧게 쓴다.
+읽는 사람은 고령자일 수 있다. 한 항목은 한 문장, 존댓말(~습니다/~세요).
+
+쓸 것:
+- summary: 도착지까지 거리와 소요 시간 한 문장. '이 경로가 피한 위험 구역' 근거가 있을 때만 그 구역을 피해 간다는 한 문장을 더한다.
+  그 근거가 없으면 '피해 간다'·'우회한다'는 말을 쓰지 않는다 ('경로 방식'이 안전한 경로여도).
+- hazards(위험한 요소): '다른 길이 없어 지나는 위험 구역', '출발지 위험'·'도착지 위험', '발효 중인 특보'.
+  지나는 위험 구역이 있으면 반드시 맨 앞에 쓴다. 특보는 여러 개여도 "지금 ○○, ○○가 발효 중입니다" 한 문장으로 묶는다. 근거에 없으면 빈 목록.
+- cautions(주의할 점): 오르막은 한 문장으로 (급한 오르막 길이와 가장 급한 경사, '그중 매우 급한 구간'이 있으면 같은 문장에 이어서),
+  계단 길이, 비·바람 관측값이 길에 주는 영향(예: 비가 오면 미끄럽다, 바람이 세면 날리는 물건). 근거에 없으면 빈 목록.
+  관측소 이름은 쓰지 않는다. 근거에 없는 것을 두고 "걱정 없다"·"영향이 크지 않다" 같은 안심 문장을 만들지 않는다.
+
+규칙:
+- 숫자(거리 m, 시간 분, 길이 m, 경사 %, 강수량 mm, 풍속 m/s)는 근거 값과 단위를 그대로 쓴다. km로 바꾸거나 반올림·계산하지 않는다.
+- 근거에 없는 길 이름·건물·시설·구간 위치(예: '중간쯤', '마지막 구간')를 지어내지 않는다. 오르막·계단이 어디에 있는지는 모른다.
+- 위험 구역 이름은 근거에 적힌 그대로 쓴다.
+- '경로 위 위험 구역: 없음'이 있을 때만 위험 구역이 없다고 쓸 수 있다. 그 밖에는 "안전하다"고 단정하지 않는다.
+- '확인할 수 없는 정보'가 있으면 그 정보는 확인하지 못했다고 cautions에 한 문장으로 밝힌다.
+- 이동 수단이 자동차면 오르막·계단은 쓰지 않는다.
+- 대피 여부·행동요령을 새로 지시하지 않는다 (이 길에 대한 설명만).
+- '참고 문장'은 같은 근거로 코드가 만든 예시다. 내용을 벗어나지 말고 더 읽기 쉽게만 고친다."""
+
+
+# 경로 설명은 지도 옆 보조 칸이라 오래 기다리지 않는다. 넘으면 코드가 만든 문장으로 (OPENAI_TIMEOUT_MS를 길게 둔 환경에서도)
+ROUTE_BRIEF_TIMEOUT_S = 8.0
+
+
+class OpenAIRouteBriefWriter:
+    """route_brief.RouteBriefService(writer=OpenAIRouteBriefWriter()). 실패하면 예외 → 코드가 만든 문장."""
+
+    def __init__(self, client: OpenAI | None = None, model: str | None = None,
+                 tracker: UsageTracker | None = None):
+        self.client = client or make_client()
+        self.model = model or os.environ.get("OPENAI_MODEL") or DEFAULT_MODEL
+        self.tracker = tracker or get_tracker()
+
+    def __call__(self, evidence: str, template) -> tuple[str, list[str], list[str]]:
+        ref = "\n".join([f"summary: {template.summary}", *(f"hazards: {h}" for h in template.hazards),
+                         *(f"cautions: {c}" for c in template.cautions)])
+        response = self.client.responses.parse(
+            model=self.model, instructions=ROUTE_BRIEF_PROMPT,
+            input=f"근거 목록:\n{evidence}\n\n참고 문장:\n{ref}",
+            text_format=RouteBriefAnswer, reasoning={"effort": reasoning_effort()}, timeout=ROUTE_BRIEF_TIMEOUT_S)
+        self.tracker.record(self.model, getattr(response, "usage", None))
+        result = response.output_parsed
+        if not isinstance(result, RouteBriefAnswer) or not result.summary.strip():
+            raise ValueError(f"경로 설명을 해석하지 못함: {response.output_text!r}")
+        return result.summary.strip(), [c.strip() for c in result.cautions if c.strip()], [h.strip() for h in result.hazards if h.strip()]
+
+
+# ---------------------------------------------------------------------------
 # 산사태·강풍태풍·생활안전 agent 문장 (B4) — 프롬프트만 다르고 형식은 침수 agent와 같다
 # ---------------------------------------------------------------------------
 
@@ -500,10 +561,6 @@ class OpenAIPolisher:
 class FactCheck(BaseModel):
     ok: bool = Field(description="근거와 어긋나는 주장이 하나도 없으면 true")
     issues: list[str] = Field(description="근거와 어긋나거나 근거에 없는 주장. 한 줄에 하나, 없으면 빈 목록")
-    # 의도 검증 (B5) — 같은 호출에서 함께 판단해 AI 호출 수를 늘리지 않는다
-    answers_question: bool = Field(default=True, description=(
-        "답변이 사용자 질문이 실제로 물은 것에 답하는가. 질문이 없으면(경고 알림) true"))
-    intent_issue: str = Field(default="", description="answers_question이 false일 때, 질문이 물은 것과 답이 어긋난 점 한 줄")
 
 
 CHECKER_PROMPT = """너는 재난 안내 답변의 사실 검증자다. 답변 초안의 각 주장이 근거 목록으로 뒷받침되는지 확인한다.
@@ -519,8 +576,6 @@ CHECKER_PROMPT = """너는 재난 안내 답변의 사실 검증자다. 답변 �
   (원문을 쉬운 말로 풀거나, 일부만 고르거나, 원문 행동의 준비 단계(예: '대피할 장소를 미리 확인')로 쓴 것은 괜찮다)
 
 '사용자 기억'·'사용자 질문'·'사용자가 이번 대화에서 한 말' 항목은 사용자가 직접 한 말로, 그 사용자 상황에 대한 근거로 인정한다.
-answers_question: '사용자 질문'이 물은 것(예: 내일 날씨, 특정 목적지까지 길, 특정 재난)에 답이 실제로 답하는지 본다.
-물은 것을 빼먹었거나 다른 것(오늘만, 다른 장소, 다른 재난 위주)을 답하면 false. 근거가 부족해 '확인할 수 없다'고 밝힌 것은 답한 것으로 본다.
 실패가 아닌 것: 표현을 쉽게 바꾸기, 근거 일부만 고르기(근거에 있는 내용을 빠뜨린 것은 사실 오류가 아니다),
 "확인할 수 없다"고 밝히기, 일반적인 주의 당부, '판단 결과' 항목을 따른 행동,
 행동요령 원문의 적용 대상(상습침수지역·보행자 등) — 원문은 서비스 규칙이 사용자 상황에 맞춰 이미 골랐다.
@@ -534,7 +589,7 @@ class OpenAIFactChecker:
     """
 
     def __init__(self, client: OpenAI | None = None, model: str | None = None,
-                 tracker: UsageTracker | None = None, reasoning_effort: str | None = None, checks_intent: bool = False):
+                 tracker: UsageTracker | None = None, reasoning_effort: str | None = None):
         self.client = client or make_client()
         self.model = (model or os.environ.get("OPENAI_VERIFY_MODEL") or os.environ.get("OPENAI_MODEL")
                       or DEFAULT_MODEL)
@@ -543,8 +598,6 @@ class OpenAIFactChecker:
         # → 기본 low. 더 깊게 보려면 OPENAI_VERIFY_EFFORT=medium (지연 늘어남)
         self.reasoning_effort = (reasoning_effort or os.environ.get("OPENAI_VERIFY_EFFORT")
                                  or globals()["reasoning_effort"]())
-        # True면 의도 검증도 같은 호출로 — (내용, 의도) 두 결과를 돌려준다 (verify.make_hallucination_check가 나눠 쓴다)
-        self.checks_intent = checks_intent
 
     def __call__(self, draft: str, evidence: str):
         from .state import CheckResult
@@ -557,13 +610,8 @@ class OpenAIFactChecker:
         if not isinstance(result, FactCheck):
             raise ValueError(f"검증 결과를 해석하지 못함: {response.output_text!r}")
         # ok=true인데 issues가 있으면 사소한 메모로 보고 통과 (오탐으로 안전 안내까지 가지 않게)
-        fact = CheckResult(ok=True) if result.ok else CheckResult(
+        return CheckResult(ok=True) if result.ok else CheckResult(
             ok=False, feedback="근거와 다른 내용: " + " / ".join(result.issues or ["(사유 없음)"]))
-        if not self.checks_intent:
-            return fact
-        intent = CheckResult(ok=True) if result.answers_question else CheckResult(
-            ok=False, feedback="질문에 맞지 않는 답: " + (result.intent_issue or "(사유 없음)"))
-        return fact, intent
 
 
 # ---------------------------------------------------------------------------

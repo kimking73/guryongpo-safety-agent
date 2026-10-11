@@ -13,8 +13,8 @@ Fields written by parallel nodes use `Annotated[..., reducer]`:
 - `checks` → `merge_checks` merges dicts keyed by check name (state.py:161)
 Both accept `RESET` (state.py:148) to clear accumulated values. `manager` sends `RESET` on entry
 (graph.py:212-213) so a retry does not mix results from earlier attempts.
-Consequence: specialist nodes must return a **list** (graph.py:232); parallel checks must write **distinct keys**
-(`"intent"`, `"hallucination"`).
+Consequence: specialist nodes must return a **list**; checks write keys into `checks` (only `"hallucination"` since
+2026-10-11, when the intent check was removed).
 
 ## 3. Gate node + pure router
 Decisions with side effects are split in two:
@@ -23,14 +23,13 @@ Decisions with side effects are split in two:
 Routers never mutate state. Verdict values are typed `Literal`s in state.py (`verdict`, `polish_verdict`).
 
 ## 4. Bounded retry loops with safe degradation
-Loop limits are constants `MAX_RETRY`, `MAX_POLISH_RETRY` (state.py:211-212), checked in gate nodes.
-On exhaustion the graph degrades instead of looping: loop 1 → `fallback` (graph.py:326, `used_fallback=True`);
-loop 2 → `finalize` returns the already-verified `verified_draft` (graph.py:323).
+The loop limit is the constant `MAX_RETRY` (state.py, 1 since 2026-10-11), checked in `verify_gate`.
+On exhaustion the graph degrades instead of looping: `fallback` (`used_fallback=True`). There is one loop only:
+action_advisor → polish → hallucination_check → verify_gate → (retry) manager.
 
 ## 5. Parallel dispatch via routers
 - Dynamic fan-out: `route_specialists` returns `Send(node, state)` per selected agent (graph.py:359, :368),
   or a single node name when nothing is selected.
-- Static fan-out: `route_checks` returns a list of node names (graph.py:371); alert mode drops `intent_check`.
 All conditional edges declare their possible targets explicitly (graph.py:422, :428, :431, :436) so the
 mermaid export is complete.
 

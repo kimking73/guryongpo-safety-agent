@@ -18,27 +18,22 @@ flowchart TD
     M -. 선택 없음 (chat) .-> D[바로 답하기<br/>인사 안내 · 들은 정보 확인] --> OUT0([최종 답변])
     M -. 선택 없음 (alert) .-> A
     L & R & W & S & P & RS --> A[행동 권고 agent<br/>규칙 트리 + 문장화]
-    A -. chat .-> I[사용자 의도 검증]
-    A --> H[환각 검증]
-    I & H --> G{검증 합류}
-    G -- 통과 --> PO[답변 다듬기]
+    A --> PO[답변 다듬기]
+    PO --> H[환각 검증]
+    H --> G{검증 결과}
+    G -- 통과 --> OUT([최종 답변])
     G -- 실패, 재시도 1회 이내 --> M
     G -- 실패, 한도 초과 --> FB([안전 fallback 답변])
-    PO --> H2[환각 재검증]
-    H2 -- 통과 --> OUT([최종 답변])
-    H2 -- 실패, 1회 이내 --> PO
-    H2 -- 실패, 한도 초과 --> OUT2([다듬기 전 검증 통과 초안])
 ```
 
 기획서 구조와 다른 점 (의도적 변경):
 
 | 변경 | 이유 |
 | --- | --- |
-| 의도 검증과 환각 검증을 **병렬** 실행 후 합류 | 둘 다 같은 초안을 보므로 결과는 같고 지연이 절반 |
-| 루프 1 최대 1회(2026-10-11, 답변 시간 때문에 2회 → 1회), 루프 2 최대 1회 재시도 | 재난 상황에서 무한 루프·과도한 지연 방지 |
-| 루프 1 한도 초과 시 fallback 답변 | 검증 못 한 답을 내보내지 않음 |
-| 루프 2 한도 초과 시 다듬기 전 초안 반환 | 이미 검증된 내용이므로 형식만 포기 |
-| alert 모드 추가 (의도 검증 생략) | 선제 경고(A5)를 같은 그래프로 생성. 사용자 질문이 없어 의도 검증 불필요 |
+| 행동 권고 → 다듬기 → 환각 검증 한 번 (2026-10-11 사용자 결정) | 예전: 의도+환각 검증 → 다듬기 → 환각 재검증. 사용자 의도 검증은 없앴고, 검증은 실제로 나갈 글(다듬은 답·음성 문장)을 한 번만 본다 |
+| 재시도 최대 1회 (2026-10-11, 답변 시간 때문에 2회 → 1회) | 재난 상황에서 무한 루프·과도한 지연 방지 |
+| 한도 초과 시 fallback 답변 | 검증 못 한 답을 내보내지 않음. 다듬기가 숫자를 바꾼 경우도 같은 경로 (예전엔 다듬기 전 초안으로 돌아갔다) |
+| alert 모드 추가 | 선제 경고(A5)를 같은 그래프로 생성 |
 | 선택된 agent가 없으면 `direct_reply`로 끝 (2026-10-10, 예전엔 행동 권고로 직행) | 인사·자기 정보만 말한 경우 — 행동 권고가 "현재 확인된 위험 없음"이라고 답해 경보 중에도 틀린 위험 판단처럼 보였다. 수치·사실을 말하지 않으므로 검증·다듬기도 생략. alert 모드는 예전처럼 행동 권고 |
 
 ## 2. 노드
@@ -54,13 +49,10 @@ flowchart TD
 | `recovery_support_agent` | 보험·피해 신고·복구 지원 제도를 [공통 보험]·[공통 피해 신고·복구]·[내 직업 지원·복구]로 안내 (2026-10-08, `recovery.py`). 직업 = 서버 프로필, 질문에 재난이 있으면 그 재난 제도만, DB에 없으면 "등록된 제도 없음" | question, user | specialist_results | get_support_programs | O |
 | `direct_reply` | 전문 agent가 필요 없는 말에 바로 답 (인사 → 서비스 안내, 자기 정보만 말함 → 들은 내용 확인). 이전 턴의 카드·행동 권고를 비움 | user_info | final_answer, voice_text, card, action_plan | - | X |
 | `action_advisor` | 판단 트리로 행동 우선순위 결정 → 전문 agent 결과와 합쳐 초안 작성 | phase, specialist_results, user | action_plan, draft | get_action_guides, get_facilities | 문장화만 |
-| `intent_check` | 초안이 질문 의도에 답하는지 (chat만). 실제 서비스는 아래 `hallucination_check`와 한 번의 LLM 호출로 함께 (B5) | question, history, draft | checks.intent | - | O |
-| `hallucination_check` | 초안의 수치·사실이 evidence와 일치하는지 | draft, specialist_results[].evidence, action_plan | checks.hallucination | - | 숫자는 규칙 대조 + LLM |
-| `verify_gate` | 검증 합류, 통과/재시도/fallback 결정 | checks, retry_count | verdict, retry_count, manager_feedback, verified_draft | - | X |
-| `polish` | 카드형 필드(코드) + 600자 넘는 답만 쉬운 말 요약 + 음성용 문장 | verified_draft, polish_feedback | polished, voice_text, card | - | 긴 답만 O |
-| `final_hallucination_check` | 다듬은 글·음성 문장의 숫자가 근거와 맞는지 | polished, voice_text, evidence | polish_verdict, polish_feedback | - | X (규칙만) |
-| `final_check_gate` | 루프 2 재시도 여부 | polish_verdict, polish_retry_count | polish_verdict, polish_retry_count | - | X |
-| `finalize` | 최종 답변 확정 | polished 또는 verified_draft | final_answer | - | X |
+| `polish` | 카드형 필드(코드) + 600자 넘는 답만 쉬운 말 요약 + 음성용 문장. 재시도면 실패 사유를 받는다 | draft, manager_feedback | polished, voice_text, card | - | 긴 답만 O |
+| `hallucination_check` | 다듬은 답(없으면 초안)·음성 문장의 수치·사실이 evidence와 일치하는지 | polished, voice_text, specialist_results[].evidence, action_plan | checks.hallucination | - | 숫자는 규칙 대조 + LLM |
+| `verify_gate` | 통과/재시도/fallback 결정 | checks, retry_count | verdict, retry_count, manager_feedback | - | X |
+| `finalize` | 최종 답변 확정 | polished | final_answer | - | X |
 | `fallback` | 검증 실패 시 최소 안내 (119, 대피소) | - | final_answer, used_fallback | - | X |
 
 환각 검증의 전제: **모든 전문 agent는 답변에 쓴 수치를 `Evidence`로 남긴다.** evidence에 없는 수치가 초안에 있으면 실패.
@@ -91,8 +83,8 @@ B3 구현 (2026-10-01):
 | 입력 | mode, user, current_location, question, risk_event, history, user_memory | mode = `chat` 또는 `alert`, user_memory = 사용자 기억 문장 (아래 기억 절) |
 | 관리자 | phase, selected_agents, manager_feedback, destination_query, can_move, damage, wants_action, user_info | wants_action = 행동·대비·대피를 물었는가(분류기, 모르면 None), user_info = 묻는 것 없이 자기 정보만 말했을 때 들은 내용 |
 | 전문 → 권고 | specialist_results, action_plan, draft | specialist_results는 병렬 누적 reducer, 재시도 시 RESET |
-| 루프 1 | checks, retry_count, verdict | checks는 병렬 병합 reducer |
-| 루프 2 | verified_draft, polished, polish_feedback, polish_retry_count, polish_verdict | |
+| 다듬기 | polished, voice_text, card | |
+| 검증·재시도 | checks, retry_count, verdict, manager_feedback | |
 | 출력 | final_answer, used_fallback | |
 
 도메인 모델: `UserProfile`, `Location`, `RiskEvent`, `Evidence`, `SpecialistResult`, `ActionPlan`, `CheckResult`, `ActionGuide`.
@@ -237,13 +229,12 @@ A7이 `action_guides` 표에 적재한 형식을 그대로 쓴다 (2026-10-01, �
   서버 종료 때 백그라운드 프로필 반영이 끝날 때까지 기다린다.
 
 B5 구현 (2026-10-03):
-- 의도 검증: `OpenAIFactChecker(checks_intent=True)`가 내용 검사와 같은 호출에서 `answers_question`·`intent_issue`도 낸다 →
-  `checks["intent"]`. 실패하면 기존 재시도(`verify_gate` → `manager_feedback`). alert 모드는 의도 검사 없음. 서비스에서 `intent_check` 노드는 빈 노드.
+- 의도 검증: 2026-10-11 삭제 (사용자 결정). 내용 검사(`OpenAIFactChecker`)만 남았다.
   검증 근거에 '사용자 질문'·'사용자가 이번 대화에서 한 말'을 넣어 사용자가 말한 피해·상황을 지어낸 것으로 보지 않게 했다.
   내용 검사 추론 깊이는 기본 low (`OPENAI_VERIFY_EFFORT`) — medium은 8~12초로 10초 제한을 자주 넘겨 검사가 통째로 빠졌다.
 - 다듬기 (`polish.py`): 카드(`build_card`) — 제목(분기 + 가장 높은 위험), 수치 칩(근거에서 코드가 고름, 최대 5개), 할 일, 출처, 119.
   글은 600자 넘을 때만 `OpenAIPolisher`가 쉬운 말로 요약하고 음성 문장(2~3문장)도 쓴다. 그보다 짧으면 초안 그대로, 음성 문장은 코드
-  (`fallback_voice`: 첫 두 문장 + 첫 할 일 + 질문). 다듬은 뒤 숫자 재검증은 규칙만(#3 해결).
+  (`fallback_voice`: 첫 두 문장 + 첫 할 일 + 질문). 2026-10-11부터 다듬기가 환각 검증 앞에 온다 — 다듬은 글·음성 문장의 숫자(규칙)와 내용(LLM)을 그 검증이 본다.
 - 행동 권고가 '위험 지역' 분기면 코드가 답 맨 앞에 "현재 위치가 위험 영역 안(…)에 있어 위험 지역 기준으로 안내합니다"를 붙인다
   (전문 agent는 이 판단을 모르고 "위험 단계 정상"만 쓸 수 있어 검증기가 막았다). 이동 불가능 분기는 '판단 결과' 근거를 남긴다.
 - 지연 (2026-10-03 로컬, gpt-6-luna): 텍스트 7~19초(대부분), 검증 재시도 1회면 30~35초. 목표 텍스트 15초·음성 20초.
@@ -256,6 +247,17 @@ B5 구현 (2026-10-03):
 3. ~~AI의 DB 직접 조회(읽기 전용) vs FastAPI 경유~~ → 직접 조회로 결정 (2026-10-01, 5절)
 4. ~~한 질문당 LLM 호출 수와 음성 지연~~ → 의도 검증은 내용 검사와 한 호출로, 다듬기는 600자 넘는 답만, 다듬은 뒤 재검증은 규칙만 (2026-10-03, 2절 B5)
 5. ~~대화 중 알게 된 사용자 정보 저장 주체~~ → 서버 프로필(`user_profiles`·`user_places`)에 AI가 사용자 토큰으로 바로 반영 (2026-10-08, 6-1절). `ai_memory`는 쓰지 않음
+
+## 7-1. AI 경로 설명 (2026-10-11, 대화 그래프 밖)
+
+대시보드 지도 위 'AI 경로 설명' 칸. 경로를 바꿀 때마다 불리므로 그래프(OpenAI 3~5번)를 돌리지 않고 `route_brief.py`가 따로 처리한다.
+
+- `POST /api/ai/route-brief` — 요청: origin·destination(lat, lon, name), route(경로 서버 응답 값), zone_names, demo.
+  응답: `summary`, `cautions[]`(주의할 점), `hazards[]`(위험한 요소), `note`, `used_template`, `timings`.
+- 근거(코드): 경로 거리·시간·오르막·급한 오르막 길이·계단 길이·지나는/피한 위험 구역 + 출발·도착 지점 위험(`hazards_at`) + 발효 중 특보 + 비·바람 관측값.
+  20m 미만 오르막·계단, 비 1mm 미만, 약한 바람은 근거에서 뺀다 (없는 걱정을 만들지 않게).
+- 문장: LLM 1번(`OpenAIRouteBriefWriter`, 8초 제한). 숫자 검사(`check_numbers`)에 걸리거나, 피한 구역이 없는데 '피해 간다'고 쓰거나, 실패·시간 초과면 코드가 만든 문장.
+- 같은 요청은 60초 캐시. 상태·대화 기억 없음.
 
 ## 8. 채팅 API (B2, 초안)
 

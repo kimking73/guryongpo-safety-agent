@@ -1,4 +1,5 @@
-"""환각 검증 (B3): 답변 초안이 전문 agent가 남긴 근거(Evidence)와 맞는지 확인한다.
+"""환각 검증 (B3): 다듬은 답(없으면 초안)이 전문 agent가 남긴 근거(Evidence)와 맞는지 확인한다.
+2026-10-11부터 다듬기 뒤에 한 번만 돈다 (행동 권고 → 다듬기 → 환각 검증). 음성 문장의 숫자도 같이 본다.
 
 두 단계, 둘 다 통과해야 한다.
   ① 숫자 검사 (규칙, check_numbers): 초안의 측정값(단위가 붙은 숫자)이 근거에 있는지. 단위 변환·반올림은 허용.
@@ -98,7 +99,7 @@ def make_hallucination_check(checker: FactChecker | None = None):
     from .flood import evidence_lines   # 근거 표기 형식을 침수 agent 프롬프트와 똑같이 맞춘다
 
     def hallucination_check(state: GuardianState) -> dict:
-        draft = state.get("draft") or ""
+        draft = state.get("polished") or state.get("draft") or ""
         evidence = [e for r in state.get("specialist_results", []) for e in r.evidence]
         plan = state.get("action_plan")
         if plan is not None:
@@ -107,22 +108,16 @@ def make_hallucination_check(checker: FactChecker | None = None):
         said = [Evidence(source="request", key="사용자 질문", value=state["question"])] if state.get("question") else []
         said += [Evidence(source="request", key="사용자가 이번 대화에서 한 말", value=m["content"])
                  for m in (state.get("history") or [])[-6:] if m.get("role") == "user"]
-        result = check_numbers(draft, evidence)
-        intent = None
+        # 숫자는 화면 글과 음성 문장 둘 다 (다듬기가 숫자를 바꾸면 여기서 걸린다)
+        result = check_numbers(draft + "\n" + (state.get("voice_text") or ""), evidence)
         how = "숫자"
         if result.ok and checker is not None and evidence:
             try:
-                out = checker(draft, evidence_lines(evidence + said))
-                result, intent = out if isinstance(out, tuple) else (out, None)
-                how = "숫자+내용" + ("+의도" if intent is not None else "")
+                result = checker(draft, evidence_lines(evidence + said))
+                how = "숫자+내용"
             except Exception as e:  # noqa: BLE001
                 logger.warning("내용 검사 실패 → 숫자 검사 결과만 사용 (%s: %s)", type(e).__name__, e)
-        if intent is not None and state.get("mode") != "alert":
-            logger.info("의도 검증 %s %s", "통과" if intent.ok else "실패", intent.feedback)
         logger.info("환각 검증 [%s] %s %s", how, "통과" if result.ok else "실패", result.feedback)
-        checks = {"hallucination": result}
-        if intent is not None and state.get("mode") != "alert":
-            checks["intent"] = intent       # 의도 검증도 같은 호출로 (서비스는 intent_check 노드를 비워 둔다)
-        return {"checks": checks}
+        return {"checks": {"hallucination": result}}
 
     return hallucination_check
