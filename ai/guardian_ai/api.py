@@ -14,7 +14,9 @@ from functools import lru_cache
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, Header
 from fastapi.responses import Response
-from pydantic import BaseModel
+from typing import Literal
+
+from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import state as S
@@ -180,6 +182,37 @@ def voice_session() -> VoiceSession:
         return VoiceSession(**realtime.create_client_secret())
     except realtime.RealtimeUnavailable as e:
         raise HTTPException(503, f"실시간 음성 대화를 지금 쓸 수 없습니다. {e}") from e
+
+
+class EvacSessionRequest(BaseModel):
+    """POST /api/voice/evac-session 요청 — 시각장애인 대피 확인(evac_check) 또는 정해진 문장 안내(announce)."""
+    mode: Literal["evac_check", "announce"]
+    alert_text: str = Field(default="", max_length=200)      # evac_check: 경보 제목 (첫 안내에 넣는다)
+    announce_text: str = Field(default="", max_length=300)   # announce: 읽을 문장 (서버 FCM tts_text)
+
+
+class EvacSession(BaseModel):
+    client_secret: str
+    expires_at: int | None = None
+    model: str
+    calls_url: str
+    mode: str
+    status_tool: str
+    end_tool: str
+    statuses: list[str]
+    read_out_prefix: str
+
+
+@app.post("/api/voice/evac-session", response_model=EvacSession)
+def voice_evac_session(req: EvacSessionRequest) -> EvacSession:
+    """시각장애인 대피 음성 확인 (B12): gpt-realtime 임시 키. 상태 저장은 앱이 서버 응답 API(via=voice)로 한다."""
+    try:
+        return EvacSession(**realtime.create_evac_client_secret(
+            req.mode, alert_text=req.alert_text, announce_text=req.announce_text))
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    except realtime.RealtimeUnavailable as e:
+        raise HTTPException(503, f"음성 안내를 지금 쓸 수 없습니다. {e}") from e
 
 
 @app.post("/api/tts", responses={200: {"content": {"audio/mpeg": {}}}})

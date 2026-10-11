@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:record/record.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
@@ -126,7 +129,12 @@ class _ProfileFormState extends ConsumerState<ProfileForm> {
         strongVibration: dis.contains('hear') ? true : a.strongVibration,
         screenFlash: dis.contains('hear') ? true : a.screenFlash,
       ));
-      if (dis.contains('see')) ref.read(autoVoiceAlerts.notifier).state = true;
+      if (dis.contains('see')) {
+        ref.read(autoVoiceAlerts.notifier).state = true;
+        // 대피 경보 음성 확인(evac_voice_check.dart)은 잠금 화면에서 바로 마이크를 연다 — 권한 창을 그때 띄울 수 없으니 지금 묻는다
+        final rec = AudioRecorder();
+        unawaited(rec.hasPermission().catchError((_) => false).whenComplete(rec.dispose));
+      }
       ref.read(profileRevision.notifier).state++;
       if (!mounted) return;
       showDsToast(context, widget.onboarding ? '내 정보를 저장했어요' : '내 정보를 저장했어요');

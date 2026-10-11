@@ -47,6 +47,8 @@ services:
       DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
       # /api/health 에 함께 표시할 다른 서비스 (꺼져 있으면 down 으로만 표시, api 는 영향 없음)
       ROUTE_HEALTH_URL: http://route:8002/api/route/health
+      # 방재단 배정 시 주민에게 알릴 도착 예상 시간 계산 (alerts/assignment.py). 꺼져 있으면 직선거리로 추정
+      ROUTE_URL: http://route:8002
       AI_HEALTH_URL: http://ai:8001/api/ai/health
     volumes:
       # Firebase 서비스 계정 키 (.env 의 FIREBASE_CREDENTIALS=secrets/firebase-admin.json)

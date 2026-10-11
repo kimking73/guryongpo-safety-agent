@@ -135,6 +135,7 @@ from types import SimpleNamespace  # noqa: E402
 
 from guardian_ai.llm import Classification, OpenAIClassifier  # noqa: E402
 from guardian_ai.tools import find_place  # noqa: E402
+from guardian_ai.flood import pick_location  # noqa: E402
 
 HOME = Location(lat=35.9935, lon=129.5498, label="집")
 WORK = Location(lat=35.9879, lon=129.5548, label="직장")
@@ -303,3 +304,71 @@ def test_risk_answer_drops_sentences_deferring_evacuation_place():
     text = "강풍 위험 단계는 주의입니다. 배 출항 가능 여부는 확인할 수 없습니다. 어디로 대피할지는 위치·경로 안내에서 확인해 주세요."
     assert strip_deferrals(text, PLACE_TOPICS) == "강풍 위험 단계는 주의입니다. 배 출항 가능 여부는 확인할 수 없습니다."
     assert strip_deferrals("대피소 정보를 확인할 수 없습니다.", PLACE_TOPICS) == "대피소 정보를 확인할 수 없습니다."  # 다 지워지면 원문
+
+
+# --- 질문에서 말한 장소를 기준 위치로 (2026-10-12) ---------------------------------
+
+def _clf(**kw):
+    parsed = Classification(agents=[Specialist.RAIN_FLOOD], reason="침수", **kw)
+    return OpenAIClassifier(client=SimpleNamespace(responses=SimpleNamespace(
+        parse=lambda **k: SimpleNamespace(output_parsed=parsed, output_text="", usage=None))), model="t")
+
+
+def test_manager_turns_place_in_question_into_reference_location():
+    """ "우리 가게 침수됐어?" → 분류기 place '가게' → locate가 찾은 좌표가 이번 질문의 기준 위치"""
+    shop = Location(lat=35.9894, lon=129.5534, label="가게")
+    asked = []
+    locate = lambda q, u: asked.append(q) or shop  # noqa: E731
+    here = Location(lat=35.98643, lon=129.54509)
+    out = G.make_manager(_clf(place="가게"), locate=locate)(
+        {"mode": "chat", "question": "우리 가게 침수됐어?", "user": UserProfile(user_id="u1"), "current_location": here})
+    assert asked == ["가게"] and out["reference_location"] == shop and out["reference_query"] == "가게"
+    loc, known = pick_location({**out, "current_location": here})
+    assert (loc.lat, loc.label, known) == (35.9894, "가게", True)          # 현재 위치보다 먼저
+    # 다음 질문에서 장소를 말하지 않으면 다시 현재 위치 기준
+    nxt = G.make_manager(_clf(), locate=locate)({**out, "mode": "chat", "question": "지금 여기 바람은 어때?", "current_location": here})
+    assert nxt["reference_location"] is None and nxt["reference_query"] is None
+    assert pick_location({**nxt, "current_location": here})[0].label == "현재 위치"
+
+
+def test_reference_place_not_found_keeps_current_location_and_says_so():
+    out = G.make_manager(_clf(place="우주상사"), locate=lambda q, u: None)(
+        {"mode": "chat", "question": "우주상사 침수됐어?", "user": UserProfile(user_id="u1")})
+    assert out["reference_location"] is None and out["reference_query"] == "우주상사"
+    loc, known = pick_location({**out, "current_location": Location(lat=35.99, lon=129.55)})
+    assert loc.lat == 35.99 and known and "'우주상사' 위치는 찾지 못함" in loc.label
+    loc, known = pick_location(out)                                        # 위치 정보도 없으면 읍 중심 + 두 사실 모두
+    assert not known and "위치 정보 없음" in loc.label and "우주상사" in loc.label
+
+
+def test_reference_place_is_ignored_without_locate_or_when_locate_fails():
+    q = {"mode": "chat", "question": "우리 가게 침수됐어?", "user": UserProfile(user_id="u1")}
+    assert G.make_manager(_clf(place="가게"))(q)["reference_query"] is None            # 기본 그래프(테스트)는 쓰지 않는다
+
+    def boom(query, u):
+        raise RuntimeError("장소 검색 장애")
+    out = G.make_manager(_clf(place="가게"), locate=boom)(q)                            # 장애여도 답은 나간다
+    assert out["reference_location"] is None and out["selected_agents"] == [Specialist.RAIN_FLOOD]
+
+
+def test_said_place_is_the_route_origin_and_reference_evidence():
+    """ "호미로 152에 있는데 가까운 대피소 알려줘" → 그 주소에서 출발하는 경로, 근거의 기준 위치도 그 주소"""
+    sent = []
+    ref = Location(lat=35.9871, lon=129.5522, label="호미로 152")
+    d = L.collect({**state(), "reference_query": "호미로 152", "reference_location": ref},
+                  fetch=flood_db, route_client=route_server(sent))
+    assert sent[0]["origin"] == {"lat": 35.9871, "lon": 129.5522}
+    assert {e.key: e.value for e in d.evidence}["기준 위치"] == "호미로 152"
+
+
+def test_locate_reference_uses_registered_place_name(monkeypatch):
+    from guardian_ai import service as SV
+    from guardian_ai import tools as T
+    monkeypatch.delenv("KAKAO_REST_KEY", raising=False)
+    monkeypatch.setattr(T, "default_fetch", lambda: (lambda sql, params: []), raising=False)
+    u = UserProfile(user_id="u1", frequent_places=[Location(lat=35.9894, lon=129.5534, label="가게")])
+    monkeypatch.setattr(T, "find_place", lambda q, user=None, **kw: (
+        {"available": True, "name": "가게", "lat": 35.9894, "lon": 129.5534, "kind": "place", "source": "user"}
+        if q.replace(" ", "") == "우리가게" else {"available": False, "reason": "없음"}))
+    assert SV.locate_reference("우리 가게", u) == Location(lat=35.9894, lon=129.5534, label="가게")
+    assert SV.locate_reference("모르는 곳", u) is None

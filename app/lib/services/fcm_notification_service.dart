@@ -11,6 +11,7 @@ import 'alert_notifications.dart';
 import 'app_config.dart';
 import 'auth_service.dart';
 import 'evac_alarm.dart';
+import 'evac_voice_check.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -22,6 +23,11 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // 대피 경보는 서버가 data 전용으로 보낸다 → 여기서 사이렌 + 전체 화면 경보를 직접 띄운다 (2026-10-11)
   final alert = EvacAlarm.fromPush(message.data);
   if (alert != null) await EvacAlarm.show(alert, initialize: true);
+  // 방재단 배정 안내: 시각장애인이면 화면을 켜고 앱을 열어 도착 예상 시간을 음성으로 읽는다 (2026-10-12)
+  final eta = EvacAlarm.etaTextFromPush(message.data);
+  if (eta != null && await EvacVoiceCheck.visionSupportSaved()) {
+    await EvacAlarm.showResponderEta(eta, incidentId: message.data['incident_id'] as String?, initialize: true);
+  }
 }
 
 class FcmNotificationService {
@@ -68,9 +74,14 @@ class FcmNotificationService {
       // 앱을 보고 있을 때 온 대피 경보: 사이렌을 울리고 경보 화면을 바로 띄운다
       final evac = EvacAlarm.fromPush(message.data,
           title: message.notification?.title, body: message.notification?.body);
+      final eta = EvacAlarm.etaTextFromPush(message.data);
       if (evac != null) {
         unawaited(EvacAlarm.show(evac));
         EvacAlarm.onOpen?.call(evac);
+      } else if (eta != null) {
+        // 방재단 배정 안내: 앱을 보고 있으면 바로 (시각장애인이면 음성으로 — onResponderEta 가 판단)
+        unawaited(AlertNotifications.show(_preview(message), openable: false));
+        EvacAlarm.onResponderEta?.call(eta, message.data['incident_id'] as String?);
       } else {
         // 앱을 보고 있어도 알림 센터·잠금 화면에 남게 시스템 알림으로도 띄운다
         final id = message.data['alert_id'] as String?;

@@ -2,11 +2,13 @@
 abstract class RealtimeLink {
   /// 마이크 권한을 받고 연결한다. 권한이 없거나 연결하지 못하면 예외.
   /// [onEvent]는 서버 이벤트, [onClosed]는 연결이 끊겼을 때 (스스로 [close]한 경우는 부르지 않는다).
+  /// [microphone]이 false면 마이크를 열지 않고 모델 소리만 받는다 (정해진 문장 안내, evac_voice_check.dart).
   Future<void> connect({
     required String callsUrl,
     required String clientSecret,
     required void Function(Map<String, dynamic> event) onEvent,
     required void Function() onClosed,
+    bool microphone = true,
   });
 
   /// 클라이언트 이벤트를 보낸다 (연결 전·끊긴 뒤에는 버린다)

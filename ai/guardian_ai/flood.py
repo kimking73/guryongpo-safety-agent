@@ -55,22 +55,34 @@ class FloodData:
 
 
 def pick_location(state: GuardianState) -> tuple[Location, bool]:
-    """현재 위치 → 집 → 구룡포읍 중심 순. 두 번째 값은 사용자 위치를 알았는지.
+    """질문에서 말한 장소 → 현재 위치 → 집 → 구룡포읍 중심 순. 두 번째 값은 사용자 위치를 알았는지.
 
     label은 항상 채운다 ("현재 위치"/"집"/사용자가 붙인 이름) — 근거 목록의 '기준 위치'와 답변 작성기에 같은 이름을 쓰기 위해.
     """
+    # 질문에서 말한 장소("우리 가게 침수됐어?", "호미로 152에 있는데…")가 가장 먼저 (2026-10-12, graph.make_manager가 채운다)
+    ref = state.get("reference_location")
+    if ref:
+        return ref.model_copy(update={"label": ref.label or state.get("reference_query") or "말씀하신 장소"}), True
+    # 장소를 말했는데 좌표를 못 찾았으면 아래 기준으로 답하되, 기준 위치 이름에 그 사실을 밝힌다
+    asked = state.get("reference_query")
+    note = f" ('{asked}' 위치는 찾지 못함)" if asked else ""
     loc = state.get("current_location")
     if loc:
-        return loc.model_copy(update={"label": loc.label or "현재 위치"}), True
+        return loc.model_copy(update={"label": (loc.label or "현재 위치") + note}), True
     user = state.get("user")
     if user is not None and user.home:
-        return user.home.model_copy(update={"label": user.home.label or "집"}), True
+        return user.home.model_copy(update={"label": (user.home.label or "집") + note}), True
+    if asked:
+        return GURYONGPO_CENTER.model_copy(
+            update={"label": f"구룡포읍 중심(위치 정보 없음, '{asked}' 위치는 찾지 못함)"}), False
     return GURYONGPO_CENTER, False
 
 
 def location_text(d: "FloodData") -> str:
     """답변과 근거에 쓰는 기준 위치 이름. 위치를 모르면 그렇다고 밝힌다."""
-    return d.location.label if d.location_known else "구룡포읍 중심(위치 정보 없음)"
+    if d.location_known or "위치 정보 없음" in (d.location.label or ""):
+        return d.location.label
+    return "구룡포읍 중심(위치 정보 없음)"
 
 
 def _ts(iso: str | None) -> datetime | None:

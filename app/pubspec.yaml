@@ -28,6 +28,7 @@ dependencies:
   flutter_svg: ^2.3.0
   # 실시간 음성 대화의 브라우저 WebRTC (lib/services/realtime_link_web.dart)
   web: ^1.1.0
+  flutter_webrtc: ^1.6.2+hotfix.4
 
 dev_dependencies:
   flutter_test:

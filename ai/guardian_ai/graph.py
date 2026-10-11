@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Callable
+from typing import Any, Callable
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
@@ -43,6 +43,7 @@ from .state import (
     RESET,              # reducer에 보내면 누적된 값을 비우는 신호
     DisasterType,
     GuardianState,
+    Location,
     Phase,
     RiskEvent,
     RiskLevel,
@@ -170,6 +171,8 @@ _NEW_TURN_RESET = {
     "card": None,
     "wants_action": None,
     "user_info": None,
+    "reference_query": None,
+    "reference_location": None,
 }
 
 # 전문 agent 없이 바로 답할 때 (인사·사용법, 자기 정보만 말함). 위험 여부·할 일은 말하지 않는다 (2026-10-10 사용자 결정)
@@ -179,7 +182,8 @@ USER_INFO_REPLY = "알려 주신 내용({info})을 앞으로 안내에 반영할
 
 
 def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_classify,
-                 phase_of: Callable[[GuardianState], Phase] | None = None) -> Node:
+                 phase_of: Callable[[GuardianState], Phase] | None = None,
+                 locate: Callable[[str, Any], Location | None] | None = None) -> Node:
     """관리자 agent를 만든다. classify가 예외를 내면 fallback_classify로 대체한다.
 
     왜 함수를 반환하는가 (공장 함수):
@@ -188,6 +192,8 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
         - 테스트·기본값: make_manager(keyword_classify)          → 이 함수 바로 아래 `manager = ...`
         - 서비스:       make_manager(OpenAIClassifier(), phase_of=action.decide_phase)  → service.py
     phase_of: 재난 단계(전·중·후·평시) 판정. 없으면 '재난 중'(DB 없이 도는 테스트·기본 그래프).
+    locate: (질문 속 기준 장소, 사용자) → 좌표. 분류기가 뽑은 place("가게", "호미로 152")를 이번 질문의 기준 위치로
+        바꾼다 (2026-10-12, 서비스는 service.locate_reference). 없으면 기준 장소를 쓰지 않는다.
     """
 
     def manager(state: GuardianState) -> dict:
@@ -254,12 +260,15 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
         if state.get("mode") == "alert":
             destination, limited, can_move, damage = None, False, "unknown", "unknown"
             wants_action, user_info = True, None
+            place = None
         elif extra is not None and hasattr(extra, "destination"):
             destination, limited = extra.destination, bool(extra.mobility_limited)
             can_move, damage = getattr(extra, "can_move", "unknown"), getattr(extra, "damage", "unknown")
             wants_action = bool(getattr(extra, "wants_action", True))
             user_info = (getattr(extra, "user_info", None) or "").strip() or None
+            place = (getattr(extra, "place", None) or "").strip() or None
         else:
+            place = None
             destination, limited = keyword_destination(question), keyword_mobility_limited(question)
             can_move, damage = keyword_situation(question)
             # 규칙 대체: 평시에는 행동을 묻는 말이 있을 때만, 그 밖의 단계는 예전처럼 (None → action.py가 단계로 정한다)
@@ -271,6 +280,20 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
         user_update = {}
         if limited and user is not None and user.walking_impaired is None:
             user_update = {"user": user.model_copy(update={"walking_impaired": True})}
+
+        # 질문 속 기준 장소 → 좌표. 찾으면 이번 질문은 그곳 기준 (flood.pick_location), 못 찾으면 이름만 남겨 답에 밝힌다
+        if place in _NOT_PLACE:
+            place = None
+        reference = None
+        if place and locate is not None:
+            try:
+                reference = locate(place, user)
+            except Exception:  # noqa: BLE001 — 장소 검색 실패로 답이 끊기면 안 된다
+                logger.exception("기준 장소 좌표 찾기 실패 → 현재 위치 기준")
+            logger.info("기준 장소 %r → %s", place, "찾음" if reference else "못 찾음")
+        elif locate is None:
+            place = None
+        view = {**view, "reference_query": place, "reference_location": reference}
 
         def _phase(v: GuardianState) -> Phase:
             if phase_of is None or v.get("mode") == "alert":
@@ -287,6 +310,8 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
             **user_update,
             # 분류기도 "대피소" 같은 일반 단어를 목적지로 뽑는다 → 장소 검색이 실패해 "요청하신 '대피소'는 찾지 못해"라고 답했다 (2026-10-07)
             "destination_query": destination if destination and destination.strip() not in _NOT_PLACE else None,
+            "reference_query": place,
+            "reference_location": reference,
             "can_move": can_move,
             "damage": damage,
             "wants_action": wants_action,

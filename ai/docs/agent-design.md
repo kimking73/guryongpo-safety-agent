@@ -81,7 +81,7 @@ B3 구현 (2026-10-01):
 | 그룹 | 필드 | 비고 |
 | --- | --- | --- |
 | 입력 | mode, user, current_location, question, risk_event, history, user_memory | mode = `chat` 또는 `alert`, user_memory = 사용자 기억 문장 (아래 기억 절) |
-| 관리자 | phase, selected_agents, manager_feedback, destination_query, can_move, damage, wants_action, user_info | wants_action = 행동·대비·대피를 물었는가(분류기, 모르면 None), user_info = 묻는 것 없이 자기 정보만 말했을 때 들은 내용 |
+| 관리자 | phase, selected_agents, manager_feedback, destination_query, reference_query, reference_location, can_move, damage, wants_action, user_info | wants_action = 행동·대비·대피를 물었는가(분류기, 모르면 None), user_info = 묻는 것 없이 자기 정보만 말했을 때 들은 내용. reference_* (2026-10-12) = 질문에서 말한 기준 장소("우리 가게 침수됐어?" → 가게, "호미로 152에 있는데…" → 호미로 152)와 그 좌표 — 분류기 `place` → `service.locate_reference`(등록 장소 → 시설 이름 → 카카오). 모든 agent의 기준 위치 순서: **말한 장소 → 현재 위치 → 집 → 읍 중심** (`flood.pick_location`). 좌표를 못 찾으면 현재 위치 기준으로 답하고 기준 위치 이름에 '○○ 위치는 찾지 못함'을 밝힌다. 질문마다 초기화 |
 | 전문 → 권고 | specialist_results, action_plan, draft | specialist_results는 병렬 누적 reducer, 재시도 시 RESET |
 | 다듬기 | polished, voice_text, card | |
 | 검증·재시도 | checks, retry_count, verdict, manager_feedback | |

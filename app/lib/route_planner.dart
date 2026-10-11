@@ -25,6 +25,9 @@ class RoutePlanner extends ConsumerWidget {
 
   static const _h = 32.0; // 버튼 높이 (compact)
 
+  /// 지도를 눌러 고른 도착지의 이름
+  static const mapDestLabel = '지도에서 고른 곳';
+
   /// 지금 출발점. 고른 곳이 없으면 현위치
   static LatLng _originAt(WidgetRef ref) => ref.read(routeOriginPoint)?.at ?? ref.read(userLocation).position;
 
@@ -60,12 +63,25 @@ class RoutePlanner extends ConsumerWidget {
 
   /// 출발 'GPS 선택'으로 지도를 누른 곳 = 현재 위치 (GPS로 받은 것처럼, 2026-10-11).
   /// 앱의 현재 위치가 바뀌므로 바다·육지 판별(whereNowProvider)이 다시 돌고, 바다면 경로 안내에 해상 경로가 나온다
+  /// 도착 '지도에서 고르기'(mapPickDest)면 누른 곳이 도착지 — 현재 위치는 그대로 두고 그곳까지 경로를 받는다
+  /// (바다 위 해상 경로 중이면 해상 경로의 도착으로)
   static Future<void> useMapPoint(BuildContext context, WidgetRef ref, LatLng p) async {
     ref.read(mapPickMode.notifier).state = false;
     if (!inServiceArea(p)) {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('구룡포 서비스 지역(경로 안내 범위) 밖이에요. 다른 곳을 눌러 주세요.')));
       ref.read(mapPickMode.notifier).state = true;
+      return;
+    }
+    if (ref.read(mapPickDest)) {
+      ref.read(mapPickDest.notifier).state = false;
+      final to = RoutePoint(mapDestLabel, p);
+      if (_seaMode(ref)) {
+        ref.read(seaDestPoint.notifier).state = to;
+        ref.read(seaRouteOff.notifier).state = false;
+      } else {
+        _routeTo(ref, to);
+      }
       return;
     }
     await chooseOrigin(ref, p, 'GPS 선택 위치');
@@ -150,8 +166,13 @@ class RoutePlanner extends ConsumerWidget {
           choose(home);
         }
       case 'map':
+        ref.read(mapPickDest.notifier).state = false;
         ref.read(mapPickMode.notifier).state = true;
         toast('지도에서 출발할 곳을 눌러 주세요. 바다를 누르면 해상 경로를 안내해요.');
+      case 'mapdest':
+        ref.read(mapPickDest.notifier).state = true;
+        ref.read(mapPickMode.notifier).state = true;
+        toast('지도에서 도착할 곳을 눌러 주세요.');
       case 'nearest':
         if (sea) {
           seaTo(null);
@@ -183,6 +204,7 @@ class RoutePlanner extends ConsumerWidget {
     final dest = id == null ? null : routeDestination(ref, id);
     String km(int m) => m >= 1000 ? '${(m / 1000).toStringAsFixed(1)}km' : '${m}m';
     final picking = ref.watch(mapPickMode);
+    final pickingDest = ref.watch(mapPickDest);
     final atSea = ref.watch(whereNowProvider).valueOrNull?.kind == WhereKind.sea;
     final originButton = RouteEndButton(
       title: '출발',
@@ -208,9 +230,14 @@ class RoutePlanner extends ConsumerWidget {
         const FaIcon(FontAwesomeIcons.handPointer, size: 13, color: Ds.navy),
         const SizedBox(width: 8),
         Expanded(
-            child: Text('지도에서 출발할 곳을 눌러 주세요. 바다를 누르면 해상 경로를 안내해요.',
+            child: Text(pickingDest ? '지도에서 도착할 곳을 눌러 주세요.' : '지도에서 출발할 곳을 눌러 주세요. 바다를 누르면 해상 경로를 안내해요.',
                 style: dsText(13, weight: FontWeight.w700, color: Ds.navy))),
-        TextButton(onPressed: () => ref.read(mapPickMode.notifier).state = false, child: const Text('취소')),
+        TextButton(
+            onPressed: () {
+              ref.read(mapPickMode.notifier).state = false;
+              ref.read(mapPickDest.notifier).state = false;
+            },
+            child: const Text('취소')),
       ]),
     );
     // 바다 위: 해상 경로는 위 '경로 안내' 칸(SeaRoutePanel)이 그린다. 여기서도 출발·도착을 바꾸고 X로 끝낼 수 있게
@@ -503,7 +530,7 @@ class _FacilityListSheet extends ConsumerWidget {
   }
 }
 
-/// 출발·도착 고르는 시트. 돌려주는 값: 'cur' · 'home' · 'map'(GPS 선택) · 'nearest' · 'shelters' · RoutePoint(내 장소·직접 입력)
+/// 출발·도착 고르는 시트. 돌려주는 값: 'cur' · 'home' · 'map'(출발 GPS 선택) · 'mapdest'(도착 지도에서 고르기) · 'nearest' · 'shelters' · RoutePoint(내 장소·직접 입력)
 class _PointSheet extends StatefulWidget {
   const _PointSheet({required this.origin, required this.home, required this.places});
   final bool origin;
@@ -556,7 +583,7 @@ class _PointSheetState extends State<_PointSheet> {
     return SafeArea(
       child: Padding(
         padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-        // 출발: 현위치 · 집 · 내 장소 · GPS 선택 · 직접 입력 (2026-10-11 사용자 요청). 도착은 GPS 선택 대신 대피소
+        // 출발: 현위치 · 집 · 내 장소 · GPS 선택 · 직접 입력 (2026-10-11 사용자 요청). 도착은 GPS 선택 대신 대피소 + 지도에서 고르기
         child: ListView(shrinkWrap: true, padding: const EdgeInsets.only(bottom: 12), children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
@@ -581,6 +608,7 @@ class _PointSheetState extends State<_PointSheet> {
           else ...[
             tile(FontAwesomeIcons.houseFlag, '가까운 대피소', 'nearest'),
             tile(FontAwesomeIcons.listUl, '대피소·의료시설 목록에서 고르기', 'shelters'),
+            tile(FontAwesomeIcons.mapPin, '지도에서 고르기', 'mapdest', sub: '대시보드 지도에서 도착할 곳을 직접 눌러 고르기'),
           ],
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),

@@ -81,6 +81,7 @@ class Settings:
     kakao_rest_key: Optional[str] = None        # 주소 → 좌표 변환 (서버에서만 사용)
     # 다른 서비스 상태 확인 (설정된 것만 /health 에 표시)
     route_health_url: Optional[str] = None
+    route_url: Optional[str] = None             # 방재단 배정 시 도착 예상 시간 계산 (route 서비스). 없으면 직선거리로 추정
     ai_health_url: Optional[str] = None
     version: str = "0.3.0"
     cors_origins: list[str] = field(default_factory=lambda: ["*"])
@@ -106,6 +107,7 @@ def load_settings() -> Settings:
         safetydata_key=_get(e, "SAFETY24_API_KEY", "SAFETYDATA_KEY"),
         kakao_rest_key=_get(e, "KAKAO_REST_KEY"),
         route_health_url=_get(e, "ROUTE_HEALTH_URL"),
+        route_url=(_get(e, "ROUTE_URL") or "").rstrip("/") or None,
         ai_health_url=_get(e, "AI_HEALTH_URL"),
         cors_origins=[x.strip() for x in _get(e, "API_CORS_ORIGINS", "CORS_ORIGINS", default="*").split(",") if x.strip()],
     )
