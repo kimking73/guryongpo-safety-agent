@@ -109,6 +109,33 @@ _NOT_PLACE = {"대피소", "대피", "안전한", "어디", "여기", "거기", 
 _MOBILITY_WORDS = ("무릎", "다리가", "다리를", "지팡이", "휠체어", "거동", "걷기 힘", "걷기가 힘", "잘 못 걸", "보행이")
 
 
+# 질문에 적은 좌표 ("35.9905, 129.5560", "위도 35.9905 경도 129.5560") — 소수 둘째 자리 이상인 수 두 개가 가까이 있을 때
+_COORDS_RE = re.compile(r"(?<![\d.])(\d{2,3}\.\d{2,})(?!\d)[^\d.]{1,12}?(\d{2,3}\.\d{2,})(?![\d.])")
+_KOREA = (33.0, 39.0, 124.0, 132.0)      # 위도 남·북, 경도 서·동 — 이 밖의 수는 좌표로 보지 않는다 (풍속·수위 등)
+
+
+def coords_in(text: str | None) -> Location | None:
+    """글 속 위도·경도 한 쌍 → 위치 (2026-10-12 사용자 요청: 대화에서 좌표로 출발지 지정). 경도를 먼저 써도 알아본다. 없으면 None"""
+    for m in _COORDS_RE.finditer(text or ""):
+        a, b = float(m.group(1)), float(m.group(2))
+        for lat, lon in ((a, b), (b, a)):
+            if _KOREA[0] <= lat <= _KOREA[1] and _KOREA[2] <= lon <= _KOREA[3]:
+                return Location(lat=lat, lon=lon, label=f"위도 {_num(lat)}, 경도 {_num(lon)}")
+    return None
+
+
+def _num(v: float) -> str:
+    return f"{v:.6f}".rstrip("0").rstrip(".")
+
+
+# 좌표로 정한 출발지를 푸는 말
+_ORIGIN_CLEAR = ("현재 위치로", "현재 위치 기준", "현재 위치에서", "지금 위치로", "내 위치로", "출발지 해제", "출발지 취소",
+                 "출발지 초기화", "출발지 설정 해제", "출발지 설정 취소")
+ORIGIN_SET_REPLY = ("출발지를 {label}(으)로 정했어요. 이 대화에서는 그곳을 기준으로 위험과 대피 경로를 안내합니다. "
+                    "되돌리려면 \"현재 위치로 안내해 줘\"라고 말씀해 주세요.")
+ORIGIN_CLEARED_REPLY = "출발지 설정을 풀었어요. 다시 현재 위치 기준으로 안내합니다."
+
+
 def keyword_destination(question: str) -> str | None:
     m = _DEST_RE.search(question or "")
     return m.group(1) if m and m.group(1) not in _NOT_PLACE else None
@@ -173,6 +200,7 @@ _NEW_TURN_RESET = {
     "user_info": None,
     "reference_query": None,
     "reference_location": None,
+    "origin_changed": None,
 }
 
 # 전문 agent 없이 바로 답할 때 (인사·사용법, 자기 정보만 말함). 위험 여부·할 일은 말하지 않는다 (2026-10-10 사용자 결정)
@@ -282,10 +310,26 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
             user_update = {"user": user.model_copy(update={"walking_impaired": True})}
 
         # 질문 속 기준 장소 → 좌표. 찾으면 이번 질문은 그곳 기준 (flood.pick_location), 못 찾으면 이름만 남겨 답에 밝힌다
+        # 좌표를 적었으면 장소 검색 없이 그 좌표가 기준 (질문에 적은 것이 먼저, 없으면 분류기가 이전 대화에서 가져온 것)
         if place in _NOT_PLACE:
             place = None
-        reference = None
-        if place and locate is not None:
+        # 질문에 직접 적은 좌표는 이 대화의 출발지로 남는다 (pinned_origin) — "현재 위치로" 같은 말로 푼다
+        chat = state.get("mode") != "alert"
+        typed = coords_in(question) if chat else None
+        reference = typed or (coords_in(place) if chat else None)
+        origin_update: dict = {}
+        if typed is not None:
+            origin_update = {"pinned_origin": typed, "origin_changed": "set"}
+        elif chat and state.get("pinned_origin") is not None and any(w in question for w in _ORIGIN_CLEAR):
+            origin_update = {"pinned_origin": None, "origin_changed": "cleared"}
+        # 출발지만 정하거나 푸는 말("출발지는 …야", "현재 위치로 안내해 줘")은 질문이 아니다 → 확인 문장만 (direct_reply).
+        # 분류기가 '안내'를 보고 경로 agent를 골라 엉뚱한 대피 안내가 나갔다 (2026-10-12 local). 재난·대피 낱말이 있으면 그대로 답한다
+        if origin_update and not fallback_classify(view):
+            selected = []
+        if reference is not None:
+            place = reference.label
+            logger.info("기준 좌표 %s%s", place, " (출발지로 정함)" if typed is not None else "")
+        elif place and locate is not None:
             try:
                 reference = locate(place, user)
             except Exception:  # noqa: BLE001 — 장소 검색 실패로 답이 끊기면 안 된다
@@ -293,7 +337,7 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
             logger.info("기준 장소 %r → %s", place, "찾음" if reference else "못 찾음")
         elif locate is None:
             place = None
-        view = {**view, "reference_query": place, "reference_location": reference}
+        view = {**view, "reference_query": place, "reference_location": reference, **origin_update}
 
         def _phase(v: GuardianState) -> Phase:
             if phase_of is None or v.get("mode") == "alert":
@@ -312,6 +356,7 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
             "destination_query": destination if destination and destination.strip() not in _NOT_PLACE else None,
             "reference_query": place,
             "reference_location": reference,
+            **origin_update,
             "can_move": can_move,
             "damage": damage,
             "wants_action": wants_action,
@@ -360,7 +405,13 @@ def direct_reply(state: GuardianState) -> dict:
     checkpointer가 턴 사이에 state를 남기므로 이전 질문의 행동 권고·카드를 비운다 (안 비우면 응답에 이전 카드·되묻기가 실린다).
     """
     info = state.get("user_info")
-    answer = USER_INFO_REPLY.format(info=info) if info else SERVICE_INTRO
+    changed, pin = state.get("origin_changed"), state.get("pinned_origin")
+    if changed == "set" and pin is not None:
+        answer = ORIGIN_SET_REPLY.format(label=pin.label)      # "출발지는 35.99, 129.55야" — 묻는 것 없이 출발지만 정함
+    elif changed == "cleared":
+        answer = ORIGIN_CLEARED_REPLY
+    else:
+        answer = USER_INFO_REPLY.format(info=info) if info else SERVICE_INTRO
     return {"final_answer": answer, "used_fallback": False, "voice_text": answer, "card": None, "action_plan": None,
             "draft": answer}
 

@@ -372,3 +372,51 @@ def test_locate_reference_uses_registered_place_name(monkeypatch):
         if q.replace(" ", "") == "우리가게" else {"available": False, "reason": "없음"}))
     assert SV.locate_reference("우리 가게", u) == Location(lat=35.9894, lon=129.5534, label="가게")
     assert SV.locate_reference("모르는 곳", u) is None
+
+
+def test_coordinates_in_question_set_the_reference_location():
+    """ "35.9905, 129.5560에서 가까운 대피소 알려줘" → 그 좌표가 기준·출발지 (2026-10-12). 장소 검색을 거치지 않는다"""
+    assert (G.coords_in("35.9905, 129.5560에서 출발").lat, G.coords_in("35.9905, 129.5560에서 출발").lon) == (35.9905, 129.556)
+    assert G.coords_in("위도 35.9905 경도 129.5560").label == "위도 35.9905, 경도 129.556"
+    assert G.coords_in("129.5560 / 35.9905").lat == 35.9905                     # 경도를 먼저 써도
+    assert G.coords_in("평균 풍속 16.5m/s, 순간 24.03m/s 인데 괜찮아?") is None    # 좌표가 아닌 수
+    assert G.coords_in("비 12.55mm 왔어") is None and G.coords_in(None) is None
+
+    def never(q, u):
+        raise AssertionError("좌표는 장소 검색을 하지 않는다")
+    out = G.make_manager(_clf(), locate=never)(
+        {"mode": "chat", "question": "35.9905, 129.5560에서 가까운 대피소 알려줘", "user": UserProfile(user_id="u1"),
+         "current_location": Location(lat=35.98643, lon=129.54509)})
+    assert (out["reference_location"].lat, out["reference_location"].lon) == (35.9905, 129.556)
+    sent = []
+    L.collect({**state(), **out}, fetch=flood_db, route_client=route_server(sent))
+    assert sent[0]["origin"] == {"lat": 35.9905, "lon": 129.556}
+    # 기본 그래프(locate 없음)·분류기가 이전 대화에서 가져온 좌표도 같다
+    out = G.make_manager(_clf(place="35.9905, 129.5560"))({"mode": "chat", "question": "거기 침수됐어?", "user": UserProfile(user_id="u1")})
+    assert out["reference_location"].lat == 35.9905 and out["reference_query"] == "위도 35.9905, 경도 129.556"
+
+
+def test_typed_coordinates_stay_as_origin_until_cleared():
+    """좌표로 정한 출발지는 이 대화에서 계속 쓴다 — 다음 질문에 좌표가 없어도. "현재 위치로"로 푼다"""
+    here = Location(lat=35.98643, lon=129.54509)
+    base = {"mode": "chat", "user": UserProfile(user_id="u1"), "current_location": here}
+    none = OpenAIClassifier(client=SimpleNamespace(responses=SimpleNamespace(parse=lambda **k: SimpleNamespace(
+        output_parsed=Classification(agents=[], reason="질문 없음"), output_text="", usage=None))), model="t")
+    s1 = {**base, **G.make_manager(none)({**base, "question": "출발지는 35.9905, 129.5560 야."})}
+    assert s1["origin_changed"] == "set" and s1["pinned_origin"].lat == 35.9905
+    assert "위도 35.9905, 경도 129.556" in G.direct_reply(s1)["final_answer"]
+    s2 = {**s1, **G.make_manager(_clf())({**s1, "question": "가까운 대피소 알려줘"})}
+    assert s2["reference_location"] is None and s2["origin_changed"] is None
+    loc, known = pick_location(s2)
+    assert (loc.lat, loc.label, known) == (35.9905, "위도 35.9905, 경도 129.556", True)
+    # 이번 질문에서 말한 장소가 있으면 그 질문만 그곳 기준
+    shop = Location(lat=35.9894, lon=129.5534, label="가게")
+    s3 = {**s2, **G.make_manager(_clf(place="가게"), locate=lambda q, u: shop)({**s2, "question": "우리 가게 침수됐어?"})}
+    assert pick_location(s3)[0].label == "가게" and s3["pinned_origin"].lat == 35.9905
+    # 분류기가 경로 agent를 골라도 푸는 말만 있으면 확인 문장으로 끝낸다
+    route_clf = OpenAIClassifier(client=SimpleNamespace(responses=SimpleNamespace(parse=lambda **k: SimpleNamespace(
+        output_parsed=Classification(agents=[Specialist.LOCATION_ROUTE], reason="안내"), output_text="", usage=None))), model="t")
+    s4 = {**s3, **G.make_manager(route_clf)({**s3, "question": "이제 현재 위치로 안내해 줘"})}
+    assert s4["selected_agents"] == []
+    assert s4["pinned_origin"] is None and G.direct_reply(s4)["final_answer"] == G.ORIGIN_CLEARED_REPLY
+    assert pick_location(s4)[0].label == "현재 위치"

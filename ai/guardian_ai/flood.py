@@ -55,7 +55,7 @@ class FloodData:
 
 
 def pick_location(state: GuardianState) -> tuple[Location, bool]:
-    """질문에서 말한 장소 → 현재 위치 → 집 → 구룡포읍 중심 순. 두 번째 값은 사용자 위치를 알았는지.
+    """질문에서 말한 장소 → 대화에서 좌표로 정한 출발지 → 현재 위치 → 집 → 구룡포읍 중심 순. 두 번째 값은 사용자 위치를 알았는지.
 
     label은 항상 채운다 ("현재 위치"/"집"/사용자가 붙인 이름) — 근거 목록의 '기준 위치'와 답변 작성기에 같은 이름을 쓰기 위해.
     """
@@ -66,6 +66,10 @@ def pick_location(state: GuardianState) -> tuple[Location, bool]:
     # 장소를 말했는데 좌표를 못 찾았으면 아래 기준으로 답하되, 기준 위치 이름에 그 사실을 밝힌다
     asked = state.get("reference_query")
     note = f" ('{asked}' 위치는 찾지 못함)" if asked else ""
+    # 대화에서 좌표로 정한 출발지 — 풀 때까지 현재 위치 대신 쓴다 (graph.make_manager, pinned_origin)
+    pin = state.get("pinned_origin")
+    if pin:
+        return pin.model_copy(update={"label": (pin.label or "정한 출발지") + note}), True
     loc = state.get("current_location")
     if loc:
         return loc.model_copy(update={"label": (loc.label or "현재 위치") + note}), True

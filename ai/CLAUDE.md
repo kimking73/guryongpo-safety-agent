@@ -4,7 +4,7 @@
 1. Read `.claude/docs/timeline.md` → status table, "다음 세션 시작점", "이월 항목", work log.
 2. From `코드/`: `git pull` (teammates push to `main`), then `docker compose up -d` and `docker compose ps`
    (db, api, ai all healthy). If `.env` changed since the ai container started: `docker compose up -d --force-recreate ai`.
-3. Baseline tests: `.venv/bin/python -m pytest -q` → **242 passed** (2026-10-12). `-m "db and not live"` needs local db + `AI_DB_*`
+3. Baseline tests: `.venv/bin/python -m pytest -q` → **244 passed** (2026-10-12). `-m "db and not live"` needs local db + `AI_DB_*`
    in `.env` (plain `-m db` also runs paid live tests). `-m live` calls real OpenAI (routing, B3 injection, extractor; a few 원).
    If `docker compose ps` hangs, restart the OrbStack app (happened 2026-10-08); VM checks still work.
    Other lanes' baselines: server 223 passed·8 skipped, route 77, app 7 known failures as of 10-09 (not fully rerun since) (see timeline "다음 세션 시작점";
@@ -48,6 +48,10 @@
   Saving: the extractor's `MemoryFact.label` ("가게") names the frequent place; `service._place_queries` also tries the road-address part alone
   (long phrases never match Kakao keyword search) and skips area-only words ("구룡포"); same label said again → PATCH. Known limit: asking about a
   remote place while elsewhere also gives the evacuation route from that place.
+  Coordinates typed in chat (`graph.coords_in`, lat/lon in either order, Korea range only) become the reference without any place search and stay
+  as `state.pinned_origin` for the conversation (after a said place, before the current location) until "현재 위치로"/"출발지 해제"; a message that only
+  sets or clears it gets a fixed confirmation (`direct_reply`, `origin_changed`). The app map still draws AI routes with the current location as origin
+  (`ChatResponse.route` carries no origin — a plan to add it was not approved on 10-12).
 - Realtime voice (2026-10-11, `guardian_ai/realtime.py`): `POST /api/voice/session` mints a 10-min OpenAI client secret for `gpt-realtime-2`
   (`OPENAI_REALTIME_MODEL`/`_VOICE`); the web app connects by WebRTC and the model only calls tools (`tool_choice=required`: `ask_guardian` →
   app calls `/api/chat`, answer read back verbatim via `read_out_prefix`; `end_conversation`). LangGraph is unchanged. Spoken audio is outside the
