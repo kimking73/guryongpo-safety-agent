@@ -129,7 +129,7 @@ void main() {
     expect(find.textContaining('기타 취약'), findsNothing);
     expect(find.textContaining('독거노인'), findsNothing);
     expect(find.text('장애인 가구'), findsNothing);
-    expect(find.text('지체장애 가구'), findsOneWidget);   // 범례
+    expect(find.text('지체장애 가구'), findsOneWidget);   // 범례는 '우선 확인 가구 지도' 메뉴 안 (방문 경로 안내는 '경로 안내' 메뉴, 2026-10-11)
     // 등록 가구 목록 카드는 뺐다 (2026-10-10) — 지도 표식(툴팁)으로 확인. 세 유형이 없는 가구는 지도에 없다
     Finder marker(String label) => find.byWidgetPredicate((w) => w is Tooltip && (w.message ?? '').startsWith(label));
     expect(marker('[시연] 김○○ 댁 · 지체장애'), findsOneWidget);
@@ -452,7 +452,7 @@ void main() {
     await t.ensureVisible(find.widgetWithText(MapMenuButton, '경로 안내'));
     await t.tap(find.widgetWithText(MapMenuButton, '경로 안내'));
     await _settle(t);
-    expect(find.text('방문 경로 안내'), findsOneWidget);
+    expect(find.text('방문 경로 안내'), findsWidgets);   // 창 제목 + 지도 아래 칸 제목
     expect(find.text('대피소·의료시설 선택'), findsNothing);
     // 박○○(2번)·김○○(1번)를 넣고 t-3은 안 넣음. 목록 순서 = 우선 확인 순서 (김○○ 먼저)
     await t.tap(find.widgetWithText(PillButton, '경로 추가').at(1));
@@ -466,7 +466,7 @@ void main() {
     expect(sent, hasLength(1));
     expect([for (final x in sent.last['stops'] as List) (x['id'], x['tier'])], [('t-1', 2), ('t-2', 4)]);   // 명단(순위) 순서로 보냄
     expect(sent.last['mode'], 'walk');
-    expect(find.text('내 방문 경로'), findsOneWidget);
+    expect(find.text('방문 경로 안내'), findsOneWidget);   // 지도 범례 자리의 칸 (2026-10-11)
     expect(find.text('경로에 넣은 곳 2/10'), findsOneWidget);
     expect(find.byTooltip('경로에서 빼기'), findsNWidgets(2));
     expect(find.text('출발:'), findsOneWidget);                 // 대시보드 경로 안내와 같은 출발 칸
@@ -474,8 +474,8 @@ void main() {
     expect(find.text('도보 · 총 1.2km · 약 15분'), findsOneWidget);
     double y(String label) => t.getTopLeft(find.descendant(of: find.byType(ListTile), matching: find.text(label)).first).dy;
     expect(y('[시연] 박○○ 댁'), lessThan(y('[시연] 김○○ 댁')));   // 최단: t-2 → t-1
-    await t.ensureVisible(find.text('우선순위 최단 경로'));
-    await t.tap(find.text('우선순위 최단 경로'));
+    await t.ensureVisible(find.text('우선순위 경로'));
+    await t.tap(find.text('우선순위 경로'));
     await _settle(t);
     expect(y('[시연] 김○○ 댁'), lessThan(y('[시연] 박○○ 댁')));   // 우선순위: t-1 → t-2
 
@@ -619,9 +619,7 @@ void main() {
     await _settle(t);
     expect(find.text('이름과 주소를 모두 넣어 주세요.'), findsOneWidget);
     await t.enterText(find.widgetWithText(TextField, '주소 (필수)'), '구룡포읍 호미로 152');
-    await t.tap(find.widgetWithText(FilledButton, '등록'));
-    await _settle(t);
-    expect(find.textContaining('장애 유형을 골라 주세요'), findsOneWidget);
+    // 장애 유형은 선택 (2026-10-11 사용자 결정 — 고르지 않아도 등록 가능)
     await t.tap(find.widgetWithText(FilterChip, '지체'));
     await t.tap(find.widgetWithText(FilterChip, '시각'));
     await t.pump();
@@ -634,7 +632,8 @@ void main() {
     expect(body['address'], '구룡포읍 호미로 152');
     expect(body['needs'], ['mobility_limited', 'vision']);
     expect(body['location'], isA<Map>());
-    expect(body['consent_method'], 'written');
+    expect(body['consent_method'], 'verbal');   // 동의는 확인 체크 하나 → 구두·본인 또는 보호자 (2026-10-11)
+    expect(body['consent_by'], '본인 또는 보호자');
     expect(body.containsKey('note'), isFalse);
     await t.pumpWidget(const SizedBox.shrink());
   });

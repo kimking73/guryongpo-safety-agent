@@ -239,7 +239,7 @@ class _MLoginScreenState extends ConsumerState<MLoginScreen> {
     context.go(Onboarding.done ? next : Uri(path: '/setup', queryParameters: {'from': next}).toString());
   }
 
-  Widget _consent(bool on, FaIconData icon, String text, bool soft, VoidCallback onTap) => Semantics(
+  Widget _consent(bool on, FaIconData icon, String text, VoidCallback onTap) => Semantics(
         checked: on,
         child: Material(
           color: on ? Ds.soft : Colors.white,
@@ -269,7 +269,7 @@ class _MLoginScreenState extends ConsumerState<MLoginScreen> {
                 ),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(color: soft ? Ds.soft : Colors.white, borderRadius: BorderRadius.circular(Ds.pill)),
+                  decoration: BoxDecoration(color: on ? Colors.white : Ds.soft, borderRadius: BorderRadius.circular(Ds.pill)),
                   child: Text('필수', style: dsText(13, weight: FontWeight.w700, color: Ds.navy)),
                 ),
               ]),
@@ -476,9 +476,9 @@ class _MLoginScreenState extends ConsumerState<MLoginScreen> {
                     const SizedBox(height: 6),
                     Text('나에게 맞는 대피 안내를 위해 몇 가지만 알려주세요.', style: dsText(17, color: Ds.muted, height: 1.5)),
                     const SizedBox(height: 22),
-                    _consent(cLoc, FontAwesomeIcons.locationCrosshairs, '위치 정보 수집 동의', false, () => setState(() => cLoc = !cLoc)),
+                    _consent(cLoc, FontAwesomeIcons.locationCrosshairs, '위치 정보 수집 동의', () => setState(() => cLoc = !cLoc)),
                     const SizedBox(height: 10),
-                    _consent(cDis, FontAwesomeIcons.wheelchairMove, '장애 정보(시각·청각·지체) 민감정보 수집 동의', true,
+                    _consent(cDis, FontAwesomeIcons.wheelchairMove, '장애 정보(시각·청각·지체) 민감정보 수집 동의',
                         () => setState(() => cDis = !cDis)),
                     const SizedBox(height: 26),
                     Row(children: [

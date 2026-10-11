@@ -170,13 +170,14 @@ void main() {
     for (var i = 0; i < 3; i++) {
       await t.pump(const Duration(milliseconds: 100));
     }
-    final chip = find.text('지금 침수 위험이 있어?');
+    // 추천 질문 칩 (침수 위험 칩은 2026-10-11 삭제 → 가까운 대피소 칩)
+    final chip = find.text('가까운 대피소는 어디야?');
     await t.ensureVisible(chip.first);
     await t.tap(chip.first);
     expect(
         container
             .read(chatMessages)
-            .any((m) => m.mine && m.text == '지금 침수 위험이 있어?'),
+            .any((m) => m.mine && m.text == '가까운 대피소는 어디야?'),
         isTrue);
     for (var i = 0; i < 4; i++) {
       await t.pump(const Duration(milliseconds: 300));
@@ -213,7 +214,7 @@ void main() {
     expect(
         container
             .read(chatMessages)
-            .any((m) => m.mine && m.text == '지금 침수 위험이 있어?'),
+            .any((m) => m.mine && m.text == '가까운 대피소는 어디야?'),
         isTrue);
     appRouter.go('/ai');
     await t.pump(const Duration(milliseconds: 300));

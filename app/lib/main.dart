@@ -5,6 +5,7 @@ import 'ui/gk_widgets.dart';
 import 'services/account_sync.dart';
 import 'dart:async';
 import 'dart:typed_data';
+import 'package:dio/dio.dart' show Dio, BaseOptions;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -55,10 +56,30 @@ bool useMobileUi = !kIsWeb;
 final repo = Provider<SafetyRepository>((_) =>
     AppConfig.isRemote ? RemoteSafetyRepository() : MockSafetyRepository());
 final offline = StateProvider<bool>((_) => false);
+
+/// 기기 연결 확인 (2026-10-11 사용자 요청 — 예전에는 온라인 배지를 눌러야 바뀌었다).
+/// 서버 연결 앱(APP_MODE=remote)은 API 서버 /api/health 에 닿는지로 판정한다. 예시 모드는 서버가 없으니 늘 온라인
+final _healthDio = Dio(BaseOptions(
+    connectTimeout: const Duration(seconds: 4), receiveTimeout: const Duration(seconds: 4)));
+
+Future<void> checkConnection(WidgetRef ref) async {
+  if (!AppConfig.isRemote) return;
+  bool ok;
+  try {
+    final r = await _healthDio.get<Object>('${AppConfig.apiBaseUrl}/api/health');
+    ok = (r.statusCode ?? 0) < 500;
+  } catch (_) {
+    ok = false;
+  }
+  if (ref.read(offline) == ok) ref.read(offline.notifier).state = !ok;
+}
 final routeFacilityId = StateProvider<String?>((_) => null);
 final routeFacilitySnapshot = StateProvider<Facility?>((_) => null);
 final routeStartOrigin = StateProvider<LatLng?>((_) => null);
 
+/// 경로 안내 ⇄ (2026-10-11 사용자 요청): true 면 대피소 → 출발지(현위치·집·내 장소) 방향으로 계산한다 (귀가 경로).
+/// 대피소 목록·대시보드 경로 안내 줄에서 고른 경로에만 쓴다 — AI·길찾기 경로는 그대로
+final routeReversed = StateProvider<bool>((_) => false);
 /// 경로 안내 '출발:'에서 고른 곳 (집·내 장소·검색, 2026-10-10). null = 현위치.
 /// 앱의 현재 위치(userLocation)는 바꾸지 않고 경로 출발점만 바꾼다
 class RoutePoint {
@@ -144,14 +165,22 @@ class ChatController {
 
   void add(List<ChatMessage> m) => _ref.read(chatMessages.notifier).state = [..._ref.read(chatMessages), ...m];
 
-  /// 글 질문. [decorate]는 답 문구를 바꿀 때(대시보드 예시 모드)
-  Future<void> ask(String question, {String Function(ChatAnswer)? decorate}) async {
+  /// 방금 붙인 답에 덧붙일 카드 (휴대폰 대화창 m.cardFor: 체크리스트·태풍·지원). 화면을 떠나 있어도 붙는다
+  void _card(String? kind, ChatAnswer answer) {
+    if (kind == null || answer.isError == true) return;
+    _ref.read(m.chatCards.notifier).state = {..._ref.read(m.chatCards), _ref.read(chatMessages).length - 1: kind};
+  }
+
+  /// 글 질문. [decorate]는 답 문구를 바꿀 때(대시보드 예시 모드), [cardOf]는 질문 → 덧붙일 카드 종류
+  Future<void> ask(String question,
+      {String Function(ChatAnswer)? decorate, String? Function(String question)? cardOf}) async {
     if (question.trim().isEmpty || busy) return;
     add([ChatMessage(question, true)]);
     _ref.read(chatLoading.notifier).state = true;
     try {
       final answer = await _ref.read(repo).ask(question, UserMode.user, _ref.read(userLocation).position);
       add([ChatMessage(decorate?.call(answer) ?? answer.text, false, answer: answer)]);
+      _card(cardOf?.call(question), answer);
     } catch (_) {
       const answer = ChatAnswer('AI 서비스에 연결하지 못했습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.', isError: true);
       add([ChatMessage(answer.text, false, answer: answer)]);
@@ -161,13 +190,14 @@ class ChatController {
   }
 
   /// 음성 질문 (녹음이 끝난 wav). 받아쓴 질문·답을 붙이고 답 음성을 재생한다 — 다른 메뉴에 있어도 재생
-  Future<void> askVoice(Uint8List wav) async {
+  Future<void> askVoice(Uint8List wav, {String? Function(String question)? cardOf}) async {
     _ref.read(chatLoading.notifier).state = true;
     ChatAnswer? answer;
     try {
       final v = await _ref.read(repo).askVoice(wav, UserMode.user, _ref.read(userLocation).position);
       answer = v.answer;
       add([ChatMessage('🎤 ${v.transcript}', true), ChatMessage(v.answer.text, false, answer: v.answer)]);
+      _card(cardOf?.call(v.transcript), v.answer);
     } catch (e) {
       add([ChatMessage(e is RemoteError ? e.message : '음성 질문을 처리하지 못했습니다. 다시 시도해 주세요.', false)]);
     } finally {
@@ -319,6 +349,21 @@ final routeProvider =
           .firstWhere((f) => f.id == facilityId);
   final origin = ref.watch(routeStartOrigin) ?? ref.read(userLocation).position;
   TravelSetting.mode = ref.watch(travelMode);
+  if (facilityId != customRouteId && ref.watch(routeReversed)) {
+    final back = Facility(
+        id: facility.id,
+        name: ref.read(originLabelProvider) ?? '현위치',
+        type: FacilityType.place,
+        position: origin,
+        address: '',
+        description: '귀가 경로 도착지',
+        distanceKm: 0,
+        walkMinutes: 0,
+        accessible: false);
+    return ref
+        .watch(repo)
+        .routeFor(back, UserMode.user, ref.watch(routeKind), facility.position);
+  }
   return ref
       .watch(repo)
       .routeFor(facility, UserMode.user, ref.watch(routeKind), origin);
@@ -382,9 +427,11 @@ String nearestShelterId(WidgetRef ref) {
 
 /// The only state transition that starts a route. Every shelter picker uses
 /// this so a selected destination always opens the dashboard map route mode.
+/// [reversed] = 대피소 → 출발지 (경로 안내 줄의 ⇄). 다른 곳(재난문자·AI·SOS)에서 부르면 늘 대피 방향
 void startRouteToShelter(WidgetRef ref, String shelterId,
-    {RouteType routeType = RouteType.safest}) {
+    {RouteType routeType = RouteType.safest, bool reversed = false}) {
   ref.read(routeKind.notifier).state = routeType;
+  ref.read(routeReversed.notifier).state = reversed;
   final facility = ref
       .read(facilitiesProvider)
       .valueOrNull
@@ -582,6 +629,7 @@ class _NotificationBootstrap extends ConsumerStatefulWidget {
 class _NotificationBootstrapState extends ConsumerState<_NotificationBootstrap>
     with WidgetsBindingObserver {
   Timer? _pollTimer;
+  Timer? _netTimer;
   bool _pollInFlight = false;
   String? _since;
   ProviderSubscription<bool>? _offlineSubscription;
@@ -595,6 +643,7 @@ class _NotificationBootstrapState extends ConsumerState<_NotificationBootstrap>
       }
     });
     WidgetsBinding.instance.addObserver(this);
+    _startNetCheck();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final controller = ref.read(prototypeSafetyProvider);
       await controller.load();
@@ -644,6 +693,12 @@ class _NotificationBootstrapState extends ConsumerState<_NotificationBootstrap>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _startNetCheck();
+    } else {
+      _netTimer?.cancel();
+      _netTimer = null;
+    }
     if (state == AppLifecycleState.resumed) {
       _pollTimer?.cancel();
       unawaited(_pollAlerts());
@@ -698,10 +753,19 @@ class _NotificationBootstrapState extends ConsumerState<_NotificationBootstrap>
     }
   }
 
+  /// 지금 한 번 + 8초마다 연결 확인 (앱이 앞에 있을 때만)
+  void _startNetCheck() {
+    _netTimer?.cancel();
+    if (!AppConfig.isRemote) return;
+    unawaited(checkConnection(ref));
+    _netTimer = Timer.periodic(const Duration(seconds: 8), (_) => unawaited(checkConnection(ref)));
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
+    _netTimer?.cancel();
     _offlineSubscription?.close();
     unawaited(FcmNotificationService.instance.dispose());
     super.dispose();
@@ -1415,14 +1479,14 @@ class StatusLine extends ConsumerWidget {
       child: Row(children: [
         Expanded(
           child: Wrap(spacing: 10, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-            // 온라인 배지 — 누르면 오프라인 화면 보기 (예전 '오프라인 보기'·'다시 연결')
+            // 온라인 배지 — 연결 상태를 자동으로 보인다. 누르면 지금 다시 확인 (2026-10-11)
             Tooltip(
-              message: isOffline ? '다시 연결' : '오프라인 보기 · ${AppConfig.dataLabel}',
+              message: isOffline ? '눌러서 다시 확인' : '연결됨 · ${AppConfig.dataLabel}',
               child: GkPill(isOffline ? '오프라인' : '온라인',
                   icon: isOffline ? Icons.cloud_off_rounded : Icons.cloud_done_rounded,
                   bg: isOffline ? GK.orange : Colors.white,
                   fg: isOffline ? Colors.white : GK.navy,
-                  onTap: () => ref.read(offline.notifier).state = !isOffline),
+                  onTap: () => unawaited(checkConnection(ref))),
             ),
             EvacStatusChip(narrow: narrow),
           ]),
@@ -2822,12 +2886,11 @@ class _AiScreenState extends ConsumerState<AiScreen> {
     await _chat.askVoice(wav);
   }
 
+  // 침수 위험·도보 안전·대피 요령 질문은 뺐다 (2026-10-11 사용자 요청, 휴대폰 추천 질문과 같게)
   List<String> get suggestions => [
         '가까운 대피소는 어디야?',
-        '지금 침수 위험이 있어?',
-        if (hasJob) '재난 후 내가 받을 수 있는 보험이 있는지 알려줘' else '도보로 안전하게 갈 수 있어?',
-        '대피할 때 뭘 해야 해?',
-        // 대시보드 '재난 후 지원 · 복구' 카드를 대신한다 (2026-10-11 사용자 요청)
+        if (hasJob) '재난 후 내가 받을 수 있는 보험이 있는지 알려줘',
+        // 대시보드 '재난 후 지원 · 복구' 카드를 대신한다 (김다인 2026-10-11)
         '내가 받을 수 있는 재난 지원 혹은 복구 사항 알려줘',
       ];
 

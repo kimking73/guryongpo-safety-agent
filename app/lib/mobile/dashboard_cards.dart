@@ -1,14 +1,20 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../disaster_center.dart' show LiveRealtimeCards;
 import '../live_screens.dart';
 import '../main.dart';
 import '../models/domain_models.dart';
 import '../origin_picker.dart';
+import '../route_planner.dart' show RouteOptions;
 import '../services/account_service.dart';
+import '../services/geocoding_service.dart';
+import '../services/location_service.dart' show inServiceArea;
 import '../ui/tokens.dart';
 import '../ui/widgets.dart';
 
@@ -274,9 +280,24 @@ class WeatherItem {
       required this.note,
       required this.icon,
       required this.badge,
-      this.source = ''});
+      this.source = '',
+      this.tableTitle = '',
+      this.tableHead = '시각',
+      this.table = const []});
   final String key, title, value, unit, level, note, source;
   final FaIconData icon, badge;
+
+  /// 눌렀을 때 보이는 표 (2026-10-11 사용자 요청): 시각(또는 지점) · 값. 서버가 시간별 값을 주는 항목만 (강풍·강우량·파고),
+  /// 수위는 지점별 지금 값. 비어 있으면 표 대신 안내 한 줄
+  final String tableTitle, tableHead;
+  final List<(String, String)> table;
+
+  /// 누르면 보이는 '실시간 관측·예보 자세히' 카드 (LiveRealtimeCards.only)
+  Set<String> get detailKeys => switch (key) {
+        'river' => const {'water'},
+        'dust' => const {'fine_dust', 'ultrafine_dust'},
+        _ => {key},
+      };
 
   Color get color => level.isEmpty ? Ds.track : Ds.level(level);
   Color get onColor => level.isEmpty ? Ds.navy : Ds.onLevel(color);
@@ -285,8 +306,8 @@ class WeatherItem {
   /// 쉬운 말 설명 (디자인: 고령자도 바로 이해)
   String get description {
     const d = {
-      'wind': ['바람이 약해요', '바람이 조금 불어요', '바람이 강해요. 간판·나뭇가지를 조심하세요', '우산이 뒤집힐 만큼 센 바람이에요'],
-      'rain': ['비가 오지 않거나 약해요', '비가 조금 와요', '비가 많이 와요. 낮은 길을 피하세요', '길에 물이 찰 만큼 비가 많이 와요'],
+      'wind': ['바람이 약해요', '바람이 조금 불어요', '바람이 강해요. 간판·나뭇가지를 조심하세요', '우산이 뒤집힐 만큼 센 바람이에요. 외출을 삼가세요'],
+      'rain': ['비가 오지 않거나 약해요', '비가 조금 와요. 우산을 챙기세요', '비가 많이 와요. 우산을 챙기고 낮은 길을 피하세요', '길에 물이 찰 만큼 비가 많이 와요. 외출을 미루세요'],
       'wave': ['바다가 잔잔해요', '파도가 조금 있어요', '파도가 높아요. 해안에 가지 마세요', '파도가 매우 높아요. 바닷가에 절대 가지 마세요'],
       'river': ['하천 물높이가 안정적이에요', '아직 괜찮지만 물이 불어나고 있어요', '물이 많이 불었어요. 하천에서 멀어지세요', '물이 넘칠 수 있어요. 바로 높은 곳으로 가세요'],
       'dust': ['공기가 깨끗해요. 마스크 없어도 돼요', '공기가 보통이에요', '공기가 나빠요. 마스크를 쓰세요', '공기가 매우 나빠요. 바깥 활동을 줄이세요'],
@@ -302,9 +323,12 @@ class WeatherItem {
 List<WeatherItem> weatherItems(Map<String, dynamic>? dashboard, {required bool demo}) {
   if (demo) {
     return const [
-      WeatherItem(key: 'wind', title: '강풍', value: '21', unit: 'm/s', level: '경보', note: '북동풍 · 순간 30m/s', icon: FontAwesomeIcons.wind, badge: FontAwesomeIcons.hurricane, source: '예시 자료'),
-      WeatherItem(key: 'rain', title: '강우량', value: '32', unit: 'mm/h', level: '주의', note: '오늘 누적 118mm', icon: FontAwesomeIcons.houseFloodWater, badge: FontAwesomeIcons.cloudShowersHeavy, source: '예시 자료'),
-      WeatherItem(key: 'wave', title: '파고', value: '3.2', unit: 'm', level: '주의', note: '최대 4.8m · 해안 접근 금지', icon: FontAwesomeIcons.houseTsunami, badge: FontAwesomeIcons.water, source: '예시 자료'),
+      WeatherItem(key: 'wind', title: '강풍', value: '21', unit: 'm/s', level: '경보', note: '북동풍 · 순간 30m/s', icon: FontAwesomeIcons.wind, badge: FontAwesomeIcons.hurricane, source: '예시 자료',
+          tableTitle: '최근 6시간 (시간별 최대)', table: [('지금', '21'), ('1시간 전', '19'), ('2시간 전', '16'), ('3시간 전', '12'), ('4시간 전', '9'), ('5시간 전', '7')]),
+      WeatherItem(key: 'rain', title: '강우량', value: '32', unit: 'mm/h', level: '주의', note: '오늘 누적 118mm', icon: FontAwesomeIcons.houseFloodWater, badge: FontAwesomeIcons.cloudShowersHeavy, source: '예시 자료',
+          tableTitle: '최근 6시간 (1시간 강수)', table: [('지금', '32'), ('1시간 전', '28'), ('2시간 전', '24'), ('3시간 전', '18'), ('4시간 전', '11'), ('5시간 전', '5')]),
+      WeatherItem(key: 'wave', title: '파고', value: '3.2', unit: 'm', level: '주의', note: '최대 4.8m · 해안 접근 금지', icon: FontAwesomeIcons.houseTsunami, badge: FontAwesomeIcons.water, source: '예시 자료',
+          tableTitle: '앞으로 12시간 예보', table: [('지금', '3.2'), ('3시간 뒤', '3.9'), ('6시간 뒤', '4.8'), ('9시간 뒤', '4.1'), ('12시간 뒤', '3.0')]),
       WeatherItem(key: 'river', title: '수위', value: '2.4', unit: 'm', level: '관심', note: '최근 1시간 +0.3m', icon: FontAwesomeIcons.houseChimney, badge: FontAwesomeIcons.water, source: '예시 자료'),
       WeatherItem(key: 'dust', title: '미세 / 초미세먼지', value: '18 / 9', unit: '㎍', level: '좋음', note: '환기 가능', icon: FontAwesomeIcons.faceSmile, badge: FontAwesomeIcons.maskFace, source: '예시 자료'),
       WeatherItem(key: 'uv', title: '자외선 지수', value: '1', unit: '', level: '좋음', note: '흐림', icon: FontAwesomeIcons.cloud, badge: FontAwesomeIcons.sun, source: '예시 자료'),
@@ -319,12 +343,39 @@ List<WeatherItem> weatherItems(Map<String, dynamic>? dashboard, {required bool d
       _ok(d) && d!['station_name'] != null ? '${d['station_name']} · ${hhmm(d['observed_at'])} $suffix' : '';
   String why(Map<String, dynamic>? d) => '${d?['reason'] ?? '서버에 자료가 없어요'}';
 
+  // 시간별 표: 관측(10분 간격)은 시각별로 묶어 최근 것부터 (peak = 그 시각 최대, 아니면 마지막 값), 예보는 시간 순서 그대로
+  List<(String, String)> hourly(Map<String, dynamic>? d, {bool peak = false, bool forecast = false}) {
+    if (!_ok(d)) return const [];
+    final pts = <(DateTime, double)>[];
+    for (final p in d!['series'] as List? ?? const []) {
+      final t = DateTime.tryParse('${(p as Map)['t']}')?.toLocal();
+      final v = (p['v'] as num?)?.toDouble();
+      if (t != null && v != null) pts.add((t, v));
+    }
+    pts.sort((a, b) => a.$1.compareTo(b.$1));
+    if (forecast) return [for (final (t, v) in pts) ('${t.day}일 ${t.hour}시', fmtNum(v))];
+    final byHour = <DateTime, double>{};
+    for (final (t, v) in pts) {
+      final h = DateTime(t.year, t.month, t.day, t.hour);
+      byHour[h] = peak && byHour[h] != null ? math.max(byHour[h]!, v) : v;
+    }
+    final hours = byHour.keys.toList()..sort((a, b) => b.compareTo(a));
+    return [for (final h in hours) ('${h.hour}시', fmtNum(byHour[h]))];
+  }
+
   // 수위: 값이 있는 지점 중 가장 높은 단계
+  var waterTable = const <(String, String)>[];
   var waterLv = '', waterV = '-', waterU = '', waterNote = why(water);
   if (_ok(water)) {
     final st = [for (final s in water!['stations'] as List? ?? const []) Map<String, dynamic>.from(s as Map)];
     int rank(Map<String, dynamic> s) => _levelOrder.indexOf(levelLabel(s['level'] as String?));
     final worst = st.isEmpty ? null : st.reduce((a, b) => rank(b) > rank(a) ? b : a);
+    waterTable = [
+      for (final s in [...st]..sort((a, b) => rank(b).compareTo(rank(a))))
+        ('${s['station_name'] ?? '-'}',
+            '${s['value'] == null ? (s['source_level_label'] ?? '-') : '${fmtNum(s['value'], 0)}${s['unit'] ?? ''}'}'
+                '${levelLabel(s['level'] as String?).isEmpty ? '' : ' · ${levelLabel(s['level'] as String?)}'}'),
+    ];
     if (worst != null) {
       waterLv = levelLabel(worst['level'] as String?);
       waterV = worst['value'] == null ? '${worst['source_level_label'] ?? '-'}' : fmtNum(worst['value'], 0);
@@ -346,23 +397,24 @@ List<WeatherItem> weatherItems(Map<String, dynamic>? dashboard, {required bool d
         value: _ok(wind) ? fmtNum(wind!['value']) : '-', unit: 'm/s',
         level: _ok(wind) ? levelLabel(wind!['level'] as String?) : '',
         note: _ok(wind) ? '${windFrom(wind!['wind_dir'])} · 순간 ${fmtNum(wind['wind_gust'])}m/s' : why(wind),
-        source: src(wind)),
+        source: src(wind), tableTitle: '최근 6시간 (시간별 최대)', table: hourly(wind, peak: true)),
     WeatherItem(
         key: 'rain', title: '강우량', icon: FontAwesomeIcons.houseFloodWater, badge: FontAwesomeIcons.cloudShowersHeavy,
         value: _ok(rain) ? fmtNum(rain!['value']) : '-', unit: 'mm/h',
         level: _ok(rain) ? levelLabel(rain!['level'] as String?) : '',
         note: _ok(rain) ? '오늘 누적 ${fmtNum(rain!['rain_day'])}mm' : why(rain),
-        source: src(rain)),
+        source: src(rain), tableTitle: '최근 6시간 (1시간 강수)', table: hourly(rain)),
     WeatherItem(
         key: 'wave', title: '파고', icon: FontAwesomeIcons.houseTsunami, badge: FontAwesomeIcons.water,
         value: _ok(wave) ? fmtNum(wave!['value']) : '-', unit: 'm',
         level: _ok(wave) ? levelLabel(wave!['level'] as String?) : '',
         note: _ok(wave) ? '예보 값 · 실측 파고는 수집하지 않아요' : why(wave),
-        source: src(wave, '부터 24시간 예보')),
+        source: src(wave, '부터 24시간 예보'), tableTitle: '앞으로 24시간 예보', table: hourly(wave, forecast: true)),
     WeatherItem(
         key: 'river', title: '수위', icon: FontAwesomeIcons.houseChimney, badge: FontAwesomeIcons.water,
         value: waterV, unit: waterU, level: waterLv, note: waterNote,
-        source: _ok(water) ? '포항 디지털 트윈 · ${hhmm(water!['observed_at'])} 수집' : ''),
+        source: _ok(water) ? '포항 디지털 트윈 · ${hhmm(water!['observed_at'])} 수집' : '',
+        tableTitle: '지점별 지금 값', tableHead: '지점', table: waterTable),
     WeatherItem(
         key: 'dust', title: '미세 / 초미세먼지', icon: FontAwesomeIcons.faceSmile, badge: FontAwesomeIcons.maskFace,
         value: pm10 == null && pm25 == null ? '-' : '${fmtNum(pm10?['value'], 0)} / ${fmtNum(pm25?['value'], 0)}',
@@ -416,17 +468,58 @@ class WeatherSection extends ConsumerWidget {
         // 휴대폰은 2열, 넓은 웹 화면은 3열 (칸 크기는 그대로)
         final cols = c.maxWidth >= 900 ? 3 : 2;
         final w = (c.maxWidth - 6 * (cols - 1)) / cols;
-        return Wrap(spacing: 6, runSpacing: 6, children: [
-          for (final it in items) SizedBox(width: w, child: _WeatherTile(item: it)),
+        // 권고 문구 길이가 달라도 같은 줄의 칸 높이는 같게
+        return Column(children: [
+          for (var i = 0; i < items.length; i += cols) ...[
+            if (i > 0) const SizedBox(height: 6),
+            IntrinsicHeight(
+              child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                for (var j = i; j < i + cols; j++) ...[
+                  if (j > i) const SizedBox(width: 6),
+                  SizedBox(
+                      width: w,
+                      child: j < items.length
+                          ? _WeatherTile(item: items[j], dashboard: async?.valueOrNull)
+                          : null),
+                ],
+              ]),
+            ),
+          ],
         ]);
       }),
+      const SizedBox(height: 6),
+      // 태풍 정보 (2026-10-11 사용자 요청 — 사용자 탭 '더 보기'에서 옮김)
+      Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => context.push('/typhoon'),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 16, 12),
+            child: Row(children: [
+              const IconCircle(FontAwesomeIcons.hurricane, size: 38, iconSize: 17),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('태풍 정보 자세히 보기', style: dsText(15, weight: FontWeight.w800)),
+                  Text('태풍 경로와 구룡포 영향', style: dsText(13, color: Ds.muted)),
+                ]),
+              ),
+              const FaIcon(FontAwesomeIcons.chevronRight, size: 13, color: Ds.muted),
+            ]),
+          ),
+        ),
+      ),
     ]);
   }
 }
 
 class _WeatherTile extends StatelessWidget {
-  const _WeatherTile({required this.item});
+  const _WeatherTile({required this.item, this.dashboard});
   final WeatherItem item;
+  /// 실측 대시보드 (시연이면 null)
+  final Map<String, dynamic>? dashboard;
 
   @override
   Widget build(BuildContext context) => Material(
@@ -434,11 +527,12 @@ class _WeatherTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          onTap: () => showWeatherDetail(context, item),
+          onTap: () => showWeatherDetail(context, item, dashboard: dashboard),
           child: Container(
             constraints: const BoxConstraints(minHeight: 64),
             padding: const EdgeInsets.all(10),
-            child: Row(children: [
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
               _WeatherIcon(item: item, size: 38),
               const SizedBox(width: 9),
               Expanded(
@@ -463,6 +557,10 @@ class _WeatherTile extends StatelessWidget {
                   ]),
                 ]),
               ),
+            ]),
+            // 권고 문구 (2026-10-11 사용자 요청 — 예전에는 눌러야 보였다)
+            const SizedBox(height: 6),
+            Text(item.description, style: dsText(13, weight: FontWeight.w600, color: Ds.sub, height: 1.35)),
             ]),
           ),
         ),
@@ -499,13 +597,18 @@ class _WeatherIcon extends StatelessWidget {
   }
 }
 
-/// 날씨 상세 (아래에서 올라오는 시트)
-Future<void> showWeatherDetail(BuildContext context, WeatherItem w) => showModalBottomSheet<void>(
+/// 날씨 상세 (아래에서 올라오는 시트). 실측이면 쉬운 설명 아래에 '실시간 관측·예보 자세히'의 그 항목 카드를 보인다
+/// (2026-10-11 사용자 요청). 시연(대시보드 없음)은 예시 값·설명만
+Future<void> showWeatherDetail(BuildContext context, WeatherItem w, {Map<String, dynamic>? dashboard}) =>
+    showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       barrierColor: const Color(0x8014225B),
-      builder: (c) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 34),
+      // 기본 시트 높이(화면의 9/16)를 넘으면 아래 '닫기'가 잘린다 → 내용 높이만큼, 넘치면 스크롤
+      isScrollControlled: true,
+      builder: (c) => SingleChildScrollView(
+        // 휴대폰 앱은 아래 탭바에 '닫기'가 가리지 않게
+        padding: EdgeInsets.fromLTRB(20, 0, 20, useMobileUi ? 110 : 34),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             _WeatherIcon(item: w, size: 72),
@@ -518,6 +621,13 @@ Future<void> showWeatherDetail(BuildContext context, WeatherItem w) => showModal
               ]),
             ),
           ]),
+          if (dashboard != null) ...[
+            const SizedBox(height: 18),
+            LiveRealtimeCards(
+                simulated: dashboard['demo'] != null,
+                only: w.detailKeys,
+                widgets: [for (final x in dashboard['widgets'] as List? ?? const []) Map<String, dynamic>.from(x as Map)]),
+          ] else ...[
           const SizedBox(height: 22),
           Text.rich(TextSpan(children: [
             TextSpan(text: w.value, style: dsText(56, weight: FontWeight.w800, color: Ds.navy, height: 1, spacing: -1.6)),
@@ -533,146 +643,491 @@ Future<void> showWeatherDetail(BuildContext context, WeatherItem w) => showModal
             const SizedBox(height: 8),
             Text(w.source, style: dsText(13, color: Ds.muted)),
           ],
+          ],
+          const SizedBox(height: 18),
+          _WeatherTable(item: w),
           const SizedBox(height: 24),
           PillButton('닫기', height: 58, fontSize: 18, onPressed: () => Navigator.of(c).pop()),
         ]),
       ),
     );
 
-// ------------------------------------------------------------------ 지도 카드 아래 경로 요약 (2줄)
-
-/// 1줄: 출발지(집·현위치·내 장소) + 도보/자동차. 2줄: 출발 → 대피소, 시간·거리.
-class RouteSummaryRows extends ConsumerWidget {
-  const RouteSummaryRows({super.key});
-
-  Future<void> _pick(BuildContext context, WidgetRef ref, String key) async {
-    final active = ref.read(routeFacilityId);
-    void reroute() {
-      if (active != null && active != customRouteId && active != aiRouteId) {
-        startRouteToShelter(ref, active, routeType: ref.read(routeKind));
-      }
-    }
-
-    if (key == 'cur') {
-      final note = await useGpsOrigin(ref);
-      if (note != null && context.mounted) showDsToast(context, note);
-      reroute();
-      return;
-    }
-    if (key == 'home') {
-      final o = await AccountService().optionalProfile();
-      final lat = double.tryParse(o['homeLat'] ?? ''), lon = double.tryParse(o['homeLon'] ?? '');
-      if (lat == null || lon == null) {
-        if (context.mounted) showDsToast(context, '사용자 탭에서 집 주소를 먼저 등록해 주세요');
-        return;
-      }
-      final name = (o['homeName'] ?? '').trim();
-      await chooseOrigin(ref, LatLng(lat, lon), name.isEmpty ? '집' : name, address: o['homeAddress'] ?? '');
-      reroute();
-      return;
-    }
-    if (context.mounted) await showOriginPicker(context, ref);
-    reroute();
-  }
+/// 날씨 상세의 표: 시각(또는 지점) · 값. 표로 줄 자료가 없으면 안내 한 줄
+class _WeatherTable extends StatelessWidget {
+  const _WeatherTable({required this.item});
+  final WeatherItem item;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
+    if (item.table.isEmpty) {
+      return Text(
+          item.tableTitle.isEmpty ? '이 항목은 시간별 값을 아직 모으지 않아요. 지금 값만 보여 드려요.' : '시간별 값이 아직 없어요.',
+          style: dsText(14, color: Ds.muted));
+    }
+    Widget row(String a, String b, {bool head = false, bool first = false}) => Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+              color: head ? Ds.track : Colors.white,
+              border: head ? null : const Border(top: BorderSide(color: Ds.track))),
+          child: Row(children: [
+            Expanded(
+                child: Text(a,
+                    style: dsText(head ? 14 : 16,
+                        weight: head || first ? FontWeight.w800 : FontWeight.w600, color: head ? Ds.sub : Ds.navy))),
+            const SizedBox(width: 12),
+            Text(b,
+                style: dsText(head ? 14 : 16,
+                    weight: head || first ? FontWeight.w800 : FontWeight.w600, color: head ? Ds.sub : Ds.navy)),
+          ]),
+        );
+    final unit = item.tableHead == '시각' && item.unit.isNotEmpty ? '값 (${item.unit})' : '값';
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(item.tableTitle, style: dsText(16, weight: FontWeight.w800)),
+      const SizedBox(height: 8),
+      ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          decoration: BoxDecoration(border: Border.all(color: Ds.track), borderRadius: BorderRadius.circular(14)),
+          child: Column(children: [
+            row(item.tableHead, unit, head: true),
+            for (var i = 0; i < item.table.length; i++)
+              row(item.table[i].$1, item.table[i].$2, first: i == 0 && item.tableHead == '시각' && !item.tableTitle.contains('예보')),
+          ]),
+        ),
+      ),
+    ]);
+  }
+}
+
+// ------------------------------------------------------------------ 지도 카드 아래 경로 안내 줄
+
+/// 경로 안내 줄 (2026-10-11 사용자 요청, web-prototype RouteBar 모양):
+/// [출발지 ⌃] → [대피소 ⌄] · ⇄ · 도보/자동차 · 시간·거리.
+/// 출발지를 누르면 현위치·집·내 장소·지도에서 선택하기·주소로 찾기, 대피소를 누르면 출발지에서 가까운 순 대피소 목록.
+/// ⇄ 는 대피소 → 출발지 방향으로 다시 계산한다 (routeReversed).
+/// 넓으면 한 줄, 휴대폰은 두 줄(출발·도착 / 나머지).
+/// 아래 줄에 경로 방식(최단 · 안전한 경로 · 오르막 회피, 안전·오르막은 함께 선택)과 설명
+class RouteSummaryRows extends ConsumerStatefulWidget {
+  const RouteSummaryRows({super.key});
+
+  @override
+  ConsumerState<RouteSummaryRows> createState() => _RouteSummaryRowsState();
+}
+
+class _RouteSummaryRowsState extends ConsumerState<RouteSummaryRows> {
+  /// 지금 열린 목록 ('from' 출발지 · 'to' 대피소) — 그 칸 테두리를 강조한다
+  String? open;
+
+  /// 출발지를 바꾼 뒤: 대피소 경로를 보고 있었으면 새 출발지로 다시 계산
+  void _reroute() {
+    final active = ref.read(routeFacilityId);
+    if (active != null && active != customRouteId && active != aiRouteId) {
+      startRouteToShelter(ref, active, routeType: ref.read(routeKind), reversed: ref.read(routeReversed));
+    }
+  }
+
+  Future<void> _setOrigin(LatLng p, String label, {String address = ''}) async {
+    if (!inServiceArea(p)) {
+      showDsToast(context, '구룡포 서비스 지역(경로 안내 범위) 밖이라 출발지로 쓸 수 없어요');
+      return;
+    }
+    await chooseOrigin(ref, p, label, address: address);
+    _reroute();
+  }
+
+  Future<void> _pickOrigin() async {
+    final o = await AccountService().optionalProfile();
+    final places = await AccountService().places();
+    if (!mounted) return;
+    final here = ref.read(userLocation);
+    final label = ref.read(originLabelProvider);
+    final homeLat = double.tryParse(o['homeLat'] ?? ''), homeLon = double.tryParse(o['homeLon'] ?? '');
+    final homeName = (o['homeName'] ?? '').trim().isEmpty ? '집' : o['homeName']!.trim();
+    setState(() => open = 'from');
+    final pick = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheet) => _PickSheet(title: '출발지 선택', children: [
+        _OptionRow(
+            icon: FontAwesomeIcons.locationCrosshairs,
+            label: '현위치',
+            sub: here.fromGps ? 'GPS' : '구룡포 기본 위치',
+            on: !here.manual,
+            onTap: () => Navigator.pop(sheet, 'cur')),
+        _OptionRow(
+            icon: FontAwesomeIcons.house,
+            label: '집',
+            sub: homeLat == null ? '사용자 탭에서 집 주소를 등록해 주세요' : (o['homeAddress'] ?? homeName),
+            on: here.manual && label == homeName,
+            onTap: () => Navigator.pop(sheet, 'home')),
+        if (places.isEmpty)
+          _OptionRow(
+              icon: FontAwesomeIcons.bookmark,
+              label: '내 장소',
+              sub: '등록된 장소가 없어요',
+              on: false,
+              onTap: () => Navigator.pop(sheet, 'noplace'))
+        else
+          for (final (i, p) in places.indexed)
+            _OptionRow(
+                icon: FontAwesomeIcons.bookmark,
+                label: p.name,
+                sub: p.address.isEmpty ? '내 장소' : p.address,
+                on: here.manual && label == p.name,
+                onTap: () => Navigator.pop(sheet, 'place$i')),
+        _OptionRow(
+            icon: FontAwesomeIcons.map,
+            label: '지도에서 선택하기',
+            sub: '지도를 눌러 출발지를 골라요',
+            on: false,
+            onTap: () => Navigator.pop(sheet, 'map')),
+        _OptionRow(
+            icon: FontAwesomeIcons.magnifyingGlass,
+            label: '주소로 찾기',
+            sub: '도로명 주소 · 예: 구룡포읍 호미로 152',
+            on: false,
+            onTap: () => Navigator.pop(sheet, 'addr')),
+      ]),
+    );
+    if (mounted) setState(() => open = null);
+    if (pick == null || !mounted) return;
+    switch (pick) {
+      case 'cur':
+        final note = await useGpsOrigin(ref);
+        if (note != null && mounted) showDsToast(context, note);
+        _reroute();
+      case 'home':
+        if (homeLat == null || homeLon == null) {
+          showDsToast(context, '사용자 탭에서 집 주소를 먼저 등록해 주세요');
+          return;
+        }
+        await _setOrigin(LatLng(homeLat, homeLon), homeName, address: o['homeAddress'] ?? '');
+      case 'noplace':
+        showDsToast(context, '사용자 탭에서 내 장소를 먼저 추가해 주세요');
+      case 'map':
+        final p = await showDialog<LatLng>(context: context, builder: (_) => MapPickDialog(start: here.position));
+        if (p != null && mounted) await _setOrigin(p, '지도에서 고른 위치');
+      case 'addr':
+        final r = await showDialog<GeocodedAddress>(context: context, builder: (_) => const AddressDialog());
+        if (r != null && mounted) await _setOrigin(r.position, r.address, address: r.address);
+      default:
+        final p = places[int.parse(pick.substring(5))];
+        await _setOrigin(p.position, p.name, address: p.address);
+    }
+  }
+
+  Future<void> _pickShelter(List<(Facility, double)> shelters) async {
+    final current = ref.read(routeFacilityId);
+    final areas = ref.read(riskAreasProvider).valueOrNull ?? const <RiskArea>[];
+    setState(() => open = 'to');
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheet) => _PickSheet(title: '대피소 선택 · 가까운 순', children: [
+        if (shelters.isEmpty)
+          Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text('대피소 목록을 불러오지 못했어요', style: dsText(15, color: Ds.muted))),
+        for (final (f, m) in shelters)
+          _OptionRow(
+              icon: FontAwesomeIcons.houseMedical,
+              label: f.name,
+              sub: shelterExclusion(f, areas) ?? (f.address.isEmpty ? '대피소' : f.address),
+              warn: shelterExclusion(f, areas) != null,
+              right: _km(m.round()),
+              on: f.id == current,
+              onTap: () => Navigator.pop(sheet, f.id)),
+      ]),
+    );
+    if (mounted) setState(() => open = null);
+    if (picked != null) {
+      startRouteToShelter(ref, picked, routeType: ref.read(routeKind), reversed: ref.read(routeReversed));
+    }
+  }
+
+  static String _km(int m) => m >= 1000 ? '${(m / 1000).toStringAsFixed(1)}km' : '${m}m';
+
+  @override
+  Widget build(BuildContext context) {
     final here = ref.watch(userLocation);
     final label = ref.watch(originLabelProvider);
-    final home = ref.watch(homeLabelProvider).valueOrNull ?? '집';
-    final origin = !here.manual ? 'cur' : (label == home || label == '집' ? 'home' : 'place');
     final mode = ref.watch(travelMode);
+    final kind = ref.watch(routeKind);
+    final reversed = ref.watch(routeReversed);
     final id = ref.watch(routeFacilityId);
     final routeAsync = id == null ? null : ref.watch(routeProvider(id));
     final route = routeAsync?.valueOrNull;
     final dest = id == null ? null : routeDestination(ref, id);
-    final shelters = [...?ref.watch(facilitiesProvider).valueOrNull].where((f) => f.type == FacilityType.shelter);
-    final nearest = shelters.isEmpty ? null : shelters.where((f) => f.id == nearestShelterId(ref)).firstOrNull;
-    final fromText = switch (origin) {
-      'cur' => here.fromGps ? '현위치 · GPS' : '현위치 · 구룡포 기본 위치',
-      'home' => '집 · ${label ?? ''}',
-      _ => '내 장소 · ${label ?? '지도에서 고른 위치'}',
-    };
-    String km(int m) => m >= 1000 ? '${(m / 1000).toStringAsFixed(1)}km' : '${m}m';
-    final kind = ref.watch(routeKind);
+    const dist = Distance();
+    final shelters = [
+      for (final f in [...?ref.watch(facilitiesProvider).valueOrNull].where((f) => f.type == FacilityType.shelter))
+        (f, dist.as(LengthUnit.Meter, here.position, f.position)),
+    ]..sort((a, b) => a.$2.compareTo(b.$2));
+    final shelterRoute = id == null || (id != customRouteId && id != aiRouteId);
+    final fromName = here.manual ? (label ?? '지도에서 고른 위치') : '현위치';
+    final toName = dest?.name ?? (shelters.isEmpty ? '가까운 대피소' : shelters.first.$1.name);
+    final flipped = reversed && shelterRoute;
+    // 이동 수단 옆 예상 시간 (2026-10-11 사용자 요청): 고른 수단 = 경로 서버 계산값,
+    // 다른 수단·경로 계산 전 = 거리로 어림 (도보 4km/h, 자동차 시내 30km/h; 직선거리는 ×1.3 — remote_repository 와 같은 어림)
+    final etaMeters = route?.distanceMeters.toDouble() ?? (shelters.isEmpty ? null : shelters.first.$2 * 1.3);
+    String? eta(TravelMode m) {
+      if (route != null && m == mode) return '${route.estimatedMinutes}분';
+      if (etaMeters == null) return null;
+      final kmh = m == TravelMode.car ? 30 : 4;
+      return '${math.max(1, (etaMeters / 1000 / kmh * 60).round())}분';
+    }
+
+    final fromPill = _EndPill(fromName, open: open == 'from', onTap: _pickOrigin);
+    final toPill = _EndPill(toName, open: open == 'to', onTap: shelterRoute ? () => _pickShelter(shelters) : null);
+    final ends = Row(children: [
+      Expanded(child: flipped ? toPill : fromPill),
+      const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 6),
+          child: FaIcon(FontAwesomeIcons.arrowRightLong, size: 15, color: Ds.muted)),
+      Expanded(child: flipped ? fromPill : toPill),
+    ]);
+    final controls = [
+      if (shelterRoute)
+        CircleButton(FontAwesomeIcons.arrowRightArrowLeft,
+            size: 40,
+            bg: Ds.soft,
+            tooltip: '출발·도착 바꾸기',
+            onPressed: () {
+              ref.read(routeReversed.notifier).state = !reversed;
+              if (id != null) ref.read(routeStartOrigin.notifier).state = here.position;
+            }),
+      const SizedBox(width: 8),
+      _ModeToggle(
+        value: mode,
+        eta: {for (final m in TravelMode.values) m: eta(m)},
+        onChanged: (m) {
+          ref.read(travelMode.notifier).state = m;
+          // 자동차는 오르막 회피가 없다 — 켜 둔 오르막 회피는 끈다 (RoutePlanner 와 같게)
+          if (!m.routeTypes.contains(RouteType.flat)) {
+            ref.read(routeKind.notifier).state = routeTypeOf(safe: kind.avoidsHazards, uphill: false);
+          }
+        },
+      ),
+      const Spacer(),
+      if (id != null) ...[
+        CircleButton(FontAwesomeIcons.xmark,
+            size: 40, bg: Ds.bg, tooltip: '경로 안내 종료', onPressed: () => ref.read(routeFacilityId.notifier).state = null),
+        const SizedBox(width: 6),
+      ],
+      if (id == null)
+        PillButton('경로 보기',
+            expand: false,
+            height: 44,
+            fontSize: 15,
+            icon: FontAwesomeIcons.diamondTurnRight,
+            onPressed: shelters.isEmpty
+                ? null
+                : () => startRouteToShelter(ref, shelters.first.$1.id, routeType: kind, reversed: reversed))
+      else
+        Container(
+          height: 44,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(color: Ds.navy, borderRadius: BorderRadius.circular(Ds.pill)),
+          alignment: Alignment.center,
+          child: routeAsync!.isLoading
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : Text.rich(TextSpan(children: [
+                  TextSpan(
+                      text: route == null ? '경로 없음' : '${route.estimatedMinutes}분',
+                      style: dsText(18, weight: FontWeight.w800, color: Colors.white)),
+                  if (route != null)
+                    TextSpan(text: ' ${_km(route.distanceMeters)}', style: dsText(13, weight: FontWeight.w600, color: Colors.white)),
+                ])),
+        ),
+    ];
+
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       const SizedBox(height: 10),
-      Row(children: [
-        Expanded(
-          child: Semantics(
-            label: '출발지 선택',
-            child: SegmentedPill<String>(
-              items: const [
-                ('home', '집', FontAwesomeIcons.house),
-                ('cur', '현위치', FontAwesomeIcons.locationCrosshairs),
-                ('place', '내 장소', FontAwesomeIcons.bookmark),
-              ],
-              value: origin,
-              onChanged: (k) => _pick(context, ref, k),
-            ),
-          ),
-        ),
-        const SizedBox(width: 6),
-        SegmentedPill<TravelMode>(
-          expand: false,
-          items: const [
-            (TravelMode.walk, null, FontAwesomeIcons.personWalking),
-            (TravelMode.car, null, FontAwesomeIcons.car),
-          ],
-          value: mode,
-          onChanged: (m) => ref.read(travelMode.notifier).state = m,
-        ),
-      ]),
-      const SizedBox(height: 8),
-      Padding(
-        padding: const EdgeInsets.only(left: 4, right: 2),
-        child: Row(children: [
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('$fromText에서',
-                  maxLines: 1, overflow: TextOverflow.ellipsis, style: dsText(12, color: Ds.muted)),
-              const SizedBox(height: 1),
-              Row(children: [
-                const FaIcon(FontAwesomeIcons.houseFlag, size: 13, color: Ds.navy),
-                const SizedBox(width: 5),
-                Flexible(
-                  child: Text(dest?.name ?? nearest?.name ?? '가까운 대피소',
-                      maxLines: 1, overflow: TextOverflow.ellipsis, style: dsText(15, weight: FontWeight.w800)),
-                ),
+      LayoutBuilder(
+        builder: (_, c) => c.maxWidth >= 640
+            ? Row(children: [Expanded(child: ends), const SizedBox(width: 12), ...controls])
+            : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                ends,
+                const SizedBox(height: 10),
+                Row(children: controls),
               ]),
-            ]),
-          ),
-          const SizedBox(width: 8),
-          if (id == null)
-            PillButton('경로 보기',
-                expand: false,
-                height: 40,
-                fontSize: 14,
-                icon: FontAwesomeIcons.diamondTurnRight,
-                onPressed: () => startRouteToShelter(ref, nearestShelterId(ref), routeType: kind))
-          else ...[
-            CircleButton(FontAwesomeIcons.xmark,
-                size: 40, bg: Ds.bg, tooltip: '경로 안내 종료', onPressed: () => ref.read(routeFacilityId.notifier).state = null),
-            const SizedBox(width: 6),
-            Container(
-              height: 40,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(color: Ds.navy, borderRadius: BorderRadius.circular(Ds.pill)),
-              alignment: Alignment.center,
-              child: routeAsync!.isLoading
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                  : Text.rich(TextSpan(children: [
-                      TextSpan(
-                          text: route == null ? '경로 없음' : '${route.estimatedMinutes}분',
-                          style: dsText(17, weight: FontWeight.w800, color: Colors.white)),
-                      if (route != null)
-                        TextSpan(text: ' ${km(route.distanceMeters)}', style: dsText(12, weight: FontWeight.w600, color: Colors.white)),
-                    ])),
-            ),
-          ],
-        ]),
+      ),
+      // 경로 방식: [최단 거리] [안전한 경로 ✓] [오르막 회피 ✓] — 안전·오르막은 함께 켤 수 있다 (김다인 RoutePlanner 와 같게, 2026-10-11)
+      const SizedBox(height: 10),
+      Semantics(
+        label: '경로 방식 선택',
+        child: RouteOptions(
+          kind: kind,
+          height: 40,
+          uphillOk: mode.routeTypes.contains(RouteType.flat),
+          onChanged: (t) => ref.read(routeKind.notifier).state = t,
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(6, 6, 4, 0),
+        child: Text(
+            switch (kind) {
+              RouteType.nearest => '가장 짧은 길이에요. 위험 구역을 피하지 않고, 지나는 구역은 알려 드려요.',
+              RouteType.safest => '침수·산사태 위험 구역(주의 이상)을 피해서 가요.',
+              RouteType.flat => '위험 구역을 피하면서 가파른 오르막을 되도록 줄여요.',
+              RouteType.uphill => '가파른 오르막을 되도록 줄여요. 위험 구역은 피하지 않고, 지나는 구역은 알려 드려요.',
+            },
+            style: dsText(13, color: Ds.muted, height: 1.4)),
       ),
     ]);
+  }
+}
+
+/// 도보/자동차 고르기 + 아이콘 옆 작은 예상 시간
+class _ModeToggle extends StatelessWidget {
+  const _ModeToggle({required this.value, required this.eta, required this.onChanged});
+  final TravelMode value;
+  final Map<TravelMode, String?> eta;
+  final ValueChanged<TravelMode> onChanged;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(color: Ds.soft, borderRadius: BorderRadius.circular(Ds.pill)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          for (final m in TravelMode.values)
+            Semantics(
+              selected: m == value,
+              button: true,
+              label: '${m.label}${eta[m] == null ? '' : ' 약 ${eta[m]}'}',
+              child: Material(
+                color: m == value ? Ds.navy : Colors.transparent,
+                shape: const StadiumBorder(),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: () => onChanged(m),
+                  child: Container(
+                    height: 38,
+                    constraints: const BoxConstraints(minWidth: 38),
+                    padding: EdgeInsets.symmetric(horizontal: eta[m] == null ? 0 : 10),
+                    alignment: Alignment.center,
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      FaIcon(m == TravelMode.car ? FontAwesomeIcons.car : FontAwesomeIcons.personWalking,
+                          size: 14, color: m == value ? Colors.white : Ds.navy),
+                      if (eta[m] != null) ...[
+                        const SizedBox(width: 4),
+                        Text(eta[m]!, style: dsText(12, weight: FontWeight.w700, color: m == value ? Colors.white : Ds.navy)),
+                      ],
+                    ]),
+                  ),
+                ),
+              ),
+            ),
+        ]),
+      );
+}
+
+/// 출발·도착 칸: 회색 pill + ⌄ (목록이 열리면 노란 테두리 + ⌃)
+class _EndPill extends StatelessWidget {
+  const _EndPill(this.text, {required this.open, required this.onTap});
+  final String text;
+  final bool open;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => Material(
+        color: open ? Colors.white : Ds.bg,
+        shape: StadiumBorder(side: BorderSide(color: open ? Ds.caution : Colors.transparent, width: 2)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Container(
+            height: 44,
+            padding: const EdgeInsets.only(left: 14, right: 10),
+            child: Row(children: [
+              Expanded(
+                  child: Text(text,
+                      maxLines: 1, overflow: TextOverflow.ellipsis, style: dsText(16, weight: FontWeight.w800))),
+              if (onTap != null) ...[
+                const SizedBox(width: 6),
+                FaIcon(open ? FontAwesomeIcons.chevronUp : FontAwesomeIcons.chevronDown, size: 12, color: Ds.muted),
+              ],
+            ]),
+          ),
+        ),
+      );
+}
+
+/// 출발지·대피소 목록 시트
+class _PickSheet extends StatelessWidget {
+  const _PickSheet({required this.title, required this.children});
+  final String title;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * .75),
+          // 아래 탭바에 가리지 않게 아래 여백 (휴대폰 앱)
+          child: ListView(shrinkWrap: true, padding: EdgeInsets.fromLTRB(16, 0, 16, useMobileUi ? 110 : 16), children: [
+            Padding(
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
+                child: Text(title, style: dsText(16, weight: FontWeight.w700, color: Ds.muted))),
+            for (final c in children) Padding(padding: const EdgeInsets.only(bottom: 8), child: c),
+          ]),
+        ),
+      );
+}
+
+/// 목록 한 줄 (web-prototype OptionRow): 동그란 아이콘 · 이름/설명 · 오른쪽 거리. 고른 줄은 남색
+class _OptionRow extends StatelessWidget {
+  const _OptionRow(
+      {required this.icon,
+      required this.label,
+      required this.sub,
+      required this.on,
+      required this.onTap,
+      this.right,
+      this.warn = false});
+  final FaIconData icon;
+  final String label, sub;
+  final String? right;
+  final bool on, warn;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = on ? Colors.white : Ds.ink;
+    return Material(
+      color: on ? Ds.navy : Ds.bg,
+      borderRadius: BorderRadius.circular(20),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(children: [
+            IconCircle(warn ? FontAwesomeIcons.triangleExclamation : icon,
+                size: 42,
+                iconSize: 18,
+                bg: on ? Colors.white.withValues(alpha: .16) : Colors.white,
+                fg: on ? Colors.white : (warn ? Ds.warnDeep : Ds.navy)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: dsText(17, weight: FontWeight.w800, color: fg)),
+                const SizedBox(height: 2),
+                Text(sub,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: dsText(13, color: on ? Colors.white70 : (warn ? Ds.warnDeep : Ds.muted))),
+              ]),
+            ),
+            if (right != null) ...[
+              const SizedBox(width: 8),
+              Text(right!, style: dsText(15, weight: FontWeight.w700, color: fg)),
+            ],
+          ]),
+        ),
+      ),
+    );
   }
 }
 

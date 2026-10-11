@@ -315,9 +315,10 @@ class TopChipBar extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final isOffline = ref.watch(offline);
     final net = Tooltip(
-      message: isOffline ? '눌러서 다시 연결' : '눌러서 오프라인 화면 보기',
+      // 연결 상태는 자동으로 바뀐다 (main.dart checkConnection). 누르면 지금 다시 확인 (2026-10-11)
+      message: isOffline ? '눌러서 다시 확인' : '연결됨',
       child: GestureDetector(
-        onTap: () => ref.read(offline.notifier).state = !isOffline,
+        onTap: () => checkConnection(ref),
         child: isOffline
             ? Container(
                 height: 40,

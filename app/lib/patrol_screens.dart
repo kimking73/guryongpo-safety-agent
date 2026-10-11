@@ -501,7 +501,7 @@ const delegatedDisabilities = [('body', '지체', 'mobility_limited'), ('hear', 
 class _DelegatedFormState extends ConsumerState<_DelegatedForm> {
   final label = TextEditingController(), address = TextEditingController(), phone = TextEditingController();
   Set<String> dis = {};
-  String method = 'written';
+  String method = 'verbal';
   bool confirmed = false, busy = false;
   String? message;
 
@@ -537,10 +537,6 @@ class _DelegatedFormState extends ConsumerState<_DelegatedForm> {
   Future<void> _save() async {
     if (label.text.trim().isEmpty || address.text.trim().isEmpty) {
       setState(() => message = '이름과 주소를 모두 넣어 주세요.');
-      return;
-    }
-    if (dis.isEmpty) {
-      setState(() => message = '장애 유형을 골라 주세요. 없으면 \'해당 없음\'을 고르세요.');
       return;
     }
     setState(() {
@@ -583,21 +579,19 @@ class _DelegatedFormState extends ConsumerState<_DelegatedForm> {
         TextField(controller: phone, keyboardType: TextInputType.phone,
             decoration: const InputDecoration(labelText: '연락처', border: OutlineInputBorder())),
         const SizedBox(height: 12),
-        const Text('장애 유형 (필수 · 중복 가능)', style: TextStyle(fontWeight: FontWeight.w700)),
+        const Text('장애 유형 (선택 · 중복 가능)', style: TextStyle(fontWeight: FontWeight.w700)),
         const SizedBox(height: 6),
         Wrap(spacing: 6, runSpacing: 6, children: [
           for (final (k, l, _) in delegatedDisabilities)
             FilterChip(label: Text(l), selected: dis.contains(k), onSelected: (_) => _toggleDis(k)),
         ]),
-        const SizedBox(height: 12),
-        SegmentedButton<String>(
-            segments: const [ButtonSegment(value: 'written', label: Text('서면 동의')), ButtonSegment(value: 'verbal', label: Text('구두 동의'))],
-            selected: {method},
-            onSelectionChanged: (v) => setState(() => method = v.first)),
+        const SizedBox(height: 8),
+        // 동의는 확인 체크 하나 (2026-10-11 사용자 결정 — 서면/구두·동의한 사람 칸은 뺐다. 서버에는 구두·본인 또는 보호자로 보낸다)
         CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
             value: confirmed,
             onChanged: (v) => setState(() => confirmed = v ?? false),
-            title: const Text('수집 항목·목적·보관 기간·철회 방법을 설명하고 동의를 받았습니다'),
+            title: const Text('본인(또는 보호자)에게 민감정보(장애 정보) 수집·제공 동의를 받았습니다'),
             subtitle: Text('동의서 버전 $consentVersion')),
         FilledButton(onPressed: busy || !confirmed ? null : _save, child: const Text('등록')),
         if (message != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(message!)),
@@ -1350,7 +1344,7 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
       Row(children: [
         const FaIcon(FontAwesomeIcons.route, size: 15, color: Ds.navy),
         const SizedBox(width: 8),
-        Expanded(child: Text('내 방문 경로', style: dsText(16, weight: FontWeight.w800))),
+        Expanded(child: Text('방문 경로 안내', style: dsText(16, weight: FontWeight.w800))),
         TextButton.icon(
             onPressed: _showRouteAddDialog,
             icon: const FaIcon(FontAwesomeIcons.plus, size: 12),
@@ -1446,15 +1440,32 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
       ]),
       if (visitError != null)
         Padding(padding: const EdgeInsets.only(top: 6), child: Text(visitError!, style: dsText(13, color: Ds.danger))),
+      // [최단 경로] [우선순위 경로] 두 버튼 (2026-10-11 사용자 요청, 휴대폰과 같게) — 경로는 넣으면 자동 계산되고 버튼은 볼 경로를 고른다
+      const SizedBox(height: 10),
+      Row(children: [
+        for (final (tab, text, icon) in const [
+          ('shortest', '최단 경로', FontAwesomeIcons.arrowRightLong),
+          ('priority', '우선순위 경로', FontAwesomeIcons.listOl),
+        ]) ...[
+          if (tab == 'priority') const SizedBox(width: 8),
+          Expanded(
+            child: PillButton(text,
+                icon: icon,
+                height: 44,
+                fontSize: 15,
+                bg: plan != null && visitTab == tab ? Ds.navy : (picked.isEmpty ? Ds.off : Ds.soft),
+                fg: plan != null && visitTab == tab ? Colors.white : Ds.navy,
+                onPressed: picked.isEmpty
+                    ? null
+                    : () {
+                        setState(() => visitTab = tab);
+                        if (visitResult == null && !visitLoading) _calcVisit(picked);
+                      }),
+          ),
+        ],
+      ]),
       if (plan != null) ...[
         const SizedBox(height: 10),
-        SegmentedPill<String>(
-          height: h,
-          items: const [('shortest', '최단 경로', null), ('priority', '우선순위 최단 경로', null)],
-          value: visitTab,
-          onChanged: (v) => setState(() => visitTab = v),
-        ),
-        const SizedBox(height: 6),
         Text('${visitMode.label} · 총 ${km(plan['distance_m'] as num)} · 약 ${min(plan['duration_s'] as num)}',
             style: dsText(15, weight: FontWeight.w800)),
         Text(visitTab == 'priority' ? '순위 단계(도움 요청+장애 → 도움 요청 → 응답 없음+장애 → …)를 지키고, 같은 단계 안에서 가장 짧게' : '순위와 상관없이 가장 짧게',

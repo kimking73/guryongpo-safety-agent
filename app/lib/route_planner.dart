@@ -304,7 +304,7 @@ class RoutePlanner extends ConsumerWidget {
       // 최단 거리 = 둘 다 끔. 안전한 경로·오르막 회피는 따로 켜고 끈다 (2026-10-11 사용자 요청: 함께 고를 수 있다)
       Semantics(
         label: '경로 방식 선택',
-        child: _RouteOptions(
+        child: RouteOptions(
           kind: kind,
           uphillOk: mode.routeTypes.contains(RouteType.flat),
           onChanged: (t) => ref.read(routeKind.notifier).state = t,
@@ -366,10 +366,12 @@ class RoutePlanner extends ConsumerWidget {
 }
 
 /// 경로 방식: [최단 거리 ✓|안전한 경로 ✓] 중 하나 + [오르막 회피 ✓] 켜고 끄기 → nearest · safest · uphill(최단+오르막) · flat(안전+오르막)
-class _RouteOptions extends StatelessWidget {
-  const _RouteOptions({required this.kind, required this.uphillOk, required this.onChanged});
+/// 휴대폰 대시보드 경로 안내 줄(RouteSummaryRows)도 같은 것을 쓴다 (2026-10-11)
+class RouteOptions extends StatelessWidget {
+  const RouteOptions({super.key, required this.kind, required this.uphillOk, required this.onChanged, this.height = RoutePlanner._h});
   final RouteType kind;
   final bool uphillOk;
+  final double height;
   final ValueChanged<RouteType> onChanged;
 
   @override
@@ -389,7 +391,7 @@ class _RouteOptions extends StatelessWidget {
           child: InkWell(
             onTap: onTap,
             child: SizedBox(
-              height: RoutePlanner._h,
+              height: height,
               child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                 FaIcon(icon, size: 11, color: fg),
                 const SizedBox(width: 4),
