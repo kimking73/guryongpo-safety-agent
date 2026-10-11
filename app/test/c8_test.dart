@@ -607,16 +607,23 @@ void main() {
     final card = find.byKey(const ValueKey('assign-demo-target-demo-household-01'));   // 주민 응답은 모든 카드에 보여 key 로 고른다
     expect(find.descendant(of: card, matching: find.text('방재단원 A (예시)')), findsOneWidget);
     expect(find.descendant(of: card, matching: step('출발 (1/4)')), findsOneWidget);
-    await t.tap(find.descendant(of: card, matching: find.text('업무 단계 바꾸기')));
+    // 다른 방재단원(예시 A)이 맡은 곳은 내가 바꿀 수 없다 (2026-10-12 사용자 요청)
+    expect(find.descendant(of: card, matching: find.text('업무 단계 바꾸기')), findsNothing);
+    expect(find.descendant(of: card, matching: find.text('방재단원 A (예시) 담당 — 내가 맡을 수 없어요')), findsOneWidget);
+    // 미배정 가구는 단계를 고르면 내가 맡는다
+    final card2 = find.byKey(const ValueKey('assign-demo-target-demo-household-02'));
+    await t.ensureVisible(card2);
+    expect(find.descendant(of: card2, matching: find.text('미배정')), findsOneWidget);
+    await t.tap(find.descendant(of: card2, matching: find.text('업무 단계 바꾸기')));
     await t.pumpAndSettle();
     await t.tap(find.text('방문 중').last);
     await _settle(t);
-    final card2 = find.byKey(const ValueKey('assign-demo-target-demo-household-01'));
     expect(find.descendant(of: card2, matching: step('방문 (2/4)')), findsOneWidget);
+    expect(find.descendant(of: card2, matching: find.text('나')), findsOneWidget);
     // 상태 칩으로 거르면 그 상태만
     await t.tap(chip('방문 중'));
     await _settle(t);
-    expect(find.text('방재단원 A (예시)'), findsWidgets);
+    expect(find.text('나'), findsWidgets);
     expect(step('출발 (1/4)'), findsNothing);
     await t.pumpWidget(const SizedBox.shrink());
   });
@@ -862,6 +869,52 @@ void main() {
     expect(find.text('방재단 도착'), findsNothing);
     await t.pumpWidget(const SizedBox.shrink());
     await t.pump(const Duration(seconds: 6));
+  });
+
+  // 2026-10-12 사용자 요청: 로그아웃했다 다시 로그인해도 방재단 출발 기록이 남았다
+  testWidgets('clearDemoSession: 시연 경보·응답·출동 기록을 모두 지운다 (로그아웃)', (t) async {
+    SharedPreferences.setMockInitialValues({});
+    final store = PrototypeSafetyController();
+    await store.load();
+    await store.startDemoAlert(prototypeEvacuationAlertId);
+    await store.respond(prototypeEvacuationAlertId, EvacuationResponseStatus.needHelp);
+    await PrototypeSafetyController.saveDemoDispatch(
+        DemoDispatch(departedAt: DateTime.now(), eta: DateTime.now(), responder: '시연 방재단원'));
+    expect(store.demoDispatch, isNotNull);
+    await PrototypeSafetyController.clearDemoSession();
+    expect(store.demoDispatch, isNull);
+    expect(store.demoAlertActive, isFalse);
+    expect(store.responseFor(prototypeEvacuationAlertId), isNull);
+    final again = PrototypeSafetyController();   // 다시 열어도 (기기 기록에서도 지워짐)
+    await again.load();
+    expect(again.demoDispatch, isNull);
+    expect(again.demoAlertActive, isFalse);
+  });
+
+  testWidgets('경로 안내 창: 다른 방재단원(예시 A)이 맡은 곳은 경로에 넣을 수 없고, 앱 사용자는 미배정으로 넣을 수 있다', (t) async {
+    _tall(t);
+    t.view.physicalSize = const Size(900, 9000);
+    SharedPreferences.setMockInitialValues({});
+    DemoLiveApi.resetDemoIncident();
+    final store = PrototypeSafetyController();
+    await store.load();
+    await store.startDemoAlert(prototypeEvacuationAlertId);
+    await t.pumpWidget(ProviderScope(
+        overrides: [prototypeSafetyProvider.overrideWith((_) => store)],
+        child: const MaterialApp(home: Scaffold(body: DemoPatrolScope(child: LiveResponderScreen())))));
+    await _settle(t);
+    await t.ensureVisible(find.widgetWithText(MapMenuButton, '경로 안내'));
+    await t.tap(find.widgetWithText(MapMenuButton, '경로 안내'));
+    await _settle(t);
+    Finder rowOf(String label) =>
+        find.ancestor(of: find.descendant(of: find.byType(Dialog), matching: find.text(label)), matching: find.byType(Row)).first;
+    final taken = rowOf('구룡포리 지체장애 어르신 댁');   // 예시 A 담당
+    expect(find.descendant(of: taken, matching: find.widgetWithText(PillButton, '경로 추가')), findsNothing);
+    expect(find.descendant(of: taken, matching: find.text('방재단원 A (예시)\n담당')), findsOneWidget);
+    final me = rowOf('앱 사용자 (시연 주민)');
+    expect(find.descendant(of: me, matching: find.widgetWithText(PillButton, '경로 추가')), findsOneWidget);
+    await t.pumpWidget(const SizedBox.shrink());
+    await t.pump(const Duration(minutes: 1));
   });
 
   test('visitCumulative: 앞 구간 이동 시간을 더한다', () {

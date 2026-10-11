@@ -38,6 +38,7 @@ import 'custom_route.dart';
 import 'login_screen.dart';
 import 'services/demo_mode.dart';
 import 'services/demo_role.dart';
+import 'services/demo_relay.dart';
 import 'profile_form.dart' show disabilitiesOf;
 import 'prototype_safety_screens.dart';
 import 'services/demo_notifications.dart';
@@ -1238,7 +1239,11 @@ class _ShellState extends ConsumerState<Shell> {
   }
 
   Future<void> _announceDemoResponse(EvacuationResponseStatus r) async {
-    final dis = disabilitiesOf(await AccountService().optionalProfile());
+    // 장애 유형: 시연 방(다른 계정)에서 받은 것, 없으면 이 기기의 '내 정보' (같은 브라우저 창끼리)
+    final remote = ref.read(prototypeSafetyProvider).residentNeeds;
+    final dis = remote != null
+        ? {for (final n in remote) const {'vision': 'see', 'hearing': 'hear', 'mobility_limited': 'body'}[n] ?? n}
+        : disabilitiesOf(await AccountService().optionalProfile());
     final kinds = [for (final (k, l) in const [('see', '시각'), ('hear', '청각'), ('body', '지체')]) if (dis.contains(k)) '$l장애'];
     rootMessengerKey.currentState?.showSnackBar(SnackBar(
       content: Text(['주민 응답이 왔어요', '앱 사용자 (시연 주민)', r.label, ...kinds].join(' · ')),
@@ -1270,6 +1275,7 @@ class _ShellState extends ConsumerState<Shell> {
     final showDemo = ref.watch(showDemoProvider);
     final crew = showDemo ? ref.watch(demoResponderViewProvider) : isPatrolRole(role);
     _listenDemoResponses();
+    ref.watch(demoRelayProvider); // 다른 계정·기기의 시연 창과 시연 방으로 주고받기 (시연 코드가 있을 때, 2026-10-12)
     final List<GkNavItem> nav = [
       ('대시보드', Icons.grid_view_rounded, '/'),
       ('AI 대화창', Icons.chat_bubble_rounded, '/ai'),

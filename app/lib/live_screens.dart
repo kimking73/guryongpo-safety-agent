@@ -12,6 +12,7 @@ import 'main.dart';
 import 'services/app_config.dart';
 import 'services/demo_mode.dart';
 import 'services/demo_role.dart';
+import 'services/demo_relay.dart';
 import 'services/demo_live_api.dart';
 import 'services/live_api.dart';
 import 'services/prototype_safety_store.dart';
@@ -514,6 +515,7 @@ final meProvider = FutureProvider<Map<String, dynamic>>((ref) => ref.watch(liveA
 void syncDemoPatrol(PrototypeSafetyController demo) {
   DemoLiveApi.myAlertActive = demo.demoAlertActive;
   DemoLiveApi.myResponse = demo.responseFor(prototypeEvacuationAlertId)?.wireValue;
+  DemoLiveApi.remoteNeeds = demo.residentNeeds;
 }
 
 /// 대피 경보 팝업의 시연 응답(기기 시연 기록)을 시연 대피 상황의 '앱 사용자 (시연 주민)'에 넘긴다 (2026-10-09)
@@ -610,6 +612,83 @@ class DemoModeSwitch extends ConsumerWidget {
           const SizedBox(height: 6),
           Text('창마다 따로 정해요. 분할 화면이면 한쪽은 사용자, 다른 쪽은 방재단원으로 — 사용자 모드엔 방재단 현황이 없어요.',
               style: TextStyle(fontSize: 13, color: GK.muted, height: 1.4)),
+          if (AppConfig.isRemote) ...[const SizedBox(height: 12), const DemoRoomField()],
         ],
       ]));
+}
+
+/// 시연 코드 (2026-10-12 사용자 요청): 다른 계정·브라우저·기기의 사용자 모드 ↔ 방재단원 모드 창을 같은 코드로 잇는다 (services/demo_relay.dart)
+class DemoRoomField extends ConsumerStatefulWidget {
+  const DemoRoomField({super.key});
+  @override
+  ConsumerState<DemoRoomField> createState() => _DemoRoomFieldState();
+}
+
+class _DemoRoomFieldState extends ConsumerState<DemoRoomField> {
+  final input = TextEditingController();
+  String? error;
+
+  @override
+  void dispose() {
+    input.dispose();
+    super.dispose();
+  }
+
+  void _join(String code) {
+    if (!DemoRoomCodeNotifier.valid(code)) {
+      setState(() => error = '영문 대문자·숫자 4~8자로 넣어 주세요');
+      return;
+    }
+    setState(() => error = null);
+    input.clear();
+    ref.read(demoRoomCodeProvider.notifier).set(code);
+  }
+
+  @override
+  Widget build(BuildContext c) {
+    final code = ref.watch(demoRoomCodeProvider);
+    final status = ref.watch(demoRoomStatusProvider);
+    const label = TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: GK.ink);
+    if (code != null) {
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          const Icon(Icons.link_rounded, color: GK.navy),
+          const SizedBox(width: 8),
+          Expanded(child: Text('시연 코드 $code', style: label)),
+          TextButton(onPressed: () => ref.read(demoRoomCodeProvider.notifier).set(null), child: const Text('연결 끊기')),
+        ]),
+        Text(
+            status == null
+                ? '다른 계정의 창에도 같은 코드를 넣으면 응답·출발이 오가요.'
+                : '$status · 다른 계정의 창에도 같은 코드를 넣으면 응답·출발이 오가요.',
+            style: const TextStyle(fontSize: 13, color: GK.muted, height: 1.4)),
+      ]);
+    }
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      const Text('시연 코드 (다른 계정과 연결)', style: label),
+      const SizedBox(height: 4),
+      const Text('다른 계정·브라우저·기기로 시연할 때, 두 창에 같은 코드를 넣어요.',
+          style: TextStyle(fontSize: 13, color: GK.muted, height: 1.4)),
+      const SizedBox(height: 8),
+      Row(children: [
+        Expanded(
+          child: TextField(
+            controller: input,
+            textCapitalization: TextCapitalization.characters,
+            maxLength: 8,
+            decoration: InputDecoration(
+                hintText: '예: K7Q2', counterText: '', errorText: error, border: const OutlineInputBorder(), isDense: true),
+            onSubmitted: _join,
+          ),
+        ),
+        const SizedBox(width: 8),
+        FilledButton(onPressed: () => _join(input.text), child: const Text('연결')),
+      ]),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton(
+            onPressed: () => _join(DemoRoomCodeNotifier.newCode()), child: const Text('새 코드 만들기')),
+      ),
+    ]);
+  }
 }
