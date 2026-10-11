@@ -1339,7 +1339,7 @@ class _ShellState extends ConsumerState<Shell> {
       ('대시보드', Icons.grid_view_rounded, '/'),
       ('AI 대화창', Icons.chat_bubble_rounded, '/ai'),
       if (crew) ('방재단 현황', Icons.shield_rounded, '/responder'),
-      ('사용자 정보', Icons.person_rounded, '/profile'),
+      ('사용자', Icons.person_rounded, '/profile'),
     ];
     final wide = MediaQuery.sizeOf(c).width >= 840;
     final here = GoRouterState.of(c).uri.path;
