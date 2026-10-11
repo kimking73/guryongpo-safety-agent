@@ -291,6 +291,8 @@ class DisasterDashboard extends StatefulWidget {
     this.extraPolygons = const [],
     this.extraMarkers = const [],
     this.extraPolylines = const [],
+    this.extraPolylinesAt,
+    this.extraMarkersAt,
     this.mapOnly = false,
     this.where = const WhereNow(WhereKind.unknown),
     this.onLocate,
@@ -356,6 +358,9 @@ class DisasterDashboard extends StatefulWidget {
   final List<Marker> extraMarkers;
   /// 지도 위에 더 그릴 선 (방재단 다중 방문 경로, 2026-10-09)
   final List<Polyline> extraPolylines;
+  /// 지도 확대 단계에 따라 달라지는 선·표시 (방재단 방문 경로: 겹치는 구간을 화면 기준 몇 픽셀씩 옆으로 나란히, 2026-10-12)
+  final List<Polyline> Function(double zoom)? extraPolylinesAt;
+  final List<Marker> Function(double zoom)? extraMarkersAt;
   final bool mapOnly;
 
   /// 경로 안내 메뉴: 지금 위치가 육지·바다인지 → 육상 경로 3종 / 해상 경로 안내 / 위치 확인 필요
@@ -395,7 +400,8 @@ class _DisasterDashboardState extends State<DisasterDashboard> with SingleTicker
   /// 이때는 재난 지도에서 무엇을 켜 두었든 침수(주의 이상 모두)와 산사태 위험 지역을 늘 그린다 (2026-10-11 사용자 요청) —
   /// 경로가 무엇을 피하고 무엇을 지나는지 보여야 한다
   bool get _routeView =>
-      dashboardMode == _DashboardMode.facilities || (widget.mapOnly && widget.extraPolylines.isNotEmpty);
+      dashboardMode == _DashboardMode.facilities ||
+      (widget.mapOnly && (widget.extraPolylines.isNotEmpty || widget.extraPolylinesAt != null));
   /// 지도에 그리는 위험 층. 경로 안내 중에는 경로가 피하는 침수·산사태
   Set<HazardKind> get _visible => _routeView
       ? const {HazardKind.flood, HazardKind.slide}
@@ -793,6 +799,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> with SingleTicker
                       polygons: hazardAreaPolygons(widget.riskAreas, kinds: visible, severeOnly: compositeView)),
                 if (widget.extraPolygons.isNotEmpty) PolygonLayer(polygons: widget.extraPolygons),
                 if (widget.extraPolylines.isNotEmpty) PolylineLayer(polylines: widget.extraPolylines),
+                if (widget.extraPolylinesAt != null) PolylineLayer(polylines: widget.extraPolylinesAt!(mapZoom)),
                 if (routeMode && widget.seaRouteLines.isNotEmpty) PolylineLayer(polylines: widget.seaRouteLines),
                 if (route != null && route.polylinePoints.length > 1)
                   PolylineLayer(polylines: [
@@ -987,6 +994,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> with SingleTicker
                   ],
                 ),
                 if (widget.extraMarkers.isNotEmpty) MarkerLayer(markers: widget.extraMarkers),
+                if (widget.extraMarkersAt != null) MarkerLayer(markers: widget.extraMarkersAt!(mapZoom)),
                 if (routeMode && widget.seaRouteMarkers.isNotEmpty) MarkerLayer(markers: widget.seaRouteMarkers),
                 // 지도 아래쪽의 빨간 테두리 경고 띠(RouteHazardBanner)는 뺐다 (2026-10-11 사용자 요청 — 지도와 아래 버튼을 가렸다).
                 // 위험 구역을 지나는 경로라는 경고는 AI 경로 설명 칸이 맡는다 (접혀 있어도 빨간 테두리 + '위험 N')

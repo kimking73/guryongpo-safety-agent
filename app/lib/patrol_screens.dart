@@ -1110,13 +1110,21 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
         for (final r in rings)
           Polygon(points: r, color: Colors.red.withValues(alpha: .10), borderColor: Colors.red.shade700, borderStrokeWidth: 2.5),
       ],
-      extraPolylines: routing ? visitLegLines(plan!, focus: leg) : const [],
+      // 확대 단계에 맞춰 그린다 — 겹치는 구간을 화면에서 몇 픽셀씩 옆으로 나란히 놓으려면 지금 확대 단계가 필요하다
+      extraPolylinesAt: routing ? (zoom) => visitLegLines(plan!, focus: leg, zoom: zoom) : null,
+      extraMarkersAt: !routing
+          ? null
+          : (zoom) {
+              // 진행 방향 화살표: 전체 보기는 모든 구간(구간 색, 나란히 놓인 선 위), 구간 보기는 고른 구간만
+              final shown = leg == null ? visitLegLanePoints(legs, zoom) : legs;
+              return [
+                for (var i = 0; i < shown.length; i++)
+                  if (leg == null || leg == i) ...visitLegArrows(shown[i], leg == null ? visitLegColor(i + 1) : GK.navy),
+              ];
+            },
       extraMarkers: [
         ..._peopleMarkers(shown, selected, (id) => setState(() => selected = id)),
         if (plan != null) ...[
-          // 진행 방향 화살표: 전체 보기는 모든 구간(구간 색), 구간 보기는 고른 구간만
-          for (var i = 0; i < legs.length; i++)
-            if (leg == null || leg == i) ...visitLegArrows(legs[i], leg == null ? visitLegColor(i + 1) : GK.navy),
           // 방문 순서: 사람 아이콘 왼쪽 아래 번호 = 그 집으로 가는 구간 색 (오른쪽 위 흰 번호 = 우선 확인 번호)
           for (final o in plan['order'] as List)
             if (at['${o['id']}'] != null)
@@ -1724,8 +1732,90 @@ Color visitLegColor(int seq) => visitLegColors[(seq - 1) % visitLegColors.length
 /// 구간 보기에서 고르지 않은 구간·번호 (옅은 회색)
 const visitLegDim = Color(0xFFA9B0C3);
 
-/// 겹칠 때 두 색이 함께 보이게: 구간 번호에 따라 굵기를 달리하고, 굵은 것을 먼저(아래에) 그린다
-const _visitLegWidths = [9.0, 6.0, 3.5];
+/// 전체 보기의 선: 가늘게 그리고, 같은 길을 지나는 구간끼리는 옆으로 나란히 놓는다 (2026-10-12 사용자 요청 — 겹쳐서 가려지지 않게).
+/// 굵기 4px(흰 테두리 6px), 줄 간격 6px
+const _visitLaneWidth = 4.0, _visitLaneCasing = 6.0, _visitLaneGapPx = 6.0;
+
+/// 선을 진행 방향의 오른쪽으로 [meters] 만큼 옮긴 좌표 (음수면 왼쪽). 꼭짓점은 앞뒤 구간 방향의 평균으로 민다
+List<LatLng> offsetLine(List<LatLng> pts, double meters) {
+  if (pts.length < 2 || meters == 0) return pts;
+  final kLat = 111320.0, kLon = 111320.0 * math.cos(pts.first.latitude * math.pi / 180);
+  (double, double) dir(int i, int j) {
+    final dx = (pts[j].longitude - pts[i].longitude) * kLon, dy = (pts[j].latitude - pts[i].latitude) * kLat;
+    final n = math.sqrt(dx * dx + dy * dy);
+    return n == 0 ? (0.0, 0.0) : (dx / n, dy / n);
+  }
+
+  return [
+    for (var i = 0; i < pts.length; i++)
+      () {
+        final a = i > 0 ? dir(i - 1, i) : (0.0, 0.0), b = i < pts.length - 1 ? dir(i, i + 1) : (0.0, 0.0);
+        var dx = a.$1 + b.$1, dy = a.$2 + b.$2;
+        final n = math.sqrt(dx * dx + dy * dy);
+        if (n < 1e-9) return pts[i]; // 제자리 점·되돌아가는 꼭짓점
+        dx /= n;
+        dy /= n;
+        // 진행 방향 (동 dx, 북 dy)의 오른쪽 = (dy, -dx)
+        return LatLng(pts[i].latitude + (-dx) * meters / kLat, pts[i].longitude + dy * meters / kLon);
+      }(),
+  ];
+}
+
+/// 구간마다 몇 번째 줄에 놓을지 (1부터). 줄은 진행 방향의 오른쪽으로 민다 → 같은 길을 반대 방향으로 지나는 구간은
+/// 길 양쪽으로 저절로 갈린다(우측통행처럼). 같은 방향으로 겹치는 구간끼리만 줄 번호를 달리한다
+List<int> visitLegLanes(List<List<LatLng>> legs) {
+  const nearM = 12.0;
+  bool sameWay(List<LatLng> a, List<LatLng> b) {
+    final kLat = 111320.0, kLon = 111320.0 * math.cos(a.first.latitude * math.pi / 180);
+    var hits = 0;
+    for (var i = 0; i < a.length - 1; i++) {
+      final ax = (a[i + 1].longitude - a[i].longitude) * kLon, ay = (a[i + 1].latitude - a[i].latitude) * kLat;
+      final an = math.sqrt(ax * ax + ay * ay);
+      if (an == 0) continue;
+      final px = a[i].longitude * kLon, py = a[i].latitude * kLat;
+      for (var j = 0; j < b.length - 1; j++) {
+        final bx = (b[j + 1].longitude - b[j].longitude) * kLon, by = (b[j + 1].latitude - b[j].latitude) * kLat;
+        final bn2 = bx * bx + by * by;
+        if (bn2 == 0) continue;
+        // a 의 꼭짓점이 b 의 선분에서 nearM 안이고, 두 선분의 방향이 같은 쪽
+        final qx = b[j].longitude * kLon, qy = b[j].latitude * kLat;
+        final t = (((px - qx) * bx + (py - qy) * by) / bn2).clamp(0.0, 1.0);
+        final ex = px - (qx + bx * t), ey = py - (qy + by * t);
+        if (ex * ex + ey * ey <= nearM * nearM && (ax * bx + ay * by) / (an * math.sqrt(bn2)) > .5) {
+          if (++hits >= math.min(2, a.length - 1)) return true; // 선분 하나짜리 짧은 구간은 한 번으로 본다
+          break;
+        }
+      }
+    }
+    return false;
+  }
+
+  final lanes = <int>[];
+  for (var i = 0; i < legs.length; i++) {
+    final used = {
+      for (var j = 0; j < i; j++)
+        if (sameWay(legs[i], legs[j]) || sameWay(legs[j], legs[i])) lanes[j]
+    };
+    var lane = 1;
+    while (used.contains(lane)) {
+      lane++;
+    }
+    lanes.add(lane);
+  }
+  return lanes;
+}
+
+final _visitLaneCache = <String, List<int>>{};
+
+/// 전체 보기에서 그릴 구간별 좌표: 줄 번호만큼 진행 방향 오른쪽으로 옮긴 선 (화면에서 줄 간격 6px 가 되게 [zoom] 으로 환산)
+List<List<LatLng>> visitLegLanePoints(List<List<LatLng>> legs, double zoom) {
+  if (legs.isEmpty) return legs;
+  final key = [for (final l in legs) '${l.length}:${l.first.latitude},${l.first.longitude}:${l.last.latitude},${l.last.longitude}'].join('|');
+  final lanes = _visitLaneCache[key] ??= visitLegLanes(legs);
+  if (_visitLaneCache.length > 8) _visitLaneCache.remove(_visitLaneCache.keys.first);
+  final mPerPx = 156543.03392 * math.cos(legs.first.first.latitude * math.pi / 180) / math.pow(2, zoom);
+  return [for (var i = 0; i < legs.length; i++) offsetLine(legs[i], (lanes[i] - .5) * _visitLaneGapPx * mPerPx)];
+}
 
 /// 방문 순서대로 구간별 좌표. 구간 선이 하나라도 없으면(예전 서버) 빈 목록
 List<List<LatLng>> visitLegPoints(Map<String, dynamic> plan) {
@@ -1733,8 +1823,8 @@ List<List<LatLng>> visitLegPoints(Map<String, dynamic> plan) {
   return legs.isEmpty || legs.any((l) => l.length < 2) ? const [] : legs;
 }
 
-/// 지도에 그릴 방문 경로 선. [focus] = 진하게 볼 구간(0부터), null 이면 전체 보기
-List<Polyline> visitLegLines(Map<String, dynamic> plan, {int? focus}) {
+/// 지도에 그릴 방문 경로 선. [focus] = 진하게 볼 구간(0부터), null 이면 전체 보기. [zoom] = 지도 확대 단계 (줄 간격 환산)
+List<Polyline> visitLegLines(Map<String, dynamic> plan, {int? focus, double zoom = 15}) {
   final legs = visitLegPoints(plan);
   if (legs.isEmpty) {
     final line = decodePolyline('${plan['geometry'] ?? ''}');
@@ -1750,11 +1840,11 @@ List<Polyline> visitLegLines(Map<String, dynamic> plan, {int? focus}) {
       Polyline(points: legs[focus], color: GK.navy, strokeWidth: 7),
     ];
   }
-  double width(int i) => _visitLegWidths[i % _visitLegWidths.length];
-  final byWidth = [for (var i = 0; i < legs.length; i++) i]..sort((a, b) => width(b).compareTo(width(a)));
+  // 전체 보기: 가는 선을 구간마다 옆으로 나란히 (겹쳐도 가려지지 않는다)
+  final lanes = visitLegLanePoints(legs, zoom);
   return [
-    for (final l in legs) Polyline(points: l, color: Colors.white, strokeWidth: 13),
-    for (final i in byWidth) Polyline(points: legs[i], color: visitLegColor(i + 1), strokeWidth: width(i)),
+    for (final l in lanes) Polyline(points: l, color: Colors.white, strokeWidth: _visitLaneCasing),
+    for (var i = 0; i < lanes.length; i++) Polyline(points: lanes[i], color: visitLegColor(i + 1), strokeWidth: _visitLaneWidth),
   ];
 }
 

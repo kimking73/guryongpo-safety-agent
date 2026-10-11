@@ -926,19 +926,21 @@ void main() {
     });
     expect([for (final (o, d) in r) (o['id'], d.inSeconds)], [('a', 120), ('b', 420)]);
   });
-  test('방문 경로를 구간별로 그리기 (2026-10-12): 전체 보기는 구간마다 색·굵기가 다르고, 구간 보기는 고른 구간만 진하게', () {
+  test('방문 경로를 구간별로 그리기 (2026-10-12): 전체 보기는 구간마다 색이 다른 가는 선, 구간 보기는 고른 구간만 진하게', () {
     const g = '_p~iF~ps|U_ulLnnqC';   // 두 점짜리 선
     Map<String, dynamic> plan(int n, {bool legs = true}) => {
           'geometry': g,
           'order': [for (var i = 0; i < n; i++) {'id': 'h$i', 'seq': i + 1, if (legs) 'geometry': g}],
         };
-    // 전체 보기: 흰 테두리 3 + 구간 3, 구간 색이 서로 다르고 굵은 선이 아래(먼저)
+    // 전체 보기: 흰 테두리 3 + 구간 3, 구간 색이 서로 다르고 모두 같은 가는 굵기
     final all = visitLegLines(plan(3));
     expect(all, hasLength(6));
     final colored = all.sublist(3);
     expect({for (final l in colored) l.color}, hasLength(3));
-    expect([for (final l in colored) l.strokeWidth], [9.0, 6.0, 3.5]);
+    expect([for (final l in colored) l.strokeWidth], [4.0, 4.0, 4.0]);
     expect(colored.first.color, visitLegColor(1));
+    // 같은 길을 같은 방향으로 지나는 세 구간 → 겹치지 않게 서로 다른 줄(옆으로 나란히)
+    expect({for (final l in colored) '${l.points.first.latitude.toStringAsFixed(6)},${l.points.first.longitude.toStringAsFixed(6)}'}, hasLength(3));
     // 구간 보기: 고른 구간만 남색 굵게(맨 위), 나머지는 옅은 회색
     final focus = visitLegLines(plan(3), focus: 1);
     expect([for (final l in focus) l.color], [visitLegDim, visitLegDim, Colors.white, visitLegColor(1)]);
@@ -948,6 +950,30 @@ void main() {
     expect(visitLegLines(plan(3, legs: false)), hasLength(2));
     // 구간 색은 5색을 돌려 쓴다
     expect(visitLegColor(6), visitLegColor(1));
+  });
+
+  test('겹치는 구간을 나란히 (2026-10-12): 반대 방향은 길 양쪽으로, 같은 방향은 줄 번호를 달리해 옆으로', () {
+    const a = LatLng(35.9900, 129.5500), b = LatLng(35.9945, 129.5500);   // 정북으로 약 500m
+    final mid = LatLng((a.latitude + b.latitude) / 2, a.longitude);
+    // 오른쪽으로 10m: 북쪽으로 가는 선은 동쪽(경도 +)으로, 남쪽으로 가는 선은 서쪽으로 밀린다
+    final up = offsetLine(const [a, b], 10), down = offsetLine(const [b, a], 10);
+    expect(up.first.longitude, greaterThan(a.longitude));
+    expect(down.first.longitude, lessThan(a.longitude));
+    expect(const Distance().as(LengthUnit.Meter, a, up.first), closeTo(10, 1));
+    expect(up.first.latitude, closeTo(a.latitude, 1e-6));   // 옆으로만 민다
+    expect(offsetLine(const [a, b], 0), const [a, b]);
+
+    // 줄 번호: 같은 방향으로 겹치면 1, 2, 3 … / 반대 방향이나 떨어진 길은 모두 1번 줄
+    expect(visitLegLanes([[a, mid, b], [a, mid, b], [a, mid, b]]), [1, 2, 3]);
+    expect(visitLegLanes([[a, mid, b], [b, mid, a]]), [1, 1]);
+    expect(visitLegLanes([[a, mid, b], const [LatLng(35.9900, 129.5600), LatLng(35.9920, 129.5600), LatLng(35.9945, 129.5600)]]), [1, 1]);
+
+    // 화면에서 줄 간격 6px: 확대할수록(zoom ↑) 실제 거리는 줄어든다, 반대 방향 두 구간은 서로 다른 쪽에 놓인다
+    final far = visitLegLanePoints([[a, mid, b], [b, mid, a]], 13), near = visitLegLanePoints([[a, mid, b], [b, mid, a]], 17);
+    double gap(List<List<LatLng>> l) => const Distance().as(LengthUnit.Meter, l[0].first, l[1].last);
+    expect(far[0].first.longitude, greaterThan(a.longitude));
+    expect(far[1].last.longitude, lessThan(a.longitude));
+    expect(gap(far), greaterThan(gap(near) * 8));
   });
 
   test('방문 경로 방향 화살표 (2026-10-12): 짧은 구간에도 1개, 방향은 진행 방향', () {

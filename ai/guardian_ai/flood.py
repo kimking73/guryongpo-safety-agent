@@ -82,6 +82,24 @@ def pick_location(state: GuardianState) -> tuple[Location, bool]:
     return GURYONGPO_CENTER, False
 
 
+def pick_user_location(state: GuardianState) -> tuple[Location, bool]:
+    """사람이 있는 곳 — 위험 지역 판정과 대피 경로의 출발점 (행동 권고·위치·경로 agent).
+
+    질문에서 말한 장소는 사용자가 거기 있다고 했을 때만 쓴다 (reference_is_here: "호미로 152에 있는데…", 좌표).
+    그곳의 상황만 물었으면("우리 가게 침수됐어?") 사용자는 다른 곳에 있다 → 정한 출발지 → 현재 위치 → 집.
+    가게가 위험 영역 안이라고 가게에 없는 사람에게 대피를 시키거나, 본인이 위험 영역 안인데 가게가 밖이라고
+    대피 안내를 빼는 일이 있었다 (2026-10-12). 상황을 볼 곳은 pick_location."""
+    if state.get("reference_is_here") or state.get("reference_location") is None:
+        return pick_location(state)         # 못 찾은 장소는 기준 위치 이름에 그 사실이 남는다 (pick_location)
+    return pick_location({**state, "reference_location": None, "reference_query": None})
+
+
+def asked_place(state: GuardianState) -> Location | None:
+    """상황만 물은 다른 장소 (사용자가 있는 곳이 아님). 없으면 None."""
+    ref = state.get("reference_location")
+    return ref if ref is not None and not state.get("reference_is_here") else None
+
+
 def location_text(d: "FloodData") -> str:
     """답변과 근거에 쓰는 기준 위치 이름. 위치를 모르면 그렇다고 밝힌다."""
     if d.location_known or "위치 정보 없음" in (d.location.label or ""):
@@ -151,6 +169,11 @@ def build_evidence(d: FloodData) -> tuple[list[Evidence], list[str]]:
             else:
                 ev.append(Evidence(source="risk_assessments", key=f"{HAZARD_KO[i['hazard']]} 위험 영역까지 거리",
                                    value=i["distance_m"], unit="m"))
+                # 밖이라는 사실을 문장으로도 남긴다 — 위 '위험 단계'는 가까운 영역의 단계인데, 거리 숫자만 있으면
+                # "기준 위치가 침수 경보 영역 안"이라고 쓰는 일이 있었다 (2026-10-12, 영역 밖 가게를 물었을 때)
+                ev.append(Evidence(source="risk_assessments", key=f"{HAZARD_KO[i['hazard']]} 위험 영역",
+                                   value=f"기준 위치는 {HAZARD_KO[i['hazard']]} 위험 영역 밖 (가장 가까운 영역까지 {round(i['distance_m'])}m, "
+                                         f"위 단계는 그 영역의 단계)"))
         if not flood_items:
             ev.append(Evidence(source="risk_assessments", key="침수·호우 위험 단계", value="정상",
                                observed_at=_ts(d.risk.get("assessed_at"))))
@@ -253,6 +276,9 @@ RISK_TOPICS = ("위험 여부", "위험 단계", "침수 위험", "산사태 위
 PLACE_TOPICS = ("대피할 곳", "대피 장소", "대피장소", "대피소", "이동 경로", "대피 경로", "어디로 대피", "위치·경로")
 # 지원·복구 agent 담당 (2026-10-08 실측: 강풍 agent가 "피해 지원 정보는 확인할 수 없습니다"라고 써 지원·복구 답과 충돌 → 검증 실패)
 SUPPORT_TOPICS = ("지원", "보험", "보상", "구호", "복구", "피해 신고")
+# 행동 권고 담당 — 할 일은 답 아래 '지금 할 일'에 따로 붙는다. 전문 agent가 "피해를 줄이는 방법은 여기서 안내하지 않습니다"라고
+# 덧붙이는 일이 지시문만으로는 남았다 (2026-10-12)
+ACTION_TOPICS = ("할 일", "행동요령", "체크리스트", "대비 방법", "대비 요령", "피해를 줄이", "줄이는 방법", "줄이기 위한")
 _DEFERRALS = ("확인할 수 없", "확인되지 않", "안내하지 않", "다루지 않", "알 수 없", "에서 확인해", "에서 안내", "따로 안내")
 _SENTENCE = re.compile(r"[^.!?\n]+[.!?]?\s*")
 
@@ -327,7 +353,7 @@ def make_rain_flood_agent(writer: Writer | None = None, fetch: Fetch | None = No
                                       state.get("manager_feedback") or ""), "LLM"
             except Exception as e:  # noqa: BLE001 — LLM 장애로 답이 끊기면 안 된다
                 logger.warning("침수 agent 문장 작성 실패 → 템플릿 (%s: %s)", type(e).__name__, e)
-        summary = strip_deferrals(summary, PLACE_TOPICS + SUPPORT_TOPICS) if summary else template_summary(data)
+        summary = strip_deferrals(summary, PLACE_TOPICS + SUPPORT_TOPICS + ACTION_TOPICS) if summary else template_summary(data)
         logger.info("침수 agent [%s] 단계=%s 근거=%d 확인불가=%s", how, data.level.value, len(data.evidence),
                     data.unavailable or "-")
         return {"specialist_results": [SpecialistResult(
