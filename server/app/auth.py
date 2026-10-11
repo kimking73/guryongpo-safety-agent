@@ -36,6 +36,7 @@ class AuthUser:
     is_anonymous: bool = True
     provider: str = "anonymous"
     dev: bool = False
+    email: Optional[str] = None        # Firebase 가 확인한 이메일 (Google·이메일 로그인, 익명은 없음)
 
 
 def init_firebase() -> bool:
@@ -78,7 +79,7 @@ def _verify_firebase(token: str) -> AuthUser:
     except auth.CertificateFetchError:
         raise ApiError("UPSTREAM_UNAVAILABLE", detail="firebase_cert_fetch_failed")
     provider = (claims.get("firebase") or {}).get("sign_in_provider", "")
-    return AuthUser(uid=claims["uid"], is_anonymous=provider == "anonymous", provider=provider)
+    return AuthUser(uid=claims["uid"], is_anonymous=provider == "anonymous", provider=provider, email=claims.get("email"))
 
 
 def verify_token(token: str) -> AuthUser:
@@ -90,7 +91,8 @@ def verify_token(token: str) -> AuthUser:
         uid = token[4:].strip()
         if settings.auth_mode != "dev" or not uid:
             raise ApiError("UNAUTHORIZED", detail="dev_token_not_allowed")
-        return AuthUser(uid=uid, provider="dev", dev=True)
+        # dev 토큰 uid 가 이메일 모양이면 이메일로도 쓴다 (로컬에서 시연 이름 확인용)
+        return AuthUser(uid=uid, provider="dev", dev=True, email=uid if "@" in uid else None)
     return _verify_firebase(token)
 
 

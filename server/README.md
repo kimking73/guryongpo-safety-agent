@@ -211,7 +211,8 @@ DATABASE_URL=postgresql://guardian:guardian-local-only@localhost:5433/guardian .
 - 시연 대피 응답 (2026-10-12, `app/demo_evac.py`): 시연 모드 앱의 대피 경보 응답을 계정당 한 줄(`care.demo_evac`, 이력 `care.demo_evac_log`,
   `db/init/01m_v0_8_demo_evac.sql`)로 저장 — `POST /demo/evacuation/start`·`/response`(주민), `GET /demo/evacuation/responses`(다른 계정의
   방재단원 모드 화면, 최근 3시간), `PUT|DELETE /demo/evacuation/{id}/dispatch`(방재단 출동 기록) → `GET /demo/evacuation/me`(주민이 받음).
-  시연 데이터라 로그인만(역할 불필요), 별명·응답·장애 유형만 공유. 실제 대피 상황·FCM·이관과 분리
+  `POST /demo/evacuation/location`(주민 현재 위치, 이력 없음). 시연 데이터라 로그인만(역할 불필요), 이름(로그인 이메일의 @ 앞, Firebase 토큰에서 — 없으면 별명)·응답·장애 유형·현재 위치(앱이 보낸 때만,
+  없으면 가상 위치)를 공유. 실제 대피 상황·FCM·이관과 분리
 - 시연용 가상 가구: `/internal/simulate` `demo_households` (5곳, "[시연] …", 침수 경보 영역 2곳·산사태 취약지역 100m 안 1곳) / `demo_households_clear`. `clear` 는 가구를 지우지 않음
 
 ### 시연 시나리오

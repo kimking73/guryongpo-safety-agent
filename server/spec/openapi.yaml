@@ -592,6 +592,33 @@ paths:
               schema: { $ref: '#/components/schemas/DemoEvacTarget' }
         '401': { $ref: '#/components/responses/Error' }
         '422': { $ref: '#/components/responses/Error' }
+  /demo/evacuation:
+    delete:
+      tags: [dashboard]
+      summary: 시연 주민 응답 전부 초기화 — 앱에서 시연 모드를 껐다 다시 켤 때 (모든 계정의 시연 응답·출동 기록·위치, 이력은 남김) (2026-10-12)
+      operationId: resetDemoEvacuations
+      responses:
+        '204': { description: 지움 }
+        '401': { $ref: '#/components/responses/Error' }
+  /demo/evacuation/location:
+    post:
+      tags: [dashboard]
+      summary: 시연 주민의 현재 위치 갱신 — 주민 앱이 움직일 때 보낸다 (이력 없음). 진행 중인 시연 응답이 없으면 404 (2026-10-12)
+      operationId: updateDemoEvacuationLocation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [location]
+              properties:
+                location: { $ref: '#/components/schemas/LatLng' }
+      responses:
+        '204': { description: 갱신됨 }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
   /demo/evacuation/me:
     get:
       tags: [dashboard]
@@ -1840,6 +1867,7 @@ components:
       type: object
       properties:
         needs: { type: array, maxItems: 3, items: { $ref: '#/components/schemas/DemoNeed' } }
+        location: { $ref: '#/components/schemas/LatLng' }
     DemoEvacResponse:
       type: object
       required: [status]
@@ -1847,6 +1875,7 @@ components:
         status: { type: string, enum: [evacuated, evacuating, need_help] }
         needs: { type: array, maxItems: 3, items: { $ref: '#/components/schemas/DemoNeed' } }
         via: { type: string, enum: [button, voice, dashboard, alarm], default: button }
+        location: { $ref: '#/components/schemas/LatLng' }
     DemoDispatch:
       type: object
       required: [departed_at, eta]
@@ -1857,11 +1886,11 @@ components:
         stage: { type: string, enum: [en_route, visiting, done], default: en_route }
     DemoEvacTarget:
       type: object
-      description: 시연 주민 한 명의 대피 응답 (방재단 화면의 '앱 사용자' 대상 줄). 위치는 시연 기본점 둘레의 가상 좌표
+      description: 시연 주민 한 명의 대피 응답 (방재단 화면의 '앱 사용자' 대상 줄). 위치는 주민 앱이 보낸 현재 위치(location_source=app), 없으면 시연 기본점 둘레의 가상 좌표(demo)
       required: [id, label, status, needs, minutes_since_alert, started_at, updated_at, is_me, location, dispatch, dispatch_by_me]
       properties:
         id: { type: string, example: demo-user-3f2a1c9e-8b7d-4e6f-a5c4-1d2e3f4a5b6c }
-        label: { type: string, description: 별명, 없으면 '시연 주민 xxxx' }
+        label: { type: string, description: 로그인 이메일의 아이디(@ 앞), 없으면 별명, 그것도 없으면 '시연 주민 xxxx' }
         status: { type: string, enum: [no_response, need_help, evacuating, evacuated] }
         needs: { type: array, items: { $ref: '#/components/schemas/DemoNeed' } }
         minutes_since_alert: { type: integer, minimum: 0 }
@@ -1870,6 +1899,8 @@ components:
         updated_at: { type: string, format: date-time }
         is_me: { type: boolean }
         location: { $ref: '#/components/schemas/LatLng' }
+        location_source: { type: string, enum: [app, demo] }
+        location_at: { type: [string, 'null'], format: date-time }
         dispatch:
           oneOf:
             - { $ref: '#/components/schemas/DemoDispatch' }

@@ -361,13 +361,13 @@ void main() {
   double flashOpacity(WidgetTester t) =>
       t.widget<AnimatedOpacity>(find.byKey(const ValueKey('evacuation-flash'))).opacity;
 
-  testWidgets('대피 현황 칩: 진행 중인 경보가 없어도 시연 모드면 3버튼 팝업, 진동·화면 점멸 켜짐이면 깜빡인다', (t) async {
-    final store = await pumpChip(t, const AccessibilitySettings(strongVibration: true, screenFlash: true));
+  testWidgets('대피 현황 칩: 진행 중인 경보가 없어도 시연 모드면 3버튼 팝업, 화면 점멸 켜짐이면 깜빡인다', (t) async {
+    final store = await pumpChip(t, const AccessibilitySettings(screenFlash: true));
     expect(find.text('지금 당장 대피해야 합니다'), findsOneWidget);
     for (final s in ['대피 완료', '대피 중', '도움 필요']) {
       expect(find.text(s), findsOneWidget);
     }
-    expect(find.text('진동·화면 점멸 켜짐 · 사용자 화면에서 바꿀 수 있어요'), findsOneWidget);
+    expect(find.text('화면 점멸 켜짐 · 사용자 화면에서 바꿀 수 있어요'), findsOneWidget);
     await t.pump(evacuationFlashTransitionInterval);
     expect(flashOpacity(t), greaterThan(0));
     await t.tap(find.text('대피 완료'));
@@ -379,10 +379,10 @@ void main() {
     await t.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('대피 현황 칩: 진동·화면 점멸을 끄면 팝업만 뜨고 깜빡이지 않는다', (t) async {
-    await pumpChip(t, const AccessibilitySettings(strongVibration: false, screenFlash: false));
+  testWidgets('대피 현황 칩: 화면 점멸을 끄면 팝업만 뜨고 깜빡이지 않는다', (t) async {
+    await pumpChip(t, const AccessibilitySettings(screenFlash: false));
     expect(find.text('지금 당장 대피해야 합니다'), findsOneWidget);
-    expect(find.text('음성·진동·화면 점멸 알림 꺼짐 · 사용자 화면에서 켤 수 있어요'), findsOneWidget);
+    expect(find.text('음성·화면 점멸 알림 꺼짐 · 사용자 화면에서 켤 수 있어요'), findsOneWidget);
     await t.pump(evacuationFlashTransitionInterval * 3);
     expect(flashOpacity(t), 0);
     await t.pumpWidget(const SizedBox.shrink());
@@ -748,6 +748,68 @@ void main() {
     await store.respond(prototypeEvacuationAlertId, EvacuationResponseStatus.evacuating);
     expect(store.lastServerSaved, isNull);
     store.dispose();
+  });
+
+  // 2026-10-12 사용자 요청: 방재단 현황에 주민의 실제 위치
+  test('시연 응답에 현재 위치를 싣고, 20m 넘게 움직이면 위치만 다시 보낸다', () async {
+    SharedPreferences.setMockInitialValues({});
+    final fake = FakeServer({
+      'POST /api/v1/demo/evacuation/start': (_) => {'id': 'demo-user-a'},
+      'POST /api/v1/demo/evacuation/response': (_) => {'id': 'demo-user-a'},
+      'GET /api/v1/demo/evacuation/me': (_) => {'id': 'demo-user-a', 'status': 'need_help', 'dispatch': null},
+      'POST /api/v1/demo/evacuation/location': (_) => null,
+    });
+    final api = fake.api();
+    final server = PrototypeSafetyController.server, loc = PrototypeSafetyController.currentLocation;
+    addTearDown(() {
+      PrototypeSafetyController.server = server;
+      PrototypeSafetyController.currentLocation = loc;
+    });
+    (double, double)? here = (35.9871, 129.5522);
+    PrototypeSafetyController.server = () => api;
+    PrototypeSafetyController.currentLocation = () => here;
+    final store = PrototypeSafetyController();
+    await store.load();
+    await store.startDemoAlert(prototypeEvacuationAlertId);
+    await store.respond(prototypeEvacuationAlertId, EvacuationResponseStatus.needHelp);
+    expect((fake.seen.last.data as Map)['location'], {'lat': 35.9871, 'lng': 129.5522});
+    fake.seen.clear();
+    await store.pullFromServer();                      // 그대로면 위치를 보내지 않는다
+    expect([for (final o in fake.seen) o.path], ['/api/v1/demo/evacuation/me']);
+    here = (35.9881, 129.5522);                        // 약 110m 이동
+    fake.seen.clear();
+    await store.pullFromServer();
+    expect(fake.seen.last.path, '/api/v1/demo/evacuation/location');
+    expect(fake.seen.last.data, {'location': {'lat': 35.9881, 'lng': 129.5522}});
+    here = null;                                       // 위치를 모르면(GPS 꺼짐·구룡포 밖) 위치 없이
+    await store.respond(prototypeEvacuationAlertId, EvacuationResponseStatus.evacuating);
+    expect((fake.seen.last.data as Map).containsKey('location'), isFalse);
+    store.dispose();
+  });
+
+  // 2026-10-12 사용자 요청: 시연 모드를 껐다 켜면 이 기기의 시연 경보·응답·출동 기록도 처음부터
+  test('시연 대피 초기화: 응답·시연 경보·출동 기록을 지우고 접근성 설정은 남긴다', () async {
+    SharedPreferences.setMockInitialValues({});
+    final original = PrototypeSafetyController.server;
+    addTearDown(() => PrototypeSafetyController.server = original);
+    PrototypeSafetyController.server = () => null;
+    final store = PrototypeSafetyController();
+    await store.load();
+    await store.startDemoAlert(prototypeEvacuationAlertId);
+    await store.respond(prototypeEvacuationAlertId, EvacuationResponseStatus.needHelp);
+    await PrototypeSafetyController.saveDemoDispatch(DemoDispatch(
+        departedAt: DateTime(2026, 10, 12, 3), eta: DateTime(2026, 10, 12, 3, 7), responder: '시연 방재단원'));
+    await store.resetDemoEvacuation();
+    expect(store.demoAlertActive, isFalse);
+    expect(store.responseFor(prototypeEvacuationAlertId), isNull);
+    expect(store.demoDispatch, isNull);
+    final again = PrototypeSafetyController();     // 새로 열어도 (기기 저장소에서도) 지워져 있다
+    await again.load();
+    expect(again.demoAlertActive, isFalse);
+    expect(again.responseFor(prototypeEvacuationAlertId), isNull);
+    expect(again.demoDispatch, isNull);
+    store.dispose();
+    again.dispose();
   });
 
   test('주민 앱이 서버에서 다른 계정 방재단원의 출동 기록(도착 예정)을 받는다', () async {

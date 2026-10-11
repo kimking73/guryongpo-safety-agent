@@ -522,6 +522,18 @@ void syncDemoPatrol(PrototypeSafetyController demo) {
   DemoLiveApi.remoteNeeds = demo.residentNeeds;
 }
 
+/// 시연 대피 초기화: 서버 시연 주민 응답(모든 계정) + 이 기기 시연 기록 + 방재단 시연 배정 (시연 모드를 다시 켤 때)
+Future<void> resetDemoEvacuation(WidgetRef ref) async {
+  DemoLiveApi.resetDemoIncident();
+  await ref.read(prototypeSafetyProvider).resetDemoEvacuation();
+  try {
+    await PrototypeSafetyController.server()?.demoEvacReset();
+    showResponseMessage('시연을 처음부터 시작해요 · 시연 주민 응답을 지웠어요');
+  } catch (_) {
+    showResponseMessage('이 기기의 시연 기록은 지웠지만 서버의 시연 응답은 지우지 못했어요');
+  }
+}
+
 /// 대피 경보 팝업의 시연 응답(기기 시연 기록)을 시연 대피 상황의 '앱 사용자 (시연 주민)'에 넘긴다 (2026-10-09)
 class DemoPatrolScope extends ConsumerWidget {
   const DemoPatrolScope({super.key, required this.child});
@@ -604,7 +616,12 @@ class DemoModeSwitch extends ConsumerWidget {
             label: '시연 모드',
             desc: '켜면 시연 시나리오(가상 위험 구역·예시 가구)로 보여 줘요. 끄면 실측 데이터만.',
             value: ref.watch(demoModeProvider),
-            onChanged: (v) => ref.read(demoModeProvider.notifier).set(v)),
+            onChanged: (v) async {
+              ref.read(demoModeProvider.notifier).set(v);
+              // 시연 모드를 다시 켜면 처음부터 (2026-10-12 사용자 요청): 서버의 시연 주민(모든 계정)과 이 기기의 시연 경보·응답·
+              // 방재단 배정을 지운다. 앱 안 예시 가구(목업)는 그대로
+              if (v) await resetDemoEvacuation(ref);
+            }),
         // 사용자 모드 / 방재단원 모드 (2026-10-12 사용자 요청: 분할 화면 시연 — 창마다 따로)
         if (ref.watch(showDemoProvider)) ...[
           const SizedBox(height: 10),

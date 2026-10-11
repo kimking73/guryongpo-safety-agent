@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -40,7 +41,6 @@ class AccessibilitySettings {
   const AccessibilitySettings({
     this.hearingSupport = false,
     this.visionSupport = false,
-    this.strongVibration = true,
     this.screenFlash = false,
     this.largeText = true,
     this.voicePrompts = true,
@@ -48,7 +48,6 @@ class AccessibilitySettings {
 
   final bool hearingSupport;
   final bool visionSupport;
-  final bool strongVibration;
   final bool screenFlash;
   final bool largeText;
   final bool voicePrompts;
@@ -56,7 +55,6 @@ class AccessibilitySettings {
   AccessibilitySettings copyWith({
     bool? hearingSupport,
     bool? visionSupport,
-    bool? strongVibration,
     bool? screenFlash,
     bool? largeText,
     bool? voicePrompts,
@@ -64,7 +62,6 @@ class AccessibilitySettings {
       AccessibilitySettings(
         hearingSupport: hearingSupport ?? this.hearingSupport,
         visionSupport: visionSupport ?? this.visionSupport,
-        strongVibration: strongVibration ?? this.strongVibration,
         screenFlash: screenFlash ?? this.screenFlash,
         largeText: largeText ?? this.largeText,
         voicePrompts: voicePrompts ?? this.voicePrompts,
@@ -73,7 +70,6 @@ class AccessibilitySettings {
   Map<String, Object> toJson() => {
         'hearingSupport': hearingSupport,
         'visionSupport': visionSupport,
-        'strongVibration': strongVibration,
         'screenFlash': screenFlash,
         'largeText': largeText,
         'voicePrompts': voicePrompts,
@@ -83,7 +79,6 @@ class AccessibilitySettings {
       AccessibilitySettings(
         hearingSupport: json['hearingSupport'] == true,
         visionSupport: json['visionSupport'] == true,
-        strongVibration: json['strongVibration'] != false,
         // Missing values in older or partially written preferences should be
         // safe by default. Explicitly saved user choices are preserved.
         screenFlash: json['screenFlash'] == true,
@@ -235,6 +230,12 @@ const _needsLabels = <String, String>{
 
 String householdNeedLabel(String value) => _needsLabels[value] ?? value;
 
+/// 두 점 사이 거리 (m, 짧은 거리용 근사)
+double _distM((double, double) a, (double, double) b) {
+  final dy = (a.$1 - b.$1) * 111320, dx = (a.$2 - b.$2) * 111320 * math.cos(a.$1 * math.pi / 180);
+  return math.sqrt(dy * dy + dx * dx);
+}
+
 /// '내 정보'의 장애 유형 → 시연 대상 needs (대리 등록과 같은 이름: 시각 vision · 청각 hearing · 지체 mobility_limited)
 const demoProfileNeeds = {'see': 'vision', 'hear': 'hearing', 'body': 'mobility_limited'};
 
@@ -268,6 +269,12 @@ class PrototypeSafetyController extends ChangeNotifier {
   static LiveApi? Function() server = () => DemoData.on ? (_live ??= LiveApi()) : null;
   static LiveApi? _live;
 
+  /// 주민의 현재 위치 (GPS·지도에서 고른 곳, 구룡포 안) — 앱이 시작할 때 userLocation 으로 넣는다. 없으면 null
+  /// (2026-10-12 사용자 요청: 방재단 현황에 실제 위치)
+  static (double, double)? Function() currentLocation = () => null;
+  /// 서버에 마지막으로 보낸 위치 — 20m 넘게 움직였을 때만 다시 보낸다
+  (double, double)? _sentLocation;
+
   /// 서버에서 내 시연 응답·방재단 출동 기록을 다시 읽는 주기 (서버 연결일 때만 돈다)
   static const serverPollEvery = Duration(seconds: 5);
   Timer? _serverPoll;
@@ -276,11 +283,13 @@ class PrototypeSafetyController extends ChangeNotifier {
   /// 마지막 시연 응답의 서버 저장 결과: null = 서버로 보내지 않음(목업·시연 끔), true = 저장됨, false = 실패(이 기기에만 기록)
   bool? lastServerSaved;
 
-  Future<bool?> _toServer(Future<Object?> Function(LiveApi api, List<String> needs) call) async {
+  Future<bool?> _toServer(Future<Object?> Function(LiveApi api, List<String> needs, (double, double)? at) call) async {
     final api = server();
     if (api == null) return lastServerSaved = null;
     try {
-      await call(api, await myDemoNeeds());
+      final at = currentLocation();
+      await call(api, await myDemoNeeds(), at);
+      if (at != null) _sentLocation = at;
       return lastServerSaved = true;
     } catch (e) {
       debugPrint('시연 응답 서버 저장 실패: $e');
@@ -299,12 +308,18 @@ class PrototypeSafetyController extends ChangeNotifier {
       final mine = await api.demoEvacMine();
       if (mine == null) {
         final r = _responses.values.isEmpty ? null : _responses.values.last;
-        await _toServer((api, needs) async {
-          await api.demoEvacStart(needs);
-          if (r != null) await api.demoEvacRespond(r.wireValue, needs);
+        await _toServer((api, needs, at) async {
+          await api.demoEvacStart(needs, lat: at?.$1, lng: at?.$2);
+          if (r != null) await api.demoEvacRespond(r.wireValue, needs, lat: at?.$1, lng: at?.$2);
           return null;
         });
         return;
+      }
+      // 움직였으면 현재 위치를 보낸다 (방재단 화면 지도·방문 경로가 따라온다)
+      final at = currentLocation();
+      if (at != null && (_sentLocation == null || _distM(at, _sentLocation!) > 20)) {
+        await api.demoEvacLocation(at.$1, at.$2);
+        _sentLocation = at;
       }
       final raw = mine['dispatch'];
       DemoDispatch? d;
@@ -523,7 +538,7 @@ class PrototypeSafetyController extends ChangeNotifier {
           entry.key: entry.value.wireValue,
       }),
     );
-    await _toServer((api, needs) => api.demoEvacRespond(status.wireValue, needs, via: via));
+    await _toServer((api, needs, at) => api.demoEvacRespond(status.wireValue, needs, via: via, lat: at?.$1, lng: at?.$2));
   }
 
   /// 새 시연 대피 경보 시작: 이전 시연 경보의 응답은 지운다 — 지난 응답이 새 경보의 상태로 남지 않게 (2026-10-09)
@@ -544,7 +559,22 @@ class PrototypeSafetyController extends ChangeNotifier {
       }),
     );
     // 서버에도 새 시연 경보 (내 응답 '응답 없음', 지난 출동 기록 지움) — 다른 계정의 방재단원 화면에 바로 나온다
-    await _toServer((api, needs) => api.demoEvacStart(needs));
+    await _toServer((api, needs, at) => api.demoEvacStart(needs, lat: at?.$1, lng: at?.$2));
+  }
+
+  /// 시연 대피 기록 초기화 (2026-10-12 사용자 요청: 시연 모드를 껐다 켜면 처음부터) — 이 기기의 시연 경보·응답·방재단 출동 기록.
+  /// 앱 안 예시 가구(목업)·접근성 설정은 그대로
+  Future<void> resetDemoEvacuation() async {
+    _responses = {};
+    _demoAlertActive = false;
+    _dispatch = null;
+    _sentLocation = null;
+    lastServerSaved = null;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_responsesKey);
+    await prefs.remove(_demoAlertKey);
+    await prefs.remove(_dispatchKey);
   }
 
   Future<void> updateAccessibility(AccessibilitySettings settings) async {

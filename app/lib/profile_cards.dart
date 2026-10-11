@@ -693,12 +693,6 @@ class ProfileAlertsCard extends ConsumerWidget {
             value: a11y.visionSupport || ref.watch(autoVoiceAlerts),
             onChanged: a11y.visionSupport ? null : (v) => ref.read(autoVoiceAlerts.notifier).state = v),
         GkSwitchRow(
-            icon: Icons.vibration_rounded,
-            label: '진동 알림',
-            desc: '대피 알림이 오면 반복해서 진동해요',
-            value: a11y.strongVibration,
-            onChanged: (v) => update(a11y.copyWith(strongVibration: v))),
-        GkSwitchRow(
             icon: Icons.flash_on_rounded,
             label: '화면 점멸',
             desc: a11y.hearingSupport
@@ -707,7 +701,8 @@ class ProfileAlertsCard extends ConsumerWidget {
             note: '광과민성이 있으면 꺼 두세요',
             value: a11y.screenFlash || a11y.hearingSupport,
             onChanged: a11y.hearingSupport ? null : (v) => update(a11y.copyWith(screenFlash: v))),
-        // 청각 지원·시각 지원 스위치는 뺐다 (2026-10-11 사용자 요청) — 진동·화면 점멸·음성 안내를 각각 켜고 끈다.
+        // 청각 지원·시각 지원 스위치는 뺐다 (2026-10-11 사용자 요청) — 화면 점멸·음성 안내를 각각 켜고 끈다.
+        // '진동 알림' 스위치와 앱 안 반복 진동은 뺐다 (2026-10-12 사용자 요청, 웹·앱 모두)
         // '음성 언어'·'접근성 자세히' 버튼은 위 스위치와 겹쳐 뺐다 (2026-10-09)
         const FcmPushSettingsCard(),
         // 재난문자처럼 (2026-10-11): 누르고 화면을 끄거나 무음으로 바꾸면 10초 뒤 사이렌 + 잠금 화면 위 경보 (Android 앱, 기기에만 기록)

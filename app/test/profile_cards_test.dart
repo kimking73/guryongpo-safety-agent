@@ -83,11 +83,11 @@ void main() {
     expect(ys, [...ys]..sort(), reason: '나이 → 장애 유형 → 접근성 지원 → 이동 수단 → 직업 → 집 → 내 장소 순서');
     expect(find.text('설정 안 함'), findsOneWidget);
     expect(find.text('내 장소 추가하기'), findsOneWidget);
-    for (final s in ['음성 안내 자동 재생', '진동 알림', '화면 점멸', '재난 푸시 알림']) {
+    for (final s in ['음성 안내 자동 재생', '화면 점멸', '재난 푸시 알림']) {
       expect(find.widgetWithText(GkSwitchRow, s), findsOneWidget, reason: s);
     }
-    // 청각 지원·시각 지원 스위치는 뺐다 (2026-10-11 사용자 요청)
-    for (final s in ['청각 지원', '시각 지원']) {
+    // 청각 지원·시각 지원 스위치는 뺐다 (2026-10-11), 진동 알림 스위치도 뺐다 (2026-10-12 사용자 요청)
+    for (final s in ['청각 지원', '시각 지원', '진동 알림']) {
       expect(find.widgetWithText(GkSwitchRow, s), findsNothing, reason: s);
     }
     expect(find.text('광과민성이 있으면 꺼 두세요'), findsOneWidget);

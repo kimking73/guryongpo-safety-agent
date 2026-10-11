@@ -4,6 +4,7 @@ import 'ui/gk_theme.dart';
 import 'ui/gk_widgets.dart';
 import 'services/account_sync.dart';
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:dio/dio.dart' show Dio, BaseOptions;
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -23,7 +24,6 @@ import 'services/account_service.dart';
 import 'services/location_service.dart';
 import 'services/geocoding_service.dart';
 import 'services/demo_speech.dart';
-import 'services/alert_vibration.dart';
 import 'services/voice_service.dart';
 import 'services/voice_conversation.dart';
 import 'services/realtime_voice.dart';
@@ -45,6 +45,7 @@ import 'services/demo_notifications.dart';
 import 'services/evac_alarm.dart';
 import 'services/evac_voice_check.dart';
 import 'evac_alarm_layer.dart';
+import 'services/notice_history.dart';
 import 'services/prototype_safety_store.dart';
 import 'services/fcm_notification_service.dart';
 import 'services/evacuation_response_queue.dart';
@@ -755,7 +756,13 @@ class _NotificationBootstrapState extends ConsumerState<_NotificationBootstrap>
       }
     });
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      unawaited(NoticeHistory.load());   // 지난 알림 (종 → 알림 화면)
       final controller = ref.read(prototypeSafetyProvider);
+      // 시연 응답에 실어 보낼 주민의 현재 위치 (GPS·지도에서 고른 곳, 구룡포 안일 때만, 2026-10-12)
+      PrototypeSafetyController.currentLocation = () {
+        final here = ref.read(userLocation);
+        return here.fromGps ? (here.position.latitude, here.position.longitude) : null;
+      };
       await controller.load();
       final queuedResponses = await _responseQueue.read();
       ref.read(pendingResponseIdsProvider.notifier).state = {
@@ -963,13 +970,36 @@ class GuryongpoApp extends StatelessWidget {
   @override
   Widget build(BuildContext c) => MaterialApp.router(
         title: '구룡포 안전',
-        scaffoldMessengerKey: rootMessengerKey,
         debugShowCheckedModeBanner: false,
         // 디자인 = web-prototype (2026-10-08) — ui/gk_theme.dart
         theme: gkTheme(),
         routerConfig: appRouter,
         // 대피 경보 화면은 모든 화면(첫 화면 포함) 위에 (evac_alarm_layer.dart)
-        builder: (_, child) => EvacAlarmLayer(child: child ?? const SizedBox.shrink()),
+        // 알림(스낵바, 2026-10-12 사용자 요청): 아래 메뉴·119를 가리지 않게 위쪽(머리줄 바로 아래) 가운데에 좁게(최대 420) 반투명으로,
+        // 3초만 보이고 지난 알림은 종(알림 화면)의 '지난 알림'에 — NoticeMessenger (services/notice_history.dart).
+        // rootMessengerKey 는 이 NoticeMessenger 에 단다 (MaterialApp 의 기본 창구 대신 화면들이 이것을 쓴다).
+        // floating 스낵바는 아래에서부터 놓이므로 아래 여백 = 화면 높이 − 위치. 좁은 화면은 아래 메뉴(NavigationBar) 높이만큼 뺀다
+        builder: (context, child) {
+          final mq = MediaQuery.of(context);
+          final wide = mq.size.width >= 840;
+          final nav = wide ? 0.0 : 80 + mq.padding.bottom;
+          // 좁은 화면은 머리줄이 두 줄(온라인·대피 현황 / 119·알림)이라 조금 더 아래
+          final bottom = math.max(16.0, mq.size.height - nav - (wide ? 140 : 190));
+          // 넓은 화면은 왼쪽 메뉴 칸(약 90)을 뺀 본문 가운데
+          final left0 = wide ? 90.0 : 0.0;
+          final width = math.min(NoticeMessenger.maxWidth, mq.size.width - left0 - 32);
+          final left = left0 + (mq.size.width - left0 - width) / 2;
+          final theme = Theme.of(context);
+          return NoticeMessenger(
+            key: rootMessengerKey,
+            child: Theme(
+              data: theme.copyWith(
+                  snackBarTheme: theme.snackBarTheme.copyWith(
+                      insetPadding: EdgeInsets.fromLTRB(left, 0, mq.size.width - left - width, bottom))),
+              child: EvacAlarmLayer(child: child ?? const SizedBox.shrink()),
+            ),
+          );
+        },
       );
 }
 
@@ -1420,8 +1450,8 @@ class EvacuationAlertDialog extends ConsumerStatefulWidget {
 class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
   bool _busy = false;
 
-  // 사용자 화면 '알림' 스위치대로 (2026-10-11 사용자 요청): 화면 점멸 · 진동 알림 · 음성 안내 자동 재생
-  Timer? _flash, _vibrate;
+  // 사용자 화면 '알림' 스위치대로 (2026-10-11 사용자 요청): 화면 점멸 · 음성 안내 자동 재생
+  Timer? _flash;
   bool _flashOn = false;
   int _flashTicks = 0;
   bool _voice = false;
@@ -1461,14 +1491,6 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
           }
           setState(() => _flashOn = ++_flashTicks % 2 == 1);
           unawaited(EvacAlarm.torch(_flashOn));   // 손전등도 같은 박자로 (2026-10-11 사용자 요청, Android 앱)
-        });
-      }
-      if (a.strongVibration) {
-        var pulses = 0;
-        alertVibrate();
-        _vibrate = Timer.periodic(const Duration(milliseconds: 900), (t) {
-          if (++pulses >= evacuationHapticPulseLimit) t.cancel();
-          alertVibrate();
         });
       }
       if (a.visionSupport) {
@@ -1539,8 +1561,6 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
   @override
   void dispose() {
     _flash?.cancel();
-    _vibrate?.cancel();
-    alertVibrateStop();
     unawaited(EvacAlarm.torch(false));
     if (widget.alarm) unawaited(EvacAlarm.stop());
     if (_voice) unawaited(DemoSpeech.instance.stop());
@@ -1614,12 +1634,11 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
     }
     final on = [
       if (_voice) '음성 안내',
-      if (a.strongVibration) '진동',
       if (a.screenFlash || a.hearingSupport) '화면 점멸',
     ];
     return Row(mainAxisAlignment: MainAxisAlignment.center, children: [
       Flexible(
-        child: Text(on.isEmpty ? '음성·진동·화면 점멸 알림 꺼짐 · 사용자 화면에서 켤 수 있어요' : '${on.join('·')} 켜짐 · 사용자 화면에서 바꿀 수 있어요',
+        child: Text(on.isEmpty ? '음성·화면 점멸 알림 꺼짐 · 사용자 화면에서 켤 수 있어요' : '${on.join('·')} 켜짐 · 사용자 화면에서 바꿀 수 있어요',
             textAlign: TextAlign.center, style: const TextStyle(fontSize: 13, color: GK.muted)),
       ),
       if (_voice)

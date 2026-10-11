@@ -34,7 +34,7 @@ Set<String> disabilitiesOf(Map<String, String> p) {
   return s;
 }
 
-/// 장애 유형에 맞춰 알림 방식을 켜고 끈다 (2026-10-12 사용자 요청): 시각 → 음성 안내, 청각 → 화면 점멸(·진동).
+/// 장애 유형에 맞춰 알림 방식을 켜고 끈다 (2026-10-12 사용자 요청): 시각 → 음성 안내, 청각 → 화면 점멸.
 /// 고른 동안은 사용자 화면 스위치로 끌 수 없고, 유형을 빼면 그 기능도 꺼진다. 처음 화면(내 정보)·사용자 화면 내 정보 저장 때 부른다
 Future<void> applyDisabilityAlerts(WidgetRef ref, Set<String> dis) async {
   final store = ref.read(prototypeSafetyProvider);
@@ -44,7 +44,6 @@ Future<void> applyDisabilityAlerts(WidgetRef ref, Set<String> dis) async {
     visionSupport: see,
     voicePrompts: see ? true : a.voicePrompts,
     hearingSupport: hear,
-    strongVibration: hear ? true : a.strongVibration,
     screenFlash: hear ? true : (a.hearingSupport ? false : a.screenFlash),
   ));
   final voice = ref.read(autoVoiceAlerts.notifier);

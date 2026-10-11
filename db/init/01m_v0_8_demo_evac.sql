@@ -6,7 +6,7 @@
 --  이제 서버에 계정당 한 줄로 저장하고(이력은 demo_evac_log), 다른 계정의 방재단원 모드 화면이 읽는다.
 --  방재단원의 '실제 출발'·업무 단계(dispatch)는 같은 줄에 써서 주민 화면이 받아 간다.
 --  실제 대피 상황(care.incidents·incident_targets·evacuation_responses)과는 완전히 분리 — FCM·이관 없음.
---  공유 항목은 별명·응답·장애 유형(시각·청각·지체)뿐 — 집 주소·전화·실제 위치는 저장하지 않는다
+--  공유 항목은 별명·응답·장애 유형(시각·청각·지체)·현재 위치(앱이 보낸 때만, 2026-10-12) — 집 주소·전화는 저장하지 않는다
 -- =====================================================================
 
 CREATE TABLE IF NOT EXISTS care.demo_evac (
@@ -22,6 +22,13 @@ CREATE TABLE IF NOT EXISTS care.demo_evac (
   dispatch_at  timestamptz
 );
 CREATE INDEX IF NOT EXISTS idx_demo_evac_updated ON care.demo_evac(updated_at);
+-- 주민 앱의 현재 위치 (2026-10-12 사용자 요청: 방재단 현황에 실제 위치). 앱이 GPS·지도에서 고른 위치(구룡포 안)일 때만 보낸다.
+-- 없으면 방재단 화면엔 시연 기본점 둘레의 가상 위치
+ALTER TABLE care.demo_evac ADD COLUMN IF NOT EXISTS lat double precision;
+ALTER TABLE care.demo_evac ADD COLUMN IF NOT EXISTS lng double precision;
+ALTER TABLE care.demo_evac ADD COLUMN IF NOT EXISTS location_at timestamptz;
+-- 방재단 화면에 보일 이름 = 로그인 이메일의 아이디(@ 앞) (2026-10-12 사용자 요청). 서버가 Firebase 토큰에서 읽는다 — 앱이 보낸 값 아님
+ALTER TABLE care.demo_evac ADD COLUMN IF NOT EXISTS email_id text;
 
 CREATE TABLE IF NOT EXISTS care.demo_evac_log (
   id          bigserial PRIMARY KEY,

@@ -52,13 +52,27 @@ class LiveApi {
   // ---- 시연 대피 응답 (2026-10-12): 서버에 저장해 다른 계정의 방재단원 모드와 주고받는다 (server app/demo_evac.py) ----
   // needs = '내 정보'의 장애 유형 (vision · hearing · mobility_limited). 주소·전화·실제 위치는 보내지 않는다
   /// 새 시연 경보 시작 — 내 응답을 '응답 없음'으로, 지난 출동 기록은 지운다
-  Future<Map<String, dynamic>> demoEvacStart(List<String> needs) =>
-      _send(_api.post<Map<String, dynamic>>('/api/v1/demo/evacuation/start', data: {'needs': needs}));
+  /// [lat]·[lng] = 주민의 현재 위치 (GPS·지도에서 고른 곳, 2026-10-12) — 없으면 방재단 화면엔 가상 위치
+  Future<Map<String, dynamic>> demoEvacStart(List<String> needs, {double? lat, double? lng}) =>
+      _send(_api.post<Map<String, dynamic>>('/api/v1/demo/evacuation/start',
+          data: {'needs': needs, if (lat != null && lng != null) 'location': {'lat': lat, 'lng': lng}}));
 
   /// 시연 응답 저장 (status: evacuated|evacuating|need_help, via: button|voice|dashboard|alarm)
-  Future<Map<String, dynamic>> demoEvacRespond(String status, List<String> needs, {String via = 'button'}) =>
-      _send(_api.post<Map<String, dynamic>>('/api/v1/demo/evacuation/response',
-          data: {'status': status, 'needs': needs, 'via': via}));
+  Future<Map<String, dynamic>> demoEvacRespond(String status, List<String> needs,
+          {String via = 'button', double? lat, double? lng}) =>
+      _send(_api.post<Map<String, dynamic>>('/api/v1/demo/evacuation/response', data: {
+        'status': status,
+        'needs': needs,
+        'via': via,
+        if (lat != null && lng != null) 'location': {'lat': lat, 'lng': lng},
+      }));
+
+  /// 서버의 시연 주민 응답 전부 초기화 (시연 모드를 껐다 켤 때, 모든 계정 — 이력은 서버에 남는다)
+  Future<void> demoEvacReset() => _api.delete<Object?>('/api/v1/demo/evacuation');
+
+  /// 시연 주민이 움직이면 현재 위치만 갱신 (이력 없음)
+  Future<void> demoEvacLocation(double lat, double lng) =>
+      _api.post<Object?>('/api/v1/demo/evacuation/location', data: {'location': {'lat': lat, 'lng': lng}});
 
   /// 내 시연 응답 + 방재단 출동 기록(dispatch). 진행 중인 시연이 없으면 null
   Future<Map<String, dynamic>?> demoEvacMine() async {

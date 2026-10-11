@@ -12,7 +12,7 @@ import 'services/prototype_safety_store.dart';
 
 /// 재난문자처럼 뜨는 대피 경보 화면 (2026-10-11 사용자 요청). 앱 전체(라우터) 위에 깔려서
 /// 잠금 화면에서 열려도 첫 화면(동의·내 정보)보다 먼저 보인다 — 닫으면 아래의 첫 화면 흐름이 그대로 이어진다.
-/// 화면 점멸·손전등·진동·음성은 사용자 화면 '알림' 스위치대로 (EvacuationAlertDialog), 사이렌은 처음 만질 때 멈춘다.
+/// 화면 점멸·손전등·음성은 사용자 화면 '알림' 스위치대로 (EvacuationAlertDialog), 사이렌은 처음 만질 때 멈춘다.
 class EvacAlarmLayer extends StatelessWidget {
   const EvacAlarmLayer({super.key, required this.child});
   final Widget child;
