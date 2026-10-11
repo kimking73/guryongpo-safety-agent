@@ -272,7 +272,7 @@ void main() {
     final first = t.getTopLeft(find.text('[시연] 김○○ 댁').first).dy;
     final second = t.getTopLeft(find.text('[시연] 박○○ 댁').first).dy;
     expect(first, lessThan(second));
-    expect(find.textContaining('도움 필요 · 지체장애', findRichText: true), findsOneWidget);   // 등록된 needs(보행 불편)만 장애로, 유형까지
+    expect(find.textContaining(RegExp('^도움 필요 · 지체장애'), findRichText: true), findsOneWidget);   // 등록된 needs(보행 불편)만 장애로, 유형까지
     // 실제 서버에는 업무 단계 칸이 없다 — 단계 바꾸기 없이 배정만
     expect(find.text('배정 0가구 · 미배정 2가구'), findsOneWidget);
     expect(find.text('업무 단계 바꾸기'), findsNothing);
@@ -305,7 +305,7 @@ void main() {
     expect(find.textContaining('마지막 방문'), findsOneWidget);
     expect(find.text('대피 완료'), findsWidgets);
     // 김○○는 대피 완료가 되어 우선 확인 목록에서 빠지고, 박○○가 1번
-    expect(find.textContaining('도움 필요 · 지체장애', findRichText: true), findsNothing);
+    expect(find.textContaining(RegExp('^도움 필요 · 지체장애'), findRichText: true), findsNothing);
     // 대피 완료는 우선 확인 가구·배정 현황 모두 '대피 완료 1곳 보기'로 접힌다 (2026-10-11 사용자 요청)
     expect(find.text('대피 완료 1곳 보기'), findsNWidgets(2));
     expect(find.textContaining('방문: 대피 완료'), findsNothing);
@@ -551,7 +551,7 @@ void main() {
     expect(find.text('시연 방재단원'), findsNothing);
     expect(find.text('시연 · 예시 데이터'), findsNothing);
     expect(find.text('예시 위치 · 실제 지도 연결 전'), findsOneWidget);
-    expect(find.text('앱 사용자 (나 · 시연)'), findsWidgets);   // 응답 전 = 응답 없음으로 우선 확인 (+ 배정 현황)
+    expect(find.text('앱 사용자 (시연 주민)'), findsWidgets);   // 응답 전 = 응답 없음으로 우선 확인 (+ 배정 현황)
     // 시연 가구는 6곳, 이름에 '[시연]' 머리 없음 (2026-10-10)
     expect(find.textContaining('[시연]'), findsNothing);
     expect(find.text('등록 장애 가구 전체 6'), findsOneWidget);   // 시각 2 · 청각 2 · 지체 2
@@ -577,14 +577,14 @@ void main() {
     await _settle(t);
     expect(find.text('내가 맡기'), findsNothing);
     expect(find.text('맡기 취소'), findsNothing);
-    final card = find.ancestor(of: find.textContaining('주민 응답 '), matching: find.byType(Material)).first;
+    final card = find.byKey(const ValueKey('assign-demo-target-demo-household-01'));   // 주민 응답은 모든 카드에 보여 key 로 고른다
     expect(find.descendant(of: card, matching: find.text('방재단원 A (예시)')), findsOneWidget);
     expect(find.descendant(of: card, matching: step('출발 (1/4)')), findsOneWidget);
     await t.tap(find.descendant(of: card, matching: find.text('업무 단계 바꾸기')));
     await t.pumpAndSettle();
     await t.tap(find.text('방문 중').last);
     await _settle(t);
-    final card2 = find.ancestor(of: find.textContaining('주민 응답 '), matching: find.byType(Material)).first;
+    final card2 = find.byKey(const ValueKey('assign-demo-target-demo-household-01'));
     expect(find.descendant(of: card2, matching: step('방문 (2/4)')), findsOneWidget);
     // 상태 칩으로 거르면 그 상태만
     await t.tap(chip('방문 중'));
@@ -592,6 +592,71 @@ void main() {
     expect(find.text('방재단원 A (예시)'), findsWidgets);
     expect(step('출발 (1/4)'), findsNothing);
     await t.pumpWidget(const SizedBox.shrink());
+  });
+
+  // 2026-10-11 사용자 요청: 장애인 주민이 대피 현황에서 보낸 응답이 방재단 화면(같은 브라우저 다른 창)에 바로 —
+  // 우선 확인 가구·배정 현황 모두에 응답 + '내 정보'의 장애 유형이 보인다
+  testWidgets('시연 주민 응답: 프로필 장애 유형과 함께 우선 확인 가구·배정 현황에 응답 4가지가 보인다', (t) async {
+    _tall(t);
+    t.view.physicalSize = const Size(900, 9000);
+    SharedPreferences.setMockInitialValues({'optional_profile': '{"지체 지원":"지원 필요"}'});
+    DemoLiveApi.resetDemoIncident();
+    final store = PrototypeSafetyController();
+    await store.load();
+    await store.startDemoAlert(prototypeEvacuationAlertId);
+    await t.pumpWidget(ProviderScope(
+        overrides: [prototypeSafetyProvider.overrideWith((_) => store)],
+        child: const MaterialApp(home: Scaffold(body: DemoPatrolScope(child: LiveResponderScreen())))));
+    await _settle(t);
+    final me = find.byKey(const ValueKey('assign-${DemoLiveApi.meTargetId}'));
+    final priorityRows = find.byKey(const ValueKey('priority-${DemoLiveApi.meTargetId}'));   // 앱 사용자 줄만
+    Finder inPriority(String s) => find.descendant(of: priorityRows, matching: find.textContaining(s));
+
+    // 응답 전 = 응답 없음
+    expect(find.text('앱 사용자 (시연 주민)'), findsWidgets);
+    expect(inPriority('응답 없음 · 지체'), findsOneWidget);
+    expect(find.descendant(of: me, matching: find.textContaining('주민 응답 응답 없음 · 지체')), findsOneWidget);
+
+    // 도움 필요
+    await store.respond(prototypeEvacuationAlertId, EvacuationResponseStatus.needHelp);
+    await _settle(t);
+    expect(inPriority('도움 필요 · 지체장애 · 미배정'), findsOneWidget);
+    expect(find.descendant(of: me, matching: find.textContaining('주민 응답 도움 필요 · 지체')), findsOneWidget);
+
+    // 대피 중: 우선 확인 순번에서는 빠져도 번호 없이 목록에 남는다
+    await store.respond(prototypeEvacuationAlertId, EvacuationResponseStatus.evacuating);
+    await _settle(t);
+    expect(inPriority('대피 중 · 지체'), findsOneWidget);
+    expect(find.descendant(of: me, matching: find.textContaining('주민 응답 대피 중 · 지체')), findsOneWidget);
+
+    // 대피 완료: '대피 완료 N곳 보기' 접힘 안
+    await store.respond(prototypeEvacuationAlertId, EvacuationResponseStatus.evacuated);
+    await _settle(t);
+    expect(inPriority('대피 완료 · 지체'), findsNothing);
+    final fold = find.textContaining(RegExp(r'^대피 완료 \d+곳 보기$')).first;
+    await t.ensureVisible(fold);
+    await t.tap(fold);
+    await _settle(t);
+    expect(inPriority('대피 완료 · 지체'), findsOneWidget);
+    expect(find.descendant(of: me, matching: find.textContaining('주민 응답 대피 완료 · 지체')), findsOneWidget);
+    await t.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('다른 창이 바꾼 시연 응답을 syncFromStorage 로 읽는다 (같은 브라우저 창 두 개)', (t) async {
+    SharedPreferences.setMockInitialValues({});
+    final store = PrototypeSafetyController();
+    await store.load();
+    expect(store.demoAlertActive, isFalse);
+    // 다른 창이 쓴 것처럼 저장소만 바꾼다
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('prototype_demo_alert_active_v1', true);
+    await prefs.setString('prototype_evacuation_responses_v1', '{"$prototypeEvacuationAlertId":"need_help"}');
+    var notified = 0;
+    store.addListener(() => notified++);
+    await store.syncFromStorage();
+    expect(store.demoAlertActive, isTrue);
+    expect(store.responseFor(prototypeEvacuationAlertId), EvacuationResponseStatus.needHelp);
+    expect(notified, 1);
   });
 
   testWidgets('가구 대리 등록 (2026-10-11): 이름·주소(필수)·연락처·장애 유형만, 지체·시각 → 보행 불편·시각', (t) async {

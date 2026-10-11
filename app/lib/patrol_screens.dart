@@ -920,10 +920,16 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
     // 대피 완료(방문 결과 또는 배정 현황 완료)는 '대피 완료 N곳'으로 접어 두고 눌러서 펼친다
     final rest = [
       for (final t in _targets)
-        if (t['in_area'] != false && !numbers.containsKey('${t['id']}') && (t['last_visit'] != null || workStatusOf(t) == WorkStatus.done)) t
+        if (t['in_area'] != false &&
+            !numbers.containsKey('${t['id']}') &&
+            (t['last_visit'] != null || workStatusOf(t) == WorkStatus.done || selfReportedMoving(t)))
+          t
     ];
-    final visited = [for (final t in rest) if (workStatusOf(t) != WorkStatus.done) t];
-    final done = [for (final t in rest) if (workStatusOf(t) == WorkStatus.done) t];
+    // 앱 사용자가 '대피 완료'라고 응답했으면 완료 접기로, '대피 중'이면 번호 없이 목록 아래에
+    bool isDone(Map<String, dynamic> t) =>
+        workStatusOf(t) == WorkStatus.done || (t['kind'] == 'app_user' && t['status'] == 'evacuated');
+    final visited = [for (final t in rest) if (!isDone(t)) t];
+    final done = [for (final t in rest) if (isDone(t)) t];
     Widget row(Map<String, dynamic> t) => Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: _PriorityRow(
@@ -1518,10 +1524,12 @@ const residentStatuses = ['need_help', 'no_response', 'evacuating', 'evacuated']
 /// 등록된 지원 필요 정보 중 장애 — 등록 가구의 needs(본인·보호자 동의로 등록)만 본다.
 /// 앱 사용자의 시각·청각 화면 설정으로는 장애를 추정하지 않는다 (2026-10-09 사용자 요청)
 /// 시각·청각·지체 장애로 나눠 보인다 (2026-10-11, 휠체어·와상 = 지체 · vulnerableKinds 와 같다)
-List<String> registeredSupport(Map<String, dynamic> t) {
-  if (t['kind'] == 'app_user') return const [];
-  return [for (final k in vulnerableKinds(t['needs'])) kindKo[k]!];
-}
+/// 앱 사용자는 본인이 '내 정보'에서 고른 장애 유형만 needs 로 온다 (시연, 2026-10-11 사용자 요청) — 그대로 보인다
+List<String> registeredSupport(Map<String, dynamic> t) => [for (final k in vulnerableKinds(t['needs'])) kindKo[k]!];
+
+/// 앱 사용자가 스스로 대피 중·대피 완료라고 응답했는지 — 우선 확인 순번에서는 빠져도 목록에 응답이 보이게 남긴다 (2026-10-11)
+bool selfReportedMoving(Map<String, dynamic> t) =>
+    t['kind'] == 'app_user' && (t['status'] == 'evacuating' || t['status'] == 'evacuated');
 
 int _priorityTier(Map<String, dynamic> t) {
   final dis = registeredSupport(t).isNotEmpty;
@@ -1768,6 +1776,7 @@ class _PriorityRow extends StatelessWidget {
     final assignee = a == null ? '미배정' : (a['is_me'] == true ? '내가 맡음' : '${a['nickname'] ?? '방재단'} 배정');
     final visit = t['last_visit'] as Map?;
     return Material(
+      key: ValueKey('priority-${t['id']}'),
       color: Color.alphaBlend(statusColor(status).withValues(alpha: status == 'need_help' ? .10 : .07), GK.bg),
       shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(GK.radiusInner),
@@ -1785,7 +1794,8 @@ class _PriorityRow extends StatelessWidget {
                 width: 34,
                 height: 34,
                 decoration: BoxDecoration(color: statusColor(status), shape: BoxShape.circle),
-                child: const Icon(Icons.check_rounded, color: Colors.white, size: 22),
+                child: Icon(status == 'evacuating' ? Icons.directions_walk_rounded : Icons.check_rounded,
+                    color: Colors.white, size: 22),
               ),
             const SizedBox(width: 12),
             Expanded(
@@ -1949,6 +1959,7 @@ class _AssignCard extends StatelessWidget {
     final status = t['status'] as String?;
     final who = a == null ? null : (mine ? '나' : '${a['nickname'] ?? '방재단'}');
     return Material(
+      key: ValueKey('assign-${t['id']}'),
       color: GK.bg,
       shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(GK.radiusInner),
@@ -1981,9 +1992,17 @@ class _AssignCard extends StatelessWidget {
             ]),
             const SizedBox(height: 8),
             _WorkProgress(w),
+            // 주민 응답은 늘 보인다 (2026-10-11 사용자 요청: 장애인이 보낸 응답을 배정 현황에서도 바로)
+            const SizedBox(height: 6),
+            Text.rich(
+                TextSpan(children: [
+                  const TextSpan(text: '주민 응답 '),
+                  TextSpan(
+                      text: [statusKo[status] ?? '$status', ...registeredSupport(t)].join(' · '),
+                      style: TextStyle(fontWeight: FontWeight.w800, color: statusColor(status))),
+                ]),
+                style: const TextStyle(fontSize: 14, color: GK.muted)),
             if (selected) ...[
-              const SizedBox(height: 6),
-              Text('주민 응답 ${statusKo[status] ?? status}', style: const TextStyle(fontSize: 14, color: GK.muted)),
               if (!closed)
                 Wrap(spacing: 6, runSpacing: 0, children: [
                   if (supportsWork && a != null)

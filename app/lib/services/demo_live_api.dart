@@ -1,12 +1,14 @@
 import 'dart:math' as math;
 
+import '../profile_form.dart' show disabilitiesOf;
+import 'account_service.dart';
 import 'live_api.dart';
 
 /// 시연 모드용 방재단 데이터 (2026-10-05). 시연 모드에서 방재단 화면(patrol_screens.dart, C8)이 [LiveApi] 대신 이 클래스를 쓴다.
 /// 가구 목록: 앱 안 6곳 (시각·청각·지체 예시). 예전엔 서버 DB의 시연 가구(GET /api/v1/demo/households)를
 /// 먼저 썼지만 장애 유형이 대리 등록(시각·청각·지체)과 달라 뺐다 (2026-10-11). 이름·주소·전화는 모두 가상이다.
 /// 대피 상황 (2026-10-09): 앱 안 예시 대피 상황 하나 — 가구별 응답·배정·업무 단계는 이 앱 메모리에만 있고 서버로 보내지 않는다
-/// (실제 응답·배정 데이터와 분리). '대피 경보 팝업' 시연 경보가 진행 중이면 '앱 사용자 (나 · 시연)'가 대상에 들어가고
+/// (실제 응답·배정 데이터와 분리). '대피 경보 팝업' 시연 경보가 진행 중이면 '앱 사용자 (시연 주민)'이 대상에 들어가고
 /// 상태 = 팝업에서 고른 시연 응답.
 class DemoLiveApi extends LiveApi {
   DemoLiveApi();
@@ -68,6 +70,8 @@ class DemoLiveApi extends LiveApi {
   static bool myAlertActive = false;
   static String? myResponse;
   static const meTargetId = 'demo-me';
+  /// 프로필 장애 유형 → 가구 needs (대리 등록과 같은 이름)
+  static const _profileNeeds = {'see': 'vision', 'hear': 'hearing', 'body': 'mobility_limited'};
   /// 가구별 시연 상태 (응답·담당·업무 단계·마지막 방문). 처음 보는 가구는 아래 순서표로 채운다
   static final _state = <String, Map<String, dynamic>>{};
   static const _pattern = <(String, String?, String?)>[
@@ -150,15 +154,18 @@ class DemoLiveApi extends LiveApi {
     if (myAlertActive) {
       final st = _stateFor(meTargetId, 1);
       st['status'] = myResponse ?? 'no_response';
+      // 장애 유형 = 주민이 '내 정보'에서 고른 것 (같은 브라우저의 다른 창이면 같은 기기 기록, 2026-10-11 사용자 요청)
+      final profile = await AccountService().optionalProfile();
+      final home = profile['homeAddress'] ?? '';
       out.add({
         'id': meTargetId,
         'kind': 'app_user',
         'household_id': null,
-        'label': '앱 사용자 (나 · 시연)',
-        'address': '예시 위치 (시연)',
+        'label': '앱 사용자 (시연 주민)',
+        'address': home.isNotEmpty ? home : '예시 위치 (시연)',
         'location': {'lat': 35.9893, 'lng': 129.5541},
         'phone': null,
-        'needs': const [],
+        'needs': [for (final d in disabilitiesOf(profile)) if (_profileNeeds[d] case final n?) n],
         'has_app': true,
         'status': st['status'],
         'minutes_since_alert': 0,

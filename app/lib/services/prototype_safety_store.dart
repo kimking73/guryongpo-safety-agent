@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'storage_events.dart';
+
 enum EvacuationResponseStatus { evacuated, evacuating, needHelp }
 
 extension EvacuationResponseStatusLabel on EvacuationResponseStatus {
@@ -200,7 +202,10 @@ String householdNeedLabel(String value) => _needsLabels[value] ?? value;
 
 final prototypeSafetyProvider =
     ChangeNotifierProvider<PrototypeSafetyController>((ref) {
-  return PrototypeSafetyController();
+  final c = PrototypeSafetyController();
+  // 같은 브라우저의 다른 창(예: 주민 창)이 시연 응답을 바꾸면 이 창(예: 방재단 창)도 바로 따라간다 (2026-10-11 사용자 요청)
+  onOtherWindowStorageChange(c.syncFromStorage);
+  return c;
 });
 
 class PrototypeSafetyController extends ChangeNotifier {
@@ -272,6 +277,30 @@ class PrototypeSafetyController extends ChangeNotifier {
       // Corrupt demo preferences are ignored; the next save replaces them.
     }
     _loaded = true;
+    notifyListeners();
+  }
+
+  /// 다른 창이 바꾼 시연 응답·시연 경보만 다시 읽는다 (웹 'storage' 이벤트). 팝업은 띄우지 않는다.
+  /// reload 는 SharedPreferences 캐시 전체를 새로 고치므로 프로필(optional_profile)도 최신이 된다
+  Future<void> syncFromStorage() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+    var responses = <String, EvacuationResponseStatus>{};
+    try {
+      final raw = prefs.getString(_responsesKey);
+      if (raw != null) {
+        responses = {
+          for (final entry in (jsonDecode(raw) as Map<String, dynamic>).entries)
+            if (EvacuationResponseStatusLabel.fromWireValue('${entry.value}') case final status?) entry.key: status,
+        };
+      }
+    } on TypeError {
+      return;
+    } on FormatException {
+      return;
+    }
+    _responses = responses;
+    _demoAlertActive = prefs.getBool(_demoAlertKey) ?? false;
     notifyListeners();
   }
 

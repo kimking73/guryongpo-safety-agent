@@ -513,7 +513,7 @@ void syncDemoPatrol(PrototypeSafetyController demo) {
   DemoLiveApi.myResponse = demo.responseFor(prototypeEvacuationAlertId)?.wireValue;
 }
 
-/// 대피 경보 팝업의 시연 응답(기기 시연 기록)을 시연 대피 상황의 '앱 사용자 (나 · 시연)'에 넘긴다 (2026-10-09)
+/// 대피 경보 팝업의 시연 응답(기기 시연 기록)을 시연 대피 상황의 '앱 사용자 (시연 주민)'에 넘긴다 (2026-10-09)
 class DemoPatrolScope extends ConsumerWidget {
   const DemoPatrolScope({super.key, required this.child});
   final Widget child;
