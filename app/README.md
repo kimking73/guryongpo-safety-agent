@@ -113,10 +113,11 @@ flutter run -d chrome --dart-define=APP_MODE=remote
   **다른 계정·기기 연동 (2026-10-12)**: 서버 연결 + 시연 모드면 시연 경보 시작·응답(팝업·3버튼·대피 확인 카드·음성·10초 뒤 경보)을
   서버 `POST /api/v1/demo/evacuation/{start,response}` 로도 저장한다(`PrototypeSafetyController.respond`·`startDemoAlert`,
   계정당 한 줄 `care.demo_evac` + 이력 `care.demo_evac_log`). 다른 계정의 방재단원 모드 화면이 `GET /demo/evacuation/responses` 를
-  5초마다 읽어 그 주민(별명 · 응답 · 장애 유형, 주소·전화·실제 위치는 공유 안 함)을 우선 확인 가구·배정 현황에 넣고(`DemoLiveApi`),
+  5초마다 읽어 그 주민(별명 · 응답 · 장애 유형 · 현재 위치 — GPS·지도에서 고른 곳(구룡포 안)이면 응답과 함께, 20m 넘게 움직이면
+  `POST /demo/evacuation/location`; 없으면 가상 위치. 주소·전화는 공유 안 함)을 우선 확인 가구·배정 현황에 넣고(`DemoLiveApi`),
   "주민 응답이 왔어요" 알림도 서버 기준으로 띄운다. 방재단원의 [실제 출발]·업무 단계는 `PUT /demo/evacuation/{id}/dispatch` →
   주민 앱이 `GET /demo/evacuation/me` 를 5초마다 읽어 칩 옆 "방재단 출발 · 도착 예정"/"방재단 도착". 서버 저장 실패면 응답은 기기에만
-  남고 "서버에 저장하지 못했어요" 안내. 실제 대피 상황·FCM 과는 분리. 로컬 두 계정 확인: `--dart-define=DEV_UID=<아무 id>` 로
+  남고 "서버에 저장하지 못했어요" 안내. 알림(스낵바)은 아래 메뉴를 가리지 않게 화면 위쪽에 반투명으로(2026-10-12, main.dart builder). 실제 대피 상황·FCM 과는 분리. 로컬 두 계정 확인: `--dart-define=DEV_UID=<아무 id>` 로
   웹을 두 번 빌드해 다른 포트로 띄운다(서버 `API_AUTH_MODE=dev`).
   반대 방향(2026-10-12): 방재단 '내 방문 경로'를 계산한 뒤 **[출발]** → 경로 순서대로 이동 시간을 더한 집마다 도착 예정 시각 →
   배정 '나'·'가는 중'(`LiveApi.dispatch`; 실서버는 배정만) → 시연 주민 몫은 기기 기록 `prototype_demo_dispatch_v1`(`DemoDispatch`) →

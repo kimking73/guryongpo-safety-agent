@@ -210,8 +210,10 @@ ThemeData gkTheme() {
         surfaceTintColor: Colors.transparent,
         showDragHandle: true,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(GK.radiusCard)))),
+    // 알림(스낵바)은 반투명으로 — 위치(화면 위쪽)는 main.dart MaterialApp builder 가 화면 높이로 정한다 (2026-10-12 사용자 요청)
     snackBarTheme: SnackBarThemeData(
-        backgroundColor: GK.navy,
+        backgroundColor: GK.navy.withValues(alpha: .8),
+        elevation: 0,
         behavior: SnackBarBehavior.floating,
         contentTextStyle: t(16, FontWeight.w600, Colors.white),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))),

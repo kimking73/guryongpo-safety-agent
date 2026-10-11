@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse, Response
 from .. import db, layers
 from ..auth import AuthUser, current_user, optional_user
 from ..errors import ApiError
-from ..schemas import DemoDispatchInput, DemoEvacResponse, DemoEvacStart
+from ..schemas import DemoDispatchInput, DemoEvacLocation, DemoEvacResponse, DemoEvacStart
 
 router = APIRouter(tags=["dashboard"])
 # 위험지역 고정 영역은 산사태 취약지역만 사용 (침수·해안 영역 레이어는 두지 않음 — 침수는 실시간 판정 영역 risk_areas)
@@ -110,14 +110,23 @@ def get_demo_households():
 def post_demo_evac_start(body: DemoEvacStart, u: AuthUser = Depends(current_user)):
     from .. import demo_evac, users
     uid, _ = users.ensure_user(u)
-    return demo_evac.start(uid, body.needs)
+    return demo_evac.start(uid, body.needs, body.location.model_dump() if body.location else None)
 
 
 @router.post("/demo/evacuation/response", summary="시연 대피 응답 저장 (대피 완료 / 대피 중 / 도움 필요) + 이력")
 def post_demo_evac_response(body: DemoEvacResponse, u: AuthUser = Depends(current_user)):
     from .. import demo_evac, users
     uid, _ = users.ensure_user(u)
-    return demo_evac.respond(uid, body.status, body.needs, body.via)
+    return demo_evac.respond(uid, body.status, body.needs, body.via, body.location.model_dump() if body.location else None)
+
+
+@router.post("/demo/evacuation/location", status_code=204, summary="시연 주민의 현재 위치 갱신 (움직일 때, 이력 없음)")
+def post_demo_evac_location(body: DemoEvacLocation, u: AuthUser = Depends(current_user)):
+    from .. import demo_evac, users
+    uid = users.find_user_id(u)
+    if not uid or not demo_evac.update_location(uid, body.location.model_dump()):
+        raise ApiError("NOT_FOUND", "진행 중인 시연 대피 응답이 없습니다.", detail="demo_evac_not_found")
+    return Response(status_code=204)
 
 
 @router.get("/demo/evacuation/me", summary="내 시연 대피 응답 + 방재단 출동 기록 (없으면 null)")

@@ -720,6 +720,43 @@ void main() {
     store.dispose();
   });
 
+  // 2026-10-12 사용자 요청: 방재단 현황에 주민의 실제 위치
+  test('시연 응답에 현재 위치를 싣고, 20m 넘게 움직이면 위치만 다시 보낸다', () async {
+    SharedPreferences.setMockInitialValues({});
+    final fake = FakeServer({
+      'POST /api/v1/demo/evacuation/start': (_) => {'id': 'demo-user-a'},
+      'POST /api/v1/demo/evacuation/response': (_) => {'id': 'demo-user-a'},
+      'GET /api/v1/demo/evacuation/me': (_) => {'id': 'demo-user-a', 'status': 'need_help', 'dispatch': null},
+      'POST /api/v1/demo/evacuation/location': (_) => null,
+    });
+    final api = fake.api();
+    final server = PrototypeSafetyController.server, loc = PrototypeSafetyController.currentLocation;
+    addTearDown(() {
+      PrototypeSafetyController.server = server;
+      PrototypeSafetyController.currentLocation = loc;
+    });
+    (double, double)? here = (35.9871, 129.5522);
+    PrototypeSafetyController.server = () => api;
+    PrototypeSafetyController.currentLocation = () => here;
+    final store = PrototypeSafetyController();
+    await store.load();
+    await store.startDemoAlert(prototypeEvacuationAlertId);
+    await store.respond(prototypeEvacuationAlertId, EvacuationResponseStatus.needHelp);
+    expect((fake.seen.last.data as Map)['location'], {'lat': 35.9871, 'lng': 129.5522});
+    fake.seen.clear();
+    await store.pullFromServer();                      // 그대로면 위치를 보내지 않는다
+    expect([for (final o in fake.seen) o.path], ['/api/v1/demo/evacuation/me']);
+    here = (35.9881, 129.5522);                        // 약 110m 이동
+    fake.seen.clear();
+    await store.pullFromServer();
+    expect(fake.seen.last.path, '/api/v1/demo/evacuation/location');
+    expect(fake.seen.last.data, {'location': {'lat': 35.9881, 'lng': 129.5522}});
+    here = null;                                       // 위치를 모르면(GPS 꺼짐·구룡포 밖) 위치 없이
+    await store.respond(prototypeEvacuationAlertId, EvacuationResponseStatus.evacuating);
+    expect((fake.seen.last.data as Map).containsKey('location'), isFalse);
+    store.dispose();
+  });
+
   test('주민 앱이 서버에서 다른 계정 방재단원의 출동 기록(도착 예정)을 받는다', () async {
     SharedPreferences.setMockInitialValues({});
     Map<String, dynamic>? dispatch = {

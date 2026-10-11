@@ -4,6 +4,7 @@ import 'ui/gk_theme.dart';
 import 'ui/gk_widgets.dart';
 import 'services/account_sync.dart';
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:dio/dio.dart' show Dio, BaseOptions;
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -738,6 +739,11 @@ class _NotificationBootstrapState extends ConsumerState<_NotificationBootstrap>
     _wireEvacAlarm();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final controller = ref.read(prototypeSafetyProvider);
+      // 시연 응답에 실어 보낼 주민의 현재 위치 (GPS·지도에서 고른 곳, 구룡포 안일 때만, 2026-10-12)
+      PrototypeSafetyController.currentLocation = () {
+        final here = ref.read(userLocation);
+        return here.fromGps ? (here.position.latitude, here.position.longitude) : null;
+      };
       await controller.load();
       final queuedResponses = await _responseQueue.read();
       ref.read(pendingResponseIdsProvider.notifier).state = {
@@ -949,7 +955,22 @@ class GuryongpoApp extends StatelessWidget {
         theme: gkTheme(),
         routerConfig: appRouter,
         // 대피 경보 화면은 모든 화면(첫 화면 포함) 위에 (evac_alarm_layer.dart)
-        builder: (_, child) => EvacAlarmLayer(child: child ?? const SizedBox.shrink()),
+        // 알림(스낵바)은 화면 아래 메뉴·119를 가리지 않게 위쪽(머리줄 바로 아래)에 띄운다 (2026-10-12 사용자 요청).
+        // floating 스낵바는 아래에서부터 놓이므로 아래 여백 = 화면 높이 − 위치. 좁은 화면은 아래 메뉴(NavigationBar) 높이만큼 뺀다
+        builder: (context, child) {
+          final mq = MediaQuery.of(context);
+          final wide = mq.size.width >= 840;
+          final nav = wide ? 0.0 : 80 + mq.padding.bottom;
+          // 넓은 화면은 왼쪽 메뉴 칸을 비켜서
+          // 좁은 화면은 머리줄이 두 줄(온라인·대피 현황 / 119·알림)이라 조금 더 아래
+          final bottom = math.max(16.0, mq.size.height - nav - (wide ? 150 : 200));
+          final theme = Theme.of(context);
+          return Theme(
+            data: theme.copyWith(
+                snackBarTheme: theme.snackBarTheme.copyWith(insetPadding: EdgeInsets.fromLTRB(wide ? 106 : 16, 0, 16, bottom))),
+            child: EvacAlarmLayer(child: child ?? const SizedBox.shrink()),
+          );
+        },
       );
 }
 

@@ -208,7 +208,7 @@ class DemoLiveApi extends LiveApi {
         'kind': 'app_user',
         'household_id': null,
         'label': r['is_me'] == true ? '${r['label']} (나)' : '${r['label']}',
-        'address': '시연 위치 (주소는 공유하지 않음)',
+        'address': r['location_source'] == 'app' ? '주민 앱의 현재 위치' : '위치 정보 없음 · 시연 위치',
         'location': r['location'],
         'phone': null,
         'needs': [for (final n in r['needs'] as List? ?? const []) '$n'],
@@ -246,7 +246,11 @@ class DemoLiveApi extends LiveApi {
         'household_id': null,
         'label': '앱 사용자 (시연 주민)',
         'address': home.isNotEmpty ? home : '예시 위치 (시연)',
-        'location': {'lat': 35.9893, 'lng': 129.5541},
+        // 이 기기 주민의 현재 위치 (GPS·지도에서 고른 곳), 없으면 예시 위치
+        'location': switch (PrototypeSafetyController.currentLocation()) {
+          (final lat, final lng) => {'lat': lat, 'lng': lng},
+          null => {'lat': 35.9893, 'lng': 129.5541},
+        },
         'phone': null,
         'needs': [for (final d in disabilitiesOf(profile)) if (_profileNeeds[d] case final n?) n],
         'has_app': true,

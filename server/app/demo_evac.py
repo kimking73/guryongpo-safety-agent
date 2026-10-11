@@ -4,7 +4,8 @@
 - 방재단원 모드 계정: responses() 로 최근 시연 응답을 읽고, '실제 출발'·업무 단계를 dispatch() 로 그 주민 줄에 쓴다
   → 주민 앱은 mine() 으로 출동 기록(도착 예정 시각)을 받는다
 - 실제 대피 상황(care.incidents·incident_targets)·FCM·이관과는 분리. 시연 데이터라 역할 없이 로그인만으로 본다 (사용자 결정 2026-10-12).
-  공유 항목은 별명·응답·장애 유형뿐 — 집 주소·전화·실제 위치는 받지도 돌려주지도 않는다 (위치는 시연 기본점 둘레의 가상 좌표)
+  공유 항목은 별명·응답·장애 유형·현재 위치 — 집 주소·전화는 받지 않는다. 현재 위치는 주민 앱이 보낸 때만(2026-10-12 사용자 요청:
+  방재단 현황에 실제 위치), 없으면 시연 기본점 둘레의 가상 좌표
 """
 from __future__ import annotations
 
@@ -24,13 +25,23 @@ OFFSETS = [(0, 0), (0.0007, 0.0005), (-0.0006, 0.0008), (0.0004, -0.0009), (-0.0
            (0.0011, -0.0002), (-0.0002, 0.0012), (0.0009, 0.0010)]
 
 START_SQL = """
-INSERT INTO care.demo_evac (user_id, status, needs) VALUES (%(uid)s, 'no_response', %(needs)s)
+INSERT INTO care.demo_evac (user_id, status, needs, lat, lng, location_at)
+VALUES (%(uid)s, 'no_response', %(needs)s, %(lat)s, %(lng)s, CASE WHEN %(lat)s::float8 IS NULL THEN NULL ELSE now() END)
 ON CONFLICT (user_id) DO UPDATE SET status = 'no_response', needs = EXCLUDED.needs, started_at = now(), responded_at = NULL,
-    updated_at = now(), dispatch = NULL, dispatch_by = NULL, dispatch_at = NULL
+    updated_at = now(), dispatch = NULL, dispatch_by = NULL, dispatch_at = NULL,
+    lat = COALESCE(EXCLUDED.lat, care.demo_evac.lat), lng = COALESCE(EXCLUDED.lng, care.demo_evac.lng),
+    location_at = COALESCE(EXCLUDED.location_at, care.demo_evac.location_at)
 """
 RESPOND_SQL = """
-INSERT INTO care.demo_evac (user_id, status, needs, responded_at) VALUES (%(uid)s, %(status)s, %(needs)s, now())
-ON CONFLICT (user_id) DO UPDATE SET status = EXCLUDED.status, needs = EXCLUDED.needs, responded_at = now(), updated_at = now()
+INSERT INTO care.demo_evac (user_id, status, needs, responded_at, lat, lng, location_at)
+VALUES (%(uid)s, %(status)s, %(needs)s, now(), %(lat)s, %(lng)s, CASE WHEN %(lat)s::float8 IS NULL THEN NULL ELSE now() END)
+ON CONFLICT (user_id) DO UPDATE SET status = EXCLUDED.status, needs = EXCLUDED.needs, responded_at = now(), updated_at = now(),
+    lat = COALESCE(EXCLUDED.lat, care.demo_evac.lat), lng = COALESCE(EXCLUDED.lng, care.demo_evac.lng),
+    location_at = COALESCE(EXCLUDED.location_at, care.demo_evac.location_at)
+"""
+LOCATION_SQL = """
+UPDATE care.demo_evac SET lat = %(lat)s, lng = %(lng)s, location_at = now()
+WHERE user_id = %(uid)s AND updated_at > now() - make_interval(hours => %(h)s)
 """
 DISPATCH_SQL = """
 UPDATE care.demo_evac SET dispatch = %(d)s::jsonb, dispatch_by = %(by)s, dispatch_at = now(), updated_at = now()
@@ -42,6 +53,7 @@ VALUES (%(uid)s, %(kind)s, %(status)s, %(via)s, %(by)s, %(data)s::jsonb)
 """
 ROWS_SQL = """
 SELECT d.user_id, u.nickname, d.status, d.needs, d.started_at, d.responded_at, d.updated_at, d.dispatch, d.dispatch_by,
+       d.lat, d.lng, d.location_at,
        (EXTRACT(EPOCH FROM now() - d.started_at) / 60)::int AS minutes
 FROM care.demo_evac d JOIN users u ON u.id = d.user_id
 WHERE d.updated_at > now() - make_interval(hours => %(h)s) {where}
@@ -64,6 +76,7 @@ def target_out(r: dict, me: Optional[str], slot: Optional[int] = None) -> dict:
     k = _slot(uid) if slot is None else slot
     dy, dx = OFFSETS[k % len(OFFSETS)]
     dy, dx = dy * (1 + k // len(OFFSETS)), dx * (1 + k // len(OFFSETS))     # 칸이 모자라면 한 바퀴 더 바깥으로
+    real = r.get("lat") is not None and r.get("lng") is not None
     d = r.get("dispatch")
     if isinstance(d, str):
         d = json.loads(d)
@@ -77,7 +90,11 @@ def target_out(r: dict, me: Optional[str], slot: Optional[int] = None) -> dict:
         "responded_at": iso(r.get("responded_at")),
         "updated_at": iso(r["updated_at"]),
         "is_me": uid == me,
-        "location": {"lat": round(BASE[0] + dy, 6), "lng": round(BASE[1] + dx, 6)},
+        # 주민 앱이 보낸 현재 위치가 있으면 그대로, 없으면 가상 위치
+        "location": ({"lat": r["lat"], "lng": r["lng"]} if real else
+                     {"lat": round(BASE[0] + dy, 6), "lng": round(BASE[1] + dx, 6)}),
+        "location_source": "app" if real else "demo",
+        "location_at": iso(r.get("location_at")) if real else None,
         "dispatch": d or None,
         "dispatch_by_me": bool(d) and me is not None and str(r.get("dispatch_by")) == me,   # 내가(이 방재단원이) 보낸 출동인지
     }
@@ -88,16 +105,25 @@ def mine(uid: str) -> Optional[dict]:
     return target_out(r, uid) if r else None
 
 
-def start(uid: str, needs: list[str]) -> Optional[dict]:
-    db.execute(START_SQL, {"uid": uid, "needs": list(needs)})
+def _loc(location: Optional[dict]) -> dict:
+    return {"lat": (location or {}).get("lat"), "lng": (location or {}).get("lng")}
+
+
+def start(uid: str, needs: list[str], location: Optional[dict] = None) -> Optional[dict]:
+    db.execute(START_SQL, {"uid": uid, "needs": list(needs), **_loc(location)})
     _log(uid, "start", "no_response", data={"needs": list(needs)})
     return mine(uid)
 
 
-def respond(uid: str, status: str, needs: list[str], via: str) -> Optional[dict]:
-    db.execute(RESPOND_SQL, {"uid": uid, "status": status, "needs": list(needs)})
+def respond(uid: str, status: str, needs: list[str], via: str, location: Optional[dict] = None) -> Optional[dict]:
+    db.execute(RESPOND_SQL, {"uid": uid, "status": status, "needs": list(needs), **_loc(location)})
     _log(uid, "response", status, via, data={"needs": list(needs)})
     return mine(uid)
+
+
+def update_location(uid: str, location: dict) -> bool:
+    """주민이 움직이면 앱이 보내는 현재 위치 (이력은 남기지 않는다). 진행 중인 시연 응답이 없으면 False"""
+    return bool(db.execute(LOCATION_SQL, {"uid": uid, "h": ACTIVE_HOURS, **_loc(location)}))
 
 
 def responses(me: Optional[str]) -> list[dict]:

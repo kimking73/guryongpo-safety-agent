@@ -167,12 +167,18 @@ DemoNeed = Literal["vision", "hearing", "mobility_limited"]
 
 class DemoEvacStart(_In):
     needs: list[DemoNeed] = Field(default_factory=list, max_length=3)
+    location: Optional[LatLng] = None      # 주민 앱의 현재 위치 (GPS·지도에서 고른 곳, 없으면 가상 위치)
+
+
+class DemoEvacLocation(_In):
+    location: LatLng
 
 
 class DemoEvacResponse(_In):
     status: ButtonStatus
     needs: list[DemoNeed] = Field(default_factory=list, max_length=3)
     via: Literal["button", "voice", "dashboard", "alarm"] = "button"
+    location: Optional[LatLng] = None
 
 
 class DemoDispatchInput(_In):

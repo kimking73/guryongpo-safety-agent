@@ -34,7 +34,7 @@ def test_start_resets_my_row_and_logs(client, fake_db):
     assert_spec(d, "/demo/evacuation/start", "post")
     assert d["id"] == f"demo-user-{UID}" and d["status"] == "no_response" and d["is_me"] and d["dispatch"] is None
     (sql, p), = _sql(fake_db, "INSERT INTO care.demo_evac (")
-    assert "dispatch = NULL" in sql and p == {"uid": UID, "needs": ["mobility_limited"]}
+    assert "dispatch = NULL" in sql and p == {"uid": UID, "needs": ["mobility_limited"], "lat": None, "lng": None}
     (_, log), = _sql(fake_db, "INSERT INTO care.demo_evac_log")
     assert log["kind"] == "start" and log["uid"] == UID
 
@@ -47,8 +47,8 @@ def test_response_is_saved_with_history(client, fake_db):
     assert r.status_code == 200, r.text
     assert_spec(r.json(), "/demo/evacuation/response", "post")
     assert r.json()["status"] == "need_help"
-    (_, p), = _sql(fake_db, "INSERT INTO care.demo_evac (user_id, status, needs, responded_at)")
-    assert p == {"uid": UID, "status": "need_help", "needs": ["vision"]}
+    (_, p), = _sql(fake_db, "INSERT INTO care.demo_evac (user_id, status, needs, responded_at")
+    assert p == {"uid": UID, "status": "need_help", "needs": ["vision"], "lat": None, "lng": None}
     (_, log), = _sql(fake_db, "INSERT INTO care.demo_evac_log")
     assert (log["kind"], log["status"], log["via"]) == ("response", "need_help", "alarm")
     # 실제 대피 상황 표에는 쓰지 않는다 (FCM·이관 없음)
@@ -112,3 +112,43 @@ def test_dispatch_write_clear_and_missing(client, fake_db, monkeypatch):
     from app import db
     monkeypatch.setattr(db, "execute", lambda sql, p=None: 0)
     assert client.put(f"/api/v1/demo/evacuation/{UID}/dispatch", json=body, headers=RESPONDER).status_code == 404
+
+
+# 2026-10-12 사용자 요청: 방재단 현황에 주민의 실제 위치
+def test_real_location_is_saved_and_returned(client, fake_db):
+    _me(fake_db)
+    fake_db.rows[ROWS_KEY] = [_row(UID, "need_help", needs=["vision"]) | {"lat": 35.9871, "lng": 129.5522, "location_at": NOW}]
+    r = client.post("/api/v1/demo/evacuation/response",
+                    json={"status": "need_help", "needs": ["vision"], "location": {"lat": 35.9871, "lng": 129.5522}}, headers=AUTH)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert_spec(d, "/demo/evacuation/response", "post")
+    assert d["location"] == {"lat": 35.9871, "lng": 129.5522} and d["location_source"] == "app"
+    (_, p), = _sql(fake_db, "INSERT INTO care.demo_evac (user_id, status, needs, responded_at")
+    assert (p["lat"], p["lng"]) == (35.9871, 129.5522)
+    # 위치 없이 응답하면 lat·lng 는 None → 서버가 이전 위치를 지킨다 (COALESCE)
+    client.post("/api/v1/demo/evacuation/response", json={"status": "evacuating"}, headers=AUTH)
+    sql, p = _sql(fake_db, "INSERT INTO care.demo_evac (user_id, status, needs, responded_at")[-1]
+    assert p["lat"] is None and "COALESCE(EXCLUDED.lat" in sql
+
+
+def test_virtual_location_without_app_location(client, fake_db):
+    _me(fake_db, OTHER)
+    fake_db.rows[ROWS_KEY] = [_row(UID, "need_help")]
+    a, = client.get("/api/v1/demo/evacuation/responses", headers=RESPONDER).json()
+    assert a["location_source"] == "demo" and a["location_at"] is None
+
+
+def test_location_update(client, fake_db, monkeypatch):
+    _me(fake_db)
+    r = client.post("/api/v1/demo/evacuation/location", json={"location": {"lat": 35.99, "lng": 129.55}}, headers=AUTH)
+    assert r.status_code == 204, r.text
+    (_, p), = _sql(fake_db, "UPDATE care.demo_evac SET lat")
+    assert (p["uid"], p["lat"], p["lng"]) == (UID, 35.99, 129.55)
+    assert not _sql(fake_db, "demo_evac_log")                    # 위치는 이력을 남기지 않는다
+    assert client.post("/api/v1/demo/evacuation/location", json={"location": {"lat": 99, "lng": 129}},
+                       headers=AUTH).status_code == 422
+    from app import db
+    monkeypatch.setattr(db, "execute", lambda sql, p=None: 0)
+    assert client.post("/api/v1/demo/evacuation/location", json={"location": {"lat": 35.99, "lng": 129.55}},
+                       headers=AUTH).status_code == 404
