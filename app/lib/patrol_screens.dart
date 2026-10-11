@@ -13,6 +13,7 @@ import 'live_screens.dart';
 import 'main.dart';
 import 'models/domain_models.dart';
 import 'origin_picker.dart';
+import 'route_brief_card.dart';
 import 'route_planner.dart' show RouteEndButton;
 import 'services/geocoding_service.dart';
 import 'ui/gk_theme.dart';
@@ -1077,8 +1078,14 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
     // 대피소·의료시설과 경로에 안 넣은 우선 확인 가구·등록 가구는 숨긴다
     final routing = line.length > 1;
     final shown = routing ? [for (final p in points) if (visitStops.contains(p.id)) p] : points;
+    // AI 경로 설명: 방문 경로를 그렸을 때만 (지도 오른쪽 위)
+    final last = !routing ? null : at['${((plan!['order'] as List).last as Map)['id']}'];
     return Dashboard(
       mapOnly: true,
+      routeBriefBody: !routing
+          ? null
+          : visitBriefBody(visitResult!, visitTab, _visitStart.latitude, _visitStart.longitude, visitOriginLabel,
+              endLat: last?.latitude, endLon: last?.longitude),
       showFacilities: !routing,
       focusPoint: focus,
       extraPolygons: [
@@ -2439,7 +2446,8 @@ class _LiveSeaRouteScreenState extends ConsumerState<LiveSeaRouteScreen> {
           clipBehavior: Clip.antiAlias,
           child: SizedBox(
               height: 420,
-              child: FlutterMap(
+              child: Stack(children: [
+                FlutterMap(
                   options: MapOptions(
                       initialCenter: const LatLng(35.985, 129.565),
                       initialZoom: 12.8,
@@ -2465,7 +2473,17 @@ class _LiveSeaRouteScreenState extends ConsumerState<LiveSeaRouteScreen> {
                             child: const Icon(Icons.health_and_safety, color: landColor, size: 32)),
                     ]),
                     _osm,
-                  ]))),
+                  ]),
+                // AI 경로 설명 (2026-10-11): 이 화면의 해상 경로에도 지도 오른쪽 위에
+                if (p != null && seaBriefBody(p.raw, p.origin.latitude, p.origin.longitude) != null)
+                  Positioned(
+                      right: 8,
+                      top: 8,
+                      child: RouteBriefCard(
+                          maxWidth: MediaQuery.sizeOf(c).width < 700 ? 240 : 320,
+                          startCollapsed: MediaQuery.sizeOf(c).width < 700,
+                          body: seaBriefBody(p.raw, p.origin.latitude, p.origin.longitude))),
+              ]))),
       const Wrap(spacing: 14, runSpacing: 6, children: [
         _Legend(color: seaColor, label: '해상 구간 (방파제·곶을 피한 바닷길)', dashed: true),
         _Legend(color: portColor, label: '항구 접안점'),

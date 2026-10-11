@@ -10,6 +10,7 @@ import 'models/domain_models.dart';
 import 'services/app_config.dart';
 import 'services/demo_mode.dart';
 import 'services/voice_service.dart';
+import 'services/voice_conversation.dart';
 import 'services/account_service.dart';
 import 'services/location_service.dart';
 import 'ui/gk_theme.dart';
@@ -966,8 +967,6 @@ class AiPanel extends ConsumerStatefulWidget {
 class _AiPanelState extends ConsumerState<AiPanel> {
   final input = TextEditingController();
   final scroll = ScrollController();
-  bool recording = false;
-  VoiceRecorder? recorder;
 
   /// 답 기다리는 중 — 앱 전체 상태 (AI 대화창과 같은 대화, 다른 메뉴에 갔다 와도 이어짐)
   bool get loading => ref.watch(chatLoading);
@@ -978,33 +977,14 @@ class _AiPanelState extends ConsumerState<AiPanel> {
               duration: const Duration(milliseconds: 180), curve: Curves.easeOut);
       });
 
-  /// 마이크: 누르면 녹음 시작, 다시 누르면(또는 28초가 지나면) 서버로 보내 받아쓴 질문·답을 보여 주고 답 음성을 바로 재생
+  /// 마이크: 한 번 누르면 연속 음성 대화 시작, 다시 누르면 중지 (AI 대화창과 같은 대화 — main.dart voiceConversation)
   Future<void> toggleMic() async {
+    final voice = ref.read(voiceConversation.notifier);
+    if (voice.active) return voice.stop();
     if (ref.read(chatLoading)) return;
-    if (recording) return finishVoice();
-    await VoicePlayer.instance.stop();
-    recorder ??= VoiceRecorder();
-    final ok = await recorder!.start(onLimit: finishVoice);
-    if (!mounted) return;
-    if (!ok) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('마이크 권한이 필요합니다. 브라우저·기기 설정에서 허용해 주세요.')));
-      return;
-    }
-    setState(() => recording = true);
-  }
-
-  Future<void> finishVoice() async {
-    if (!recording) return;
-    final chat = ref.read(chatController), loadingNotifier = ref.read(chatLoading.notifier);
-    setState(() => recording = false);
-    loadingNotifier.state = true;
-    final wav = await recorder!.stop();
-    loadingNotifier.state = false;
-    if (wav == null) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('녹음이 너무 짧습니다. 버튼을 누르고 말씀한 뒤 다시 눌러 주세요.')));
-      return;
-    }
-    await chat.askVoice(wav); // 보내기·답 붙이기는 화면 밖(chatController) — 다른 메뉴로 가도 이어짐
+    final ok = await voice.start();
+    if (!mounted || ok) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('마이크 권한이 필요합니다. 브라우저·기기 설정에서 허용해 주세요.')));
   }
 
   Future<void> ask(String question) async {
@@ -1016,6 +996,7 @@ class _AiPanelState extends ConsumerState<AiPanel> {
   @override
   Widget build(BuildContext context) {
     ref.listen(chatMessages, (_, __) => scrollToEnd()); // 답은 chatController가 붙인다
+    final voice = ref.watch(voiceConversation);
     return Card(
       child: SizedBox(
           height: 470,
@@ -1075,10 +1056,10 @@ class _AiPanelState extends ConsumerState<AiPanel> {
                               hintText: '질문 입력',
                               border: OutlineInputBorder()))),
                   IconButton(
-                      tooltip: recording ? '말하기 끝' : '음성으로 질문',
-                      onPressed: loading && !recording ? null : toggleMic,
-                      color: recording ? Colors.red : null,
-                      icon: Icon(recording ? Icons.stop_circle : Icons.mic)),
+                      tooltip: voice != VoiceState.off ? '음성 대화 중지' : '음성 대화',
+                      onPressed: loading && voice == VoiceState.off ? null : toggleMic,
+                      color: voice != VoiceState.off ? Colors.red : null,
+                      icon: Icon(voice != VoiceState.off ? Icons.stop_circle : Icons.graphic_eq_rounded)),
                   IconButton(
                       onPressed: () {
                         ask(input.text);
@@ -1086,9 +1067,9 @@ class _AiPanelState extends ConsumerState<AiPanel> {
                       },
                       icon: const Icon(Icons.send))
                 ])),
-            if (recording)
-              const Padding(padding: EdgeInsets.only(left: 12, bottom: 8),
-                  child: Text('듣고 있어요… 말씀이 끝나면 빨간 버튼을 눌러 주세요.', style: TextStyle(color: Colors.red, fontSize: 12))),
+            if (voice != VoiceState.off)
+              Padding(padding: const EdgeInsets.only(left: 12, bottom: 8),
+                  child: Text(voiceStateLabel(voice), style: const TextStyle(color: Colors.red, fontSize: 12))),
           ])));
   }
 
@@ -1096,7 +1077,6 @@ class _AiPanelState extends ConsumerState<AiPanel> {
   void dispose() {
     input.dispose();
     scroll.dispose();
-    recorder?.dispose();
     super.dispose();
   }
 }

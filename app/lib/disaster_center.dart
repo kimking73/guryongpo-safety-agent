@@ -298,6 +298,7 @@ class DisasterDashboard extends StatefulWidget {
     this.seaRoutePanel,
     this.seaRouteLines = const [],
     this.seaRouteMarkers = const [],
+    this.routeBriefBody,
     this.showFacilities = false,
     this.focusPoint,
   });
@@ -364,6 +365,8 @@ class DisasterDashboard extends StatefulWidget {
   /// 바다 위일 때 경로 안내 모드에서 지도에 겹쳐 그릴 해상 경로 선·표시
   final List<Polyline> seaRouteLines;
   final List<Marker> seaRouteMarkers;
+  /// 고른 경로(route) 말고 지도에 겹쳐 그린 경로의 AI 설명 요청 값 — 해상 경로·방재단 방문 경로 (route_brief_card.dart)
+  final Map<String, dynamic>? routeBriefBody;
   /// 경로 모드가 아니어도 대피소·의료시설을 그린다 (방재단 지도, 2026-10-09)
   final bool showFacilities;
   /// 바뀌면 지도를 이 점으로 옮기고 확대한다 (방재단 목록에서 가구를 고를 때)
@@ -935,14 +938,16 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                     bottom: 8,
                     child: RouteHazardBanner(route: route),
                   ),
-                // AI 경로 설명 (2026-10-11): 경로가 있을 때 지도 오른쪽 위. 좁은 화면은 접힌 채로 (범례와 겹치지 않게)
-                if (route != null)
+                // AI 경로 설명 (2026-10-11): 지도에 경로가 있으면 늘 오른쪽 위 — 고른 경로, 해상 경로, 방재단 방문 경로 모두.
+                // 좁은 화면은 접힌 채로 (범례와 겹치지 않게)
+                if (route != null || (widget.routeBriefBody != null && (widget.mapOnly || routeMode)))
                   Positioned(
                     right: 8,
                     top: 8,
                     child: RouteBriefCard(
                         maxWidth: MediaQuery.sizeOf(context).width < 700 ? 240 : 320,
-                        startCollapsed: MediaQuery.sizeOf(context).width < 700),
+                        startCollapsed: MediaQuery.sizeOf(context).width < 700,
+                        body: route != null ? null : widget.routeBriefBody),
                   ),
                 // 범례는 지도 왼쪽 위에 늘 펼쳐 둔다 (2026-10-10: '범례' 버튼·침수 범례·침수 위험 단계 상자 대신 하나로)
                 Positioned(
@@ -1480,9 +1485,10 @@ Color _sensorColor(String level) =>
     _sensorRiskLevels.contains(level) ? _floodColor(level) : Colors.blueGrey.shade400;
 const _sensorRiskLevels = ['주의', '경계', '심각'];
 
-/// 지도 왼쪽 위에 늘 펼쳐 두는 범례 (2026-10-10, 사용자 결정): 지금 켠 층에 맞는 것만.
-/// 색 = 위험 단계는 침수·강풍만, 산사태는 취약 지역 한 색. 수치는 쓰지 않는다
-class MapLegendCard extends StatelessWidget {
+/// 지도 왼쪽 위 범례 (2026-10-10, 사용자 결정): 지금 켠 층에 맞는 것만.
+/// 색 = 위험 단계는 침수·강풍만, 산사태는 취약 지역 한 색. 수치는 쓰지 않는다.
+/// 처음에는 펼쳐 두고, 제목 줄을 누르면 접고 편다 (2026-10-11 사용자 요청 — 지도를 가릴 때 닫을 수 있게)
+class MapLegendCard extends StatefulWidget {
   const MapLegendCard(
       {super.key,
       required this.visible,
@@ -1497,7 +1503,16 @@ class MapLegendCard extends StatelessWidget {
   final bool showFacilities, hasDestination, hasRoute, hasSea;
 
   @override
+  State<MapLegendCard> createState() => _MapLegendCardState();
+}
+
+class _MapLegendCardState extends State<MapLegendCard> {
+  bool open = true;
+
+  @override
   Widget build(BuildContext context) {
+    final visible = widget.visible, severeOnly = widget.severeOnly, showFacilities = widget.showFacilities;
+    final hasDestination = widget.hasDestination, hasRoute = widget.hasRoute, hasSea = widget.hasSea;
     const label = TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: GK.navy);
     const note = TextStyle(fontSize: 11, color: GK.muted, height: 1.3);
     // circle = 지도에 원으로 그리는 것 (산사태 취약 지역, 2026-10-11 사용자 요청)
@@ -1531,8 +1546,27 @@ class MapLegendCard extends StatelessWidget {
         color: Colors.white.withValues(alpha: .94),
         elevation: 1,
         borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(10, 2, 10, 8),
+        clipBehavior: Clip.antiAlias,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+          Tooltip(
+            message: open ? '범례 닫기' : '범례 열기',
+            child: InkWell(
+              onTap: () => setState(() => open = !open),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(10, 7, 6, 7),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.layers_rounded, size: 16, color: GK.navy),
+                  const SizedBox(width: 5),
+                  const Text('범례', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: GK.navy)),
+                  const SizedBox(width: 4),
+                  Icon(open ? Icons.expand_less_rounded : Icons.expand_more_rounded, size: 20, color: GK.muted),
+                ]),
+              ),
+            ),
+          ),
+          if (open)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
             if (leveled) ...[
               section('위험 단계'),
@@ -1566,6 +1600,7 @@ class MapLegendCard extends StatelessWidget {
               row(SizedBox(width: 18, child: Container(height: 3, color: Colors.teal.shade700)), '바닷길'),
           ]),
         ),
+        ]),
       ),
     );
   }

@@ -111,6 +111,15 @@ docker compose run --rm loader                        # 정적 데이터(대피�
 - **음성(질문 녹음 → 답 음성) 켜기 (B5, Google Cloud)**: GCP 콘솔에서 Speech-to-Text API·Text-to-Speech API를 사용 설정하고,
   서비스 계정을 만들어 키(JSON)를 `secrets/gcp-voice.json`으로 저장 → `docker compose up -d --force-recreate ai`.
   키가 없으면 채팅은 그대로 되고 `/api/voice`·`/api/tts`만 503(앱은 "음성 기능을 지금 쓸 수 없습니다"). 키 파일은 커밋하지 않는다.
+  서비스 계정 키를 만들 수 없으면(조직 정책) API 키를 `.env`의 `GCP_VOICE_API_KEY`에 넣어도 된다.
+- **음성 대화 (2026-10-11)**: 앱의 마이크를 한 번 누르면 손대지 않고 묻고 듣는다. 방식은 둘이고 앱이 알아서 고른다 (`app/lib/services/realtime_voice.dart` `VoiceHub`).
+  - **실시간 음성 (웹, 먼저 시도)**: OpenAI Realtime(`OPENAI_REALTIME_MODEL`, 기본 `gpt-realtime-2`)이 듣고 말한다. **답 내용은 그대로 LangGraph**가 만든다 —
+    모델은 말을 들을 때마다 도구 `ask_guardian`만 부르고(세션 `tool_choice=required`), 앱이 `/api/chat` 답의 음성 문장을 "그대로 읽어라"로 돌려준다.
+    앱은 `POST /api/voice/session`으로 10분짜리 임시 키만 받아 OpenAI와 WebRTC로 직접 연결한다 (`ai/guardian_ai/realtime.py`, 진짜 키는 서버에만).
+    Google 키가 없어도 된다. Realtime 사용료는 `GET /api/ai/usage` 예상 비용에 잡히지 않는다 — OpenAI 대시보드에서 확인.
+  - **녹음 올리기 (휴대폰 앱·실시간이 안 될 때)**: 듣기 → 말이 끝나면(약 1.2초 조용) 자동 전송 `/api/voice`(Google 받아쓰기·음성 합성) → 답 음성 → 다시 듣기
+    (`voice_conversation.dart`, 말 끝 감지 `voice_service.dart` `SpeechEndDetector`). Google 키가 있어야 한다.
+  - 끝내기는 중지 버튼, "그만"·"대화 종료" 같은 말, 한동안 말 없음.
 - **`db/init`의 시드(02~)가 바뀌었으면** `docker compose run --rm loader` (DB 데이터 유지). **스키마(01)가 바뀌었으면** loader가 알려 주고 멈추므로 `docker compose down -v` 후 다시 `up`.
 - 서버 API 대부분은 아직 목업(응답 헤더 `X-Mock: true`)이다. 실데이터: `/api/health`, `/api/v1/risk*`, 지도 레이어 `stations`·`landslide_zones`·`risk_areas`·`shelters`·`medical`·`manholes`. 자세한 건 `server/README.md`.
 - `server/app/`·`server/collector/`·`server/risk/`(api), `ai/guardian_ai/`, `route/guardian_route/` 코드를 고치면 해당 서버가 자동으로 재시작된다 (재빌드 불필요).

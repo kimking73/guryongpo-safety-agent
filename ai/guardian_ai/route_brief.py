@@ -1,4 +1,6 @@
-"""AI 경로 설명 (2026-10-11): 대시보드 지도에 그린 경로의 주의할 점·위험 요소를 짧게 풀어 준다 — POST /api/ai/route-brief.
+"""AI 경로 설명 (2026-10-11): 지도에 그린 경로의 주의할 점·위험 요소를 짧게 풀어 준다 — POST /api/ai/route-brief.
+지도에 그리는 경로 모두에 쓴다: 육상 경로(대피소·길찾기·AI 답의 경로), 해상 경로(sea — 바다 → 항구 → 육상),
+방재단 방문 경로(visits — 여러 집을 도는 길).
 
 대화 그래프(graph.py)를 돌리지 않는다. 경로를 바꿀 때마다 불리므로 가볍게:
   ① 근거는 코드가 모은다 — 앱이 보낸 경로 서버 응답 + 출발·도착 지점 위험(hazards_at) + 특보·비·바람(tools.py)
@@ -12,11 +14,12 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
+import re
 import threading
 import time
 from typing import Any, Callable, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from . import demo, tools, tracing
 from .flood import evidence_lines
@@ -39,6 +42,10 @@ NOTABLE = {"rain_1h": 1.0, "wind_speed": 9.0, "wind_gust": 14.0}
 MIN_ASCEND_M = 15
 LEVEL_KO = {"watch": "예비특보", "advisory": "주의보", "warning": "경보", "critical": "경보"}
 NOTE = "경사·계단 길이는 경로 서버의 고도 자료(90m 격자) 기준이라 실제와 다를 수 있습니다."
+# 구역 이름을 받지 못했을 때 (해상·방문 경로는 앱이 id만 가진다): 경로 서버 구역 id 앞머리로 종류만 말한다
+ZONE_KIND_KO = {"flood": "침수 위험 구역", "landslide": "산사태 위험 구역"}
+SEA_NOTE = "해상 구간은 육지·방파제만 피한 대략의 바닷길입니다(수심·암초 미반영). 실제 항해는 선장 판단과 해경 안내를 따르세요."
+VISIT_NOTE = "방문 순서와 거리는 경로 서버 계산 값입니다. 현장 상황에 따라 순서를 바꾸세요."
 
 
 class Point(BaseModel):
@@ -65,12 +72,36 @@ class RouteFacts(BaseModel):
     geometry: str = ""
 
 
+class SeaFacts(BaseModel):
+    """해상 경로 /api/route/sea 응답의 바다 구간 (sea_leg + port)."""
+    port_name: str
+    distance_m: int
+    bearing_label: str = ""          # 16방위 한글 (예: 북서쪽)
+    direct: bool = True              # False면 곶·방파제를 돌아 들어가는 길
+    path_found: bool = True          # False면 바닷길을 못 찾음 (지도에 선 없음, 방위만)
+
+
+class VisitFacts(BaseModel):
+    """방재단 방문 경로 /api/route/visits 응답에서 고른 한 가지(shortest 또는 priority)."""
+    stops: int = Field(ge=1)
+    by_priority: bool = False
+    blocked_zones: list[str] = Field(default_factory=list)   # 막아야 했지만 길이 없어 풀어 준 구역
+
+
 class RouteBriefRequest(BaseModel):
     origin: Point
     destination: Point
-    route: RouteFacts
+    route: RouteFacts | None = None    # 육상 구간. 해상 경로에서 항구 → 대피소 길을 못 구했으면 없음
+    sea: SeaFacts | None = None        # 있으면 해상 경로 (바다 → 항구 → route)
+    visits: VisitFacts | None = None   # 있으면 방재단 방문 경로 (route = 모든 집을 도는 길)
     zone_names: dict[str, str] = Field(default_factory=dict)   # 위험 구역 id → 이름 (앱이 가진 값). 없으면 id 그대로
     demo: bool = False
+
+    @model_validator(mode="after")
+    def _has_a_route(self):
+        if self.route is None and self.sea is None:
+            raise ValueError("route 또는 sea 중 하나는 있어야 합니다")
+        return self
 
 
 class RouteBriefResponse(BaseModel):
@@ -90,44 +121,68 @@ def _names(ids: list[str], names: dict[str, str]) -> str:
     """구역 이름 묶음. 이름이 '침수 경보'처럼 종류·단계라 여러 구역이 같은 이름일 수 있다 → "침수 경보 2곳, 산사태 경고"."""
     count: dict[str, int] = {}
     for i in ids:
-        n = names.get(i) or i
+        n = names.get(i) or next((ko for prefix, ko in ZONE_KIND_KO.items() if i.startswith(prefix)), i)
         count[n] = count.get(n, 0) + 1
     return ", ".join(n if c == 1 else f"{n} {c}곳" for n, c in count.items())
 
 
 def build_evidence(req: RouteBriefRequest, fetch=None) -> tuple[list[Evidence], list[str]]:
     """근거 목록과 확인하지 못한 항목 이름. tool이 실패하면 그 항목만 빠진다 (답은 계속 나간다)."""
-    r, missing = req.route, []
-    walk = r.mode == "walk"
-    ev = [Evidence(source="request", key="출발지", value=req.origin.name or "현위치"),
-          Evidence(source="request", key="도착지", value=req.destination.name or "도착지"),
-          Evidence(source="route", key="이동 수단", value="도보" if walk else "자동차"),
-          Evidence(source="route", key="경로 거리", value=r.distance_m, unit="m"),
-          Evidence(source="route", key="소요 시간", value=math.ceil(r.duration_s / 60), unit="분")]
-    if r.strategy in STRATEGY_KO:
-        ev.append(Evidence(source="route", key="경로 방식", value=STRATEGY_KO[r.strategy]))
-    if walk:
-        if r.ascend_m >= MIN_ASCEND_M:
-            ev.append(Evidence(source="route", key="오르막 합계", value=r.ascend_m, unit="m"))
-        if r.steep_up_m >= MIN_NOTABLE_M:
-            ev += [Evidence(source="route", key="급한 오르막 길이 (매우 급한 구간 포함)", value=r.steep_up_m, unit="m"),
-                   Evidence(source="route", key="가장 급한 오르막 경사", value=r.max_uphill_pct, unit="%")]
-            if r.very_steep_up_m >= MIN_NOTABLE_M:
-                ev.append(Evidence(source="route", key="그중 매우 급한 구간(노약자·휠체어 통행 한계 초과) 길이",
-                                   value=r.very_steep_up_m, unit="m"))
-        if r.steps_m >= MIN_NOTABLE_M:
-            ev.append(Evidence(source="route", key="계단 길이", value=r.steps_m, unit="m"))
-    inside, avoided = _names(r.still_inside, req.zone_names), _names(r.avoided, req.zone_names)
-    if inside:
-        ev.append(Evidence(source="route", key=f"다른 길이 없어 지나는 위험 구역 {len(r.still_inside)}곳", value=inside))
-    if avoided:
-        ev.append(Evidence(source="route", key=f"이 경로가 피한 위험 구역 {len(r.avoided)}곳", value=avoided))
-    if not inside and r.hazards_ok and r.strategy not in ("shortest", "uphill"):
-        ev.append(Evidence(source="route", key="경로 위 위험 구역", value="없음"))
-    if not r.hazards_ok:
-        missing.append("위험 구역 정보 (위험 구역을 피하지 않고 계산한 경로)")
+    r, sea, visits, missing = req.route, req.sea, req.visits, []
+    walk = r is None or r.mode == "walk"
+    ev = [Evidence(source="request", key="출발지", value=req.origin.name or "현위치")]
+    if visits is not None:
+        ev += [Evidence(source="route", key="경로 종류", value="방재단 방문 경로 (여러 집을 차례로 도는 길)"),
+               Evidence(source="route", key="방문할 곳", value=f"{visits.stops}곳"),
+               Evidence(source="route", key="방문 순서",
+                        value="우선 확인 순서를 지킨 가장 짧은 길" if visits.by_priority else "가장 짧게 도는 순서")]
+    else:
+        ev.append(Evidence(source="request", key="도착지", value=req.destination.name or "도착지"))
+    if sea is not None:
+        ev += [Evidence(source="route", key="경로 종류", value="해상 경로 (바다 → 항구 → 육지)"),
+               Evidence(source="route", key="들어갈 항구", value=sea.port_name),
+               Evidence(source="route", key="바닷길 거리 (항구까지)", value=sea.distance_m, unit="m")]
+        if sea.bearing_label:
+            ev.append(Evidence(source="route", key="항구 방향", value=sea.bearing_label))
+        if not sea.path_found:
+            missing.append("바닷길 (찾지 못해 지도에 선이 없음 — 방향만 참고)")
+        elif not sea.direct:
+            ev.append(Evidence(source="route", key="바닷길 모양", value="곶·방파제를 돌아서 들어가는 길 (지도의 파란 점선)"))
+        if r is None:
+            missing.append("항구에서 도착지까지 육상 경로")
+    land = "항구에서 도착지까지 " if sea is not None else ""
+    if r is not None:
+        ev += [Evidence(source="route", key=f"{land}이동 수단", value="도보" if walk else "자동차"),
+               Evidence(source="route", key=f"{land}경로 거리" if land else ("전체 거리" if visits else "경로 거리"),
+                        value=r.distance_m, unit="m"),
+               Evidence(source="route", key=f"{land}소요 시간" if land else "소요 시간", value=math.ceil(r.duration_s / 60), unit="분")]
+        if r.strategy in STRATEGY_KO and visits is None:
+            ev.append(Evidence(source="route", key="경로 방식", value=STRATEGY_KO[r.strategy]))
+        if walk:
+            if r.ascend_m >= MIN_ASCEND_M:
+                ev.append(Evidence(source="route", key="오르막 합계", value=r.ascend_m, unit="m"))
+            if r.steep_up_m >= MIN_NOTABLE_M:
+                ev += [Evidence(source="route", key="급한 오르막 길이 (매우 급한 구간 포함)", value=r.steep_up_m, unit="m"),
+                       Evidence(source="route", key="가장 급한 오르막 경사", value=r.max_uphill_pct, unit="%")]
+                if r.very_steep_up_m >= MIN_NOTABLE_M:
+                    ev.append(Evidence(source="route", key="그중 매우 급한 구간(노약자·휠체어 통행 한계 초과) 길이",
+                                       value=r.very_steep_up_m, unit="m"))
+            if r.steps_m >= MIN_NOTABLE_M:
+                ev.append(Evidence(source="route", key="계단 길이", value=r.steps_m, unit="m"))
+        # 방문 경로: 서버가 막으려다 풀어 준 구역(blocked_zones)도 결국 지나는 구역이다
+        passing = [*r.still_inside, *(z for z in (visits.blocked_zones if visits else []) if z not in r.still_inside)]
+        inside, avoided = _names(passing, req.zone_names), _names(r.avoided, req.zone_names)
+        if inside:
+            ev.append(Evidence(source="route", key=f"다른 길이 없어 지나는 위험 구역 {len(passing)}곳", value=inside))
+        if avoided:
+            ev.append(Evidence(source="route", key=f"이 경로가 피한 위험 구역 {len(r.avoided)}곳", value=avoided))
+        if not inside and r.hazards_ok and r.strategy not in ("shortest", "uphill"):
+            ev.append(Evidence(source="route", key="경로 위 위험 구역", value="없음"))
+        if not r.hazards_ok:
+            missing.append("위험 구역 정보 (위험 구역을 피하지 않고 계산한 경로)")
 
-    for label, p in (("출발지", req.origin), ("도착지", req.destination)):
+    # 방문 경로는 도착지가 따로 없다 (마지막 집일 뿐) — 출발지만 본다
+    for label, p in (("출발지", req.origin), *([] if visits is not None else [("도착지", req.destination)])):
         h = tools.hazards_at(p.lat, p.lon, fetch=fetch)
         if not h.get("available"):
             missing.append(f"{label} 위험 여부")
@@ -162,10 +217,19 @@ def build_evidence(req: RouteBriefRequest, fetch=None) -> tuple[list[Evidence], 
 
 def template_brief(req: RouteBriefRequest, ev: list[Evidence], missing: list[str]) -> RouteBriefResponse:
     """LLM 없이 근거로 만든 문장 (LLM 실패·숫자 검사 실패 때, 그리고 LLM에게 주는 뼈대)."""
-    r = req.route
+    r, sea, visits = req.route, req.sea, req.visits
     by = {e.key: e for e in ev}
     dest = req.destination.name or "도착지"
-    summary = f"{dest}까지 {r.distance_m}m, {'걸어서' if r.mode == 'walk' else '차로'} 약 {math.ceil(r.duration_s / 60)}분입니다."
+    how = "차로" if r is not None and r.mode == "car" else "걸어서"
+    land = f"{dest}까지 {r.distance_m}m, {how} 약 {math.ceil(r.duration_s / 60)}분입니다." if r is not None else ""
+    if visits is not None and r is not None:
+        summary = f"{visits.stops}곳을 모두 도는 길은 {r.distance_m}m, {how} 약 {math.ceil(r.duration_s / 60)}분입니다."
+    elif sea is not None:
+        summary = f"{(sea.bearing_label + ' ') if sea.bearing_label else ''}{sea.port_name}까지 바닷길 {sea.distance_m}m입니다."
+        if land:
+            summary += f" 항구에서 {land}"
+    else:
+        summary = land
     avoided = next((e for e in ev if e.key.startswith("이 경로가 피한 위험 구역")), None)
     if avoided is not None:
         summary += f" 위험 구역을 피해 가는 길입니다 ({avoided.value})."
@@ -178,9 +242,11 @@ def template_brief(req: RouteBriefRequest, ev: list[Evidence], missing: list[str
             hazards.append(f"{label}가 {by[f'{label} 위험'].value}입니다.")
     if "발효 중인 특보" in by:
         hazards.append(f"발효 중인 특보: {by['발효 중인 특보'].value}")
-    if not r.hazards_ok:
+    if r is not None and not r.hazards_ok:
         hazards.append("위험 구역 정보를 확인하지 못해, 위험 구역을 피하지 않고 계산한 경로입니다.")
-    if r.mode == "walk":
+    if sea is not None and sea.path_found and not sea.direct:
+        cautions.append("바닷길은 곶·방파제를 돌아서 들어갑니다. 지도의 파란 점선을 따라가세요.")
+    if r is not None and r.mode == "walk":
         if r.steep_up_m >= MIN_NOTABLE_M:
             very = (f" 그중 {r.very_steep_up_m}m는 노약자·휠체어가 다니기 힘든 매우 급한 구간입니다."
                     if r.very_steep_up_m >= MIN_NOTABLE_M else "")
@@ -195,7 +261,18 @@ def template_brief(req: RouteBriefRequest, ev: list[Evidence], missing: list[str
     if missing:
         cautions.append("확인하지 못한 정보: " + ", ".join(missing))
     return RouteBriefResponse(summary=summary, cautions=cautions[:MAX_ITEMS + 1], hazards=hazards[:MAX_ITEMS + 1],
-                              used_template=True)
+                              note=_note(req), used_template=True)
+
+
+def _note(req: RouteBriefRequest) -> str:
+    return SEA_NOTE if req.sea is not None else VISIT_NOTE if req.visits is not None else NOTE
+
+
+def _claims_avoidance(text: str, sea: bool) -> bool:
+    """'위험 구역을 피해 간다'는 말이 있는가. 해상 경로는 '방파제를 피해'가 정상 표현이라 '구역'과 같은 문장일 때만 본다."""
+    if not sea:
+        return any(w in text for w in AVOID_WORDS)
+    return any("구역" in part and any(w in part for w in AVOID_WORDS) for part in re.split(r"[.\n]", text))
 
 
 def _num(v: Any) -> str:
@@ -233,11 +310,11 @@ class RouteBriefService:
                     check = check_numbers(text, ev)
                     if not summary.strip():
                         raise ValueError("빈 요약")
-                    if not req.route.avoided and any(w in text for w in AVOID_WORDS):
+                    if not (req.route and req.route.avoided) and _claims_avoidance(text, req.sea is not None):
                         logger.info("경로 설명: 피한 구역이 없는데 피했다고 씀 → 템플릿")
                     elif check.ok:
                         out = RouteBriefResponse(summary=summary.strip(), cautions=cautions[:MAX_ITEMS],
-                                                 hazards=hazards[:MAX_ITEMS], used_template=False)
+                                                 hazards=hazards[:MAX_ITEMS], note=_note(req), used_template=False)
                     else:
                         logger.info("경로 설명 숫자 검사 실패 → 템플릿 (%s)", check.feedback)
                 except Exception as e:  # noqa: BLE001 — 설명 실패로 경로 안내가 끊기면 안 된다

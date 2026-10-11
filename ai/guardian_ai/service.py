@@ -108,11 +108,11 @@ class ChatResponse(BaseModel):
     selected_agents: list[S.Specialist] = Field(default_factory=list)
     phase: S.Phase = S.Phase.NONE
     used_fallback: bool = False
-    route: RouteInfo | None = None   # 답에 경로 안내가 있을 때만 (안전 안내로 끝난 답에는 없음)
+    route: RouteInfo | None = None   # 답에 경로 안내가 있을 때만
     call_emergency: bool = False     # 판단 로직 '재난 중 > 위험 지역 > 이동 불가능' → 앱이 119 연결 버튼을 크게
     decision_path: str = ""          # 행동 권고 판단 로직에서 도달한 분기 (예: "재난 중 > 위험 지역 > 이동 가능")
     follow_up: str | None = None     # 근거가 없어 사용자에게 물은 질문 (답변 끝에도 있음). 다음 질문에서 대화로 이어진다
-    card: Card | None = None         # 카드형 답변 (안전 안내로 끝난 답에는 없음)
+    card: Card | None = None         # 카드형 답변
     voice_text: str = ""             # 음성으로 읽을 2~3문장 (/api/voice·/api/tts가 읽는다)
     timings: dict[str, float] = Field(default_factory=dict)   # 단계별 걸린 시간(초) — 지연 측정용, 앱 표시 안 함
 
@@ -268,7 +268,8 @@ class ChatService:
         ]})
         used_fallback = bool(result.get("used_fallback"))
         plan = result.get("action_plan")
-        route = None if used_fallback else next(
+        # used_fallback(검증 한도 초과)이어도 만든 답·경로·카드·음성 문장을 그대로 보낸다 (사용자 결정 2026-10-11)
+        route = next(
             (r.route for r in result.get("specialist_results") or []
              if r.agent == S.Specialist.LOCATION_ROUTE and r.route and r.route.get("geometry")),
             plan.route if plan is not None and plan.route and plan.route.get("geometry") else None)
@@ -282,8 +283,8 @@ class ChatService:
             call_emergency=bool(getattr(plan, "call_emergency", False)),
             decision_path=" > ".join(getattr(plan, "decision_path", None) or []),
             follow_up=getattr(plan, "question", None),
-            card=Card.model_validate(result["card"]) if result.get("card") and not used_fallback else None,
-            voice_text=(result.get("voice_text") or answer) if not used_fallback else answer,
+            card=Card.model_validate(result["card"]) if result.get("card") else None,
+            voice_text=result.get("voice_text") or answer,
             timings=timings,
         )
 

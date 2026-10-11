@@ -281,13 +281,13 @@ def test_chat_response_carries_route_for_the_app():
     assert res.route.destination.name == "충혼탑 앞" and res.route.distance_m == 1024
 
 
-def test_no_route_in_response_when_answer_fell_back():
+def test_route_stays_in_response_when_check_limit_is_exceeded():
     def always_wrong(*a):
         return "충혼탑 앞까지 999m입니다."
     svc = ChatService(classifier=G.keyword_classify, overrides={
         Specialist.LOCATION_ROUTE.value: L.make_location_route_agent(writer=always_wrong, fetch=flood_db, route_client=route_server())})
     res = svc.chat(ChatRequest(user_id="u1", question="어디로 대피해야 해?", current_location=HERE))
-    assert res.used_fallback and res.route is None
+    assert res.used_fallback and "999m" in res.answer and res.route is not None
 
 
 def test_location_answer_drops_sentences_deferring_risk_topics():

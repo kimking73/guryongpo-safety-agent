@@ -4,7 +4,7 @@
 1. Read `.claude/docs/timeline.md` → status table, "다음 세션 시작점", "이월 항목", work log.
 2. From `코드/`: `git pull` (teammates push to `main`), then `docker compose up -d` and `docker compose ps`
    (db, api, ai all healthy). If `.env` changed since the ai container started: `docker compose up -d --force-recreate ai`.
-3. Baseline tests: `.venv/bin/python -m pytest -q` → **217 passed** (2026-10-11). `-m "db and not live"` needs local db + `AI_DB_*`
+3. Baseline tests: `.venv/bin/python -m pytest -q` → **223 passed** (2026-10-11). `-m "db and not live"` needs local db + `AI_DB_*`
    in `.env` (plain `-m db` also runs paid live tests). `-m live` calls real OpenAI (routing, B3 injection, extractor; a few 원).
    If `docker compose ps` hangs, restart the OrbStack app (happened 2026-10-08); VM checks still work.
    Other lanes' baselines: server 223 passed·8 skipped, route 77, app 7 known failures as of 10-09 (not fully rerun since) (see timeline "다음 세션 시작점";
@@ -42,6 +42,11 @@
   to-do list only when asked or in the danger branch (classifier `wants_action`); dependents follow-up removed; when the advisor's own route
   passes a hazard zone, code appends that fact to the route step (`action.with_passing_zones` — the checker blocked answers that omitted it);
   walking ability / dependents are no longer extracted or read from the server profile (김다인 1a4fa25, user decision 10-09).
+- Realtime voice (2026-10-11, `guardian_ai/realtime.py`): `POST /api/voice/session` mints a 10-min OpenAI client secret for `gpt-realtime-2`
+  (`OPENAI_REALTIME_MODEL`/`_VOICE`); the web app connects by WebRTC and the model only calls tools (`tool_choice=required`: `ask_guardian` →
+  app calls `/api/chat`, answer read back verbatim via `read_out_prefix`; `end_conversation`). LangGraph is unchanged. Spoken audio is outside the
+  checker and Realtime cost is outside `usage.py`. Upload flow `/api/voice` (Google STT/TTS) stays as the fallback — still no Google key
+  (org policy blocks service-account keys; `GCP_VOICE_API_KEY` supported instead); `/api/voice` returns `end_conversation` for whole-sentence end phrases.
 - LangSmith tracing (2026-10-11, `guardian_ai/tracing.py`): off unless `LANGSMITH_TRACING=true` + `LANGSMITH_API_KEY`; `LANGSMITH_TRACE_SCOPE=demo`
   (default) sends demo-mode chats only — real users' location/age/disability must not leave the server without a consent decision.
   `make_client()` wraps OpenAI with `wrap_openai`; `ChatService.chat` and the background `_collect` both run inside `tracing.scope(demo)`.
@@ -75,7 +80,7 @@
   `ChatService()` wires the real nodes; `DEFAULT_NODES`/`ChatService(classifier=…)` stay offline for tests.
 - B5 (2026-10-03, in progress — only the real Google voice round trip is left, waiting for `secrets/gcp-voice.json`):
   order since 2026-10-11 (user decision): action_advisor → polish → hallucination_check → verify_gate (pass → finalize,
-  fail → manager once (`MAX_RETRY` 1), then fallback); intent check and the post-polish re-check loop were removed.
+  fail → manager once (`MAX_RETRY` 1), then `fallback` = the last generated answer goes out as is with `used_fallback=true`, route/card/voice kept (user decision 2026-10-11; the 119 sentence `graph.SAFE_NOTICE` only when no answer exists)); intent check and the post-polish re-check loop were removed.
   Content checker `OpenAIFactChecker` (effort low by default — `OPENAI_VERIFY_EFFORT`; all steps at once via
   `OPENAI_REASONING_EFFORT`). `polish.py`: `build_card` (code picks chips from Evidence) + `OpenAIPolisher` only for
   drafts > 600 chars + `voice_text`; a retry passes `manager_feedback` to the polisher. `ChatResponse.card`·`voice_text`·`timings`. `voice.py` (ffmpeg → Google STT/TTS v1),
@@ -125,7 +130,7 @@ Flutter app/web (teammate C). This lane (B) also owns GraphHopper routing and GC
 | `guardian_ai/graph.py` | Default (stub) nodes, manager (keyword fallbacks, follow-up continuation), routing functions, `build_graph()` (graph.py:470) |
 | `guardian_ai/tools.py` | Read-only DB tools (risk, observations, warnings, messages, zones, facilities, life safety, action guides), `request_route`; allowlist `AGENT_TOOLS` |
 | `guardian_ai/flood.py` | Rain/flood agent: `collect` → `build_evidence` → writer or `template_summary`; `make_rain_flood_agent(writer, fetch)` |
-| `guardian_ai/route_brief.py` | AI route brief for the dashboard map card (2026-10-11): `POST /api/ai/route-brief` — evidence by code (route facts from the app + `hazards_at` + warnings + rain/wind), one LLM call (`OpenAIRouteBriefWriter`, 8 s limit), `check_numbers` + false-"avoided" guard, template fallback, 60 s cache. Not part of the chat graph |
+| `guardian_ai/route_brief.py` | AI route brief for the dashboard map card (2026-10-11): `POST /api/ai/route-brief` — evidence by code (route facts from the app + `hazards_at` + warnings + rain/wind), one LLM call (`OpenAIRouteBriefWriter`, 8 s limit), `check_numbers` + false-"avoided" guard, template fallback, 60 s cache. Covers every route drawn on a map: land routes, sea routes (`sea` = port·sea distance·bearing, `route` optional) and responder visit routes (`visits` = stop count·order·`blocked_zones`); unnamed zone ids fall back to the kind (`ZONE_KIND_KO`). Not part of the chat graph |
 | `guardian_ai/verify.py` | Hallucination check on the polished answer + voice text: `check_numbers` (rule), `make_hallucination_check(checker)` |
 | `guardian_ai/specialists.py` | Landslide·wind/typhoon·life-safety agents (`make_specialist`) |
 | `guardian_ai/recovery.py` | Recovery/support agent (2026-10-08): `support_programs` → [공통 보험]·[공통 피해 신고·복구]·[내 직업 지원·복구] by the profile's occupation (`job_targets`), question hazard filter (`hazard_of`), `make_recovery_support_agent`; advisor skips the decision tree when it is the only agent |

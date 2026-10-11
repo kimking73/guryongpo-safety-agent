@@ -71,4 +71,54 @@ void main() {
     await t.pump();
     expect(find.text('AI 경로 설명'), findsNothing);
   });
+
+  test('해상 경로 → 설명 요청: 바닷길 + 항구에서 대피소까지, 육지 위치면 육상 구간만', () {
+    final raw = {
+      'at_sea': true,
+      'port': {'name': '구룡포항', 'berth': {'lat': 35.99, 'lon': 129.56}},
+      'sea_leg': {'distance_m': 820.4, 'bearing_label': '북서쪽', 'direct': false, 'path_found': true},
+      'destination': {'name': '구룡포초등학교', 'lat': 35.991, 'lon': 129.555},
+      'land_route': {..._route, 'still_inside': ['flood--8']},
+    };
+    final b = seaBriefBody(raw, 35.98, 129.57)!;
+    expect(b['sea'], {'port_name': '구룡포항', 'distance_m': 820, 'bearing_label': '북서쪽', 'direct': false, 'path_found': true});
+    expect((b['route'] as Map)['steps_m'], 24);
+    expect((b['destination'] as Map)['name'], '구룡포초등학교');
+    expect((b['origin'] as Map)['name'], '배 위치');
+    final local = localBriefOfBody(b);
+    expect(local.summary, '북서쪽 구룡포항까지 바닷길 820m입니다. 항구에서 구룡포초등학교까지 1001m, 걸어서 약 13분입니다.');
+    expect(local.hazards.single, contains('1곳'));
+    expect(local.cautions.single, contains('방파제'));
+
+    final land = seaBriefBody({...raw, 'at_sea': false, 'sea_leg': null, 'port': null}, 35.98, 129.57)!;
+    expect(land.containsKey('sea'), isFalse);
+    expect(seaBriefBody({'at_sea': false}, 35.98, 129.57), isNull);
+  });
+
+  test('방재단 방문 경로 → 설명 요청: 고른 순서의 거리·집 수, 풀어 준 구역', () {
+    final result = {
+      'mode': 'walk',
+      'hazards_ok': true,
+      'blocked_zones': ['flood--3'],
+      'shortest': {'order': [{'id': 'a', 'seq': 1}, {'id': 'b', 'seq': 2}], 'distance_m': 900, 'duration_s': 660, 'geometry': 'abc', 'still_inside': []},
+      'priority': {'order': [{'id': 'b', 'seq': 1}, {'id': 'a', 'seq': 2}], 'distance_m': 1200, 'duration_s': 870, 'geometry': 'abd', 'still_inside': ['flood--3']},
+    };
+    final b = visitBriefBody(result, 'priority', 35.99, 129.55, '내 위치')!;
+    expect(b['visits'], {'stops': 2, 'by_priority': true, 'blocked_zones': ['flood--3']});
+    expect((b['route'] as Map)['distance_m'], 1200);
+    expect(localBriefOfBody(b).summary, '2곳을 모두 도는 길은 1200m, 걸어서 약 15분입니다.');
+    expect(visitBriefBody({'shortest': {'order': []}}, 'shortest', 35.99, 129.55, '내 위치'), isNull);
+  });
+
+  testWidgets('요청 값으로 그리는 칸 (해상·방문 경로): 서버 없이도 경로 값으로 만든 설명을 보인다', (t) async {
+    final body = visitBriefBody({
+      'mode': 'walk',
+      'shortest': {'order': [{'id': 'a', 'seq': 1}], 'distance_m': 300, 'duration_s': 240, 'geometry': 'abc', 'still_inside': []},
+    }, 'shortest', 35.99, 129.55, '내 위치');
+    await t.pumpWidget(ProviderScope(
+        child: MaterialApp(home: Scaffold(body: Align(alignment: Alignment.topRight, child: RouteBriefCard(maxWidth: 320, body: body))))));
+    await t.pumpAndSettle();
+    expect(find.text('AI 경로 설명'), findsOneWidget);
+    expect(find.text('1곳을 모두 도는 길은 300m, 걸어서 약 4분입니다.'), findsOneWidget);
+  });
 }

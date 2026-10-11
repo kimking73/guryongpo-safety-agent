@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -40,6 +42,104 @@ class RouteBrief {
         ],
       );
 }
+
+/// 서버 없이(예시 모드·연결 실패) 요청 값으로 만든 설명 — 해상 경로·방문 경로용
+RouteBrief localBriefOfBody(Map<String, dynamic> body) {
+  final r = body['route'] as Map?, sea = body['sea'] as Map?, visits = body['visits'] as Map?;
+  final how = r?['mode'] == 'car' ? '차로' : '걸어서';
+  final land = r == null ? '' : '${r['distance_m']}m, $how 약 ${((r['duration_s'] as num? ?? 0) / 60).ceil()}분입니다.';
+  final dest = (body['destination'] as Map?)?['name'] ?? '도착지';
+  final String summary;
+  if (visits != null) {
+    summary = '${visits['stops']}곳을 모두 도는 길은 $land';
+  } else if (sea != null) {
+    final dir = '${sea['bearing_label'] ?? ''}';
+    summary = '${dir.isEmpty ? '' : '$dir '}${sea['port_name']}까지 바닷길 ${sea['distance_m']}m입니다.'
+        '${r == null ? '' : ' 항구에서 $dest까지 $land'}';
+  } else {
+    summary = '$dest까지 $land';
+  }
+  final inside = (r?['still_inside'] as List? ?? const []).length + (visits?['blocked_zones'] as List? ?? const []).length;
+  return RouteBrief(fromAi: false, summary: summary, hazards: [
+    if (inside > 0) '다른 길이 없어 위험 구역 $inside곳을 지납니다.',
+    if (r != null && r['hazards_ok'] == false) '위험 구역 정보를 확인하지 못해, 위험 구역을 피하지 않고 계산한 경로입니다.',
+  ], cautions: [
+    if (sea != null && sea['direct'] == false && sea['path_found'] != false) '바닷길은 곶·방파제를 돌아서 들어갑니다. 지도의 파란 점선을 따라가세요.',
+    if (sea != null && sea['path_found'] == false) '바닷길을 찾지 못해 지도에 선이 없습니다. 방향만 참고하세요.',
+  ]);
+}
+
+/// 경로 서버 응답(육상 구간)에서 설명에 쓰는 값만
+Map<String, dynamic> _landFacts(Map land, String mode) => {
+      'distance_m': (land['distance_m'] as num? ?? 0).round(),
+      'duration_s': (land['duration_s'] as num? ?? 0).round(),
+      for (final k in const ['ascend_m', 'max_uphill_pct', 'steps_m', 'steep_up_m', 'very_steep_up_m'])
+        if (land[k] is num) k: (land[k] as num).round(),
+      'avoided': [for (final z in land['avoided'] as List? ?? const []) '$z'],
+      'still_inside': [for (final z in land['still_inside'] as List? ?? const []) '$z'],
+      'hazards_ok': land['hazards_ok'] != false,
+      'mode': mode,
+      if (land['profile'] is String) 'profile': land['profile'],
+      'geometry': '${land['geometry'] ?? ''}',
+    };
+
+/// 해상 경로(/api/route/sea 응답) → 설명 요청. 바닷길도 육상 경로도 없으면 null
+Map<String, dynamic>? seaBriefBody(Map<String, dynamic> raw, double lat, double lon) {
+  final leg = raw['sea_leg'] as Map?, port = raw['port'] as Map?, land = raw['land_route'] as Map?;
+  final dest = raw['destination'] as Map?;
+  final sea = raw['at_sea'] == true && leg != null && port != null;
+  if (!sea && land == null) return null;
+  final end = dest ?? (port?['berth'] as Map?) ?? const {};
+  return {
+    'origin': {'lat': lat, 'lon': lon, 'name': sea ? '배 위치' : '현위치'},
+    'destination': {
+      'lat': end['lat'] ?? lat,
+      'lon': end['lon'] ?? end['lng'] ?? lon,
+      'name': '${dest?['name'] ?? (sea ? port['name'] : '도착지')}',
+    },
+    if (land != null) 'route': _landFacts(land, 'walk'),
+    if (sea)
+      'sea': {
+        'port_name': '${port['name']}',
+        'distance_m': (leg['distance_m'] as num? ?? 0).round(),
+        'bearing_label': '${leg['bearing_label'] ?? ''}',
+        'direct': leg['direct'] != false,
+        'path_found': leg['path_found'] != false,
+      },
+    if (DemoData.on) 'demo': true,
+  };
+}
+
+/// 방재단 방문 경로(/api/route/visits 응답에서 고른 shortest·priority) → 설명 요청
+Map<String, dynamic>? visitBriefBody(Map<String, dynamic> result, String tab, double lat, double lon, String originName,
+    {double? endLat, double? endLon}) {
+  final plan = result[tab] as Map?;
+  final stops = (plan?['order'] as List? ?? const []).length;
+  if (plan == null || stops == 0) return null;
+  return {
+    'origin': {'lat': lat, 'lon': lon, 'name': originName},
+    'destination': {'lat': endLat ?? lat, 'lon': endLon ?? lon, 'name': '마지막 방문지'},
+    'route': _landFacts({...plan, 'hazards_ok': result['hazards_ok']}, '${result['mode'] ?? 'walk'}'),
+    'visits': {
+      'stops': stops,
+      'by_priority': tab == 'priority',
+      'blocked_zones': [for (final z in result['blocked_zones'] as List? ?? const []) '$z'],
+    },
+    if (DemoData.on) 'demo': true,
+  };
+}
+
+/// 요청 값(JSON 글자)으로 받는 설명 — 해상 경로·방문 경로처럼 routeProvider 밖에서 그린 경로용. 같은 경로면 다시 부르지 않는다
+final routeBriefByBody = FutureProvider.family<RouteBrief?, String>((ref, json) async {
+  final body = Map<String, dynamic>.from(jsonDecode(json) as Map);
+  if (!AppConfig.isRemote) return localBriefOfBody(body);
+  try {
+    final r = await routeBriefDio.post<Map<String, dynamic>>('/api/ai/route-brief', data: body);
+    return RouteBrief.fromJson(r.data!);
+  } on DioException {
+    return localBriefOfBody(body);
+  }
+});
 
 /// 테스트에서 바꿔 끼운다
 Dio routeBriefDio = Dio(BaseOptions(
@@ -98,11 +198,14 @@ final routeBriefProvider = FutureProvider.family<RouteBrief?, String>((ref, id) 
   }
 });
 
-/// 지도 오른쪽 위에 겹쳐 놓는 칸. 접을 수 있고, 좁은 화면은 접힌 채로 시작한다
+/// 지도 오른쪽 위에 겹쳐 놓는 칸. 접을 수 있고, 좁은 화면은 접힌 채로 시작한다.
+/// 지도에 그리는 경로 모두에 쓴다 (2026-10-11 사용자 요청): [body] 가 없으면 대시보드에서 고른 경로(routeFacilityId),
+/// 있으면 그 요청 값의 경로(해상 경로 seaBriefBody, 방재단 방문 경로 visitBriefBody)
 class RouteBriefCard extends ConsumerStatefulWidget {
-  const RouteBriefCard({super.key, required this.maxWidth, this.startCollapsed = false});
+  const RouteBriefCard({super.key, required this.maxWidth, this.startCollapsed = false, this.body});
   final double maxWidth;
   final bool startCollapsed;
+  final Map<String, dynamic>? body;
 
   @override
   ConsumerState<RouteBriefCard> createState() => _RouteBriefCardState();
@@ -113,9 +216,14 @@ class _RouteBriefCardState extends ConsumerState<RouteBriefCard> {
 
   @override
   Widget build(BuildContext context) {
-    final id = ref.watch(routeFacilityId);
-    if (id == null) return const SizedBox.shrink();
-    final async = ref.watch(routeBriefProvider(id));
+    final AsyncValue<RouteBrief?> async;
+    if (widget.body != null) {
+      async = ref.watch(routeBriefByBody(jsonEncode(widget.body)));
+    } else {
+      final id = ref.watch(routeFacilityId);
+      if (id == null) return const SizedBox.shrink();
+      async = ref.watch(routeBriefProvider(id));
+    }
     final brief = async.valueOrNull;
     if (!async.isLoading && brief == null) return const SizedBox.shrink();
     final danger = brief?.hazards.isNotEmpty ?? false;

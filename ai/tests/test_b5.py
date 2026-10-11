@@ -72,8 +72,8 @@ def test_short_draft_skips_polisher_but_gets_voice_and_card():
     assert called == [] and res.voice_text and res.card is not None and res.card.chips
 
 
-def test_polisher_changing_a_number_gets_feedback_then_safe_fallback():
-    """다듬기가 숫자를 바꾸면 환각 검증에서 걸리고, 사유가 다음 다듬기에 전달된다. 그래도 틀리면 안전 안내 (틀린 숫자는 안 나간다)."""
+def test_polisher_changing_a_number_gets_feedback_then_answer_goes_out_marked():
+    """다듬기가 숫자를 바꾸면 환각 검증에서 걸리고, 사유가 다음 다듬기에 전달된다. 그래도 틀리면 만든 답을 그대로 보내고 used_fallback으로 표시한다."""
     feedbacks = []
 
     def bad_polisher(draft, summarize, feedback):
@@ -81,7 +81,7 @@ def test_polisher_changing_a_number_gets_feedback_then_safe_fallback():
         return draft.replace("230mm", "300mm"), "침수심 300mm입니다."
     res = ask(svc(**{G.POLISH: P.make_polish(polisher=bad_polisher)}))
     assert feedbacks[0] == "" and "300" in feedbacks[1]
-    assert res.used_fallback and "300mm" not in res.answer and "300mm" not in res.voice_text
+    assert res.used_fallback and "300mm" in res.answer and res.voice_text == "침수심 300mm입니다."
 
 
 def test_polisher_fixed_on_retry_is_used():
