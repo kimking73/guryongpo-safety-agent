@@ -80,7 +80,9 @@ class FcmNotificationService {
         EvacAlarm.onOpen?.call(evac);
       } else if (eta != null) {
         // 방재단 배정 안내: 앱을 보고 있으면 바로 (시각장애인이면 음성으로 — onResponderEta 가 판단)
-        unawaited(AlertNotifications.show(_preview(message), openable: false));
+        // 시각장애인이면 onResponderEta 의 gpt-realtime 이 읽으므로 알림은 읽지 않는다 (두 목소리 겹침 방지)
+        unawaited(EvacVoiceCheck.visionSupportSaved().then((vision) =>
+            AlertNotifications.show(_preview(message), openable: false, speak: !vision)));
         EvacAlarm.onResponderEta?.call(eta, message.data['incident_id'] as String?);
       } else {
         // 앱을 보고 있어도 알림 센터·잠금 화면에 남게 시스템 알림으로도 띄운다

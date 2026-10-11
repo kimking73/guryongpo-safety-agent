@@ -7,7 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'live_screens.dart';
 import 'evac_alarm_layer.dart';
 import 'main.dart';
-import 'profile_form.dart' show disabilitiesOf;
+import 'profile_form.dart' show applyDisabilityAlerts, disabilitiesOf;
 import 'models/domain_models.dart';
 import 'patrol_screens.dart' show isPatrolRole, roleKo;
 import 'services/account_service.dart';
@@ -167,6 +167,7 @@ class _ProfileDetailsCardState extends ConsumerState<ProfileDetailsCard> {
       '지체 지원': support('지체 지원', 'body'),
     };
     await AccountService().saveOptionalProfile(p);
+    await applyDisabilityAlerts(ref, disabilitiesOf(p));
     saved = p;
     if (mounted && notify) {
       ScaffoldMessenger.of(context)
@@ -684,12 +685,13 @@ class ProfileAlertsCard extends ConsumerWidget {
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         const GkCardTitle('알림'),
         const SizedBox(height: 4),
+        // 시각 장애 → 음성 안내, 청각 장애 → 화면 점멸은 늘 켜짐 — 끄려면 내 정보에서 장애 유형을 바꾼다 (2026-10-12 사용자 요청)
         GkSwitchRow(
             icon: Icons.volume_up_rounded,
             label: '음성 안내 자동 재생',
-            desc: '재난 경고를 소리로 읽어 줘요',
-            value: ref.watch(autoVoiceAlerts),
-            onChanged: (v) => ref.read(autoVoiceAlerts.notifier).state = v),
+            desc: a11y.visionSupport ? '시각 장애를 선택해 늘 켜져 있어요' : '재난 경고를 소리로 읽어 줘요',
+            value: a11y.visionSupport || ref.watch(autoVoiceAlerts),
+            onChanged: a11y.visionSupport ? null : (v) => ref.read(autoVoiceAlerts.notifier).state = v),
         GkSwitchRow(
             icon: Icons.vibration_rounded,
             label: '진동 알림',
@@ -699,10 +701,12 @@ class ProfileAlertsCard extends ConsumerWidget {
         GkSwitchRow(
             icon: Icons.flash_on_rounded,
             label: '화면 점멸',
-            desc: '대피 알림이 오면 화면이 빨갛게 깜빡여요 (휴대폰 앱은 손전등도)',
+            desc: a11y.hearingSupport
+                ? '청각 장애를 선택해 늘 켜져 있어요 (휴대폰 앱은 손전등도)'
+                : '대피 알림이 오면 화면이 빨갛게 깜빡여요 (휴대폰 앱은 손전등도)',
             note: '광과민성이 있으면 꺼 두세요',
-            value: a11y.screenFlash,
-            onChanged: (v) => update(a11y.copyWith(screenFlash: v))),
+            value: a11y.screenFlash || a11y.hearingSupport,
+            onChanged: a11y.hearingSupport ? null : (v) => update(a11y.copyWith(screenFlash: v))),
         // 청각 지원·시각 지원 스위치는 뺐다 (2026-10-11 사용자 요청) — 진동·화면 점멸·음성 안내를 각각 켜고 끈다.
         // '음성 언어'·'접근성 자세히' 버튼은 위 스위치와 겹쳐 뺐다 (2026-10-09)
         const FcmPushSettingsCard(),

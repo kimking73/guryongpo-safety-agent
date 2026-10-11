@@ -737,6 +737,23 @@ class _NotificationBootstrapState extends ConsumerState<_NotificationBootstrap>
     WidgetsBinding.instance.addObserver(this);
     _startNetCheck();
     _wireEvacAlarm();
+    // 시연: 방재단원 모드(다른 창·계정)가 출발하면 시각장애인에게 도착 예정 시간을 음성으로 — 실서버 responder_assigned 푸시와 같은 흐름
+    // (화면이 꺼져 있으면 배정 안내 알림으로 화면을 켜고 앱을 연 뒤 읽는다, 2026-10-12 사용자 요청)
+    ref.listenManual<DemoDispatch?>(prototypeSafetyProvider.select((s) => s.demoDispatch), (previous, d) {
+      if (d == null || d.stage != 'en_route' || d.departedAt == previous?.departedAt) return;
+      if (ref.read(demoResponderViewProvider)) return;
+      if (!ref.read(prototypeSafetyProvider).accessibility.visionSupport) return;
+      final mins = (d.eta.difference(DateTime.now()).inSeconds / 60).ceil();
+      if (mins <= 0) return; // 지난 시연 기록
+      final key = 'demo-${d.departedAt.millisecondsSinceEpoch}';
+      if (_etaAnnounced.contains(key)) return;
+      final text = '방재단원이 배정되었습니다. 약 $mins분 후 도착합니다. 안전한 곳에서 기다려 주세요.';
+      if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
+        unawaited(_announceEta(text, key));
+      } else {
+        unawaited(EvacAlarm.showResponderEta(text, incidentId: key));
+      }
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final controller = ref.read(prototypeSafetyProvider);
       await controller.load();
@@ -811,6 +828,8 @@ class _NotificationBootstrapState extends ConsumerState<_NotificationBootstrap>
 
   /// 대피 경보 사이렌 알림(services/evac_alarm.dart) → 경보 화면 / 알림 버튼 응답 (2026-10-11)
   void _wireEvacAlarm() {
+    AlertNotifications.readAloud = () =>
+        ref.read(autoVoiceAlerts) || ref.read(prototypeSafetyProvider).accessibility.visionSupport;
     // 주의보·경보 알림으로 앱이 열렸는데 열 경고 화면이 없으면(대피 종료·시연) 내용을 앱 아래쪽에 보여 준다
     AlertNotifications.onShow = (a) => rootMessengerKey.currentState?.showSnackBar(SnackBar(
           content: Text('${a.title}\n${a.summary}'),
@@ -1431,7 +1450,7 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final a = ref.read(prototypeSafetyProvider).accessibility;
-      if (a.screenFlash) {
+      if (a.screenFlash || a.hearingSupport) {
         // 0.5초마다 바뀌어 초당 1번 깜빡, 최대 30초 (광과민성 기준 안쪽)
         _flash = Timer.periodic(evacuationFlashTransitionInterval, (t) {
           if (!mounted || _flashTicks >= 60) {
@@ -1596,7 +1615,7 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
     final on = [
       if (_voice) '음성 안내',
       if (a.strongVibration) '진동',
-      if (a.screenFlash) '화면 점멸',
+      if (a.screenFlash || a.hearingSupport) '화면 점멸',
     ];
     return Row(mainAxisAlignment: MainAxisAlignment.center, children: [
       Flexible(

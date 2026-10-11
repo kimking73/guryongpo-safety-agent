@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../models/domain_models.dart';
+import 'demo_speech.dart';
 
 // 주의보·경보·대피 종료 등 일반 재난 알림도 잠금 화면에 (2026-10-11 사용자 요청, Android 먼저)
 //
@@ -28,6 +30,10 @@ class AlertNotifications {
 
   /// 열 경고 화면이 없는 알림으로 앱이 열렸을 때 — 앱 안에 내용을 보여 준다 (main.dart 가 정해 둔다)
   static void Function(AlertItem preview)? onShow;
+
+  /// '음성 안내 자동 재생' 스위치 (main.dart 가 정해 둔다) — 켜져 있으면 알림이 뜰 때마다 제목·내용을 소리 내어 읽는다
+  /// (2026-10-12 사용자 요청). 앱이 꺼진 채 받은 푸시(백그라운드 처리기)에는 정해져 있지 않아 읽지 않는다
+  static bool Function()? readAloud;
 
   static const _channel = AndroidNotificationChannel(
     channelId,
@@ -64,12 +70,17 @@ class AlertNotifications {
   /// 화면이 꺼져 있으면 켠다: 전체 화면 알림으로 앱을 잠깐 열어 화면을 켠 뒤 바로 잠금 화면으로 돌려
   /// 잠금 화면에 이 알림이 보이게 한다 (MainActivity.kt wakeForNotice, 2026-10-11 — 소리만 나고 화면이 안 켜졌음).
   /// 휴대폰을 쓰는 중이면 Android 가 전체 화면 대신 위쪽 팝업으로만 보여 준다
-  static Future<void> show(AlertItem alert, {bool openable = true}) async {
+  /// [speak] = false 면 읽지 않는다 (시각장애인 방재단 도착 안내처럼 다른 음성이 읽는 알림)
+  static Future<void> show(AlertItem alert, {bool openable = true, bool speak = true}) async {
     if (!supported) return;
     await ensureChannel();
+    final plugin = FlutterLocalNotificationsPlugin();
+    final id = notificationId(alert.id);
     try {
-      await FlutterLocalNotificationsPlugin().show(
-        notificationId(alert.id),
+      // 같은 자리에 이전 알림이 남아 있으면 Android 는 '수정'으로 보고 소리만 내고 화면을 켜지 않는다 → 지우고 새로 띄운다
+      await plugin.cancel(id);
+      await plugin.show(
+        id,
         alert.title,
         alert.summary,
         NotificationDetails(
@@ -91,6 +102,9 @@ class AlertNotifications {
         payload: payloadOf(alert, openable: openable),
       );
     } catch (_) {}
+    if (speak && (readAloud?.call() ?? false)) {
+      unawaited(DemoSpeech.instance.speak('재난 알림입니다. ${alert.title}. ${alert.summary}'));
+    }
   }
 
   /// DemoNotifications 가 받은 알림 응답 중 우리 것이면 처리하고 true

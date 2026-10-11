@@ -2677,7 +2677,8 @@ const seaColor = Color(0xff1565c0), landColor = Color(0xff2e7d32), portColor = C
 /// 대시보드 '경로 안내' (2026-10-10 사용자 요청): 지금 위치(GPS 또는 직접 지정한 출발지)가 바다 위면 화면을 따로 열지 않고
 /// 그 위치에서 바로 해상 경로(바다 → 가까운 항구 → 대피소)를 받아 대시보드 지도에 그린다. 바다가 아니면 null
 /// 육지 출발지(집·내 장소 등)를 골랐거나 X로 끝냈으면 null. 도착은 경로 안내 '도착:'에서 고른 곳(없으면 가까운 대피소)
-final seaRoutePlanProvider = FutureProvider<SeaRoutePlan?>((ref) async {
+final seaRoutePlanProvider = FutureProvider<SeaRoutePlan?>(seaRoutePlan);
+Future<SeaRoutePlan?> seaRoutePlan(FutureProviderRef<SeaRoutePlan?> ref) async {
   if (ref.watch(seaRouteOff) || ref.watch(routeOriginPoint) != null) return null;
   final where = await ref.watch(whereNowProvider.future);
   if (where.kind != WhereKind.sea) return null;
@@ -2685,7 +2686,7 @@ final seaRoutePlanProvider = FutureProvider<SeaRoutePlan?>((ref) async {
   final to = ref.watch(seaDestPoint)?.at;
   final r = await ref.watch(liveApiProvider).seaRoute(p.latitude, p.longitude, toLat: to?.latitude, toLon: to?.longitude);
   return SeaRoutePlan(r, p);
-});
+}
 
 /// 대시보드 지도에 겹쳐 그릴 해상 경로: 바닷길(파란 점선) + 항구에서 대피소까지 육상 경로(초록)
 List<Polyline> seaRoutePolylines(SeaRoutePlan p) => [

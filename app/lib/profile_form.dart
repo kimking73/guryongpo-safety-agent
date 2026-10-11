@@ -34,6 +34,27 @@ Set<String> disabilitiesOf(Map<String, String> p) {
   return s;
 }
 
+/// 장애 유형에 맞춰 알림 방식을 켜고 끈다 (2026-10-12 사용자 요청): 시각 → 음성 안내, 청각 → 화면 점멸(·진동).
+/// 고른 동안은 사용자 화면 스위치로 끌 수 없고, 유형을 빼면 그 기능도 꺼진다. 처음 화면(내 정보)·사용자 화면 내 정보 저장 때 부른다
+Future<void> applyDisabilityAlerts(WidgetRef ref, Set<String> dis) async {
+  final store = ref.read(prototypeSafetyProvider);
+  final a = store.accessibility;
+  final see = dis.contains('see'), hear = dis.contains('hear');
+  await store.updateAccessibility(a.copyWith(
+    visionSupport: see,
+    voicePrompts: see ? true : a.voicePrompts,
+    hearingSupport: hear,
+    strongVibration: hear ? true : a.strongVibration,
+    screenFlash: hear ? true : (a.hearingSupport ? false : a.screenFlash),
+  ));
+  final voice = ref.read(autoVoiceAlerts.notifier);
+  if (see) {
+    voice.state = true;
+  } else if (a.visionSupport) {
+    voice.state = false;
+  }
+}
+
 List<String> jobsOf(Map<String, String> p) =>
     (p['jobs'] ?? '').split('|').where((x) => x.trim().isNotEmpty).toList();
 
@@ -119,18 +140,8 @@ class _ProfileFormState extends ConsumerState<ProfileForm> {
 
       await geocode('home', home.text, '집');
       await AccountService().saveOptionalProfile(p);
-      // 장애 유형에 맞춰 알림 방식 자동 설정 (디자인: 시각 → 음성, 청각 → 진동·점멸)
-      final store = ref.read(prototypeSafetyProvider);
-      final a = store.accessibility;
-      await store.updateAccessibility(a.copyWith(
-        visionSupport: dis.contains('see'),
-        voicePrompts: dis.contains('see') ? true : a.voicePrompts,
-        hearingSupport: dis.contains('hear'),
-        strongVibration: dis.contains('hear') ? true : a.strongVibration,
-        screenFlash: dis.contains('hear') ? true : a.screenFlash,
-      ));
+      await applyDisabilityAlerts(ref, disabilitiesOf(p));
       if (dis.contains('see')) {
-        ref.read(autoVoiceAlerts.notifier).state = true;
         // 대피 경보 음성 확인(evac_voice_check.dart)은 잠금 화면에서 바로 마이크를 연다 — 권한 창을 그때 띄울 수 없으니 지금 묻는다
         final rec = AudioRecorder();
         unawaited(rec.hasPermission().catchError((_) => false).whenComplete(rec.dispose));

@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'disaster_center.dart';
 import 'main.dart';
+import 'patrol_screens.dart' show seaRoutePlan, seaRoutePlanProvider;
 import 'services/app_config.dart';
 import 'services/demo_mode.dart';
 import 'services/demo_role.dart';
@@ -27,15 +28,17 @@ import 'ui/widgets.dart' show SegmentedPill;
 final liveApiProvider = Provider<LiveApi>((_) => LiveApi());
 
 /// 서버 맞춤 대시보드 (GET /api/v1/dashboard). 위치가 30m 넘게 바뀌면 다시 받는다. 새로고침은 ref.invalidate
-final liveDashboardProvider = FutureProvider<Map<String, dynamic>>((ref) {
+final liveDashboardProvider = FutureProvider<Map<String, dynamic>>(_liveDashboard);
+Future<Map<String, dynamic>> _liveDashboard(FutureProviderRef<Map<String, dynamic>> ref) {
   ref.watch(serverDemoProvider);   // 시연 모드 ↔ 실측 전환 때 다시 받기
   final p = ref.watch(userLocation).position;
   return ref.watch(liveApiProvider).dashboard(p.latitude, p.longitude);
-});
+}
 
 /// 지금 위치가 육지인지 바다인지 (2026-10-09, 대시보드 '경로 안내' 메뉴). 판별 = 경로 서버의 육지 지도(/api/route/sea/check).
 /// GPS 위치가 없거나(권한 없음·구룡포 밖) 판별할 데이터가 없으면 unknown + 이유 — 육지·바다를 임의로 정하지 않는다
-final whereNowProvider = FutureProvider<WhereNow>((ref) async {
+final whereNowProvider = FutureProvider<WhereNow>(_whereNow);
+Future<WhereNow> _whereNow(FutureProviderRef<WhereNow> ref) async {
   final here = ref.watch(userLocation);
   if (!here.fromGps) {
     return WhereNow(WhereKind.unknown,
@@ -50,7 +53,7 @@ final whereNowProvider = FutureProvider<WhereNow>((ref) async {
   } catch (_) {
     return const WhereNow(WhereKind.unknown, reason: '경로 서버에서 바다·육지를 판별하지 못했습니다.');
   }
-});
+}
 
 /// 시연 모드면 [demo], 아니면 [live]
 class DemoSwitch extends ConsumerWidget {
@@ -192,7 +195,8 @@ class WindPoint {
   final String? observedAt;
 }
 
-final windPointsProvider = FutureProvider<List<WindPoint>>((ref) async {
+final windPointsProvider = FutureProvider<List<WindPoint>>(_windPoints);
+Future<List<WindPoint>> _windPoints(FutureProviderRef<List<WindPoint>> ref) async {
   ref.watch(serverDemoProvider);
   final fc = await ref.watch(liveApiProvider).stationsLayer();
   return [
@@ -207,7 +211,7 @@ final windPointsProvider = FutureProvider<List<WindPoint>>((ref) async {
             gust: (m['wind_gust'] as num?)?.toDouble(),
             observedAt: f['properties']['observed_at'] as String?),
   ];
-});
+}
 
 /// 대시보드 위쪽 (디자인 = web-prototype, 2026-10-08): 시연 데이터 알림·불러오기 오류만.
 /// 판정 시각은 제목 아래([liveStatusText]), 출발 위치·길찾기는 지도 카드, 머리 경고는 빨간 카드, 새로고침은 제목 옆으로 옮겼다
@@ -529,9 +533,15 @@ class DemoPatrolScope extends ConsumerWidget {
     return _scope(child);
   }
 
+  // liveApiProvider 를 이 안에서만 바꾸므로, 그것을 읽는 공용 provider(방재단 지도가 쓰는 대시보드·바람·바다 판별·해상 경로)도
+  // 여기서 같이 다시 선언해야 한다. 빠뜨리면 Riverpod 이 'one of its dependencies were overridden' 으로 멈춘다 (2026-10-11)
   static Widget _scope(Widget child) => ProviderScope(overrides: [
         liveApiProvider.overrideWithValue(_api),
         meProvider.overrideWith((_) => _api.me()),
+        liveDashboardProvider.overrideWith(_liveDashboard),
+        windPointsProvider.overrideWith(_windPoints),
+        whereNowProvider.overrideWith(_whereNow),
+        seaRoutePlanProvider.overrideWith(seaRoutePlan),
       ], child: child);
 }
 

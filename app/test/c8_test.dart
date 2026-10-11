@@ -563,6 +563,29 @@ void main() {
     await t.pump(const Duration(minutes: 1));   // 남은 타이머 정리
   });
 
+  testWidgets('시연 방재단 범위 안에서도 대시보드·바람·바다 판별 provider를 읽을 수 있다 (서버 연결 앱 빨간 화면, 2026-10-11)', (t) async {
+    SharedPreferences.setMockInitialValues({});
+    final store = PrototypeSafetyController();
+    await store.load();
+    final read = <String>[];
+    await t.pumpWidget(ProviderScope(
+        overrides: [prototypeSafetyProvider.overrideWith((_) => store)],
+        child: MaterialApp(
+            home: DemoPatrolScope(
+                child: Consumer(builder: (_, ref, __) {
+          ref.watch(liveDashboardProvider);
+          ref.watch(windPointsProvider);
+          ref.watch(whereNowProvider);
+          ref.watch(seaRoutePlanProvider);
+          read.add('ok');
+          return const SizedBox();
+        })))));
+    expect(t.takeException(), isNull);
+    expect(read, isNotEmpty);
+    await t.pumpWidget(const SizedBox.shrink());
+    await t.pump(const Duration(minutes: 1));
+  });
+
   testWidgets('시연 대시보드: 팝업 응답이 집계·목록에 반영되고, 배정·업무 단계 변경이 집계와 맞는다', (t) async {
     _tall(t);
     t.view.physicalSize = const Size(900, 9000);
