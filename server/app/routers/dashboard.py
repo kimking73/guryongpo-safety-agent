@@ -130,6 +130,13 @@ def post_demo_evac_location(body: DemoEvacLocation, u: AuthUser = Depends(curren
     return Response(status_code=204)
 
 
+@router.delete("/demo/evacuation", status_code=204, summary="시연 주민 응답 전부 초기화 (앱에서 시연 모드를 다시 켤 때, 이력은 남김)")
+def delete_demo_evac_all(u: AuthUser = Depends(current_user)):
+    from .. import demo_evac
+    demo_evac.reset()
+    return Response(status_code=204)
+
+
 @router.get("/demo/evacuation/me", summary="내 시연 대피 응답 + 방재단 출동 기록 (없으면 null)")
 def get_demo_evac_me(u: AuthUser = Depends(current_user)):
     from .. import demo_evac, users

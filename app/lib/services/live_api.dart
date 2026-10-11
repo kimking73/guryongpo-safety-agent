@@ -67,6 +67,9 @@ class LiveApi {
         if (lat != null && lng != null) 'location': {'lat': lat, 'lng': lng},
       }));
 
+  /// 서버의 시연 주민 응답 전부 초기화 (시연 모드를 껐다 켤 때, 모든 계정 — 이력은 서버에 남는다)
+  Future<void> demoEvacReset() => _api.delete<Object?>('/api/v1/demo/evacuation');
+
   /// 시연 주민이 움직이면 현재 위치만 갱신 (이력 없음)
   Future<void> demoEvacLocation(double lat, double lng) =>
       _api.post<Object?>('/api/v1/demo/evacuation/location', data: {'location': {'lat': lat, 'lng': lng}});

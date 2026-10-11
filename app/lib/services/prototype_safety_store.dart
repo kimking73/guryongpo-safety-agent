@@ -517,6 +517,21 @@ class PrototypeSafetyController extends ChangeNotifier {
     await _toServer((api, needs, at) => api.demoEvacStart(needs, lat: at?.$1, lng: at?.$2));
   }
 
+  /// 시연 대피 기록 초기화 (2026-10-12 사용자 요청: 시연 모드를 껐다 켜면 처음부터) — 이 기기의 시연 경보·응답·방재단 출동 기록.
+  /// 앱 안 예시 가구(목업)·접근성 설정은 그대로
+  Future<void> resetDemoEvacuation() async {
+    _responses = {};
+    _demoAlertActive = false;
+    _dispatch = null;
+    _sentLocation = null;
+    lastServerSaved = null;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_responsesKey);
+    await prefs.remove(_demoAlertKey);
+    await prefs.remove(_dispatchKey);
+  }
+
   Future<void> updateAccessibility(AccessibilitySettings settings) async {
     _accessibility = settings;
     notifyListeners();

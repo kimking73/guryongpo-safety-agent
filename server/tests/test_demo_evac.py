@@ -167,3 +167,11 @@ def test_label_is_email_id_from_token(client, fake_db):
     assert p["email_id"] == "harin" and "COALESCE(EXCLUDED.email_id" in sql
     fake_db.rows[ROWS_KEY] = [_row(UID, "need_help", nickname="별명")]
     assert client.get("/api/v1/demo/evacuation/me", headers=AUTH).json()["label"] == "별명"
+
+
+# 2026-10-12 사용자 요청: 시연 모드를 껐다 켜면 서버의 시연 주민 초기화
+def test_reset_all_demo_residents(client, fake_db):
+    assert client.delete("/api/v1/demo/evacuation").status_code == 401
+    assert client.delete("/api/v1/demo/evacuation", headers=AUTH).status_code == 204
+    (sql, _), = _sql(fake_db, "DELETE FROM care.demo_evac")
+    assert "demo_evac_log" not in sql                      # 이력은 남긴다

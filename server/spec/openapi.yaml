@@ -592,6 +592,14 @@ paths:
               schema: { $ref: '#/components/schemas/DemoEvacTarget' }
         '401': { $ref: '#/components/responses/Error' }
         '422': { $ref: '#/components/responses/Error' }
+  /demo/evacuation:
+    delete:
+      tags: [dashboard]
+      summary: 시연 주민 응답 전부 초기화 — 앱에서 시연 모드를 껐다 다시 켤 때 (모든 계정의 시연 응답·출동 기록·위치, 이력은 남김) (2026-10-12)
+      operationId: resetDemoEvacuations
+      responses:
+        '204': { description: 지움 }
+        '401': { $ref: '#/components/responses/Error' }
   /demo/evacuation/location:
     post:
       tags: [dashboard]

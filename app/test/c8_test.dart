@@ -757,6 +757,31 @@ void main() {
     store.dispose();
   });
 
+  // 2026-10-12 사용자 요청: 시연 모드를 껐다 켜면 이 기기의 시연 경보·응답·출동 기록도 처음부터
+  test('시연 대피 초기화: 응답·시연 경보·출동 기록을 지우고 접근성 설정은 남긴다', () async {
+    SharedPreferences.setMockInitialValues({});
+    final original = PrototypeSafetyController.server;
+    addTearDown(() => PrototypeSafetyController.server = original);
+    PrototypeSafetyController.server = () => null;
+    final store = PrototypeSafetyController();
+    await store.load();
+    await store.startDemoAlert(prototypeEvacuationAlertId);
+    await store.respond(prototypeEvacuationAlertId, EvacuationResponseStatus.needHelp);
+    await PrototypeSafetyController.saveDemoDispatch(DemoDispatch(
+        departedAt: DateTime(2026, 10, 12, 3), eta: DateTime(2026, 10, 12, 3, 7), responder: '시연 방재단원'));
+    await store.resetDemoEvacuation();
+    expect(store.demoAlertActive, isFalse);
+    expect(store.responseFor(prototypeEvacuationAlertId), isNull);
+    expect(store.demoDispatch, isNull);
+    final again = PrototypeSafetyController();     // 새로 열어도 (기기 저장소에서도) 지워져 있다
+    await again.load();
+    expect(again.demoAlertActive, isFalse);
+    expect(again.responseFor(prototypeEvacuationAlertId), isNull);
+    expect(again.demoDispatch, isNull);
+    store.dispose();
+    again.dispose();
+  });
+
   test('주민 앱이 서버에서 다른 계정 방재단원의 출동 기록(도착 예정)을 받는다', () async {
     SharedPreferences.setMockInitialValues({});
     Map<String, dynamic>? dispatch = {

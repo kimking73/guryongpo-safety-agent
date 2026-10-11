@@ -137,6 +137,12 @@ def update_location(uid: str, location: dict) -> bool:
     return bool(db.execute(LOCATION_SQL, {"uid": uid, "h": ACTIVE_HOURS, **_loc(location)}))
 
 
+def reset() -> int:
+    """시연 주민 응답 전부 지우기 (2026-10-12 사용자 요청: 앱에서 시연 모드를 껐다 켜면 처음부터).
+    응답·출동 기록·위치가 지워진다. 이력(demo_evac_log)과 앱 안 예시 가구(목업)는 그대로"""
+    return db.execute("DELETE FROM care.demo_evac")
+
+
 def responses(me: Optional[str]) -> list[dict]:
     rows = db.fetch_all(ROWS_SQL.format(where=""), {"h": ACTIVE_HOURS})
     # 자리는 계정마다 정해진 칸, 같은 칸이 이미 쓰였으면 다음 빈 칸 (목록 안에서 겹치지 않게)
