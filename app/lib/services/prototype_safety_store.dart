@@ -184,6 +184,34 @@ class DemoVisit {
       );
 }
 
+/// 방재단 출동 기록 (시연, 2026-10-12): 방재단이 '내 방문 경로'에서 [출발]을 누르면 시민에게 출발 사실과 도착 예정 시각을 알린다.
+/// stage: en_route(가는 중) · visiting(도착·방문 중) · done(완료)
+class DemoDispatch {
+  const DemoDispatch({required this.departedAt, required this.eta, required this.responder, this.stage = 'en_route'});
+
+  final DateTime departedAt;
+  final DateTime eta;
+  final String responder;
+  final String stage;
+
+  DemoDispatch copyWith({String? stage}) =>
+      DemoDispatch(departedAt: departedAt, eta: eta, responder: responder, stage: stage ?? this.stage);
+
+  Map<String, Object> toJson() => {
+        'departed_at': departedAt.toIso8601String(),
+        'eta': eta.toIso8601String(),
+        'responder': responder,
+        'stage': stage,
+      };
+
+  factory DemoDispatch.fromJson(Map<String, dynamic> json) => DemoDispatch(
+        departedAt: DateTime.parse('${json['departed_at']}'),
+        eta: DateTime.parse('${json['eta']}'),
+        responder: '${json['responder'] ?? '방재단'}',
+        stage: '${json['stage'] ?? 'en_route'}',
+      );
+}
+
 const _needsLabels = <String, String>{
   'elderly': '고령',
   'living_alone': '독거',
@@ -215,8 +243,23 @@ class PrototypeSafetyController extends ChangeNotifier {
   static const _householdsKey = 'prototype_households_v1';
   static const _visitsKey = 'prototype_visits_v1';
   static const _demoAlertKey = 'prototype_demo_alert_active_v1';
+  static const _dispatchKey = 'prototype_demo_dispatch_v1';
+
+  PrototypeSafetyController() {
+    _instances.add(this);
+  }
+
+  /// 이 앱(창) 안의 컨트롤러들 — 방재단 시연 화면이 출동 기록을 쓰면 같은 창의 시민 표시도 바로 바뀌게
+  static final _instances = <PrototypeSafetyController>{};
+
+  @override
+  void dispose() {
+    _instances.remove(this);
+    super.dispose();
+  }
 
   bool _loaded = false;
+  DemoDispatch? _dispatch;
   AccessibilitySettings _accessibility = const AccessibilitySettings();
   String? _demoRole;
   Map<String, EvacuationResponseStatus> _responses = {};
@@ -237,6 +280,38 @@ class PrototypeSafetyController extends ChangeNotifier {
   List<DemoVisit> get visits => List.unmodifiable(_visits);
 
   EvacuationResponseStatus? responseFor(String alertId) => _responses[alertId];
+
+  /// 방재단이 이 시연 주민에게 출발했는지·도착 예정 시각 (2026-10-12 사용자 요청: 방재단 → 시민 쌍방향). 없으면 null
+  DemoDispatch? get demoDispatch => _dispatch;
+
+  static DemoDispatch? _readDispatch(SharedPreferences prefs) {
+    final raw = prefs.getString(_dispatchKey);
+    if (raw == null) return null;
+    try {
+      return DemoDispatch.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+    } on TypeError {
+      return null;
+    } on FormatException {
+      return null;
+    }
+  }
+
+  /// 출동 기록 쓰기·지우기 (방재단 시연 화면 DemoLiveApi 가 부른다). 같은 창은 바로, 다른 창은 storage 이벤트로 받는다
+  static Future<void> saveDemoDispatch(DemoDispatch? d) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (d == null) {
+      await prefs.remove(_dispatchKey);
+    } else {
+      await prefs.setString(_dispatchKey, jsonEncode(d.toJson()));
+    }
+    for (final c in [..._instances]) {
+      c._dispatch = d;
+      c.notifyListeners();
+    }
+  }
+
+  /// 저장된 출동 기록 (방재단 창을 새로 열었을 때 시연 대상 줄에 다시 붙인다)
+  static Future<DemoDispatch?> storedDemoDispatch() async => _readDispatch(await SharedPreferences.getInstance());
 
   Future<void> load() async {
     if (_loaded) return;
@@ -259,6 +334,7 @@ class PrototypeSafetyController extends ChangeNotifier {
       }
       _demoRole = prefs.getString(_roleKey);
       _demoAlertActive = prefs.getBool(_demoAlertKey) ?? false;
+      _dispatch = _readDispatch(prefs);
       final rawHouseholds = prefs.getString(_householdsKey);
       if (rawHouseholds != null) {
         _households = (jsonDecode(rawHouseholds) as List)
@@ -301,6 +377,7 @@ class PrototypeSafetyController extends ChangeNotifier {
     }
     _responses = responses;
     _demoAlertActive = prefs.getBool(_demoAlertKey) ?? false;
+    _dispatch = _readDispatch(prefs);
     notifyListeners();
   }
 
@@ -321,9 +398,11 @@ class PrototypeSafetyController extends ChangeNotifier {
   Future<void> startDemoAlert(String alertId) async {
     _responses = {..._responses}..remove(alertId);
     _demoAlertActive = true;
+    _dispatch = null;   // 지난 경보의 방재단 도착 시간이 새 경보에 남지 않게
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_demoAlertKey, true);
+    await prefs.remove(_dispatchKey);
     await prefs.setString(
       _responsesKey,
       jsonEncode({

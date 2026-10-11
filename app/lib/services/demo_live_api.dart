@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import '../profile_form.dart' show disabilitiesOf;
 import 'account_service.dart';
 import 'live_api.dart';
+import 'prototype_safety_store.dart' show DemoDispatch, PrototypeSafetyController;
 
 /// 시연 모드용 방재단 데이터 (2026-10-05). 시연 모드에서 방재단 화면(patrol_screens.dart, C8)이 [LiveApi] 대신 이 클래스를 쓴다.
 /// 가구 목록: 앱 안 6곳 (시각·청각·지체 예시). 예전엔 서버 DB의 시연 가구(GET /api/v1/demo/households)를
@@ -148,12 +149,22 @@ class DemoLiveApi extends LiveApi {
         'assigned_to': st['assigned'],
         'work_status': st['work'],
         'last_visit': st['visit'],
+        'eta': st['eta'],
         'in_area': lat == null || lng == null || _distM(lat, lng) <= _radiusM,
       });
     }
     if (myAlertActive) {
       final st = _stateFor(meTargetId, 1);
       st['status'] = myResponse ?? 'no_response';
+      // 방재단 창을 새로 열었으면 메모리엔 없지만 기기에 남은 출동 기록으로 배정·단계·도착 예정을 되살린다
+      if (st['assigned'] == null) {
+        final d = await PrototypeSafetyController.storedDemoDispatch();
+        if (d != null) {
+          st['assigned'] = {'user_id': null, 'nickname': _meNick, 'is_me': true};
+          st['work'] = d.stage;
+          st['eta'] = d.eta.toIso8601String();
+        }
+      }
       // 장애 유형 = 주민이 '내 정보'에서 고른 것 (같은 브라우저의 다른 창이면 같은 기기 기록, 2026-10-11 사용자 요청)
       final profile = await AccountService().optionalProfile();
       final home = profile['homeAddress'] ?? '';
@@ -174,6 +185,7 @@ class DemoLiveApi extends LiveApi {
         'assigned_to': st['assigned'],
         'work_status': st['work'],
         'last_visit': st['visit'],
+        'eta': st['eta'],
         'in_area': true,
       });
     }
@@ -221,16 +233,57 @@ class DemoLiveApi extends LiveApi {
     final st = _targetState(targetId);
     if (body.containsKey('assigned_to')) {
       if (body['assigned_to'] == 'me') {
-        st['assigned'] = {'user_id': null, 'nickname': '시연 방재단원(나)', 'is_me': true};
+        st['assigned'] = {'user_id': null, 'nickname': _meNick, 'is_me': true};
         st['work'] = 'en_route';
       } else {
         st['assigned'] = null;
         st['work'] = null;
+        st['eta'] = null;
       }
     }
     if (body['work_status'] != null) st['work'] = body['work_status'];
     if (body['status'] != null) st['status'] = body['status'];
+    if (targetId == meTargetId) await _syncMeDispatch(st);
     return {'id': targetId};
+  }
+
+  static const _meNick = '시연 방재단원(나)';
+
+  /// '내 방문 경로' [출발] (2026-10-12 사용자 요청): 경로의 집마다 내가 맡고 '가는 중' + 도착 예정 시각.
+  /// 시연 주민(앱 사용자)이 경로에 있으면 출발 사실·도착 예정을 기기 저장소로 보낸다 (같은 브라우저의 시민 창이 받는다)
+  @override
+  Future<void> dispatch(String incidentId, List<(String targetId, DateTime eta)> stops) async {
+    final now = DateTime.now();
+    for (final (id, eta) in stops) {
+      final st = _targetState(id);
+      st['assigned'] = {'user_id': null, 'nickname': _meNick, 'is_me': true};
+      st['work'] = 'en_route';
+      st['eta'] = eta.toIso8601String();
+      if (id == meTargetId) {
+        await PrototypeSafetyController.saveDemoDispatch(
+            DemoDispatch(departedAt: now, eta: eta, responder: '시연 방재단원', stage: 'en_route'));
+      }
+    }
+  }
+
+  /// 시연 주민 대상의 배정·단계가 바뀌면 시민에게 보낸 출동 기록도 맞춘다: 방문 중 → 도착, 완료 → 끝, 배정 해제 → 지움
+  static Future<void> _syncMeDispatch(Map<String, dynamic> st) async {
+    final d = await PrototypeSafetyController.storedDemoDispatch();
+    if (st['assigned'] == null) {
+      if (d != null) await PrototypeSafetyController.saveDemoDispatch(null);
+      return;
+    }
+    final stage = switch (st['work']) { 'visiting' || 'escorting' => 'visiting', 'done' => 'done', _ => 'en_route' };
+    if (d == null) {
+      // 출발 버튼 없이 배정 현황에서 단계만 바꾼 경우: 도착 예정을 모르면 '가는 중'은 보내지 않고, 도착(방문 중)부터 알린다
+      final eta = DateTime.tryParse('${st['eta']}');
+      if (stage == 'en_route' && eta == null) return;
+      final now = DateTime.now();
+      await PrototypeSafetyController.saveDemoDispatch(DemoDispatch(
+          departedAt: now, eta: eta ?? now, responder: '시연 방재단원', stage: stage));
+    } else if (d.stage != stage) {
+      await PrototypeSafetyController.saveDemoDispatch(d.copyWith(stage: stage));
+    }
   }
 
   /// 방문 기록 — 대피 완료 결과는 주민 상태를 대피 완료로 (서버 규칙과 같게), 업무 단계도 완료로 (2026-10-11)
@@ -248,6 +301,7 @@ class DemoLiveApi extends LiveApi {
       st['status'] = 'evacuated';
       st['work'] = 'done';
     }
+    if (targetId == meTargetId) await _syncMeDispatch(st);
     return {'id': 'demo-visit-${DateTime.now().microsecondsSinceEpoch}'};
   }
 

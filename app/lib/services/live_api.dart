@@ -58,6 +58,14 @@ class LiveApi {
   Future<Map<String, dynamic>> patchTarget(String incidentId, String targetId, Map<String, dynamic> body) =>
       _send(_api.patch<Map<String, dynamic>>('/api/v1/admin/incidents/$incidentId/targets/$targetId', data: body));
 
+  /// '내 방문 경로' [출발] (2026-10-12): 경로의 집들을 내가 맡는다. 실제 서버엔 업무 단계·도착 예정 칸이 없어 배정만 —
+  /// 도착 예정 시각을 시민에게 보내는 것은 시연(DemoLiveApi)만
+  Future<void> dispatch(String incidentId, List<(String targetId, DateTime eta)> stops) async {
+    for (final (id, _) in stops) {
+      await patchTarget(incidentId, id, {'assigned_to': 'me', if (supportsWorkStatus) 'work_status': 'en_route'});
+    }
+  }
+
   /// 방문 결과 기록 (result: evacuated_with_help|already_evacuated|transported|refused|not_home|other, note?)
   Future<Map<String, dynamic>> recordVisit(String incidentId, String targetId, Map<String, dynamic> body) =>
       _send(_api.post<Map<String, dynamic>>('/api/v1/admin/incidents/$incidentId/targets/$targetId/visits', data: body));

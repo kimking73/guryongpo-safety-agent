@@ -1564,6 +1564,69 @@ class EvacStatusChip extends ConsumerWidget {
   }
 }
 
+/// 대피 현황 칩 옆 방재단 도착 예정 (2026-10-12 사용자 요청: 방재단 → 시민 쌍방향, 시연).
+/// 방재단이 '내 방문 경로'에서 [출발]하면 '방재단 출발 · 14:32 도착 예정 (약 6분)', 방문 중이면 '방재단 도착', 완료면 숨김.
+/// 같은 브라우저 다른 창의 방재단 화면이 쓴 기기 기록(prototype_demo_dispatch_v1)을 storage 이벤트로 받는다
+class DispatchEtaPill extends ConsumerStatefulWidget {
+  const DispatchEtaPill({super.key, this.narrow = false});
+  final bool narrow;
+  @override
+  ConsumerState<DispatchEtaPill> createState() => _DispatchEtaPillState();
+}
+
+class _DispatchEtaPillState extends ConsumerState<DispatchEtaPill> {
+  Timer? _tick;
+  /// 출발 안내 메시지를 이미 띄운 출발 시각 (머리줄이 다시 그려져도 한 번만)
+  static DateTime? _announced;
+
+  @override
+  void initState() {
+    super.initState();
+    // 남은 분을 갱신
+    _tick = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext c) {
+    final evac = evacHeaderState(ref);
+    final d = ref.watch(prototypeSafetyProvider).demoDispatch;
+    if (!evac.demo || d == null || d.stage == 'done') return const SizedBox.shrink();
+    final eta = d.eta.toLocal();
+    final left = eta.difference(DateTime.now());
+    final mins = (left.inSeconds / 60).ceil();
+    final arrived = d.stage == 'visiting';
+    if (!arrived && _announced != d.departedAt) {
+      _announced = d.departedAt;
+      WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _showResponseMessage('방재단이 출발했어요. ${_hhmm(eta)}쯤 도착해요${mins > 0 ? ' (약 $mins분)' : ''}'));
+    }
+    final full = arrived
+        ? '방재단 도착'
+        : mins > 0
+            ? '방재단 출발 · ${_hhmm(eta)} 도착 예정 (약 $mins분)'
+            : '방재단 곧 도착';
+    final short = arrived ? '방재단 도착' : (mins > 0 ? '${_hhmm(eta)} 도착' : '곧 도착');
+    return Semantics(
+      label: full,
+      excludeSemantics: true,
+      child: GkPill(widget.narrow ? short : full,
+          icon: arrived ? Icons.door_front_door_rounded : Icons.directions_run_rounded,
+          bg: GK.navy,
+          fg: Colors.white),
+    );
+  }
+
+  static String _hhmm(DateTime t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+}
+
 /// 위쪽 머리줄 = web-prototype ResidentHeader (2026-10-08): 온라인/오프라인 배지 · 대피 현황 칩(2026-10-09, 예전 현재 위치 알약) ·
 /// 알림 종(선제 경고·알림 화면) · 좁은 화면이면 119. 현재 위치 확인은 지도의 '현위치' 버튼과 경로 안내에 그대로 있다
 class StatusLine extends ConsumerWidget {
@@ -1589,6 +1652,7 @@ class StatusLine extends ConsumerWidget {
                   onTap: () => unawaited(checkConnection(ref))),
             ),
             EvacStatusChip(narrow: narrow),
+            DispatchEtaPill(narrow: narrow),
           ]),
         ),
         const SizedBox(width: 10),

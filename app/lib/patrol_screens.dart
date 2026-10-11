@@ -641,6 +641,8 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
   bool visitLoading = false;
   String? visitError;
   int _calcSeq = 0;
+  /// '내 방문 경로' [출발]을 보내는 중
+  bool dispatching = false;
 
   /// 시연 대시보드인지 (앱 안 예시 데이터, 서버 기록과 분리)
   bool get _demo => ref.read(liveApiProvider) is DemoLiveApi;
@@ -1228,6 +1230,28 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
     }
   }
 
+  /// [출발]: 보고 있는 경로 순서대로 이동 시간을 더해 집마다 도착 예정 시각 → 배정 '나'·'가는 중' (시연이면 시민에게도)
+  Future<void> _dispatch(Map<String, dynamic> plan) async {
+    final id = incidentId;
+    if (id == null) return;
+    final now = DateTime.now();
+    final stops = [for (final (o, after) in visitCumulative(plan)) ('${o['id']}', now.add(after))];
+    setState(() => dispatching = true);
+    try {
+      await ref.read(liveApiProvider).dispatch(id, stops);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(_demo
+              ? '출발했어요 · ${stops.length}곳 도착 예정 시각을 주민에게 보냈어요 (시연)'
+              : '출발했어요 · ${stops.length}곳을 내가 맡았어요')));
+      await _loadDetail();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('출발을 기록하지 못했어요. ${liveError(e)}')));
+    } finally {
+      if (mounted) setState(() => dispatching = false);
+    }
+  }
+
   /// 우선 확인 번호 (지도·목록과 같은 번호)
   Map<String, int> _numbersOf(List<Map<String, dynamic>> priority) =>
       {for (var i = 0; i < priority.length; i++) '${priority[i]['id']}': i + 1};
@@ -1348,6 +1372,11 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
     final picked = _routeTargets(targets);
     final label = {for (final t in targets) '${t['id']}': '${t['label']}'};
     final plan = _visitPlan;
+    final closed = detail?['closed_at'] != null;
+    final etaOf = {
+      for (final t in targets)
+        if (DateTime.tryParse('${t['eta']}') case final e? when workStatusOf(t) != WorkStatus.done) '${t['id']}': e.toLocal()
+    };
     final me = ref.watch(userLocation);
     String km(num m) => m >= 1000 ? '${(m / 1000).toStringAsFixed(1)}km' : '${m.round()}m';
     String min(num s) => '${(s / 60).ceil()}분';
@@ -1483,7 +1512,7 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
             style: dsText(15, weight: FontWeight.w800)),
         Text(visitTab == 'priority' ? '순위 단계(도움 요청+장애 → 도움 요청 → 응답 없음+장애 → …)를 지키고, 같은 단계 안에서 가장 짧게' : '순위와 상관없이 가장 짧게',
             style: dsText(12, color: Ds.muted)),
-        for (final o in plan['order'] as List)
+        for (final (o, after) in visitCumulative(plan))
           ListTile(
             dense: true,
             contentPadding: EdgeInsets.zero,
@@ -1492,9 +1521,23 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
                 backgroundColor: Ds.navy,
                 child: Text('${o['seq']}', style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.bold))),
             title: Text(label['${o['id']}'] ?? '${o['id']}'),
-            subtitle: Text('앞 지점에서 ${km(o['leg_distance_m'] as num)} · ${min(o['leg_duration_s'] as num)}'),
+            subtitle: Text('앞 지점에서 ${km(o['leg_distance_m'] as num)} · ${min(o['leg_duration_s'] as num)} · '
+                '${etaOf['${o['id']}'] != null ? '도착 예정 ${clockHm(etaOf['${o['id']}']!)}' : '출발하면 약 ${min(after.inSeconds)} 뒤'}'),
             onTap: () => setState(() => selected = '${o['id']}'),
           ),
+        // [출발] (2026-10-12 사용자 요청): 경로의 집들을 내가 맡고 '가는 중' + 집마다 도착 예정 시각 → 시연이면 시민 화면에도
+        if (!closed) ...[
+          const SizedBox(height: 6),
+          PillButton(dispatching ? '보내는 중…' : '출발',
+              icon: FontAwesomeIcons.personRunning,
+              height: 48,
+              fontSize: 16,
+              bg: Ds.navy,
+              fg: Colors.white,
+              onPressed: dispatching ? null : () => _dispatch(plan)),
+          Text(_demo ? '누르면 집마다 도착 예정 시각을 주민 화면(대피 현황 옆)에 보내요.' : '누르면 경로의 집들을 내가 맡아요.',
+              style: dsText(12, color: Ds.muted)),
+        ],
         if ((plan['still_inside'] as List? ?? const []).isNotEmpty)
           Text('⚠ 위험 구역 ${(plan['still_inside'] as List).length}곳을 지납니다 (방문할 집이 구역 안에 있거나 다른 길이 없음).',
               style: TextStyle(color: Colors.deepOrange.shade800)),
@@ -1518,6 +1561,18 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
             _MapPoint('${h['id']}', latLng(h['location'])!, null, null, '${h['label']}', kind: vulnerableKind(h['needs']),
                 detail: needsText(h['needs'])),
       ];
+}
+
+/// 시각 'HH:MM' (도착 예정 표시)
+String clockHm(DateTime t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+/// 방문 경로(order)의 집마다 출발부터 그 집까지 걸리는 시간 (앞 구간 이동 시간 누적, 머무는 시간은 넣지 않음)
+List<(Map<String, dynamic>, Duration)> visitCumulative(Map<String, dynamic> plan) {
+  var sum = 0;
+  return [
+    for (final o in plan['order'] as List)
+      (Map<String, dynamic>.from(o as Map), Duration(seconds: sum += ((o['leg_duration_s'] as num?) ?? 0).round())),
+  ];
 }
 
 String _hms(DateTime t) =>
@@ -2009,6 +2064,10 @@ class _AssignCard extends StatelessWidget {
                       style: TextStyle(fontWeight: FontWeight.w800, color: statusColor(status))),
                 ]),
                 style: const TextStyle(fontSize: 14, color: GK.muted)),
+            // [출발]로 정한 도착 예정 (2026-10-12) — 가는 중일 때만
+            if (w == WorkStatus.enRoute && DateTime.tryParse('${t['eta']}') != null)
+              Text('도착 예정 ${clockHm(DateTime.parse('${t['eta']}').toLocal())}',
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: GK.navy)),
             if (selected) ...[
               if (!closed)
                 Wrap(spacing: 6, runSpacing: 0, children: [

@@ -702,6 +702,127 @@ void main() {
     expect(body.containsKey('note'), isFalse);
     await t.pumpWidget(const SizedBox.shrink());
   });
+
+  // 2026-10-12 사용자 요청 (쌍방향 소통): 방재단이 '내 방문 경로'에서 [출발] → 집마다 도착 예정 → 시민 화면 대피 현황 옆에
+  testWidgets('방재단 [출발]: 경로 이동 시간 누적으로 도착 예정, 시연 주민에게 출발·도착 예정을 보낸다', (t) async {
+    _tall(t);
+    t.view.physicalSize = const Size(900, 9000);
+    SharedPreferences.setMockInitialValues({});
+    DemoLiveApi.resetDemoIncident();
+    final store = PrototypeSafetyController();
+    await store.load();
+    await store.startDemoAlert(prototypeEvacuationAlertId);
+    await store.respond(prototypeEvacuationAlertId, EvacuationResponseStatus.needHelp);
+    final api = _RouteDemoApi();
+    await t.pumpWidget(ProviderScope(
+        overrides: [prototypeSafetyProvider.overrideWith((_) => store)],
+        child: MaterialApp(
+            home: Scaffold(
+                body: DemoPatrolScope(
+                    child: ProviderScope(overrides: [liveApiProvider.overrideWithValue(api)], child: const LiveResponderScreen()))))));
+    await _settle(t);
+    await t.ensureVisible(find.widgetWithText(MapMenuButton, '경로 안내'));
+    await t.tap(find.widgetWithText(MapMenuButton, '경로 안내'));
+    await _settle(t);
+    final row = find.ancestor(
+        of: find.descendant(of: find.byType(Dialog), matching: find.text('앱 사용자 (시연 주민)')), matching: find.byType(Row)).first;
+    await t.tap(find.descendant(of: row, matching: find.widgetWithText(PillButton, '경로 추가')));
+    await _settle(t);
+    await t.tap(find.widgetWithText(PillButton, '1곳 경로 계산'));
+    await _settle(t);
+    expect(find.textContaining('출발하면 약 6분 뒤'), findsOneWidget);   // 출발 전: 누적 이동 시간
+
+    final before = DateTime.now();
+    final go = find.widgetWithText(PillButton, '출발');
+    await t.ensureVisible(go);
+    await t.tap(go);
+    await _settle(t);
+    // 시민에게 보낸 출동 기록: 가는 중 · 도착 예정 = 출발 + 6분
+    final d = store.demoDispatch!;
+    expect(d.stage, 'en_route');
+    expect(d.eta.difference(before).inSeconds, inInclusiveRange(359, 362));
+    final eta = clockHm(d.eta);
+    // 방재단 화면: 내가 맡음 · 가는 중 · 도착 예정
+    final card = find.byKey(const ValueKey('assign-${DemoLiveApi.meTargetId}'));
+    expect(find.descendant(of: card, matching: find.text('도착 예정 $eta')), findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('나')), findsOneWidget);
+    expect(find.textContaining('도착 예정 $eta'), findsWidgets);   // 경로 목록 줄에도
+
+    // 배정 현황에서 '방문 중'으로 바꾸면 시민 쪽은 '도착'
+    await t.ensureVisible(card);
+    await t.tap(find.descendant(of: card, matching: find.text('앱 사용자 (시연 주민)')));
+    await _settle(t);
+    await t.tap(find.descendant(of: card, matching: find.text('업무 단계 바꾸기')));
+    await t.pumpAndSettle();
+    await t.tap(find.text('방문 중').last);
+    await _settle(t);
+    expect(store.demoDispatch!.stage, 'visiting');
+    await t.pumpWidget(const SizedBox.shrink());
+    await t.pump(const Duration(minutes: 1));   // 남은 타이머(안내 메시지) 정리
+  });
+
+  testWidgets('시민 화면: 대피 현황 칩 옆에 방재단 출발·도착 예정, 다른 창이 보낸 것도 받는다', (t) async {
+    SharedPreferences.setMockInitialValues({});
+    final store = PrototypeSafetyController();
+    await store.load();
+    await store.startDemoAlert(prototypeEvacuationAlertId);
+    await t.pumpWidget(ProviderScope(
+        overrides: [prototypeSafetyProvider.overrideWith((_) => store)],
+        child: MaterialApp(
+            scaffoldMessengerKey: rootMessengerKey,
+            home: const Scaffold(body: Row(children: [EvacStatusChip(), DispatchEtaPill()])))));
+    await t.pump();
+    expect(find.textContaining('방재단'), findsNothing);   // 출발 전엔 없음
+
+    // 다른 창(방재단)이 저장소에 쓴 것처럼
+    final eta = DateTime.now().add(const Duration(minutes: 6));
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('prototype_demo_dispatch_v1',
+        '{"departed_at":"${DateTime.now().toIso8601String()}","eta":"${eta.toIso8601String()}","responder":"시연 방재단원","stage":"en_route"}');
+    await store.syncFromStorage();
+    await t.pump();
+    await t.pump();
+    expect(find.text('방재단 출발 · ${clockHm(eta)} 도착 예정 (약 6분)'), findsOneWidget);
+    expect(find.textContaining('방재단이 출발했어요'), findsOneWidget);   // 한 번 안내
+
+    await PrototypeSafetyController.saveDemoDispatch(
+        DemoDispatch(departedAt: DateTime.now(), eta: eta, responder: '시연 방재단원', stage: 'visiting'));
+    await t.pump();
+    expect(find.text('방재단 도착'), findsOneWidget);
+    await PrototypeSafetyController.saveDemoDispatch(null);
+    await t.pump();
+    expect(find.text('방재단 도착'), findsNothing);
+    await t.pumpWidget(const SizedBox.shrink());
+    await t.pump(const Duration(seconds: 6));
+  });
+
+  test('visitCumulative: 앞 구간 이동 시간을 더한다', () {
+    final r = visitCumulative({
+      'order': [
+        {'id': 'a', 'seq': 1, 'leg_duration_s': 120},
+        {'id': 'b', 'seq': 2, 'leg_duration_s': 300},
+      ]
+    });
+    expect([for (final (o, d) in r) (o['id'], d.inSeconds)], [('a', 120), ('b', 420)]);
+  });
+}
+
+/// 시연 API + 방문 경로 (경로 서버 대신 집마다 6분)
+class _RouteDemoApi extends DemoLiveApi {
+  @override
+  Future<Map<String, dynamic>> visitRoute(double lat, double lon, List<Map<String, dynamic>> stops, {String mode = 'walk'}) async {
+    Map<String, dynamic> plan() => {
+          'order': [
+            for (var i = 0; i < stops.length; i++)
+              {'id': stops[i]['id'], 'seq': i + 1, 'tier': 1, 'leg_distance_m': 400, 'leg_duration_s': 360}
+          ],
+          'distance_m': 400 * stops.length,
+          'duration_s': 360 * stops.length,
+          'geometry': '_p~iF~ps|U_ulLnnqC',
+          'still_inside': <String>[],
+        };
+    return {'mode': mode, 'shortest': plan(), 'priority': plan(), 'blocked_zones': <String>[], 'hazards_ok': true};
+  }
 }
 
 /// 시연 API + 대리 등록 요청 본문 기록 (주소 → 좌표는 테스트에서 서버가 없어 시연 규칙대로 지금 위치로)
