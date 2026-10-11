@@ -16,6 +16,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'models/domain_models.dart';
 import 'repositories/mock_repository.dart';
 import 'repositories/remote_repository.dart';
+import 'services/alert_notifications.dart';
 import 'services/app_config.dart';
 import 'services/auth_service.dart';
 import 'services/account_service.dart';
@@ -690,9 +691,16 @@ class _NotificationBootstrapState extends ConsumerState<_NotificationBootstrap>
 
   /// 대피 경보 사이렌 알림(services/evac_alarm.dart) → 경보 화면 / 알림 버튼 응답 (2026-10-11)
   void _wireEvacAlarm() {
+    // 주의보·경보 알림으로 앱이 열렸는데 열 경고 화면이 없으면(대피 종료·시연) 내용을 앱 아래쪽에 보여 준다
+    AlertNotifications.onShow = (a) => rootMessengerKey.currentState?.showSnackBar(SnackBar(
+          content: Text('${a.title}\n${a.summary}'),
+          duration: const Duration(seconds: 10),
+        ));
     EvacAlarm.onOpen = (alert) {
       if (!mounted || evacAlarmCurrent.value?.id == alert.id) return;
-      final answered = ref.read(alertCenterProvider).any((a) => a.id == alert.id && a.myStatus != null);
+      // 시연 경보는 누를 때마다 새로 시작 — 지난 시연 응답이 남아 있어도 다시 띄운다
+      final answered = alert.id != prototypeEvacuationAlertId &&
+          ref.read(alertCenterProvider).any((a) => a.id == alert.id && a.myStatus != null);
       if (answered) {
         unawaited(EvacAlarm.stop());
         return;

@@ -59,9 +59,13 @@ def _message(p: Push):
     return messaging.Message(
         token=p.token, data=p.data,
         notification=messaging.Notification(title=p.title, body=p.body),
+        # 주의보·경보 등 일반 알림도 잠금 화면에 내용 전체 + 소리·진동 (2026-10-11) — 앱이 'alerts' 채널을 만든다
+        # (app/lib/services/alert_notifications.dart), 앱에 채널이 없으면 기본 채널
         android=messaging.AndroidConfig(
             priority="high",
-            notification=messaging.AndroidNotification(channel_id="alerts")),       # 앱에 채널이 없으면 기본 채널
+            notification=messaging.AndroidNotification(
+                channel_id="alerts", visibility="public", priority="high",
+                default_sound=True, default_vibrate_timings=True)),
         apns=messaging.APNSConfig(payload=messaging.APNSPayload(
             aps=messaging.Aps(sound="default", category=EVAC_CATEGORY if evac else None))),
     )

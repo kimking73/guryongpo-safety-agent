@@ -15,32 +15,56 @@ import io.flutter.plugin.common.MethodChannel
  * 대피 경보(재난문자처럼, 2026-10-11): 경보 알림으로 열리면 잠금 화면 위에 화면을 켜서 띄우고,
  * 앱(services/evac_alarm.dart)이 채널 guardian/alarm 으로 손전등 깜빡임·잠금 화면 표시 해제를 부른다.
  * 잠금 화면 위 표시는 경보 화면에서만 — 평소 앱 화면은 잠금 화면 위에 나오지 않는다.
+ *
+ * 주의보·경보 등 일반 재난 알림(services/alert_notifications.dart, 같은 날): 꺼진 화면에서는 소리만 나고 화면이 안 켜졌다 →
+ * 전체 화면 알림으로 열리면 화면만 잠깐 켜고 바로 잠금 화면 위 표시를 풀어, 잠금 화면에 알림 카드가 보이게 한다.
  */
 class MainActivity : FlutterActivity() {
+    /** 대피 경보가 잠금 화면 위에 떠 있는 중 — 일반 알림이 이 표시를 풀지 않게 */
+    private var evacOverLock = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
-        if (isEvacAlarm(intent)) showOverLock(true)
+        handleIntent(intent)
         super.onCreate(savedInstanceState)
     }
 
     override fun onNewIntent(intent: Intent) {
-        if (isEvacAlarm(intent)) showOverLock(true)
+        handleIntent(intent)
         super.onNewIntent(intent)
+    }
+
+    private fun handleIntent(i: Intent?) {
+        when {
+            isNotification(i, "evac_alarm") -> { evacOverLock = true; showOverLock(true) }
+            isNotification(i, "alert_notice") -> wakeForNotice()
+        }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "guardian/alarm").setMethodCallHandler { call, result ->
             when (call.method) {
-                "lockScreen" -> { showOverLock(call.arguments == true); result.success(null) }
+                "lockScreen" -> {
+                    evacOverLock = call.arguments == true
+                    showOverLock(evacOverLock)
+                    result.success(null)
+                }
                 "torch" -> result.success(torch(call.arguments == true))
                 else -> result.notImplemented()
             }
         }
     }
 
-    /** flutter_local_notifications 가 알림(전체 화면 포함)으로 열 때 붙이는 action + 우리 payload 표시 */
-    private fun isEvacAlarm(i: Intent?): Boolean =
-        i?.action == "SELECT_NOTIFICATION" && (i.getStringExtra("payload")?.contains("\"evac_alarm\"") == true)
+    /** flutter_local_notifications 가 알림(전체 화면 포함)으로 열 때 붙이는 action + 우리 payload 의 kind */
+    private fun isNotification(i: Intent?, kind: String): Boolean =
+        i?.action == "SELECT_NOTIFICATION" && (i.getStringExtra("payload")?.contains("\"$kind\"") == true)
+
+    /** 화면을 켜고 잠시 뒤 잠금 화면 위 표시를 푼다 → 잠금 화면(알림 카드)이 다시 보인다. 잠금이 없는 기기는 앱이 열린 채 */
+    private fun wakeForNotice() {
+        if (evacOverLock) return
+        showOverLock(true)
+        window.decorView.postDelayed({ if (!evacOverLock) showOverLock(false) }, NOTICE_WAKE_MS)
+    }
 
     private fun showOverLock(on: Boolean) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
@@ -64,5 +88,9 @@ class MainActivity : FlutterActivity() {
         if (id == null) false else { cm.setTorchMode(id, on); true }
     } catch (e: Exception) {
         false
+    }
+
+    private companion object {
+        const val NOTICE_WAKE_MS = 1500L
     }
 }

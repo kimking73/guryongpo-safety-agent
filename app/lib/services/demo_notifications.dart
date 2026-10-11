@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import 'alert_notifications.dart';
 import 'evac_alarm.dart';
 import 'prototype_safety_store.dart';
 
@@ -55,6 +56,8 @@ class DemoNotifications {
       onDidReceiveNotificationResponse: _handleResponse,
     );
     _initialized = true;
+    // 주의보·경보 채널은 앱을 열 때마다 만든다 — 푸시 설정이 늦거나 실패해도 FCM 이 이 채널로 띄우게
+    await AlertNotifications.ensureChannel();
     final launch = await _plugin.getNotificationAppLaunchDetails();
     final response = launch?.notificationResponse;
     if (launch?.didNotificationLaunchApp == true && response != null) {
@@ -65,6 +68,8 @@ class DemoNotifications {
   Future<void> _handleResponse(NotificationResponse response) async {
     // 대피 경보 사이렌 알림(services/evac_alarm.dart)은 같은 플러그인을 쓰므로 여기서 넘겨준다
     if (await EvacAlarm.handleResponse(response)) return;
+    // 주의보·경보 등 일반 재난 알림(services/alert_notifications.dart)도 같은 플러그인
+    if (AlertNotifications.handleResponse(response)) return;
     final status = EvacuationResponseStatusLabel.fromWireValue(
       response.actionId,
     );

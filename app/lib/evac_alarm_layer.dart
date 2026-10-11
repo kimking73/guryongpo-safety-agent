@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'main.dart';
 import 'models/domain_models.dart';
 import 'prototype_safety_screens.dart';
+import 'services/alert_notifications.dart';
 import 'services/evac_alarm.dart';
 import 'services/prototype_safety_store.dart';
 
@@ -74,5 +75,24 @@ Future<void> scheduleEvacAlarmDemo(WidgetRef ref, {Duration delay = const Durati
     if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
       EvacAlarm.onOpen?.call(demoEvacuationAlert);
     }
+  });
+}
+
+/// 시연: [delay] 뒤에 주의보·경보 같은 일반 재난 알림 — 화면을 끄고 기다리면 잠금 화면에 뜬다 (서버로 보내지 않음)
+Future<void> scheduleAlertNoticeDemo({Duration delay = const Duration(seconds: 10)}) async {
+  await EvacAlarm.requestPermissions();
+  await AlertNotifications.ensureChannel();
+  Timer(delay, () {
+    unawaited(AlertNotifications.show(
+      const AlertItem(
+        id: 'demo-alert-notice',
+        title: '[호우 경보] 구룡포읍 · 현재 위치 (시연)',
+        level: '경보',
+        time: '',
+        summary: '구룡포읍에 호우 경보가 발효 중입니다. 하천·해안가·비탈면 가까이 가지 말고 안전한 실내에 머무르세요.',
+        guide: '',
+      ),
+      openable: false,   // 시연 알림은 서버에 없는 경고 — 누르면 앱만 연다
+    ));
   });
 }

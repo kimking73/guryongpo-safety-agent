@@ -717,6 +717,17 @@ class ProfileAlertsCard extends ConsumerWidget {
             icon: const Icon(Icons.campaign_rounded),
             label: const Text('잠금 화면 경보 시연 (10초 뒤)'),
           ),
+          // 주의보·경보 같은 일반 재난 알림도 잠금 화면에 (2026-10-11, 기기에서만)
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+            onPressed: () async {
+              await scheduleAlertNoticeDemo();
+              showResponseMessage('10초 뒤 호우 경보 알림이 와요 — 화면을 꺼 보세요');
+            },
+            icon: const Icon(Icons.notifications_active_rounded),
+            label: const Text('잠금 화면 재난 알림 시연 (10초 뒤)'),
+          ),
         ],
       ]),
     );

@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/domain_models.dart';
 import '../repositories/mock_repository.dart';
+import 'alert_notifications.dart';
 import 'app_config.dart';
 import 'auth_service.dart';
 import 'evac_alarm.dart';
@@ -59,6 +60,9 @@ class FcmNotificationService {
         Firebase.apps.isEmpty) {
       return;
     }
+    // 주의보·경보 등 일반 알림 채널 — 앱이 꺼져 있을 때 Android 가 이 채널로 띄운다 (잠금 화면·소리·진동)
+    await AlertNotifications.ensureChannel();
+    AlertNotifications.onOpen = (id, preview) => unawaited(_onOpen?.call(id, preview));
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
     _foregroundSubscription = FirebaseMessaging.onMessage.listen((message) {
       // 앱을 보고 있을 때 온 대피 경보: 사이렌을 울리고 경보 화면을 바로 띄운다
@@ -67,6 +71,11 @@ class FcmNotificationService {
       if (evac != null) {
         unawaited(EvacAlarm.show(evac));
         EvacAlarm.onOpen?.call(evac);
+      } else {
+        // 앱을 보고 있어도 알림 센터·잠금 화면에 남게 시스템 알림으로도 띄운다
+        final id = message.data['alert_id'] as String?;
+        unawaited(AlertNotifications.show(_preview(message),
+            openable: id != null && id.isNotEmpty));
       }
       unawaited(_onForeground?.call(_preview(message)));
     });
@@ -106,6 +115,7 @@ class FcmNotificationService {
         settings.authorizationStatus == AuthorizationStatus.provisional) {
       // 대피 경보가 잠금 화면 위에 뜨려면 '전체 화면 알림' 권한도 (Android 14부터 사용자가 켬)
       await EvacAlarm.requestPermissions();
+      await AlertNotifications.ensureChannel();
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_enabledKey, true);
       final token = await FirebaseMessaging.instance.getToken();

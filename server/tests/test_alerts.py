@@ -100,6 +100,9 @@ def test_fcm_alarm_message_is_data_only():
     assert m.android.priority == "high" and m.android.ttl == fcm.ALARM_TTL
     plain = fcm._message(fcm.Push(token="t", title="a", body="b", data=fcm.payload("alert", alert_id=ALERT)))
     assert plain.notification is not None
+    n = plain.android.notification                      # 일반 알림도 잠금 화면에 내용 전체 + 소리·진동
+    assert n.channel_id == "alerts" and n.visibility == "public" and n.priority == "high"
+    assert n.default_sound and n.default_vibrate_timings
 
 
 def test_fcm_skipped_without_firebase(monkeypatch):
