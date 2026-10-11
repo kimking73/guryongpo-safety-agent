@@ -73,6 +73,8 @@ def test_failed_check_retries_then_falls_back():
     final, visited = run(app, chat("침수 상황 알려줘"))
 
     assert final["used_fallback"] is True
+    # 한도를 넘으면 안전 안내 문장이 아니라 마지막으로 만든 답이 나간다 (사용자 결정 2026-10-11)
+    assert final["final_answer"] and final["final_answer"] != G.SAFE_NOTICE
     assert final["retry_count"] == MAX_RETRY
     assert visited.count(G.MANAGER) == MAX_RETRY + 1
     assert "수위 수치 불일치" in final["manager_feedback"]
@@ -90,16 +92,15 @@ def test_retry_clears_previous_specialist_results():
     assert len(final["specialist_results"]) == 1  # 재시도 전 결과가 누적되지 않음
 
 
-def test_bad_polish_is_caught_by_check_and_never_sent():
-    """다듬기가 지어낸 값은 그 뒤의 환각 검증(숫자 검사)에서 걸린다 → 한도까지 실패하면 안전 안내."""
+def test_bad_polish_is_caught_by_check_then_sent_as_is_after_the_limit():
+    """다듬기가 지어낸 값은 그 뒤의 환각 검증(숫자 검사)에서 걸린다 → 한도까지 실패하면 만든 답 그대로 (used_fallback 표시)."""
     def bad_polish(state):
         return {"polished": "수위 99cm (지어낸 값)"}
 
     final, visited = run(G.build_graph({G.POLISH: bad_polish}), chat("침수 상황 알려줘"))
 
     assert visited.count(G.POLISH) == MAX_RETRY + 1
-    assert final["used_fallback"] is True and "99cm" not in final["final_answer"]
-    assert final["card"] is None and "99cm" not in final["voice_text"]
+    assert final["used_fallback"] is True and final["final_answer"] == "수위 99cm (지어낸 값)"
 
 
 def test_alert_mode_runs_the_same_checks():
@@ -117,3 +118,8 @@ def test_mermaid_export():
     mermaid = G.build_graph().get_graph().draw_mermaid()
     for name in [G.MANAGER, G.ACTION_ADVISOR, G.VERIFY_GATE, G.FALLBACK, *G.SPECIALISTS]:
         assert name in mermaid
+
+
+def test_fallback_without_any_answer_uses_safe_notice():
+    out = G.fallback({"checks": {}})
+    assert out["final_answer"] == G.SAFE_NOTICE and out["voice_text"] == G.SAFE_NOTICE and out["card"] is None

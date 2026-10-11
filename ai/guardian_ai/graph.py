@@ -350,7 +350,7 @@ def verify_gate(state: GuardianState) -> dict:
 
     - 통과              → verdict="pass"     (finalize로)
     - 실패 + 한도 이내   → verdict="retry",    실패 사유를 관리자에게 전달, retry_count 증가
-    - 실패 + 한도 초과   → verdict="fallback", 안전 안내로 종료
+    - 실패 + 한도 초과   → verdict="fallback", 마지막으로 만든 답을 그대로 내보내고 종료
     실제 이동은 아래 route_verdict가 verdict 값을 보고 결정한다.
     """
     failed = [f"[{k}] {c.feedback}" for k, c in state.get("checks", {}).items() if not c.ok]
@@ -372,19 +372,22 @@ def finalize(state: GuardianState) -> dict:
     return {"final_answer": state.get("polished") or state.get("draft", ""), "used_fallback": False}
 
 
-def fallback(state: GuardianState) -> dict:
-    """검증을 한도까지 실패한 경우: 확실한 최소 안내만 한다.
+SAFE_NOTICE = "정확한 정보를 확인하지 못했습니다. 위급하면 119에 연락하고 가까운 대피소로 이동하세요."
 
-    재난 상황에서 틀린 정보를 주는 것보다 "모른다 + 안전 행동"이 낫다.
-    used_fallback=True는 로그·품질 측정(J4)에 쓴다.
+
+def fallback(state: GuardianState) -> dict:
+    """검증을 한도까지 실패한 경우: 마지막으로 만든 답을 그대로 내보낸다 (사용자 결정 2026-10-11).
+
+    이전에는 답을 버리고 안전 안내 문장만 냈다. 지금은 만든 답·음성 문장·카드를 그대로 두고,
+    만든 답이 아예 없을 때만 안전 안내 문장을 쓴다.
+    used_fallback=True는 "검증을 통과하지 못한 답"이라는 표시 — 로그·품질 측정(J4)에 쓴다.
     """
-    return {
-        "final_answer": "정확한 정보를 확인하지 못했습니다. 위급하면 119에 연락하고 가까운 대피소로 이동하세요.",
-        "used_fallback": True,
-        # 다듬기가 검증보다 먼저 돌므로, 떨어진 답의 음성 문장·카드가 남지 않게 비운다 (2026-10-11)
-        "voice_text": "정확한 정보를 확인하지 못했습니다. 위급하면 119에 연락하고 가까운 대피소로 이동하세요.",
-        "card": None,
-    }
+    answer = state.get("polished") or state.get("draft") or ""
+    if not answer:
+        return {"final_answer": SAFE_NOTICE, "used_fallback": True, "voice_text": SAFE_NOTICE, "card": None}
+    failed = [f"[{k}] {c.feedback}" for k, c in state.get("checks", {}).items() if not c.ok]
+    logger.warning("검증 한도 초과 → 검증을 통과하지 못한 답을 그대로 보냄: %s", " / ".join(failed))
+    return {"final_answer": answer, "used_fallback": True}
 
 
 # 노드 이름 → 함수 매핑. build_graph(overrides=...)로 일부만 바꿔 끼울 수 있다.
@@ -424,7 +427,7 @@ def route_verdict(state: GuardianState) -> str:
     return {
         "pass": FINALIZE,      # 통과 → 최종 확정
         "retry": MANAGER,      # 재시도 → 관리자부터 다시
-        "fallback": FALLBACK,  # 한도 초과 → 안전 안내
+        "fallback": FALLBACK,  # 한도 초과 → 만든 답 그대로
     }[state["verdict"]]
 
 

@@ -23,7 +23,7 @@ flowchart TD
     H --> G{검증 결과}
     G -- 통과 --> OUT([최종 답변])
     G -- 실패, 재시도 1회 이내 --> M
-    G -- 실패, 한도 초과 --> FB([안전 fallback 답변])
+    G -- 실패, 한도 초과 --> FB([만든 답 그대로<br/>used_fallback 표시])
 ```
 
 기획서 구조와 다른 점 (의도적 변경):
@@ -32,7 +32,7 @@ flowchart TD
 | --- | --- |
 | 행동 권고 → 다듬기 → 환각 검증 한 번 (2026-10-11 사용자 결정) | 예전: 의도+환각 검증 → 다듬기 → 환각 재검증. 사용자 의도 검증은 없앴고, 검증은 실제로 나갈 글(다듬은 답·음성 문장)을 한 번만 본다 |
 | 재시도 최대 1회 (2026-10-11, 답변 시간 때문에 2회 → 1회) | 재난 상황에서 무한 루프·과도한 지연 방지 |
-| 한도 초과 시 fallback 답변 | 검증 못 한 답을 내보내지 않음. 다듬기가 숫자를 바꾼 경우도 같은 경로 (예전엔 다듬기 전 초안으로 돌아갔다) |
+| 한도 초과 시 만든 답 그대로 | 2026-10-11 사용자 결정: 검증을 한도(1회 재시도)까지 통과하지 못해도 마지막으로 만든 답·카드·음성·경로를 그대로 보낸다. `used_fallback=true`가 '검증을 통과하지 못한 답' 표시. 만든 답이 없을 때만 119·대피소 안내 문장 (`graph.SAFE_NOTICE`). 예전에는 답을 버리고 안내 문장만 냈다 |
 | alert 모드 추가 | 선제 경고(A5)를 같은 그래프로 생성 |
 | 선택된 agent가 없으면 `direct_reply`로 끝 (2026-10-10, 예전엔 행동 권고로 직행) | 인사·자기 정보만 말한 경우 — 행동 권고가 "현재 확인된 위험 없음"이라고 답해 경보 중에도 틀린 위험 판단처럼 보였다. 수치·사실을 말하지 않으므로 검증·다듬기도 생략. alert 모드는 예전처럼 행동 권고 |
 
@@ -53,7 +53,7 @@ flowchart TD
 | `hallucination_check` | 다듬은 답(없으면 초안)·음성 문장의 수치·사실이 evidence와 일치하는지 | polished, voice_text, specialist_results[].evidence, action_plan | checks.hallucination | - | 숫자는 규칙 대조 + LLM |
 | `verify_gate` | 통과/재시도/fallback 결정 | checks, retry_count | verdict, retry_count, manager_feedback | - | X |
 | `finalize` | 최종 답변 확정 | polished | final_answer | - | X |
-| `fallback` | 검증 실패 시 최소 안내 (119, 대피소) | - | final_answer, used_fallback | - | X |
+| `fallback` | 검증 한도 초과 시 마지막 답을 그대로 확정 (답이 없으면 119·대피소 안내) | polished, draft, checks | final_answer, used_fallback | - | X |
 
 환각 검증의 전제: **모든 전문 agent는 답변에 쓴 수치를 `Evidence`로 남긴다.** evidence에 없는 수치가 초안에 있으면 실패.
 
@@ -287,7 +287,7 @@ AI는 별도 컨테이너(`ai`, 포트 8001)로 운영한다. 배포 시 Caddy�
   "decision_path": "재난 중 > 위험 지역 > 이동 가능",   // 행동 권고 판단 로직에서 도달한 분기
   "follow_up": null,               // 근거가 없어 물은 질문 하나 (답변 끝에도 있음)
   "call_emergency": false,         // 이동 불가능 분기 → 앱 119 버튼
-  "route": {                       // 경로를 안내했을 때만 — 위치·경로 agent 또는 '이동 가능' 분기 (안전 안내로 끝난 답이면 null)
+  "route": {                       // 경로를 안내했을 때만 — 위치·경로 agent 또는 '이동 가능' 분기 (검증 한도 초과 `used_fallback=true`여도 그대로 온다)
     "destination": { "name": "충혼탑 앞", "lat": 35.99144, "lon": 129.56073, "kind": "shelter" },  // kind: shelter·medical·home·work·place
     "profile": "elderly", "distance_m": 1024, "duration_s": 984,
     "avoided": ["flood-67"], "still_inside": [], "hazards_ok": true,

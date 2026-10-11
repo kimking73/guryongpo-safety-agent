@@ -176,10 +176,10 @@ def test_wrong_first_answer_is_rewritten_after_feedback():
     assert feedbacks[0] == "" and "300mm" in feedbacks[1]
 
 
-def test_always_wrong_answer_ends_in_safe_fallback():
+def test_always_wrong_answer_goes_out_marked_after_the_limit():
     res = service_with(lambda *a: "침수심이 999mm입니다.").chat(
         ChatRequest(user_id="u1", question="침수 위험 있어요?", profile=UserProfile(user_id="u1", home=HOME)))
-    assert res.used_fallback and "999mm" not in res.answer and "119" in res.answer
+    assert res.used_fallback and "999mm" in res.answer
 
 
 def test_evidence_unit_parsing_from_reason_text():

@@ -4,7 +4,7 @@
 1. Read `.claude/docs/timeline.md` → status table, "다음 세션 시작점", "이월 항목", work log.
 2. From `코드/`: `git pull` (teammates push to `main`), then `docker compose up -d` and `docker compose ps`
    (db, api, ai all healthy). If `.env` changed since the ai container started: `docker compose up -d --force-recreate ai`.
-3. Baseline tests: `.venv/bin/python -m pytest -q` → **217 passed** (2026-10-11). `-m "db and not live"` needs local db + `AI_DB_*`
+3. Baseline tests: `.venv/bin/python -m pytest -q` → **223 passed** (2026-10-11). `-m "db and not live"` needs local db + `AI_DB_*`
    in `.env` (plain `-m db` also runs paid live tests). `-m live` calls real OpenAI (routing, B3 injection, extractor; a few 원).
    If `docker compose ps` hangs, restart the OrbStack app (happened 2026-10-08); VM checks still work.
    Other lanes' baselines: server 223 passed·8 skipped, route 77, app 7 known failures as of 10-09 (not fully rerun since) (see timeline "다음 세션 시작점";
@@ -75,7 +75,7 @@
   `ChatService()` wires the real nodes; `DEFAULT_NODES`/`ChatService(classifier=…)` stay offline for tests.
 - B5 (2026-10-03, in progress — only the real Google voice round trip is left, waiting for `secrets/gcp-voice.json`):
   order since 2026-10-11 (user decision): action_advisor → polish → hallucination_check → verify_gate (pass → finalize,
-  fail → manager once (`MAX_RETRY` 1), then fallback); intent check and the post-polish re-check loop were removed.
+  fail → manager once (`MAX_RETRY` 1), then `fallback` = the last generated answer goes out as is with `used_fallback=true`, route/card/voice kept (user decision 2026-10-11; the 119 sentence `graph.SAFE_NOTICE` only when no answer exists)); intent check and the post-polish re-check loop were removed.
   Content checker `OpenAIFactChecker` (effort low by default — `OPENAI_VERIFY_EFFORT`; all steps at once via
   `OPENAI_REASONING_EFFORT`). `polish.py`: `build_card` (code picks chips from Evidence) + `OpenAIPolisher` only for
   drafts > 600 chars + `voice_text`; a retry passes `manager_feedback` to the polisher. `ChatResponse.card`·`voice_text`·`timings`. `voice.py` (ffmpeg → Google STT/TTS v1),

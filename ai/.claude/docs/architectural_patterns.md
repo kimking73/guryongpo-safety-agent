@@ -24,7 +24,7 @@ Routers never mutate state. Verdict values are typed `Literal`s in state.py (`ve
 
 ## 4. Bounded retry loops with safe degradation
 The loop limit is the constant `MAX_RETRY` (state.py, 1 since 2026-10-11), checked in `verify_gate`.
-On exhaustion the graph degrades instead of looping: `fallback` (`used_fallback=True`). There is one loop only:
+On exhaustion the graph stops looping and sends the last generated answer as is, marked `used_fallback=True` (user decision 2026-10-11; `SAFE_NOTICE` only when there is no answer at all). There is one loop only:
 action_advisor → polish → hallucination_check → verify_gate → (retry) manager.
 
 ## 5. Parallel dispatch via routers
