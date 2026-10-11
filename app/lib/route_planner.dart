@@ -366,7 +366,6 @@ class RoutePlanner extends ConsumerWidget {
 }
 
 /// 경로 방식: [최단 거리 ✓|안전한 경로 ✓] 중 하나 + [오르막 회피 ✓] 켜고 끄기 → nearest · safest · uphill(최단+오르막) · flat(안전+오르막)
-/// 휴대폰 대시보드 경로 안내 줄(RouteSummaryRows)도 같은 것을 쓴다 (2026-10-11)
 class RouteOptions extends StatelessWidget {
   const RouteOptions({super.key, required this.kind, required this.uphillOk, required this.onChanged, this.height = RoutePlanner._h});
   final RouteType kind;

@@ -38,19 +38,10 @@ import 'services/demo_notifications.dart';
 import 'services/prototype_safety_store.dart';
 import 'services/fcm_notification_service.dart';
 import 'services/evacuation_response_queue.dart';
-import 'ui/tokens.dart' show buildAppTheme;
-import 'mobile/ai_chat.dart' as m;
-import 'mobile/app_shell.dart' as m;
-import 'mobile/evac_sos.dart' as m;
-import 'mobile/m_core.dart' as m;
-import 'mobile/m_patrol_screens.dart' as m;
-import 'mobile/onboarding.dart' as m;
-import 'mobile/profile_screen.dart' as m;
+import 'onboarding.dart' as m;
 
-/// 화면 디자인 고르기 (2026-10-09 사용자 결정): 웹(브라우저)은 web-prototype 디자인(이 파일의 Shell·Dashboard 등, 김종연),
-/// 휴대폰 앱(안드로이드·iOS)은 '구룡포 안전 비서 모바일' 디자인(lib/mobile/, 김다인). 기능·데이터 코드는 함께 쓴다.
-/// 테스트에서 바꿀 수 있게 변수로 둔다
-bool useMobileUi = !kIsWeb;
+// 화면은 웹·휴대폰 한 벌 (2026-10-11 사용자 결정): 휴대폰 앱은 웹 화면의 좁은 폭 모양(하단 탭·머리줄 119)을 쓴다.
+// 예전 휴대폰 전용 화면(lib/mobile/)과 그 화면에만 있던 기능은 지웠다.
 
 /// APP_MODE=remote면 실제 서버, 아니면 예시 데이터
 final repo = Provider<SafetyRepository>((_) =>
@@ -165,22 +156,14 @@ class ChatController {
 
   void add(List<ChatMessage> m) => _ref.read(chatMessages.notifier).state = [..._ref.read(chatMessages), ...m];
 
-  /// 방금 붙인 답에 덧붙일 카드 (휴대폰 대화창 m.cardFor: 체크리스트·태풍·지원). 화면을 떠나 있어도 붙는다
-  void _card(String? kind, ChatAnswer answer) {
-    if (kind == null || answer.isError == true) return;
-    _ref.read(m.chatCards.notifier).state = {..._ref.read(m.chatCards), _ref.read(chatMessages).length - 1: kind};
-  }
-
-  /// 글 질문. [decorate]는 답 문구를 바꿀 때(대시보드 예시 모드), [cardOf]는 질문 → 덧붙일 카드 종류
-  Future<void> ask(String question,
-      {String Function(ChatAnswer)? decorate, String? Function(String question)? cardOf}) async {
+  /// 글 질문. [decorate]는 답 문구를 바꿀 때(대시보드 예시 모드)
+  Future<void> ask(String question, {String Function(ChatAnswer)? decorate}) async {
     if (question.trim().isEmpty || busy) return;
     add([ChatMessage(question, true)]);
     _ref.read(chatLoading.notifier).state = true;
     try {
       final answer = await _ref.read(repo).ask(question, UserMode.user, _ref.read(userLocation).position);
       add([ChatMessage(decorate?.call(answer) ?? answer.text, false, answer: answer)]);
-      _card(cardOf?.call(question), answer);
     } catch (_) {
       const answer = ChatAnswer('AI 서비스에 연결하지 못했습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.', isError: true);
       add([ChatMessage(answer.text, false, answer: answer)]);
@@ -190,14 +173,13 @@ class ChatController {
   }
 
   /// 음성 질문 (녹음이 끝난 wav). 받아쓴 질문·답을 붙이고 답 음성을 재생한다 — 다른 메뉴에 있어도 재생
-  Future<void> askVoice(Uint8List wav, {String? Function(String question)? cardOf}) async {
+  Future<void> askVoice(Uint8List wav) async {
     _ref.read(chatLoading.notifier).state = true;
     ChatAnswer? answer;
     try {
       final v = await _ref.read(repo).askVoice(wav, UserMode.user, _ref.read(userLocation).position);
       answer = v.answer;
       add([ChatMessage('🎤 ${v.transcript}', true), ChatMessage(v.answer.text, false, answer: v.answer)]);
-      _card(cardOf?.call(v.transcript), v.answer);
     } catch (e) {
       add([ChatMessage(e is RemoteError ? e.message : '음성 질문을 처리하지 못했습니다. 다시 시도해 주세요.', false)]);
     } finally {
@@ -462,14 +444,9 @@ Future<void> _recordPrototypeEvacuationResponse(
       }
       startRouteToShelter(ref, nearestShelterId(ref),
           routeType: RouteType.nearest);
-      if (useMobileUi) ref.read(m.dashMapFull.notifier).state = true;
       appRouter.go('/');
     } else if (status == EvacuationResponseStatus.needHelp) {
-      if (useMobileUi) {
-        appRouter.push('/sos');
-      } else {
-        _showResponseMessage('방재단에게 도움을 요청했습니다');
-      }
+      _showResponseMessage('방재단에게 도움을 요청했습니다');
     }
   } catch (error) {
     _showResponseMessage('응답을 저장하지 못했습니다. $error');
@@ -508,11 +485,7 @@ Future<void> _afterResponseSuccess(
     WidgetRef ref, String alertId, String status) async {
   _setAlertResponse(ref, alertId, status);
   if (status == 'need_help') {
-    if (useMobileUi) {
-      appRouter.push('/sos');
-    } else {
-      _showResponseMessage('방재단에게 도움을 요청했습니다');
-    }
+    _showResponseMessage('방재단에게 도움을 요청했습니다');
   } else if (status == 'evacuating') {
     try {
       await ref.read(facilitiesProvider.future);
@@ -521,18 +494,9 @@ Future<void> _afterResponseSuccess(
     }
     startRouteToShelter(ref, nearestShelterId(ref),
         routeType: RouteType.nearest);
-    if (useMobileUi) ref.read(m.dashMapFull.notifier).state = true;
     appRouter.go('/');
   }
 }
-
-// 휴대폰 앱 화면(lib/mobile/)이 같은 대피 응답 처리를 쓰도록 공개
-typedef ResponseSubmitResult = _ResponseSubmitResult;
-Future<ResponseSubmitResult> submitEvacuationResponse(WidgetRef ref, AlertItem alert, String status) =>
-    _submitEvacuationResponse(ref, alert, status);
-Future<void> recordPrototypeEvacuationResponse(WidgetRef ref, EvacuationResponseStatus status) =>
-    _recordPrototypeEvacuationResponse(ref, status);
-void showResponseMessage(String message) => _showResponseMessage(message);
 
 Future<_ResponseSubmitResult> _submitEvacuationResponse(
   WidgetRef ref,
@@ -783,7 +747,7 @@ class GuryongpoApp extends StatelessWidget {
         scaffoldMessengerKey: rootMessengerKey,
         debugShowCheckedModeBanner: false,
         // 디자인 = web-prototype (2026-10-08) — ui/gk_theme.dart
-        theme: useMobileUi ? buildAppTheme() : gkTheme(),
+        theme: gkTheme(),
         routerConfig: appRouter,
       );
 }
@@ -853,20 +817,13 @@ final appRouter = GoRouter(
   // 첫 화면(동의·로그인·내 정보)은 웹·앱 공통 — web-prototype 온보딩과 같은 구성
   GoRoute(path: '/login', builder: (_, s) => m.MLoginScreen(from: s.uri.queryParameters['from'])),
   GoRoute(path: '/setup', builder: (_, s) => m.SetupScreen(from: s.uri.queryParameters['from'])),
-  GoRoute(path: '/sos', builder: (_, __) => const m.SosScreen()),
   GoRoute(path: '/location', builder: (_, __) => const InitialSetupScreen()),
-  ShellRoute(builder: (_, __, child) => useMobileUi ? m.MShell(child: child) : Shell(child: child), routes: _menuRoutes([
-    GoRoute(path: '/', builder: (_, __) => useMobileUi ? const m.MDashboard() : const Dashboard()),
+  ShellRoute(builder: (_, __, child) => Shell(child: child), routes: _menuRoutes([
+    GoRoute(path: '/', builder: (_, __) => const Dashboard()),
     GoRoute(path: '/map', builder: (_, __) => const FacilitiesScreen()),
     GoRoute(path: '/alerts', builder: (_, __) => const AlertsScreen()),
-    GoRoute(path: '/ai', builder: (_, __) => useMobileUi ? const m.MAiScreen() : const AiScreen()),
-    GoRoute(path: '/profile', builder: (_, __) => useMobileUi ? const m.MProfileScreen() : const ProfileScreen()),
-    GoRoute(path: '/profile/edit', builder: (_, __) => const m.ProfileEditScreen()),
-    // 휴대폰 앱의 '방재단 현황' 탭 (웹은 /responder)
-    GoRoute(
-        path: '/team',
-        builder: (_, __) => const DemoSwitch(
-            demo: DemoPatrolScope(child: m.MLiveResponderScreen()), live: m.MLiveResponderScreen())),
+    GoRoute(path: '/ai', builder: (_, __) => const AiScreen()),
+    GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
     GoRoute(
         path: '/typhoon',
         builder: (_, s) => DemoSwitch(

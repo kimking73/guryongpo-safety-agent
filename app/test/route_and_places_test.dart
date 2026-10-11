@@ -1,5 +1,4 @@
 // AI 답의 경로 → 지도, 등록 장소 저장 → AI 요청 profile, 보행 불편 → 노약자 경로
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -8,7 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:guryongpo_safety/dashboard_parts.dart';
 import 'package:guryongpo_safety/disaster_center.dart';
 import 'package:guryongpo_safety/main.dart';
-import 'package:guryongpo_safety/mobile/onboarding.dart' show Onboarding;
+import 'package:guryongpo_safety/onboarding.dart' show Onboarding;
 import 'package:guryongpo_safety/models/domain_models.dart';
 import 'package:guryongpo_safety/origin_picker.dart' show originLabelProvider;
 import 'package:guryongpo_safety/repositories/mock_repository.dart';
@@ -66,9 +65,6 @@ class RouteAnsweringRepo extends MockSafetyRepository {
 }
 
 void main() {
-  // 이 파일은 웹 화면(web-prototype 디자인)의 대시보드를 본다 — 테스트(VM)는 kIsWeb=false 라 기본이 휴대폰 화면
-  setUp(() => useMobileUi = false);
-  tearDown(() => useMobileUi = !kIsWeb);
   test('채팅 응답의 경로 → 지도용 경로·목적지', () {
     final a = chatAnswerFromJson(_chat, names: {'flood-67': '침수 경보'});
     expect(a.text, contains('902m'));
@@ -201,7 +197,6 @@ void main() {
       ),
     );
     expect(find.byTooltip('경로 안내 종료'), findsOneWidget);
-    // 경로 방식은 경로 안내 한 덩어리(RouteSummaryRows) 안에서 고른다 (2026-10-10)
     expect(find.text('최단 거리'), findsOneWidget);
     await t.ensureVisible(find.byTooltip('경로 안내 종료'));
     await t.pump();
