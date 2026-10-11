@@ -311,6 +311,8 @@ def test_route_step_is_added_when_the_writer_leaves_it_out():
     kept = ["구룡포 초등학교 앞까지 1125m 경로로 대피하세요."]
     assert A.with_route_first(kept, route) == kept and A.with_route_first(kept, None) == kept
     assert A.with_route_first([], route) == [step]
+    late = ["전기차단기를 내리세요.", "구룡포 초등학교 앞까지 1125m입니다."]
+    assert A.with_route_first(late, route) == late[::-1]                       # 뒤에 쓴 경로 안내는 앞으로
 
 
 def test_two_locations_are_explained_to_the_checker():
@@ -320,10 +322,28 @@ def test_two_locations_are_explained_to_the_checker():
     assert "위치 구분" not in {n.key for n in A.decide(tree_state(Phase.DURING), fetch=FakeDB()).notes}
 
 
+def test_property_question_gets_property_guides_first():
+    """재산 피해를 물으면 대상 'property' 원문이 앞에 — 재난 중이면 '특보 중' 다음에 '예보 시(사전 조치)'. 평소 질문에는 나오지 않는다."""
+    def g(i, hazard, phase, targets, priority, title):
+        return {"id": i, "disaster": hazard, "phase": phase, "min_level": "watch", "targets": targets, "priority": priority,
+                "title": title, "content": title + " 내용", "voice_text": None, "source_name": "행정안전부", "source_url": None}
+    guides = [g(1, "heavy_rain", "during", ["all"], 5, "호우경보 발령 시"),
+              g(2, "heavy_rain", "before", ["property"], 10, "호우특보가 예보되면 (건물·차량 침수 대비)"),
+              g(3, "heavy_rain", "during", ["property"], 10, "호우특보 중 (건물 안 가스·전기)"),
+              g(4, "flood", "during", ["property"], 20, "홍수가 예상되면 (전기·가스)")]
+    rain = [result(Specialist.RAIN_FLOOD, RiskLevel.WARNING)]
+    _, picked = A.pick_guides(rain, Phase.DURING, None, fetch=FakeDB(guides=guides), about_property=True)
+    assert [x["id"] for x in picked] == [4, 3, 2]                # 특보 중(침수·호우) → 예보 시
+    _, usual = A.pick_guides(rain, Phase.DURING, None, fetch=FakeDB(guides=guides))
+    assert [x["id"] for x in usual] == [1]                        # 재산을 묻지 않았으면 property 원문은 없다
+    _, none = A.pick_guides(rain, Phase.DURING, None, fetch=FakeDB(guides=guides[:1]), about_property=True)
+    assert [x["id"] for x in none] == [1]                         # property 원문이 없으면 평소 원문
+
+
 def test_property_question_is_passed_to_the_writer():
     d = A.Decision(path=["재난 중", "안전"], guide_phase=Phase.DURING)
     text = A.situation_text({**state(), "about_property": True, "reference_query": "가게"}, d, None, None)
-    assert "- 질문 초점: 재산·시설 피해 줄이기 (대상: 가게) →" in text and "가게 피해를 줄이는 구체적인 방법은 공식 행동요령에 없어" in text
+    assert "- 질문 초점: 재산·시설 피해 줄이기 (대상: 가게) →" in text and "가게 피해를 줄이는 구체적인 방법은" in text
     assert "질문 초점" not in A.situation_text(state(), d, None, None)
 
 

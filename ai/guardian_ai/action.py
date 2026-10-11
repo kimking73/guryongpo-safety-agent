@@ -92,13 +92,36 @@ def primary_result(results: list[SpecialistResult]) -> SpecialistResult | None:
     return max(candidates, key=lambda r: (r.risk_level.rank, -TIE_ORDER.index(r.agent)))
 
 
+# 재산·시설 피해를 줄이는 원문의 대상 값 (db/init/04_seed_knowledge.sql, 행정안전부 국민행동요령 2026-10-12). 재산을 물었을 때만 고른다
+PROPERTY_TARGET = "property"
+
+
+def property_guides(main: SpecialistResult, phase: Phase, level: RiskLevel, fetch: Fetch | None) -> list[dict[str, Any]]:
+    """재산·시설 보호 원문: 지금 단계의 것 먼저, 재난 중이면 '예보 시(사전 조치)' 원문도 뒤에 — 제목에 조건이 있어 작성기가 조건으로 남긴다."""
+    phases = [phase, Phase.BEFORE] if phase == Phase.DURING else [Phase.BEFORE, Phase.DURING] if phase == Phase.NONE else [phase]
+    found: dict[str, dict[str, Any]] = {}
+    for ph in phases:
+        for hazard in GUIDE_HAZARDS[main.agent]:
+            res = T.get_action_guides(hazard, ph.value, level.value, [PROPERTY_TARGET], fetch=fetch)
+            for g in sorted(res.get("items", []), key=lambda g: g["priority"]):
+                if PROPERTY_TARGET in (g.get("targets") or []):          # get_action_guides는 'all'도 함께 준다
+                    found.setdefault(g["title"], g)
+    return list(found.values())
+
+
 def pick_guides(results: list[SpecialistResult], phase: Phase, user: UserProfile | None,
-                fetch: Fetch | None = None) -> tuple[SpecialistResult | None, list[dict[str, Any]]]:
-    """(기준 재난 결과, 원문 최대 MAX_GUIDES건). 평시면 '재난 전' 원문 → 없으면 '관심' 단계 '재난 중' 원문."""
+                fetch: Fetch | None = None, about_property: bool = False) -> tuple[SpecialistResult | None, list[dict[str, Any]]]:
+    """(기준 재난 결과, 원문 최대 MAX_GUIDES건). 평시면 '재난 전' 원문 → 없으면 '관심' 단계 '재난 중' 원문.
+    about_property: 재산·시설 피해를 줄이는 법을 물었다 → 그 원문(대상 property)을 앞에 두고, 남는 자리에 평소 원문."""
     main = primary_result(results)
     if main is None:
         return None, []
     level = max(main.risk_level, RiskLevel.WATCH, key=lambda lv: lv.rank)
+    if about_property:
+        first = property_guides(main, phase, level, fetch)[:MAX_GUIDES]
+        if first:
+            _, rest = pick_guides(results, phase, user, fetch)
+            return main, (first + [g for g in rest if g["title"] not in {f["title"] for f in first}])[:MAX_GUIDES]
     phases = [Phase.BEFORE, Phase.DURING] if phase in (Phase.NONE, Phase.BEFORE) else [phase]
     targets = targets_for(user)
     for ph in phases:
@@ -259,10 +282,16 @@ def with_route_first(steps: list[str], route: dict[str, Any] | None) -> list[str
 
     재산 피해를 물은 질문에서 작성 AI가 재산 이야기만 쓰고 본인 대피를 빼는 일이 있었다 (2026-10-12 local)."""
     name = ((route or {}).get("destination") or {}).get("name")
-    if not route or not name or any(name in s for s in steps):
+    if not route or not name:
         return steps
     at = 1 if steps and "119" in steps[0] else 0
-    return [*steps[:at], route_step(route), *steps[at:]]
+    has = next((i for i, s in enumerate(steps) if name in s), None)
+    if has is None:
+        return [*steps[:at], route_step(route), *steps[at:]]
+    if has <= at:
+        return steps
+    rest = [s for i, s in enumerate(steps) if i != has]        # 뒤에 쓴 경로 안내를 앞으로 (재산 요령보다 본인 대피가 먼저)
+    return [*rest[:at], steps[has], *rest[at:]]
 
 
 def with_passing_zones(steps: list[str], route: dict[str, Any] | None) -> list[str]:
@@ -304,8 +333,10 @@ def situation_text(state: GuardianState, decision: Decision, main: SpecialistRes
         # 지시를 이 줄에 함께 적는다 — 지시문(ACTION_WRITER_PROMPT)에 두면 재산을 묻지 않은 질문에도 "안내하지 못합니다"를 썼다 (2026-10-12)
         lines.append("- 질문 초점: 재산·시설 피해 줄이기" + (f" (대상: {target})" if target else "")
                      + " → 원문 중 시설·물건·전기설비·차량·선박·농작물을 보호하는 문장을 먼저 고른다 (대피소 경로·119가 주어졌으면 그것이 첫 번째)."
-                     + f" 원문에 {what}의 피해를 줄이는 문장이 없으면 마지막 할 일로 \"{what} 피해를 줄이는 구체적인 방법은 공식 행동요령에 없어"
-                     + " 안내하지 못합니다.\"라고 쓴다. 물막이·모래주머니·물건 옮기기처럼 원문에 없는 방법은 만들지 않는다.")
+                     + f" 주택·집·건물에 대한 원문은 {what}에도 그대로 쓴다 (원문의 '집 주변'·'주택' 같은 낱말은 바꾸지 않아도 된다)."
+                     + " '예보되면'·'예상되면' 같은 원문의 조건은 그대로 남긴다."
+                     + f" 원문에 시설·물건을 보호하는 문장이 하나도 없을 때만 마지막 할 일로 \"{what} 피해를 줄이는 구체적인 방법은"
+                     + " 공식 행동요령에 없어 안내하지 못합니다.\"라고 쓴다. 원문에 없는 방법은 만들지 않는다.")
     if route:
         dest = route.get("destination") or {}
         lines.append(f"- 대피소 경로: {dest.get('name')}까지 {route.get('distance_m')}m, 도보 약 {-(-route.get('duration_s', 0) // 60)}분")
@@ -374,7 +405,7 @@ def make_action_advisor(writer: ActionWriter | None = None, fetch: Fetch | None 
         if any(r.agent == Specialist.RECOVERY_SUPPORT for r in results):
             # 보험·복구 제도는 지원·복구 agent가 DB로 안내한다 → '확인되지 않음' 메모를 빼 서로 어긋나지 않게
             decision.notes = [n for n in decision.notes if n.key != "보험·법률 정보"]
-        main, guides = (pick_guides(results, decision.guide_phase, user, fetch) if use_guides
+        main, guides = (pick_guides(results, decision.guide_phase, user, fetch, bool(state.get("about_property"))) if use_guides
                         else (primary_result(results), []))
         route, route_ev = (None, [])
         if decision.need_route and use_guides:

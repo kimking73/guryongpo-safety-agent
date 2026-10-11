@@ -52,6 +52,12 @@
   as `state.pinned_origin` for the conversation (after a said place, before the current location) until "현재 위치로"/"출발지 해제"; a message that only
   sets or clears it gets a fixed confirmation (`direct_reply`, `origin_changed`). The app map still draws AI routes with the current location as origin
   (`ChatResponse.route` carries no origin — a plan to add it was not approved on 10-12).
+- Asked place vs. where the user is (2026-10-12): classifier `at_place` → `state.reference_is_here`. Specialists still describe the asked place
+  (`flood.pick_location`); the danger-zone decision, evacuation route origin and phase use `flood.pick_user_location` (the asked place only when the
+  user said they are there or typed coordinates). `action.decide` adds evidence `물은 장소(○○)` + `위치 구분` so writer/checker don't mix the two;
+  `action.with_route_first` guarantees the shelter-route step in the danger branch. `about_property` → '질문 초점' line for the action writer
+  (property-protection sentences from action_guides first; none → "공식 행동요령에 없어 안내하지 못합니다" — no shop flood-proofing text in the data).
+  Flood evidence now states "기준 위치는 ○○ 위험 영역 밖" when outside; `flood.ACTION_TOPICS` strips "…여기서 안내하지 않습니다" sentences.
 - Realtime voice (2026-10-11, `guardian_ai/realtime.py`): `POST /api/voice/session` mints a 10-min OpenAI client secret for `gpt-realtime-2`
   (`OPENAI_REALTIME_MODEL`/`_VOICE`); the web app connects by WebRTC and the model only calls tools (`tool_choice=required`: `ask_guardian` →
   app calls `/api/chat`, answer read back verbatim via `read_out_prefix`; `end_conversation`). LangGraph is unchanged. Spoken audio is outside the
