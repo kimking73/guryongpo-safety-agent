@@ -26,7 +26,7 @@ from typing import Any, Callable
 
 from . import tools as T
 from .db import Fetch
-from .flood import RISK_TOPICS, SUPPORT_TOPICS, evidence_lines, location_text, pick_location, strip_deferrals
+from .flood import RISK_TOPICS, SUPPORT_TOPICS, evidence_lines, location_text, pick_user_location, strip_deferrals
 from .state import Evidence, GuardianState, Location, Specialist, SpecialistResult
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ class LocationData:
 
 
 def collect(state: GuardianState, fetch: Fetch | None = None, route_client=None, place_client=None) -> LocationData:
-    location, known = pick_location(state)
+    location, known = pick_user_location(state)     # 대피 경로는 사람이 있는 곳에서 (물은 장소가 아니라)
     user = state.get("user")
     d = LocationData(location=location, location_known=known,
                      shelters=T.get_safe_shelters(location.lat, location.lon, limit=CANDIDATES, fetch=fetch),

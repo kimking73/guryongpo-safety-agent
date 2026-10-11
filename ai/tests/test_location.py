@@ -304,6 +304,10 @@ def test_risk_answer_drops_sentences_deferring_evacuation_place():
     text = "강풍 위험 단계는 주의입니다. 배 출항 가능 여부는 확인할 수 없습니다. 어디로 대피할지는 위치·경로 안내에서 확인해 주세요."
     assert strip_deferrals(text, PLACE_TOPICS) == "강풍 위험 단계는 주의입니다. 배 출항 가능 여부는 확인할 수 없습니다."
     assert strip_deferrals("대피소 정보를 확인할 수 없습니다.", PLACE_TOPICS) == "대피소 정보를 확인할 수 없습니다."  # 다 지워지면 원문
+    from guardian_ai.flood import ACTION_TOPICS                                  # 할 일·피해 줄이는 법은 행동 권고 담당 (2026-10-12)
+    said = "호우 위험은 경보입니다. 가게의 침수 피해를 줄이는 방법은 여기서 안내하지 않습니다."
+    assert strip_deferrals(said, ACTION_TOPICS) == "호우 위험은 경보입니다."
+    assert strip_deferrals("가게 침수 여부는 확인되지 않았습니다.", ACTION_TOPICS) == "가게 침수 여부는 확인되지 않았습니다."
 
 
 # --- 질문에서 말한 장소를 기준 위치로 (2026-10-12) ---------------------------------
@@ -355,10 +359,48 @@ def test_said_place_is_the_route_origin_and_reference_evidence():
     """ "호미로 152에 있는데 가까운 대피소 알려줘" → 그 주소에서 출발하는 경로, 근거의 기준 위치도 그 주소"""
     sent = []
     ref = Location(lat=35.9871, lon=129.5522, label="호미로 152")
-    d = L.collect({**state(), "reference_query": "호미로 152", "reference_location": ref},
-                  fetch=flood_db, route_client=route_server(sent))
+    said = {**state(), "reference_query": "호미로 152", "reference_location": ref}
+    d = L.collect({**said, "reference_is_here": True}, fetch=flood_db, route_client=route_server(sent))
     assert sent[0]["origin"] == {"lat": 35.9871, "lon": 129.5522}
     assert {e.key: e.value for e in d.evidence}["기준 위치"] == "호미로 152"
+    # 그곳의 상황만 물었으면("호미로 152 침수됐어?") 사용자는 거기 없다 → 대피 경로는 현재 위치에서 (2026-10-12)
+    sent.clear()
+    d = L.collect(said, fetch=flood_db, route_client=route_server(sent))
+    here = state()["current_location"]
+    assert sent[0]["origin"] == {"lat": here.lat, "lon": here.lon}
+    assert {e.key: e.value for e in d.evidence}["기준 위치"] == "현재 위치"
+
+
+def test_user_location_is_the_asked_place_only_when_the_user_is_there():
+    from guardian_ai.flood import asked_place, pick_user_location
+    here, shop = Location(lat=35.99, lon=129.55), Location(lat=35.9894, lon=129.5534, label="가게")
+    base = {"current_location": here}
+    about = {**base, "reference_location": shop, "reference_query": "가게"}
+    assert pick_user_location(about)[0].label == "현재 위치" and pick_location(about)[0].label == "가게"   # 상황은 가게, 사람은 현재 위치
+    assert asked_place(about) == shop
+    there = {**about, "reference_is_here": True}
+    assert pick_user_location(there)[0].label == "가게" and asked_place(there) is None
+    assert pick_user_location(base)[0].label == "현재 위치" and asked_place(base) is None
+    # 못 찾은 장소는 기준 위치 이름에 그 사실이 남는다 (사람 위치도 현재 위치라 같은 말)
+    assert "'우주상사' 위치는 찾지 못함" in pick_user_location({**base, "reference_query": "우주상사"})[0].label
+    pin = Location(lat=35.98, lon=129.54, label="정한 출발지")
+    assert pick_user_location({**about, "pinned_origin": pin})[0].label == "정한 출발지"
+
+
+def test_manager_separates_asking_about_a_place_from_being_there():
+    shop = Location(lat=35.9894, lon=129.5534, label="가게")
+    q = {"mode": "chat", "user": UserProfile(user_id="u1")}
+    locate = lambda q_, u: shop  # noqa: E731
+    about = G.make_manager(_clf(place="가게", about_property=True), locate=locate)({**q, "question": "가게 침수 피해를 줄이려면?"})
+    assert about["reference_location"] == shop and about["reference_is_here"] is False and about["about_property"] is True
+    there = G.make_manager(_clf(place="가게", at_place=True), locate=locate)({**q, "question": "가게에 있는데 대피소 어디야?"})
+    assert there["reference_is_here"] is True and there["about_property"] is False
+    lost = G.make_manager(_clf(place="우주상사", at_place=True), locate=lambda q_, u: None)({**q, "question": "우주상사에 있어"})
+    assert lost["reference_is_here"] is False                                         # 좌표를 못 찾았으면 현재 위치 기준
+    typed = G.make_manager(_clf(), locate=locate)({**q, "question": "35.9905, 129.5560에서 가까운 대피소"})
+    assert typed["reference_is_here"] is True                                         # 좌표로 말한 곳은 있는 곳
+    nxt = G.make_manager(_clf(), locate=locate)({**there, "mode": "chat", "question": "바람은 어때?"})
+    assert nxt["reference_is_here"] is False and nxt["about_property"] is False       # 다음 질문에서 지운다
 
 
 def test_locate_reference_uses_registered_place_name(monkeypatch):

@@ -207,6 +207,9 @@ class GuardianState(TypedDict, total=False):
     destination_query: str | None        # 질문에서 뽑은 목적지 이름 ("구룡포항", "집"). 없으면 가까운 대피소로 안내
     reference_query: str | None          # 질문에서 뽑은 기준 장소 ("가게", "호미로 152") — 그곳의 상황을 묻거나 거기 있다고 말함
     reference_location: Location | None  # 그 장소의 좌표 (찾았을 때만). 있으면 현재 위치보다 먼저 기준 위치로 쓴다 (flood.pick_location)
+    reference_is_here: bool              # 사용자가 그 장소에 지금 있다고 말했나 (좌표로 말한 곳 포함). False면 그곳의 상황만 물은 것 →
+                                         # 대피 판단·대피 경로는 현재 위치 기준 (flood.pick_user_location, 2026-10-12)
+    about_property: bool                 # 사람의 대피가 아니라 재산·시설 피해를 줄이는 법을 물었나 → 행동 권고가 그 원문을 먼저 고른다
     pinned_origin: Location | None       # 대화에서 좌표로 정한 출발지 — 이 대화가 끝나거나 "현재 위치로" 할 때까지 기준 위치 (질문마다 지우지 않는다)
     origin_changed: Literal["set", "cleared"] | None   # 이번 질문에서 출발지를 정했나·풀었나 (direct_reply의 확인 문장)
     can_move: Literal["yes", "no", "unknown"]   # 대화로 본 스스로 이동 가능 여부 (행동 권고 판단 로직)

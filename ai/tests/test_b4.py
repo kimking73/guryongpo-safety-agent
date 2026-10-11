@@ -261,6 +261,85 @@ def test_during_danger_cannot_move_is_119():
     assert d.path == ["재난 중", "위험 지역", "이동 불가능"] and d.emergency
 
 
+SHOP = Location(lat=35.9894, lon=129.5534, label="가게")
+
+
+def two_places(here_labels, shop_labels):
+    """위험 영역 조회만 지점별로 다르게 답하는 가짜 DB (사용자 위치 HERE / 물은 장소 SHOP)."""
+    db = FakeDB()
+
+    def fetch(sql, params):
+        if "AS labels" in sql:
+            return [{"labels": shop_labels if abs(params["lat"] - SHOP.lat) < 1e-6 else here_labels}]
+        return db(sql, params)
+    return fetch
+
+
+def test_asking_about_another_place_does_not_evacuate_from_it():
+    """나는 영역 밖, 가게는 침수 경보 영역 안 + '가게 피해 줄이려면?' → 가게에 없는 사람에게 대피를 시키지 않는다 (2026-10-12)."""
+    s = {**tree_state(Phase.DURING, age=30), "reference_location": SHOP, "reference_query": "가게"}
+    d = A.decide(s, fetch=two_places(None, "침수 경보"))
+    notes = {n.key: n.value for n in d.notes}
+    assert d.path == ["재난 중", "안전"] and not d.need_route
+    assert notes["사용자 위치"] == "침수·산사태 위험 영역 밖"
+    assert notes["물은 장소(가게)"].startswith("위험 영역 안(침수 경보)") and "지금 있는 곳은 아님" in notes["물은 장소(가게)"]
+
+
+def test_user_inside_danger_is_guided_even_if_the_asked_place_is_safe():
+    """나는 침수 경보 영역 안, 가게는 밖 → 본인 대피 안내가 빠지면 안 된다 (2026-10-12)."""
+    s = {**tree_state(Phase.DURING, age=30), "reference_location": SHOP, "reference_query": "가게"}
+    d = A.decide(s, fetch=two_places("침수 경보", None))
+    notes = {n.key: n.value for n in d.notes}
+    assert d.path == ["재난 중", "위험 지역", "이동 가능"] and d.need_route
+    assert notes["사용자 위치"] == "위험 영역 안(침수 경보)" and notes["물은 장소(가게)"].startswith("침수·산사태 위험 영역 밖")
+
+
+def test_being_at_the_said_place_judges_by_that_place():
+    """ "가게에 있는데…" → 가게가 사람 위치. '물은 장소' 근거는 붙지 않는다."""
+    s = {**tree_state(Phase.DURING, age=30), "reference_location": SHOP, "reference_query": "가게", "reference_is_here": True}
+    d = A.decide(s, fetch=two_places(None, "침수 경보"))
+    assert d.path == ["재난 중", "위험 지역", "이동 가능"] and not any(n.key.startswith("물은 장소") for n in d.notes)
+    assert {n.key: n.value for n in d.notes}["위치 구분"].startswith("사용자는 지금 가게에 있다")
+
+
+def test_route_step_is_added_when_the_writer_leaves_it_out():
+    """위험 지역 분기의 대피소 경로는 작성 AI가 빼도 '지금 할 일' 맨 앞에 (119가 있으면 그 다음)."""
+    route = {"destination": {"name": "구룡포 초등학교 앞"}, "distance_m": 1125, "duration_s": 840}
+    step = "구룡포 초등학교 앞(으)로 대피하세요. 1125m, 도보 약 14분입니다."
+    assert A.with_route_first(["가게 간판을 묶으세요."], route) == [step, "가게 간판을 묶으세요."]
+    assert A.with_route_first([A.EMERGENCY_STEP, "기다리세요."], route) == [A.EMERGENCY_STEP, step, "기다리세요."]
+    kept = ["구룡포 초등학교 앞까지 1125m 경로로 대피하세요."]
+    assert A.with_route_first(kept, route) == kept and A.with_route_first(kept, None) == kept
+    assert A.with_route_first([], route) == [step]
+
+
+def test_two_locations_are_explained_to_the_checker():
+    s = {**tree_state(Phase.DURING, age=30), "reference_location": SHOP, "reference_query": "가게"}
+    note = {n.key: n.value for n in A.decide(s, fetch=two_places("침수 경보", None)).notes}["위치 구분"]
+    assert "물은 장소(가게)" in note and "현재 위치에 있다" in note
+    assert "위치 구분" not in {n.key for n in A.decide(tree_state(Phase.DURING), fetch=FakeDB()).notes}
+
+
+def test_property_question_is_passed_to_the_writer():
+    d = A.Decision(path=["재난 중", "안전"], guide_phase=Phase.DURING)
+    text = A.situation_text({**state(), "about_property": True, "reference_query": "가게"}, d, None, None)
+    assert "- 질문 초점: 재산·시설 피해 줄이기 (대상: 가게) →" in text and "가게 피해를 줄이는 구체적인 방법은 공식 행동요령에 없어" in text
+    assert "질문 초점" not in A.situation_text(state(), d, None, None)
+
+
+def test_phase_is_during_when_only_the_asked_place_is_at_risk():
+    calls = []
+
+    def fetch(sql, params):
+        if "risk_assessments" in sql and "AS labels" not in sql:
+            calls.append(round(params["lat"], 4))
+            return [risk_row("flood", "warning", "침수")] if abs(params["lat"] - SHOP.lat) < 1e-6 else []
+        return []
+    s = {**state(), "reference_location": SHOP, "reference_query": "가게"}
+    assert A.decide_phase(s, fetch=fetch) == Phase.DURING and calls == [round(HERE.lat, 4), round(SHOP.lat, 4)]
+    assert A.decide_phase(state(), fetch=fetch) == Phase.NONE
+
+
 def test_hazard_check_unavailable_counts_as_danger():
     d = A.decide(tree_state(Phase.DURING, age=30), fetch=FakeDB(down=True))
     assert d.path[:2] == ["재난 중", "위험 지역"]

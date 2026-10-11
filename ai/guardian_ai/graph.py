@@ -198,6 +198,8 @@ _NEW_TURN_RESET = {
     "card": None,
     "wants_action": None,
     "user_info": None,
+    "reference_is_here": False,
+    "about_property": False,
     "reference_query": None,
     "reference_location": None,
     "origin_changed": None,
@@ -288,15 +290,16 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
         if state.get("mode") == "alert":
             destination, limited, can_move, damage = None, False, "unknown", "unknown"
             wants_action, user_info = True, None
-            place = None
+            place, at_place, about_property = None, False, False
         elif extra is not None and hasattr(extra, "destination"):
             destination, limited = extra.destination, bool(extra.mobility_limited)
             can_move, damage = getattr(extra, "can_move", "unknown"), getattr(extra, "damage", "unknown")
             wants_action = bool(getattr(extra, "wants_action", True))
             user_info = (getattr(extra, "user_info", None) or "").strip() or None
             place = (getattr(extra, "place", None) or "").strip() or None
+            at_place, about_property = bool(getattr(extra, "at_place", False)), bool(getattr(extra, "about_property", False))
         else:
-            place = None
+            place, at_place, about_property = None, False, False
             destination, limited = keyword_destination(question), keyword_mobility_limited(question)
             can_move, damage = keyword_situation(question)
             # 규칙 대체: 평시에는 행동을 묻는 말이 있을 때만, 그 밖의 단계는 예전처럼 (None → action.py가 단계로 정한다)
@@ -327,6 +330,7 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
         if origin_update and not fallback_classify(view):
             selected = []
         if reference is not None:
+            at_place = True                 # 좌표로 말한 곳은 지금 있는 곳(출발지)으로 본다
             place = reference.label
             logger.info("기준 좌표 %s%s", place, " (출발지로 정함)" if typed is not None else "")
         elif place and locate is not None:
@@ -337,7 +341,8 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
             logger.info("기준 장소 %r → %s", place, "찾음" if reference else "못 찾음")
         elif locate is None:
             place = None
-        view = {**view, "reference_query": place, "reference_location": reference, **origin_update}
+        here = bool(at_place and reference is not None)
+        view = {**view, "reference_query": place, "reference_location": reference, "reference_is_here": here, **origin_update}
 
         def _phase(v: GuardianState) -> Phase:
             if phase_of is None or v.get("mode") == "alert":
@@ -356,6 +361,8 @@ def make_manager(classify: Classifier, fallback_classify: Classifier = keyword_c
             "destination_query": destination if destination and destination.strip() not in _NOT_PLACE else None,
             "reference_query": place,
             "reference_location": reference,
+            "reference_is_here": here,
+            "about_property": about_property,
             **origin_update,
             "can_move": can_move,
             "damage": damage,

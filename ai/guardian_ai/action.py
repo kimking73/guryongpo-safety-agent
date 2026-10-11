@@ -16,7 +16,7 @@ from typing import Any, Callable
 
 from . import tools as T
 from .db import Fetch
-from .flood import LEVEL_KO, pick_location
+from .flood import LEVEL_KO, asked_place, pick_user_location
 from .state import (ActionPlan, Evidence, GuardianState, Mobility, Phase, RiskLevel, Specialist, SpecialistResult,
                     UserProfile)
 
@@ -48,14 +48,18 @@ EMERGENCY_STEP = "위험 지역에서 이동이 어려우면 119에 구조를 �
 
 def decide_phase(state: GuardianState, fetch: Fetch | None = None) -> Phase:
     """중: 특보 발효 또는 기준 위치 반경 500m에 주의 이상 판정 / 전: 예비특보만 / 후: 해제 24시간 안 / 그 밖 평시.
-    DB에 닿지 않으면 '중'(안전 쪽)."""
-    location, _ = pick_location(state)
+    DB에 닿지 않으면 '중'(안전 쪽). 기준 위치 = 사람이 있는 곳 + (다른 곳의 상황을 물었으면) 그 장소 — 어느 한쪽이라도 주의 이상이면 '중'."""
+    location, _ = pick_user_location(state)
     warnings = T.get_weather_warnings(lifted_hours=LIFTED_HOURS, fetch=fetch)
     risk = T.get_risk_at(location.lat, location.lon, radius_m=500, fetch=fetch)
     if not warnings.get("available") and not risk.get("available"):
         return Phase.DURING
     statuses = {w["status"] for w in warnings.get("items", []) if w["hazard"] not in NON_DISASTER}
-    risky = any(RiskLevel(i["level"]).rank >= RiskLevel.ADVISORY.rank for i in risk.get("items", [])
+    items = list(risk.get("items", []))
+    other = asked_place(state)
+    if other is not None:
+        items += T.get_risk_at(other.lat, other.lon, radius_m=500, fetch=fetch).get("items", [])
+    risky = any(RiskLevel(i["level"]).rank >= RiskLevel.ADVISORY.rank for i in items
                 if i["hazard"] not in NON_DISASTER)
     if "active" in statuses or risky:
         return Phase.DURING
@@ -172,7 +176,26 @@ def decide(state: GuardianState, fetch: Fetch | None = None, use_data: bool = Tr
 
     # 재난 중
     d = Decision(path=["재난 중"], guide_phase=Phase.DURING)
-    location, known = pick_location(state)
+    location, known = pick_user_location(state)     # 사람이 있는 곳 — 다른 곳의 상황만 물었으면 그곳이 아니라 현재 위치
+    other = asked_place(state)
+    if use_data and other is not None:
+        # 물은 장소의 위험은 근거로만 남긴다 (분기·대피 경로는 사람 위치로). 작성기·검증기가 두 곳을 헷갈리지 않게 이름을 붙인다
+        oz = T.hazards_at(other.lat, other.lon, fetch=fetch)
+        name = other.label or state.get("reference_query") or "말씀하신 장소"
+        not_here = "사용자가 지금 있는 곳은 아님 (그곳에서 대피하라거나 그곳으로 가라고 쓰지 않는다)"
+        d.notes.append(Evidence(source="risk_assessments", key=f"물은 장소({name})", value=(
+            f"위험 영역 안({oz['labels']}) — {not_here}" if oz.get("available") and oz.get("labels")
+            else f"침수·산사태 위험 영역 밖 — {not_here}" if oz.get("available")
+            else f"위험 영역 여부 확인되지 않음 — {not_here}")))
+        # 두 위치가 한 답에 섞인다: 전문 agent의 '기준 위치'는 물은 장소, '사용자 위치'·대피소 경로는 사람이 있는 곳.
+        # 이 줄이 없으면 내용 검사가 둘을 같은 곳으로 보고 맞는 답을 막았다 (2026-10-12 local, 6번 중 5번)
+        d.notes.append(Evidence(source="rule", key="위치 구분", value=(
+            f"위험 단계·위험 영역 근거의 '기준 위치'는 사용자가 물은 장소({name})다. 사용자는 지금 그곳이 아니라 "
+            f"{location.label or '현재 위치'}에 있다. '사용자 위치'와 대피소 경로는 {location.label or '현재 위치'} 기준이다.")))
+    elif use_data and known and (state.get("reference_is_here") or state.get("pinned_origin")):
+        # 사용자가 있다고 말한 곳·정한 출발지: '기준 위치'와 '사용자 위치'가 같은 곳임을 밝힌다 (검사가 둘을 다른 곳으로 봤다)
+        d.notes.append(Evidence(source="rule", key="위치 구분", value=(
+            f"사용자는 지금 {location.label}에 있다. '기준 위치'·'사용자 위치'·대피소 경로 모두 {location.label} 기준이다.")))
     if use_data:
         hz = T.hazards_at(location.lat, location.lon, fetch=fetch)
         in_danger = (not hz.get("available")) or bool(hz.get("labels"))   # 판정 불가 → 위험 지역 (규칙)
@@ -226,6 +249,22 @@ def passing_zones_note(route: dict[str, Any] | None) -> str:
     return f"가는 길에 다른 길이 없어 위험 영역 {n}곳을 지납니다." if n else ""
 
 
+def route_step(route: dict[str, Any]) -> str:
+    dest = route.get("destination") or {}
+    return f"{dest.get('name')}(으)로 대피하세요. {route.get('distance_m')}m, 도보 약 {-(-route.get('duration_s', 0) // 60)}분입니다."
+
+
+def with_route_first(steps: list[str], route: dict[str, Any] | None) -> list[str]:
+    """위험 지역 분기의 대피소 경로는 '지금 할 일'에 꼭 있다 (판단 로직 규칙) — 작성 AI가 빼면 코드가 넣는다 (119 다음, 그 밖에는 맨 앞).
+
+    재산 피해를 물은 질문에서 작성 AI가 재산 이야기만 쓰고 본인 대피를 빼는 일이 있었다 (2026-10-12 local)."""
+    name = ((route or {}).get("destination") or {}).get("name")
+    if not route or not name or any(name in s for s in steps):
+        return steps
+    at = 1 if steps and "119" in steps[0] else 0
+    return [*steps[:at], route_step(route), *steps[at:]]
+
+
 def with_passing_zones(steps: list[str], route: dict[str, Any] | None) -> list[str]:
     """대피 경로가 위험 영역을 지나는데 '지금 할 일'이 알리지 않으면 경로 안내 문장 뒤에 코드가 붙인다.
 
@@ -259,6 +298,14 @@ def situation_text(state: GuardianState, decision: Decision, main: SpecialistRes
         lines.append(f"- 기준 재난: {main.agent.value}, 위험 단계 {LEVEL_KO[main.risk_level.value]}")
     for n in decision.notes:
         lines.append(f"- {n.key}: {n.value}")
+    if state.get("about_property"):
+        target = state.get("reference_query")
+        what = target or "그 대상"
+        # 지시를 이 줄에 함께 적는다 — 지시문(ACTION_WRITER_PROMPT)에 두면 재산을 묻지 않은 질문에도 "안내하지 못합니다"를 썼다 (2026-10-12)
+        lines.append("- 질문 초점: 재산·시설 피해 줄이기" + (f" (대상: {target})" if target else "")
+                     + " → 원문 중 시설·물건·전기설비·차량·선박·농작물을 보호하는 문장을 먼저 고른다 (대피소 경로·119가 주어졌으면 그것이 첫 번째)."
+                     + f" 원문에 {what}의 피해를 줄이는 문장이 없으면 마지막 할 일로 \"{what} 피해를 줄이는 구체적인 방법은 공식 행동요령에 없어"
+                     + " 안내하지 못합니다.\"라고 쓴다. 물막이·모래주머니·물건 옮기기처럼 원문에 없는 방법은 만들지 않는다.")
     if route:
         dest = route.get("destination") or {}
         lines.append(f"- 대피소 경로: {dest.get('name')}까지 {route.get('distance_m')}m, 도보 약 {-(-route.get('duration_s', 0) // 60)}분")
@@ -277,8 +324,7 @@ def template_steps(decision: Decision, guides: list[dict[str, Any]], route: dict
     """LLM 없이: 119(이동 불가) → 대피소 경로 → 원문 그대로 → 확인되지 않은 항목"""
     steps = [EMERGENCY_STEP] if decision.emergency else []
     if route:
-        dest = route.get("destination") or {}
-        steps.append(f"{dest.get('name')}(으)로 대피하세요. {route.get('distance_m')}m, 도보 약 {-(-route.get('duration_s', 0) // 60)}분입니다.")
+        steps.append(route_step(route))
     steps += [f"{g['title']}: {g['content']}" for g in guides]
     steps += [f"{n.key}: {n.value}" for n in decision.notes if n.value == NOT_CONFIRMED]
     return steps
@@ -336,7 +382,7 @@ def make_action_advisor(writer: ActionWriter | None = None, fetch: Fetch | None 
         forecast_ev: list[Evidence] = []
         if use_guides and decision.guide_phase == Phase.BEFORE and not any(
                 e.source == "forecasts" for r in results for e in r.evidence):
-            loc, _ = pick_location(state)
+            loc, _ = pick_user_location(state)
             from .flood import forecast_evidence
             forecast_ev = forecast_evidence(T.get_forecast(loc.lat, loc.lon, hours=48, fetch=fetch))
             if not forecast_ev:
@@ -363,6 +409,7 @@ def make_action_advisor(writer: ActionWriter | None = None, fetch: Fetch | None 
                     steps = []
             if not steps:
                 steps, how = template_steps(decision, guides, route), "원문"
+            steps = with_route_first(steps, route if decision.need_route else None)
             steps = with_passing_zones(steps, own_route)
         path = " > ".join(decision.path)
         logger.info("행동 권고 [%s] 분기=%s 재난=%s 원문=%s 경로=%s 질문=%s", how, path,
@@ -373,12 +420,19 @@ def make_action_advisor(writer: ActionWriter | None = None, fetch: Fetch | None 
         # 검증기가 "위험을 낮춰 말함"으로 막았다 (2026-10-03 live)
         if "위험 지역" in decision.path:
             where = next((n.value for n in decision.notes if n.key == "사용자 위치"), "")
-            # 질문에서 말한 장소 기준이면 그 이름으로 ("우리 가게 침수됐어?" → 기준 위치(가게), 2026-10-12)
-            ref = state.get("reference_location") or state.get("pinned_origin")
+            # 사용자가 있다고 말한 장소·정한 출발지 기준이면 그 이름으로 ("가게에 있는데…" → 기준 위치(가게), 2026-10-12).
+            # 다른 곳의 상황만 물었으면 사람 위치는 현재 위치다 (flood.pick_user_location)
+            ref = (state.get("reference_location") if state.get("reference_is_here") else None) or state.get("pinned_origin")
             spot = f"기준 위치({ref.label or state.get('reference_query') or '말씀하신 장소'})" if ref else "현재 위치"
             reason = (f"{spot}가 {where}에 있어" if where.startswith("위험 영역 안")
                       else f"{spot}의 위험 여부를 확인할 수 없어" if where else f"{spot}를 알 수 없어")
-            draft = f"{reason} 위험 지역 기준으로 안내합니다.\n\n" + draft
+            other = asked_place(state)
+            if other is not None and where.startswith("위험 영역 안"):
+                # 다른 곳의 상황을 물었는데 본인이 위험 영역 안 → 누구의 대피인지 밝힌다 (물은 장소 이야기는 그 아래 문단)
+                asked = other.label or state.get("reference_query") or "말씀하신 장소"
+                draft = f"물으신 {asked}와 별개로, 지금 계신 {spot}가 {where}에 있어 대피부터 안내합니다.\n\n" + draft
+            else:
+                draft = f"{reason} 위험 지역 기준으로 안내합니다.\n\n" + draft
         if decision.emergency:
             draft = EMERGENCY_STEP + "\n\n" + draft                      # 답변 맨 앞에도 (판단 로직 규칙)
         if steps:
