@@ -101,3 +101,52 @@ def test_api_roundtrip_and_cache():
     c.post("/api/ai/route-brief", json={**BODY, "route": {**ROUTE, "distance_m": 900}})
     assert len(calls) == 2
     assert c.post("/api/ai/route-brief", json={"origin": BODY["origin"]}).status_code == 422
+
+
+SEA = {"port_name": "구룡포항", "distance_m": 820, "bearing_label": "북서쪽", "direct": False}
+
+
+def test_sea_route_brief_covers_sea_leg_and_land_leg():
+    """해상 경로: 바닷길(항구·거리·방향·모양) + 항구 → 대피소 육상 구간. 안내 글도 해상용."""
+    r = req(sea=SEA, route={**ROUTE, "avoided": [], "still_inside": []})
+    ev, missing = RB.build_evidence(r, fetch)
+    keys = {e.key: e.value for e in ev}
+    assert keys["들어갈 항구"] == "구룡포항" and keys["바닷길 거리 (항구까지)"] == 820 and keys["항구 방향"] == "북서쪽"
+    assert keys["항구에서 도착지까지 경로 거리"] == 1001 and "바닷길 모양" in keys and missing == []
+    out = RB.template_brief(r, ev, missing)
+    assert "북서쪽 구룡포항까지 바닷길 820m" in out.summary and "1001m" in out.summary and out.note == RB.SEA_NOTE
+    assert any("방파제" in c for c in out.cautions)
+    # '방파제를 피해'는 정상 표현 — 위험 구역을 피했다는 말이 아니므로 LLM 문장을 버리지 않는다
+    ok = RB.RouteBriefService(writer=lambda e, t: ("구룡포항까지 바닷길 820m입니다.", ["방파제를 피해 돌아 들어가세요."], []),
+                              fetch=fetch).brief(r)
+    assert not ok.used_template and ok.note == RB.SEA_NOTE
+    bad = RB.RouteBriefService(writer=lambda e, t: ("구룡포항까지 바닷길 820m입니다. 위험 구역을 피해 갑니다.", [], []),
+                               fetch=fetch).brief(r)
+    assert bad.used_template
+
+
+def test_sea_route_without_land_leg_or_path_says_what_is_missing():
+    r = req(sea={**SEA, "path_found": False}, route=None)
+    ev, missing = RB.build_evidence(r, fetch)
+    assert any("바닷길" in m for m in missing) and any("육상 경로" in m for m in missing)
+    out = RB.template_brief(r, ev, missing)
+    assert "구룡포항까지 바닷길 820m" in out.summary and any("확인하지 못한 정보" in c for c in out.cautions)
+
+
+def test_visit_route_brief_counts_stops_and_passing_zones():
+    """방재단 방문 경로: 몇 곳·전체 거리, 서버가 풀어 준 구역(blocked_zones)도 지나는 구역으로. 도착지는 따로 없다."""
+    r = req(visits={"stops": 4, "by_priority": True, "blocked_zones": ["z3"]},
+            route={**ROUTE, "avoided": [], "still_inside": ["z2"], "strategy": None},
+            zone_names={"z2": "산사태 경고", "z3": "침수 경보"})
+    ev, missing = RB.build_evidence(r, fetch)
+    keys = {e.key: e.value for e in ev}
+    assert keys["방문할 곳"] == "4곳" and keys["전체 거리"] == 1001 and "도착지" not in keys and "경로 방식" not in keys
+    assert keys["다른 길이 없어 지나는 위험 구역 2곳"] == "산사태 경고, 침수 경보"
+    out = RB.template_brief(r, ev, missing)
+    assert out.summary.startswith("4곳을 모두 도는 길은 1001m") and out.note == RB.VISIT_NOTE
+
+
+def test_request_needs_a_land_route_or_a_sea_leg():
+    import pytest
+    with pytest.raises(ValueError):
+        req(route=None)

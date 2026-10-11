@@ -111,9 +111,17 @@ void main() {
     }
     expect(find.byIcon(Icons.water_drop),
         findsNothing); // Grid cells are filled by server risk stage, not depth icons.
-    // 범례는 지도 왼쪽 위에 늘 펼쳐 둔 하나뿐 (2026-10-10): '범례' 버튼·침수 범례·침수 위험 단계 상자 없음, 수치 없음
+    // 범례는 지도 왼쪽 위 하나뿐 (2026-10-10): 침수 범례·침수 위험 단계 상자 없음, 수치 없음.
+    // 처음에는 펼쳐져 있고 제목 줄 '범례'를 누르면 접고 편다 (2026-10-11 사용자 요청)
     expect(find.byType(MapLegendCard), findsOneWidget);
-    expect(find.text('범례'), findsNothing);
+    expect(find.text('범례'), findsOneWidget);
+    expect(find.byTooltip('범례 닫기'), findsOneWidget);
+    await tester.tap(find.text('범례'));
+    await tester.pump();
+    expect(_has('산사태 취약 지역'), findsNothing);
+    expect(find.byTooltip('범례 열기'), findsOneWidget);
+    await tester.tap(find.text('범례'));
+    await tester.pump();
     expect(find.text('침수 위험 단계'), findsNothing);
     expect(find.textContaining('m/s'), findsNothing);
     expect(_has('산사태 취약 지역'), findsOneWidget);

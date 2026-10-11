@@ -258,6 +258,12 @@ B5 구현 (2026-10-03):
   20m 미만 오르막·계단, 비 1mm 미만, 약한 바람은 근거에서 뺀다 (없는 걱정을 만들지 않게).
 - 문장: LLM 1번(`OpenAIRouteBriefWriter`, 8초 제한). 숫자 검사(`check_numbers`)에 걸리거나, 피한 구역이 없는데 '피해 간다'고 쓰거나, 실패·시간 초과면 코드가 만든 문장.
 - 같은 요청은 60초 캐시. 상태·대화 기억 없음.
+- 지도에 그리는 경로 모두에 쓴다 (2026-10-11 사용자 요청). 요청에 선택 항목 두 개:
+  - `sea` {port_name, distance_m, bearing_label, direct, path_found} — 해상 경로(바다 → 항구 → 육지). `route`는 항구 → 대피소 육상 구간이며 못 구했으면 생략.
+    요약은 항구 방향·이름·바닷길 거리 먼저. 안내 글(`note`)은 "대략의 바닷길(수심·암초 미반영)"로 바뀐다.
+  - `visits` {stops, by_priority, blocked_zones} — 방재단 방문 경로. `route`는 모든 집을 도는 길. 도착지 위험은 보지 않고, 서버가 풀어 준 구역도 '지나는 위험 구역'에 넣는다.
+  - `route`와 `sea`가 둘 다 없으면 422. 구역 이름(`zone_names`)이 없으면 id 앞머리로 종류만 말한다 (침수·산사태 위험 구역).
+  - 앱: 고른 경로는 `routeBriefProvider`, 해상·방문 경로는 `seaBriefBody`·`visitBriefBody` → `RouteBriefCard(body:)` (대시보드 해상 경로, `/sea-route` 화면, 방재단 지도).
 
 ## 8. 채팅 API (B2, 초안)
 

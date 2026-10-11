@@ -30,6 +30,7 @@ import 'disaster_center.dart';
 import 'live_screens.dart';
 import 'patrol_screens.dart';
 import 'origin_picker.dart';
+import 'route_brief_card.dart' show seaBriefBody;
 import 'route_planner.dart';
 import 'custom_route.dart';
 import 'login_screen.dart';
@@ -1578,7 +1579,11 @@ class Dashboard extends ConsumerWidget {
       this.extraPolylines = const [],
       this.mapOnly = false,
       this.showFacilities = false,
+      this.routeBriefBody,
       this.focusPoint});
+
+  /// 방재단 방문 경로처럼 밖에서 그려 넣은 경로(extraPolylines)의 AI 경로 설명 요청 값 (route_brief_card.dart)
+  final Map<String, dynamic>? routeBriefBody;
 
   /// 방재단 현황(2026-10-09)이 대시보드 지도 칸만 쓸 때 (DisasterDashboard 참고)
   final List<Polygon> extraPolygons;
@@ -1659,6 +1664,8 @@ class Dashboard extends ConsumerWidget {
       seaRoutePanel: demo || mapOnly ? null : const SeaRoutePanel(),
       seaRouteLines: sea == null ? const [] : seaRoutePolylines(sea),
       seaRouteMarkers: sea == null ? const [] : seaRouteMarkers(sea),
+      routeBriefBody: routeBriefBody ??
+          (sea == null || !sea.atSea ? null : seaBriefBody(sea.raw, sea.origin.latitude, sea.origin.longitude)),
       routeActive: route != null,
       facilities: facilities,
       riskAreas: ref.watch(riskAreasProvider).valueOrNull ?? const <RiskArea>[],
