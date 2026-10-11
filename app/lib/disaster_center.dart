@@ -11,6 +11,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'services/account_service.dart';
 import 'services/location_service.dart';
 import 'services/demo_mode.dart';
+import 'services/notice_history.dart';
 import 'models/domain_models.dart';
 import 'route_brief_card.dart';
 import 'weather_section.dart' show WeatherSection, warningIcon;
@@ -2893,6 +2894,7 @@ class _AlertHubScreenState extends State<AlertHubScreen> {
       padding: gkPagePadding(context),
       children: [
         const GkPageTitle('선제 경고·알림'),
+        const NoticeHistoryCard(),   // 지난 알림 (화면에 3초 떴던 것, 2026-10-12)
         const SizedBox(height: 8),
         const Text('사용자 맞춤형 선제 경고', style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold)),
         _WeatherBulletins(warnings: _widget('warnings') ?? const {}, forecast: _widget('forecast') ?? const {}),
@@ -3031,6 +3033,7 @@ class _AlertHubScreenState extends State<AlertHubScreen> {
       padding: gkPagePadding(context),
       children: [
         const GkPageTitle('선제 경고·알림'),
+        const NoticeHistoryCard(),   // 지난 알림 (화면에 3초 떴던 것, 2026-10-12)
         const SizedBox(height: 8),
         const _DemoBanner(),
         const Text(

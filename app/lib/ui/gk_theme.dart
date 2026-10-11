@@ -215,8 +215,8 @@ ThemeData gkTheme() {
         backgroundColor: GK.navy.withValues(alpha: .8),
         elevation: 0,
         behavior: SnackBarBehavior.floating,
-        contentTextStyle: t(16, FontWeight.w600, Colors.white),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))),
+        contentTextStyle: t(14, FontWeight.w600, Colors.white),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
     listTileTheme: ListTileThemeData(
         iconColor: GK.navy,
         titleTextStyle: t(18, FontWeight.w700),
