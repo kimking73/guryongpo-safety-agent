@@ -72,6 +72,7 @@ def rules_for(profile: str, strategy: str | None = None, mode: str = "walk") -> 
     - None·safest·fastest(안전 경로): 위험 구역 회피 + 사용자 유형 규칙 그대로 (성인 = 경사 무시, 노약자 = 급경사 회피)
       fastest는 예전 앱이 보내던 이름이라 safest와 같게 둔다
     - flat(오르막 회피 경로): 위험 구역 회피 + 오르막 회피. 노약자는 이미 오르막·내리막 모두 피하므로 노약자 규칙 그대로
+    - uphill(2026-10-11): flat과 같은 규칙인데 위험 구역은 피하지 않는다 (앱에서 안전한 경로를 끄고 오르막 회피만 켰을 때)
     걸음 속도는 어느 쪽이든 사용자 유형대로.
 
     mode="car"(자동차, 2026-10-07): GraphHopper car 프로필 기본 모델(차로·제한 속도·회전 제한) 위에 위험 구역 회피만 더한다.
@@ -82,6 +83,6 @@ def rules_for(profile: str, strategy: str | None = None, mode: str = "walk") -> 
     rules = PROFILE_RULES[profile]
     if strategy == "shortest":
         return {"priority": [], "speed": rules["speed"], "distance_influence": SHORTEST_DISTANCE_INFLUENCE}
-    if strategy == "flat" and profile != "elderly":
+    if strategy in ("flat", "uphill") and profile != "elderly":
         return {"priority": UPHILL_RULES, "speed": rules["speed"]}
     return rules

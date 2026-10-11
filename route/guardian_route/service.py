@@ -22,9 +22,11 @@ from .profiles import PROFILE_RULES, rules_for
 from .sea import ALTERNATIVES, ApiShelterSource, SeaChart, ShelterSource, bearing_label, pick_shelter
 
 Profile = Literal["adult", "elderly"]
-Strategy = Literal["shortest", "safest", "flat", "fastest"]   # fastest = 예전 이름, safest와 같음
+Strategy = Literal["shortest", "safest", "flat", "uphill", "fastest"]   # fastest = 예전 이름, safest와 같음. uphill = 오르막만 회피 (2026-10-11)
 Mode = Literal["walk", "car"]     # 이동 수단 (2026-10-07 자동차 추가) → GraphHopper 프로필 foot·car
 GH_PROFILE = {"walk": "foot", "car": "car"}
+# 위험 구역을 피하지 않는 경로 선택: 가까운 경로(shortest) · 오르막만 회피(uphill — 앱에서 안전한 경로를 끄고 오르막 회피만 켬)
+NO_AVOID = {"shortest", "uphill"}
 CheckReason = Literal["off_route", "hazard_on_route"]
 
 # 위험 구역 안 도로의 우선순위 배수. 0이면 그 길을 완전히 막아 출발지·도착지가 구역 안일 때 경로가 아예 없어진다.
@@ -210,9 +212,9 @@ class RouteService:
         """
         points = [(req.origin.lat, req.origin.lon), (req.destination.lat, req.destination.lon)]
         zones = self._zones(req.demo)
-        # 가까운 경로(shortest)만 위험 구역을 피하지 않는다 — 지나는 구역은 still_inside로 알린다. 나머지는 규칙만 다르다 (profiles.rules_for)
+        # 가까운 경로(shortest)·오르막만 회피(uphill)는 위험 구역을 피하지 않는다 — 지나는 구역은 still_inside로 알린다 (profiles.rules_for)
         rules = rules_for(req.profile, req.strategy, req.mode)
-        avoid = req.strategy != "shortest"
+        avoid = req.strategy not in NO_AVOID
         gh_profile = GH_PROFILE[req.mode]
 
         safe = self.gh.route(points, profile=gh_profile, custom_model=build_model(rules, zones if avoid else []))

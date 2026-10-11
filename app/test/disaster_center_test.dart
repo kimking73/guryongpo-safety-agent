@@ -29,20 +29,19 @@ Future<void> _openLegend(WidgetTester t, {bool routeMode = false, bool hasRoute 
 }
 
 void main() {
-  testWidgets('지도 범례 (2026-10-09): 기본은 핵심만, 기술 설명은 접힌 범례 자세히 안 · 경로 전에는 목적지·경로 없음', (t) async {
+  testWidgets('지도 범례 (2026-10-10): 단계 색은 이름 없이 주의·경계·심각, 산사태는 취약 지역 한 색, 파란 테두리 없음', (t) async {
     await _openLegend(t);
-    for (final s in ['노랑 · 주의', '주황 · 경계', '빨강 · 심각', '파란 테두리 · 침수', '갈색 테두리 · 산사태', '현위치', '범례 자세히']) {
+    for (final s in ['주의', '경계', '심각', '산사태 취약 지역', '현위치', '범례 자세히']) {
       expect(_has(s), findsWidgets, reason: s);
     }
-    expect(_has('목적지'), findsNothing);
-    expect(_has('파란 선'), findsNothing);
-    expect(_has('물방울'), findsNothing);       // 접혀 있음
-    expect(_has('칸 가운데 점'), findsNothing);
+    for (final s in ['노랑', '주황 ·', '빨강', '파란 테두리', '갈색 테두리', '목적지', '파란 선', '물방울']) {
+      expect(_has(s), findsNothing, reason: s);
+    }
     await t.tap(find.text('범례 자세히'));
     await t.pumpAndSettle();
     expect(_has('물방울'), findsWidgets);
-    expect(_has('칸 가운데 점'), findsWidgets);
-    expect(_has('채움색 = 위험 단계'), findsWidgets);
+    expect(_has('칸 가운데 점'), findsNothing);
+    expect(_has('판단 근거·범위·출처'), findsWidgets);
   });
 
   testWidgets('지도 범례: 경로 안내 중이면 대피소·의료시설·목적지·파란 선·주황 경고', (t) async {
@@ -98,56 +97,59 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
     }
 
-    const all = ['전체 재난 표시', '침수 격자', '강풍', '산사태 위험 지역'];
+    const kinds = ['침수 격자', '강풍', '산사태 위험 지역'];
     // 태풍은 켜고 끄는 항목이 아니라 끝에 따로 있는 '태풍 지도 열기' (다른 화면으로 이동)
     expect(find.widgetWithText(MapMenuButton, '태풍'), findsNothing);
     expect(btn('태풍 지도 열기').kind, MapButtonKind.action);
-    // 처음: 재난 지도 메뉴가 펼쳐져 있고 재난은 모두 켜짐 (종합 보기)
+    expect(find.widgetWithText(MapMenuButton, '전체 재난 표시'), findsNothing);
+    // 처음: 재난 지도 메뉴가 펼쳐져 있고 '위험 재난 표시'(심각 침수·강풍 + 산사태 취약 지역)만 켜짐 (2026-10-10)
     expect(btn('재난 지도').expanded, isTrue);
     expect(btn('경로 안내').expanded, isFalse);
-    for (final l in all) {
-      expect(btn(l).selected, isTrue, reason: l);
+    expect(btn('위험 재난 표시').selected, isTrue);
+    for (final l in kinds) {
+      expect(btn(l).selected, isFalse, reason: l);
     }
     expect(find.byIcon(Icons.water_drop),
         findsNothing); // Grid cells are filled by server risk stage, not depth icons.
-    expect(find.textContaining('주의보: 평균 14m/s'),
-        findsNothing); // Composite legend is minimal.
-    expect(find.text('침수는 심각 단계만 표시'), findsOneWidget);
+    // 범례는 지도 왼쪽 위에 늘 펼쳐 둔 하나뿐 (2026-10-10): '범례' 버튼·침수 범례·침수 위험 단계 상자 없음, 수치 없음
+    expect(find.byType(MapLegendCard), findsOneWidget);
+    expect(find.text('범례'), findsNothing);
+    expect(find.text('침수 위험 단계'), findsNothing);
+    expect(find.textContaining('m/s'), findsNothing);
+    expect(_has('산사태 취약 지역'), findsOneWidget);
+    expect(_has('크고 붉을수록 강함'), findsOneWidget);
+    // 위험 재난 표시 중에는 단계 범례도 심각 한 칸
+    expect(find.descendant(of: find.byType(MapLegendCard), matching: find.text('주의')), findsNothing);
+    expect(find.descendant(of: find.byType(MapLegendCard), matching: find.text('심각')), findsOneWidget);
 
-    // 모두 켜진 상태에서 '전체 재난 표시' → 모두 끔
-    await tap('전체 재난 표시');
-    for (final l in all) {
-      expect(btn(l).selected, isFalse, reason: l);
-    }
-
-    // 여러 개 동시 선택
+    // 개별 재난을 고르면 위험 재난 표시는 꺼진다 (여러 개 동시 선택)
     await tap('침수 격자');
     await tap('강풍');
+    expect(btn('위험 재난 표시').selected, isFalse);
     expect(btn('침수 격자').selected, isTrue);
     expect(btn('강풍').selected, isTrue);
     expect(btn('산사태 위험 지역').selected, isFalse);
-    expect(btn('전체 재난 표시').selected, isFalse);
-    expect(find.text('침수 위험 단계'), findsOneWidget);
-    expect(find.text('강풍 기준'), findsOneWidget);
-    expect(find.textContaining('주의보: 평균 14m/s'), findsOneWidget);
+    expect(find.text('위험 단계'), findsOneWidget);
+    expect(find.descendant(of: find.byType(MapLegendCard), matching: find.text('주의')), findsOneWidget);
+    expect(_has('크고 붉을수록 강함'), findsOneWidget);
+    expect(_has('산사태 취약 지역'), findsNothing);
+    expect(find.textContaining('m/s'), findsNothing);
 
     await tap('침수 격자');
     expect(btn('침수 격자').selected, isFalse);
     expect(btn('강풍').selected, isTrue);
-    expect(find.text('격자색은 서버 위험 단계'), findsNothing);
+    expect(find.text('위험 단계'), findsOneWidget); // 강풍도 단계 색을 따른다
 
-    // 하나씩 다 켜면 '전체' 표시도 켜진다
-    await tap('침수 격자');
-    expect(btn('전체 재난 표시').selected, isFalse);
-    await tap('산사태 위험 지역');
-    expect(btn('전체 재난 표시').selected, isTrue);
-    // 일부만 켜져 있을 때 '전체' → 모두 켬
-    await tap('강풍');
-    expect(btn('전체 재난 표시').selected, isFalse);
-    await tap('전체 재난 표시');
-    for (final l in all) {
-      expect(btn(l).selected, isTrue, reason: l);
+    // 위험 재난 표시를 다시 켜면 개별 선택은 비워진다
+    await tap('위험 재난 표시');
+    expect(btn('위험 재난 표시').selected, isTrue);
+    for (final l in kinds) {
+      expect(btn(l).selected, isFalse, reason: l);
     }
+    // 끄면 아무 재난도 안 켜져 있다는 안내
+    await tap('위험 재난 표시');
+    expect(btn('위험 재난 표시').selected, isFalse);
+    expect(find.textContaining('켜진 재난이 없어'), findsOneWidget);
 
     expect(tester.takeException(), isNull);
     expect(errors, isEmpty, reason: errors.join('\n'));
@@ -264,7 +266,7 @@ void main() {
       await tap(t, '경로 안내');
       expect(btn(t, '경로 안내').expanded, isTrue);
       expect(btn(t, '재난 지도').expanded, isFalse);
-      expect(find.widgetWithText(MapMenuButton, '전체 재난 표시'), findsNothing); // 재난 지도 하위 항목은 접힘
+      expect(find.widgetWithText(MapMenuButton, '위험 재난 표시'), findsNothing); // 재난 지도 하위 항목은 접힘
       expect(btn(t, '안전한 경로').selected, isTrue);
       expect(btn(t, '최단 거리').selected, isFalse);
       expect(find.widgetWithText(MapMenuButton, '해상 경로 안내'), findsNothing);
@@ -285,7 +287,7 @@ void main() {
       await tap(t, '재난 지도');
       expect(btn(t, '재난 지도').expanded, isTrue);
       expect(btn(t, '경로 안내').expanded, isFalse);
-      expect(find.widgetWithText(MapMenuButton, '전체 재난 표시'), findsOneWidget);
+      expect(find.widgetWithText(MapMenuButton, '위험 재난 표시'), findsOneWidget);
     });
 
     testWidgets('바다면 육상 경로 대신 해상 경로 안내만', (t) async {

@@ -69,15 +69,12 @@ String? cardFor(String q) {
   return null;
 }
 
-/// 내 정보에 맞춘 추천 질문 (디자인 5개 + 기존 질문)
+/// 내 정보에 맞춘 추천 질문 (2026-10-11 사용자 요청으로 태풍 정보·대피 요령·침수 위험·도보 안전 질문은 뺐다)
 const suggestedQuestions = [
   '태풍 대비 체크리스트 알려줘',
-  '지금 태풍 정보 알려줘',
   '내 위치에서 가장 가까운 대피소 알려줘',
   '재난 후 내가 받을 수 있는 보험이 있는지 알려줘',
-  '대피할 때 뭘 해야 해?',
-  '지금 침수 위험이 있어?',
-  '도보로 안전하게 갈 수 있어?',
+  '내가 받을 수 있는 재난 지원 혹은 복구 사항 알려줘',
 ];
 
 class MAiScreen extends ConsumerStatefulWidget {
@@ -90,7 +87,7 @@ class _MAiScreenState extends ConsumerState<MAiScreen> {
   final input = TextEditingController();
   final scroll = ScrollController();
   final _lastBotKey = GlobalKey();
-  bool loading = false;
+  // 답 기다리는 중 = 앱 전체 chatLoading (화면을 떠났다 와도 이어짐, 2026-10-11)
 
   // 녹음
   VoiceRecorder? recorder;
@@ -137,43 +134,18 @@ class _MAiScreenState extends ConsumerState<MAiScreen> {
             alignment: 0, duration: const Duration(milliseconds: 380), curve: Curves.easeOutCubic);
       });
 
-  void _add(List<ChatMessage> m) => ref.read(chatMessages.notifier).state = [...ref.read(chatMessages), ...m];
-
-  void _addAnswer(ChatAnswer answer, String question) {
-    _add([ChatMessage(answer.text, false, answer: answer)]);
-    final kind = cardFor(question);
-    if (kind != null && answer.isError != true) {
-      ref.read(chatCards.notifier).state = {...ref.read(chatCards), ref.read(chatMessages).length - 1: kind};
-    }
-    _scrollToAnswer();
-  }
-
+  /// 보내기·답 붙이기는 chatController(main.dart)가 한다 — 답을 기다리는 중에 다른 탭으로 가도
+  /// 요청이 끝까지 가고 답·카드가 대화 기록에 붙는다 (예전에는 이 화면이 닫히면 답을 버렸다, 2026-10-11)
   Future<void> send([String? q]) async {
     final question = (q ?? input.text).trim();
-    if (question.isEmpty || loading) return;
-    _add([ChatMessage(question, true)]);
-    setState(() {
-      loading = true;
-      input.clear();
-    });
-    _scrollToEnd();
-    try {
-      final answer = await ref.read(repo).ask(question, UserMode.user, ref.read(userLocation).position);
-      if (mounted) _addAnswer(answer, question);
-    } catch (_) {
-      if (mounted) {
-        _addAnswer(
-            const ChatAnswer('AI 서비스에 연결하지 못했어요. 연결 상태를 확인한 뒤 다시 시도해 주세요.', isError: true),
-            question);
-      }
-    } finally {
-      if (mounted) setState(() => loading = false);
-    }
+    if (question.isEmpty || ref.read(chatLoading)) return;
+    input.clear();
+    await ref.read(chatController).ask(question, cardOf: cardFor);
   }
 
   // ---------------------------------------------------------------- 음성 입력
   Future<void> startRec() async {
-    if (loading || recording) return;
+    if (ref.read(chatLoading) || recording) return;
     await VoicePlayer.instance.stop();
     recorder ??= VoiceRecorder();
     final ok = await recorder!.start(onLimit: stopRec);
@@ -206,37 +178,18 @@ class _MAiScreenState extends ConsumerState<MAiScreen> {
   Future<void> stopRec() async {
     if (!recording) return;
     _recTick?.cancel();
-    setState(() {
-      recording = false;
-      loading = true;
-    });
+    setState(() => recording = false);
+    // 화면이 닫혀도 이어지게 ref 대신 미리 잡아 둔다
+    final chat = ref.read(chatController);
+    final busy = ref.read(chatLoading.notifier)..state = true;
     final wav = await recorder!.stop();
     if (wav == null) {
-      if (mounted) {
-        setState(() => loading = false);
-        showDsToast(context, '녹음이 너무 짧아요. 마이크를 누르고 말씀한 뒤 네모 버튼을 눌러 주세요.');
-      }
+      busy.state = false;
+      if (mounted) showDsToast(context, '녹음이 너무 짧아요. 마이크를 누르고 말씀한 뒤 네모 버튼을 눌러 주세요.');
       return;
     }
-    ChatAnswer? answer;
-    try {
-      final v = await ref.read(repo).askVoice(wav, UserMode.user, ref.read(userLocation).position);
-      answer = v.answer;
-      if (mounted) {
-        _add([ChatMessage(v.transcript, true)]);
-        _addAnswer(v.answer, v.transcript);
-      }
-    } catch (e) {
-      if (mounted) {
-        showDsToast(context, e is RemoteError ? e.message : '음성 입력을 쓸 수 없어요. 글자로 물어봐 주세요.');
-      }
-    }
-    if (mounted) setState(() => loading = false);
-    if (answer?.audio != null) {
-      try {
-        await VoicePlayer.instance.play(answer!.audio!);
-      } catch (_) {}
-    }
+    // 받아쓴 질문·답을 붙이고 답 음성을 재생한다 (실패하면 대화에 안내 문구)
+    await chat.askVoice(wav, cardOf: cardFor);
   }
 
   @override
@@ -250,6 +203,12 @@ class _MAiScreenState extends ConsumerState<MAiScreen> {
 
   @override
   Widget build(BuildContext c) {
+    final loading = ref.watch(chatLoading);
+    // 새 메시지: 내 질문이면 맨 아래로, 답이면 답 첫 줄이 위에 오게
+    ref.listen<List<ChatMessage>>(chatMessages, (prev, next) {
+      if (next.length <= (prev?.length ?? 0) || next.isEmpty) return;
+      next.last.mine ? _scrollToEnd() : _scrollToAnswer();
+    });
     final messages = ref.watch(chatMessages);
     final cards = ref.watch(chatCards);
     final lastBot = messages.lastIndexWhere((m) => !m.mine);
@@ -347,14 +306,14 @@ class _MAiScreenState extends ConsumerState<MAiScreen> {
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-            child: recording ? _recordingBar() : _inputBar(),
+            child: recording ? _recordingBar() : _inputBar(loading),
           ),
         ]),
       ),
     ]));
   }
 
-  Widget _inputBar() => Container(
+  Widget _inputBar(bool loading) => Container(
         height: 60,
         padding: const EdgeInsets.only(left: 18, right: 6),
         decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(Ds.pill)),
