@@ -110,14 +110,15 @@ def get_demo_households():
 def post_demo_evac_start(body: DemoEvacStart, u: AuthUser = Depends(current_user)):
     from .. import demo_evac, users
     uid, _ = users.ensure_user(u)
-    return demo_evac.start(uid, body.needs, body.location.model_dump() if body.location else None)
+    return demo_evac.start(uid, body.needs, body.location.model_dump() if body.location else None, u.email)
 
 
 @router.post("/demo/evacuation/response", summary="시연 대피 응답 저장 (대피 완료 / 대피 중 / 도움 필요) + 이력")
 def post_demo_evac_response(body: DemoEvacResponse, u: AuthUser = Depends(current_user)):
     from .. import demo_evac, users
     uid, _ = users.ensure_user(u)
-    return demo_evac.respond(uid, body.status, body.needs, body.via, body.location.model_dump() if body.location else None)
+    return demo_evac.respond(uid, body.status, body.needs, body.via, body.location.model_dump() if body.location else None,
+                             u.email)
 
 
 @router.post("/demo/evacuation/location", status_code=204, summary="시연 주민의 현재 위치 갱신 (움직일 때, 이력 없음)")

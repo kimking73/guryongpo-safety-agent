@@ -25,19 +25,21 @@ OFFSETS = [(0, 0), (0.0007, 0.0005), (-0.0006, 0.0008), (0.0004, -0.0009), (-0.0
            (0.0011, -0.0002), (-0.0002, 0.0012), (0.0009, 0.0010)]
 
 START_SQL = """
-INSERT INTO care.demo_evac (user_id, status, needs, lat, lng, location_at)
-VALUES (%(uid)s, 'no_response', %(needs)s, %(lat)s, %(lng)s, CASE WHEN %(lat)s::float8 IS NULL THEN NULL ELSE now() END)
+INSERT INTO care.demo_evac (user_id, status, needs, lat, lng, location_at, email_id)
+VALUES (%(uid)s, 'no_response', %(needs)s, %(lat)s, %(lng)s, CASE WHEN %(lat)s::float8 IS NULL THEN NULL ELSE now() END, %(email_id)s)
 ON CONFLICT (user_id) DO UPDATE SET status = 'no_response', needs = EXCLUDED.needs, started_at = now(), responded_at = NULL,
     updated_at = now(), dispatch = NULL, dispatch_by = NULL, dispatch_at = NULL,
     lat = COALESCE(EXCLUDED.lat, care.demo_evac.lat), lng = COALESCE(EXCLUDED.lng, care.demo_evac.lng),
-    location_at = COALESCE(EXCLUDED.location_at, care.demo_evac.location_at)
+    location_at = COALESCE(EXCLUDED.location_at, care.demo_evac.location_at),
+    email_id = COALESCE(EXCLUDED.email_id, care.demo_evac.email_id)
 """
 RESPOND_SQL = """
-INSERT INTO care.demo_evac (user_id, status, needs, responded_at, lat, lng, location_at)
-VALUES (%(uid)s, %(status)s, %(needs)s, now(), %(lat)s, %(lng)s, CASE WHEN %(lat)s::float8 IS NULL THEN NULL ELSE now() END)
+INSERT INTO care.demo_evac (user_id, status, needs, responded_at, lat, lng, location_at, email_id)
+VALUES (%(uid)s, %(status)s, %(needs)s, now(), %(lat)s, %(lng)s, CASE WHEN %(lat)s::float8 IS NULL THEN NULL ELSE now() END, %(email_id)s)
 ON CONFLICT (user_id) DO UPDATE SET status = EXCLUDED.status, needs = EXCLUDED.needs, responded_at = now(), updated_at = now(),
     lat = COALESCE(EXCLUDED.lat, care.demo_evac.lat), lng = COALESCE(EXCLUDED.lng, care.demo_evac.lng),
-    location_at = COALESCE(EXCLUDED.location_at, care.demo_evac.location_at)
+    location_at = COALESCE(EXCLUDED.location_at, care.demo_evac.location_at),
+    email_id = COALESCE(EXCLUDED.email_id, care.demo_evac.email_id)
 """
 LOCATION_SQL = """
 UPDATE care.demo_evac SET lat = %(lat)s, lng = %(lng)s, location_at = now()
@@ -52,7 +54,7 @@ INSERT INTO care.demo_evac_log (user_id, kind, status, via, by_user_id, data)
 VALUES (%(uid)s, %(kind)s, %(status)s, %(via)s, %(by)s, %(data)s::jsonb)
 """
 ROWS_SQL = """
-SELECT d.user_id, u.nickname, d.status, d.needs, d.started_at, d.responded_at, d.updated_at, d.dispatch, d.dispatch_by,
+SELECT d.user_id, u.nickname, d.email_id, d.status, d.needs, d.started_at, d.responded_at, d.updated_at, d.dispatch, d.dispatch_by,
        d.lat, d.lng, d.location_at,
        (EXTRACT(EPOCH FROM now() - d.started_at) / 60)::int AS minutes
 FROM care.demo_evac d JOIN users u ON u.id = d.user_id
@@ -82,7 +84,8 @@ def target_out(r: dict, me: Optional[str], slot: Optional[int] = None) -> dict:
         d = json.loads(d)
     return {
         "id": TARGET_PREFIX + uid,
-        "label": r.get("nickname") or f"시연 주민 {uid[:4]}",
+        # 이름 = 로그인 이메일의 아이디(@ 앞) → 별명 → '시연 주민 xxxx' (2026-10-12 사용자 요청)
+        "label": r.get("email_id") or r.get("nickname") or f"시연 주민 {uid[:4]}",
         "status": r["status"],
         "needs": list(r.get("needs") or []),
         "minutes_since_alert": max(0, int(r.get("minutes") or 0)),
@@ -109,14 +112,22 @@ def _loc(location: Optional[dict]) -> dict:
     return {"lat": (location or {}).get("lat"), "lng": (location or {}).get("lng")}
 
 
-def start(uid: str, needs: list[str], location: Optional[dict] = None) -> Optional[dict]:
-    db.execute(START_SQL, {"uid": uid, "needs": list(needs), **_loc(location)})
+def email_id(email: Optional[str]) -> Optional[str]:
+    """'harin@gmail.com' → 'harin' (없으면 None)"""
+    head = (email or "").split("@", 1)[0].strip()
+    return head[:40] or None
+
+
+def start(uid: str, needs: list[str], location: Optional[dict] = None, email: Optional[str] = None) -> Optional[dict]:
+    db.execute(START_SQL, {"uid": uid, "needs": list(needs), **_loc(location), "email_id": email_id(email)})
     _log(uid, "start", "no_response", data={"needs": list(needs)})
     return mine(uid)
 
 
-def respond(uid: str, status: str, needs: list[str], via: str, location: Optional[dict] = None) -> Optional[dict]:
-    db.execute(RESPOND_SQL, {"uid": uid, "status": status, "needs": list(needs), **_loc(location)})
+def respond(uid: str, status: str, needs: list[str], via: str, location: Optional[dict] = None,
+            email: Optional[str] = None) -> Optional[dict]:
+    db.execute(RESPOND_SQL, {"uid": uid, "status": status, "needs": list(needs), **_loc(location),
+                             "email_id": email_id(email)})
     _log(uid, "response", status, via, data={"needs": list(needs)})
     return mine(uid)
 

@@ -27,6 +27,8 @@ CREATE INDEX IF NOT EXISTS idx_demo_evac_updated ON care.demo_evac(updated_at);
 ALTER TABLE care.demo_evac ADD COLUMN IF NOT EXISTS lat double precision;
 ALTER TABLE care.demo_evac ADD COLUMN IF NOT EXISTS lng double precision;
 ALTER TABLE care.demo_evac ADD COLUMN IF NOT EXISTS location_at timestamptz;
+-- 방재단 화면에 보일 이름 = 로그인 이메일의 아이디(@ 앞) (2026-10-12 사용자 요청). 서버가 Firebase 토큰에서 읽는다 — 앱이 보낸 값 아님
+ALTER TABLE care.demo_evac ADD COLUMN IF NOT EXISTS email_id text;
 
 CREATE TABLE IF NOT EXISTS care.demo_evac_log (
   id          bigserial PRIMARY KEY,

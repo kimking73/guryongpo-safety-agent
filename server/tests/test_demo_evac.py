@@ -34,7 +34,7 @@ def test_start_resets_my_row_and_logs(client, fake_db):
     assert_spec(d, "/demo/evacuation/start", "post")
     assert d["id"] == f"demo-user-{UID}" and d["status"] == "no_response" and d["is_me"] and d["dispatch"] is None
     (sql, p), = _sql(fake_db, "INSERT INTO care.demo_evac (")
-    assert "dispatch = NULL" in sql and p == {"uid": UID, "needs": ["mobility_limited"], "lat": None, "lng": None}
+    assert "dispatch = NULL" in sql and p == {"uid": UID, "needs": ["mobility_limited"], "lat": None, "lng": None, "email_id": None}
     (_, log), = _sql(fake_db, "INSERT INTO care.demo_evac_log")
     assert log["kind"] == "start" and log["uid"] == UID
 
@@ -48,7 +48,7 @@ def test_response_is_saved_with_history(client, fake_db):
     assert_spec(r.json(), "/demo/evacuation/response", "post")
     assert r.json()["status"] == "need_help"
     (_, p), = _sql(fake_db, "INSERT INTO care.demo_evac (user_id, status, needs, responded_at")
-    assert p == {"uid": UID, "status": "need_help", "needs": ["vision"], "lat": None, "lng": None}
+    assert p == {"uid": UID, "status": "need_help", "needs": ["vision"], "lat": None, "lng": None, "email_id": None}
     (_, log), = _sql(fake_db, "INSERT INTO care.demo_evac_log")
     assert (log["kind"], log["status"], log["via"]) == ("response", "need_help", "alarm")
     # 실제 대피 상황 표에는 쓰지 않는다 (FCM·이관 없음)
@@ -152,3 +152,18 @@ def test_location_update(client, fake_db, monkeypatch):
     monkeypatch.setattr(db, "execute", lambda sql, p=None: 0)
     assert client.post("/api/v1/demo/evacuation/location", json={"location": {"lat": 35.99, "lng": 129.55}},
                        headers=AUTH).status_code == 404
+
+
+# 2026-10-12 사용자 요청: 방재단 화면의 이름 = 시연 주민의 이메일 아이디
+def test_label_is_email_id_from_token(client, fake_db):
+    from app.demo_evac import email_id
+    assert email_id("harin@gmail.com") == "harin" and email_id(None) is None and email_id("") is None
+    _me(fake_db)
+    fake_db.rows[ROWS_KEY] = [_row(UID, "need_help", nickname="별명") | {"email_id": "harin"}]
+    r = client.post("/api/v1/demo/evacuation/response", json={"status": "need_help"},
+                    headers={"Authorization": "Bearer dev:harin@gmail.com"})
+    assert r.status_code == 200 and r.json()["label"] == "harin"          # 이메일 아이디가 별명보다 먼저
+    (sql, p), = _sql(fake_db, "INSERT INTO care.demo_evac (user_id, status, needs, responded_at")
+    assert p["email_id"] == "harin" and "COALESCE(EXCLUDED.email_id" in sql
+    fake_db.rows[ROWS_KEY] = [_row(UID, "need_help", nickname="별명")]
+    assert client.get("/api/v1/demo/evacuation/me", headers=AUTH).json()["label"] == "별명"
