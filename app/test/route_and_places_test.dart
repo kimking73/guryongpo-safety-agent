@@ -17,6 +17,8 @@ import 'package:guryongpo_safety/ui/map_menu.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:guryongpo_safety/live_screens.dart' show whereNowProvider;
 import 'package:guryongpo_safety/route_planner.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:guryongpo_safety/route_brief_card.dart';
 
 const _chat = {
   'conversation_id': 'c1',
@@ -337,6 +339,37 @@ void main() {
     // 경로 안내를 열면 대피소 고르기 창이 먼저 뜬다 (기존 동작) — 닫고 시작
     Navigator.of(t.element(find.byType(BottomSheet))).pop();
     await t.pump(const Duration(milliseconds: 500));
+    final before = container.read(userLocation).position;
+    // 도착도 지도에서 고른다 (2026-10-11 사용자 요청): 누른 곳까지 경로, 현재 위치는 그대로
+    await t.ensureVisible(find.text('도착:'));
+    await t.pump(const Duration(milliseconds: 300));
+    await t.tap(find.text('도착:'));
+    for (var i = 0; i < 6; i++) {
+      await t.pump(const Duration(milliseconds: 150));
+    }
+    await t.ensureVisible(find.text('지도에서 고르기'));
+    await t.pump(const Duration(milliseconds: 300));
+    await t.tap(find.text('지도에서 고르기'));
+    for (var i = 0; i < 6; i++) {
+      await t.pump(const Duration(milliseconds: 150));
+    }
+    expect(container.read(mapPickMode), isTrue);
+    expect(container.read(mapPickDest), isTrue);
+    expect(find.textContaining('지도에서 도착할 곳을 눌러 주세요'), findsWidgets);
+    const to = LatLng(35.9880, 129.5560);
+    t.widget<DisasterDashboard>(find.byType(DisasterDashboard)).onMapPick!(to);
+    for (var i = 0; i < 6; i++) {
+      await t.pump(const Duration(milliseconds: 150));
+    }
+    expect(container.read(mapPickMode), isFalse);
+    expect(container.read(mapPickDest), isFalse);
+    expect(container.read(userLocation).position, before); // 현재 위치는 바뀌지 않는다
+    expect(container.read(routeFacilityId), customRouteId);
+    final dest = container.read(routeFacilitySnapshot);
+    expect(dest?.position, to);
+    expect(dest?.name, RoutePlanner.mapDestLabel);
+    expect(find.textContaining(RoutePlanner.mapDestLabel), findsWidgets); // 도착 버튼 글자
+
     await t.ensureVisible(find.text('출발:'));
     await t.pump(const Duration(milliseconds: 300));
     await t.tap(find.text('출발:'));
@@ -363,6 +396,7 @@ void main() {
     expect(here.position, p);
     expect(here.manual, isTrue);
     expect(container.read(originLabelProvider), 'GPS 선택 위치'); // 출발 버튼 글자
+
     await t.pumpWidget(const SizedBox());
     await t.pump(const Duration(seconds: 1));
   });
@@ -396,5 +430,114 @@ void main() {
     expect(find.text('오르막 회피'), findsOneWidget);
     expect(icon(FontAwesomeIcons.arrowTrendDown), findsOneWidget);
     await t.pumpWidget(const SizedBox());
+  });
+
+  // 2026-10-11 사용자 요청: 휴대폰 폭에서는 AI 경로 설명이 지도를 가리지 않게 지도 칸 바로 아래 칸으로
+  for (final (width, below) in [(390.0, true), (1280.0, false)]) {
+    testWidgets('AI 경로 설명 위치: 폭 ${width.round()} → ${below ? '지도 아래 칸' : '지도 위 오른쪽'}', (t) async {
+      t.view.physicalSize = Size(width, 1800);
+      t.view.devicePixelRatio = 1;
+      addTearDown(t.view.reset);
+      final onError = FlutterError.onError;
+      FlutterError.onError = (d) {
+        if (d.library != 'image resource service') onError?.call(d);
+      };
+      addTearDown(() => FlutterError.onError = onError);
+      SharedPreferences.setMockInitialValues({'profile_setup_complete': true});
+      Onboarding.setConsented();
+      Onboarding.setDone();
+      appRouter.go('/');
+      final container = ProviderContainer(overrides: [repo.overrideWithValue(MockSafetyRepository())]);
+      addTearDown(container.dispose);
+      await t.pumpWidget(UncontrolledProviderScope(container: container, child: const GuryongpoApp()));
+      for (var i = 0; i < 10; i++) {
+        await t.pump(const Duration(milliseconds: 300));
+      }
+      await t.tap(find.widgetWithText(MapMenuButton, '경로 안내'));
+      for (var i = 0; i < 5; i++) {
+        await t.pump(const Duration(milliseconds: 150));
+      }
+      Navigator.of(t.element(find.byType(BottomSheet))).pop();
+      await t.pump(const Duration(milliseconds: 500));
+      container.read(routeFacilityId.notifier).state = 'gym';
+      for (var i = 0; i < 8; i++) {
+        await t.pump(const Duration(milliseconds: 200));
+      }
+      expect(find.byType(RouteBriefCard), findsOneWidget);
+      final onMap = find.descendant(of: find.byType(FlutterMap), matching: find.byType(RouteBriefCard));
+      expect(onMap, below ? findsNothing : findsOneWidget);
+      if (below) {
+        // 지도 바로 아래, 접힌 채로 시작 — 제목 줄을 누르면 펴진다
+        final map = t.getRect(find.byType(FlutterMap)), card = t.getRect(find.byType(RouteBriefCard));
+        expect(card.top, greaterThanOrEqualTo(map.bottom));
+        expect(card.top - map.bottom, lessThan(40));
+        expect(find.descendant(of: find.byType(RouteBriefCard), matching: find.textContaining('까지')), findsNothing);
+        await t.ensureVisible(find.text('AI 경로 설명'));
+        await t.pump(const Duration(milliseconds: 300));
+        await t.tap(find.text('AI 경로 설명'));
+        await t.pump(const Duration(milliseconds: 300));
+        expect(find.descendant(of: find.byType(RouteBriefCard), matching: find.textContaining('까지')), findsWidgets);
+      }
+      await t.pumpWidget(const SizedBox());
+      await t.pump(const Duration(seconds: 1));
+    });
+  }
+
+  testWidgets("지도 '주소 입력' (2026-10-11): 현위치 버튼 위에 있고, 누르면 주소로 현위치를 고치는 창이 뜬다", (t) async {
+    t.view.physicalSize = const Size(390, 1800);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.reset);
+    final onError = FlutterError.onError;
+    FlutterError.onError = (d) {
+      if (d.library != 'image resource service') onError?.call(d);
+    };
+    addTearDown(() => FlutterError.onError = onError);
+    SharedPreferences.setMockInitialValues({'profile_setup_complete': true});
+    Onboarding.setConsented();
+    Onboarding.setDone();
+    appRouter.go('/');
+    final container = ProviderContainer(overrides: [repo.overrideWithValue(MockSafetyRepository())]);
+    addTearDown(container.dispose);
+    await t.pumpWidget(UncontrolledProviderScope(container: container, child: const GuryongpoApp()));
+    for (var i = 0; i < 10; i++) {
+      await t.pump(const Duration(milliseconds: 300));
+    }
+    final edit = find.widgetWithText(MapMenuButton, '주소 입력'), gps = find.widgetWithText(MapMenuButton, '현위치');
+    expect(edit, findsOneWidget);
+    expect(t.getRect(edit).bottom, lessThanOrEqualTo(t.getRect(gps).top)); // 현위치 바로 위
+    // 휴대폰 폭에서 '전체 화면'과 겹치지 않는다
+    expect(t.getRect(edit).overlaps(t.getRect(find.text('전체 화면'))), isFalse);
+    await t.ensureVisible(edit);
+    await t.pump(const Duration(milliseconds: 300));
+    await t.tap(edit);
+    for (var i = 0; i < 5; i++) {
+      await t.pump(const Duration(milliseconds: 150));
+    }
+    expect(find.text('주소로 현위치 설정'), findsOneWidget);
+    expect(find.text('도로명 주소'), findsOneWidget);
+    await t.tap(find.text('취소'));
+    await t.pump(const Duration(milliseconds: 400));
+    expect(container.read(userLocation).manual, isFalse); // 취소하면 그대로
+    await t.pumpWidget(const SizedBox());
+    await t.pump(const Duration(seconds: 1));
+  });
+
+  test('AI 답의 경로 (2026-10-11): 처음엔 AI가 계산한 경로 그대로, 경로 방식·이동 수단을 바꾸면 같은 도착지로 다시 받는다', () async {
+    final container = ProviderContainer(overrides: [repo.overrideWithValue(MockSafetyRepository())]);
+    addTearDown(container.dispose);
+    final ai = MockSafetyRepository().exampleRoute('gym', UserMode.user, RouteType.safest);
+    container.read(aiRoute.notifier).state =
+        ChatAnswer('구룡포 실내체육관으로 가세요.', route: ai, destinationName: '구룡포 실내체육관', destinationPos: const LatLng(35.9868, 129.548));
+    container.read(routeKind.notifier).state = RouteType.safest;
+    container.read(travelMode.notifier).state = ai.mode;
+    expect(identical(await container.read(routeProvider(aiRouteId).future), ai), isTrue); // 서버를 다시 부르지 않는다
+
+    container.read(routeKind.notifier).state = RouteType.nearest;
+    final nearest = await container.read(routeProvider(aiRouteId).future);
+    expect(identical(nearest, ai), isFalse);
+    expect(nearest.routeType, RouteType.nearest); // 최단 거리로 다시 받은 경로
+
+    container.read(routeKind.notifier).state = RouteType.safest;
+    expect(identical(await container.read(routeProvider(aiRouteId).future), ai), isTrue); // 안전한 경로로 돌아오면 AI 경로
   });
 }

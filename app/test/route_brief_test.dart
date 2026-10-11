@@ -53,7 +53,12 @@ void main() {
       child: const MaterialApp(home: Scaffold(body: Align(alignment: Alignment.topRight, child: RouteBriefCard(maxWidth: 320)))),
     ));
     await t.pumpAndSettle();
+    // 처음에는 접혀 있다: 제목과 위험 개수만 (2026-10-11 사용자 요청)
     expect(find.text('AI 경로 설명'), findsOneWidget);
+    expect(find.text(brief.summary), findsNothing);
+    expect(find.text('위험 1'), findsOneWidget);
+    await t.tap(find.text('AI 경로 설명'));
+    await t.pumpAndSettle();
     expect(find.text(brief.summary), findsOneWidget);
     expect(find.text('위험한 요소'), findsOneWidget);
     expect(find.text('주의할 점'), findsOneWidget);
@@ -119,6 +124,8 @@ void main() {
         child: MaterialApp(home: Scaffold(body: Align(alignment: Alignment.topRight, child: RouteBriefCard(maxWidth: 320, body: body))))));
     await t.pumpAndSettle();
     expect(find.text('AI 경로 설명'), findsOneWidget);
+    await t.tap(find.text('AI 경로 설명'));
+    await t.pumpAndSettle();
     expect(find.text('1곳을 모두 도는 길은 300m, 걸어서 약 4분입니다.'), findsOneWidget);
   });
 }

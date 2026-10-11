@@ -34,6 +34,7 @@ class MapIcons {
       '<circle cx="12" cy="5" r="2"/><path d="M12 7v14"/><path d="M8 11h8"/><path d="M4 14a8 8 0 0 0 16 0"/>');
   static final locate = _svg(
       '<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>');
+  static final address = _svg('<path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.5"/>');
   static final check = _svg('<path d="m5 12.5 4.5 4.5L19 7.5"/>');
   static final chevronDown = _svg('<path d="m6 9 6 6 6-6"/>');
   static final info = _svg('<circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><path d="M12 7.5h.01"/>');

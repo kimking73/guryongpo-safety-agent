@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -8,7 +9,7 @@ import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import 'disaster_center.dart' show WhereKind;
+import 'disaster_center.dart' show WhereKind, HazardKind, hazardAreaPolygons, floodGridAreaPolygons;
 import 'live_screens.dart';
 import 'main.dart';
 import 'models/domain_models.dart';
@@ -23,7 +24,7 @@ import 'services/prototype_safety_store.dart';
 import 'ui/gk_widgets.dart';
 import 'ui/map_menu.dart' show MapMenuButton, MapButtonKind, MapIcons;
 import 'ui/tokens.dart' show Ds, dsText;
-import 'ui/widgets.dart' show PillButton, SegmentedPill;
+import 'ui/widgets.dart' show CircleButton, PillButton, SegmentedPill;
 import 'services/location_service.dart';
 import 'services/polyline.dart';
 
@@ -638,6 +639,8 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
   TravelMode visitMode = TravelMode.walk;
   Map<String, dynamic>? visitResult;
   String visitTab = 'shortest';
+  /// 지도에서 강조해 보는 구간 (0 = 출발 → 첫 집). null = 전체 보기 (2026-10-12: 겹치는 길에서 어디로 갈지 보이게)
+  int? visitLeg;
   bool visitLoading = false;
   String? visitError;
   int _calcSeq = 0;
@@ -1080,8 +1083,13 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
     final shown = routing ? [for (final p in points) if (visitStops.contains(p.id)) p] : points;
     // AI 경로 설명: 방문 경로를 그렸을 때만 (지도 오른쪽 위)
     final last = !routing ? null : at['${((plan!['order'] as List).last as Map)['id']}'];
+    // 구간마다 따로 그린다 (2026-10-12): 전체 보기 = 구간 색 + 방향 화살표, 구간 보기 = 고른 구간만 진하게
+    final legs = routing ? visitLegPoints(plan!) : const <List<LatLng>>[];
+    final leg = visitLeg != null && visitLeg! < legs.length ? visitLeg : null;
     return Dashboard(
       mapOnly: true,
+      // 지도를 옮길 범위: 구간 보기는 그 구간, 전체 보기는 경로 전체
+      focusBounds: !routing ? null : LatLngBounds.fromPoints(leg != null ? legs[leg] : line),
       routeBriefBody: !routing
           ? null
           : visitBriefBody(visitResult!, visitTab, _visitStart.latitude, _visitStart.longitude, visitOriginLabel,
@@ -1092,16 +1100,14 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
         for (final r in rings)
           Polygon(points: r, color: Colors.red.withValues(alpha: .10), borderColor: Colors.red.shade700, borderStrokeWidth: 2.5),
       ],
-      extraPolylines: [
-        if (line.length > 1) ...[
-          Polyline(points: line, color: Colors.white, strokeWidth: 10),
-          Polyline(points: line, color: GK.navy, strokeWidth: 6),
-        ],
-      ],
+      extraPolylines: routing ? visitLegLines(plan!, focus: leg) : const [],
       extraMarkers: [
         ..._peopleMarkers(shown, selected, (id) => setState(() => selected = id)),
         if (plan != null) ...[
-          // 방문 순서: 사람 아이콘 왼쪽 아래 남색 번호 (오른쪽 위 흰 번호 = 우선 확인 번호)
+          // 진행 방향 화살표: 전체 보기는 모든 구간(구간 색), 구간 보기는 고른 구간만
+          for (var i = 0; i < legs.length; i++)
+            if (leg == null || leg == i) ...visitLegArrows(legs[i], leg == null ? visitLegColor(i + 1) : GK.navy),
+          // 방문 순서: 사람 아이콘 왼쪽 아래 번호 = 그 집으로 가는 구간 색 (오른쪽 위 흰 번호 = 우선 확인 번호)
           for (final o in plan['order'] as List)
             if (at['${o['id']}'] != null)
               Marker(
@@ -1111,7 +1117,14 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
                 alignment: const Alignment(-1.9, 1.9),
                 child: Container(
                   alignment: Alignment.center,
-                  decoration: BoxDecoration(color: GK.navy, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
+                  decoration: BoxDecoration(
+                      color: legs.isEmpty
+                          ? GK.navy
+                          : leg == null
+                              ? visitLegColor((o['seq'] as num).toInt())
+                              : (leg == (o['seq'] as num).toInt() - 1 ? GK.navy : visitLegDim),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 2)),
                   child: Text('${o['seq']}', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Colors.white)),
                 ),
               ),
@@ -1133,6 +1146,7 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
 
   void _clearVisit({bool pick = false}) {
     visitResult = null;
+    visitLeg = null;
     visitError = null;
     visitLoading = false;
     if (pick) {
@@ -1220,7 +1234,12 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
     try {
       final start = _visitStart;
       final r = await ref.read(liveApiProvider).visitRoute(start.latitude, start.longitude, stops, mode: visitMode.api);
-      if (mounted && seq == _calcSeq) setState(() => visitResult = r);
+      if (mounted && seq == _calcSeq) {
+        setState(() {
+          visitResult = r;
+          visitLeg = null;
+        });
+      }
     } catch (e) {
       if (mounted && seq == _calcSeq) setState(() => visitError = liveError(e));
     } finally {
@@ -1348,6 +1367,10 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
     final picked = _routeTargets(targets);
     final label = {for (final t in targets) '${t['id']}': '${t['label']}'};
     final plan = _visitPlan;
+    final order = [for (final o in plan?['order'] as List? ?? const []) Map<String, dynamic>.from(o as Map)];
+    // 구간 선이 오는 서버일 때만 구간 보기를 쓴다 (예전 서버면 전체 선 하나 — 번호·목록은 그대로)
+    final hasLegs = plan != null && visitLegPoints(plan).isNotEmpty;
+    final leg = hasLegs && visitLeg != null && visitLeg! < order.length ? visitLeg : null;
     final me = ref.watch(userLocation);
     String km(num m) => m >= 1000 ? '${(m / 1000).toStringAsFixed(1)}km' : '${m.round()}m';
     String min(num s) => '${(s / 60).ceil()}분';
@@ -1471,7 +1494,10 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
                 onPressed: picked.isEmpty
                     ? null
                     : () {
-                        setState(() => visitTab = tab);
+                        setState(() {
+                          visitTab = tab;
+                          visitLeg = null; // 다른 경로를 보면 전체 보기부터
+                        });
                         if (visitResult == null && !visitLoading) _calcVisit(picked);
                       }),
           ),
@@ -1483,17 +1509,64 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
             style: dsText(15, weight: FontWeight.w800)),
         Text(visitTab == 'priority' ? '순위 단계(도움 요청+장애 → 도움 요청 → 응답 없음+장애 → …)를 지키고, 같은 단계 안에서 가장 짧게' : '순위와 상관없이 가장 짧게',
             style: dsText(12, color: Ds.muted)),
-        for (final o in plan['order'] as List)
+        // 한 구간씩 보기 (2026-10-12 사용자 요청 — 겹치는 길에서 지금 어디로 가는지): ◀ ▶ 로 넘기거나 아래 줄을 누른다
+        if (hasLegs) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.fromLTRB(6, 6, 6, 6),
+            decoration: BoxDecoration(color: Ds.bg, borderRadius: BorderRadius.circular(14)),
+            child: Row(children: [
+              CircleButton(FontAwesomeIcons.chevronLeft,
+                  size: 32,
+                  iconSize: 12,
+                  tooltip: '앞 구간',
+                  onPressed: leg == null || leg == 0 ? null : () => setState(() => visitLeg = leg - 1)),
+              const SizedBox(width: 6),
+              Expanded(
+                child: leg == null
+                    ? Text('전체 보기 · 구간 ${order.length}개\n▶ 를 누르면 한 구간씩 진하게 보여요',
+                        style: dsText(13, weight: FontWeight.w700, color: Ds.sub, height: 1.35))
+                    : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text('${leg + 1} / ${order.length} 구간 · ${km(order[leg]['leg_distance_m'] as num)} · ${min(order[leg]['leg_duration_s'] as num)}',
+                            style: dsText(14, weight: FontWeight.w800)),
+                        Text('${leg == 0 ? '출발($visitOriginLabel)' : (label['${order[leg - 1]['id']}'] ?? '앞 집')} → ${label['${order[leg]['id']}'] ?? '${order[leg]['id']}'}',
+                            maxLines: 2, overflow: TextOverflow.ellipsis, style: dsText(12, color: Ds.muted, height: 1.3)),
+                      ]),
+              ),
+              if (leg != null) ...[
+                TextButton(onPressed: () => setState(() => visitLeg = null), child: const Text('전체 보기')),
+              ],
+              CircleButton(FontAwesomeIcons.chevronRight,
+                  size: 32,
+                  iconSize: 12,
+                  tooltip: '다음 구간',
+                  onPressed: leg != null && leg >= order.length - 1 ? null : () => setState(() => visitLeg = leg == null ? 0 : leg + 1)),
+            ]),
+          ),
+        ],
+        for (final o in order)
           ListTile(
             dense: true,
-            contentPadding: EdgeInsets.zero,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            selected: leg == (o['seq'] as num).toInt() - 1,
+            selectedTileColor: Ds.soft,
             leading: CircleAvatar(
                 radius: 12,
-                backgroundColor: Ds.navy,
+                // 번호 색 = 지도에서 그 집으로 가는 구간 색
+                backgroundColor: !hasLegs
+                    ? Ds.navy
+                    : leg == null
+                        ? visitLegColor((o['seq'] as num).toInt())
+                        : (leg == (o['seq'] as num).toInt() - 1 ? GK.navy : visitLegDim),
                 child: Text('${o['seq']}', style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.bold))),
             title: Text(label['${o['id']}'] ?? '${o['id']}'),
             subtitle: Text('앞 지점에서 ${km(o['leg_distance_m'] as num)} · ${min(o['leg_duration_s'] as num)}'),
-            onTap: () => setState(() => selected = '${o['id']}'),
+            // 줄을 누르면 그 집으로 가는 구간을 지도에서 진하게 (다시 누르면 전체 보기)
+            onTap: () => setState(() {
+              selected = '${o['id']}';
+              if (hasLegs) visitLeg = leg == (o['seq'] as num).toInt() - 1 ? null : (o['seq'] as num).toInt() - 1;
+            }),
           ),
         if ((plan['still_inside'] as List? ?? const []).isNotEmpty)
           Text('⚠ 위험 구역 ${(plan['still_inside'] as List).length}곳을 지납니다 (방문할 집이 구역 안에 있거나 다른 길이 없음).',
@@ -1537,6 +1610,90 @@ List<String> registeredSupport(Map<String, dynamic> t) => [for (final k in vulne
 /// 앱 사용자가 스스로 대피 중·대피 완료라고 응답했는지 — 우선 확인 순번에서는 빠져도 목록에 응답이 보이게 남긴다 (2026-10-11)
 bool selfReportedMoving(Map<String, dynamic> t) =>
     t['kind'] == 'app_user' && (t['status'] == 'evacuating' || t['status'] == 'evacuated');
+
+// ------------------------------------------------------------------ 방문 경로를 구간별로 그리기 (2026-10-12)
+// 여러 집을 도는 길은 같은 길을 오가서 선 하나로 그리면 겹친다 → 구간(앞 지점 → 그 집)마다 색·굵기·방향 화살표를 달리한다.
+// 구간 선은 경로 서버 /api/route/visits 의 order[].geometry (없으면 예전처럼 전체 선 하나)
+
+/// 구간 색: 위험 단계 색(노랑·주황·빨강)·산사태 색과 겹치지 않는 5색을 구간 번호로 돌려 쓴다
+const visitLegColors = [GK.navy, Color(0xFF00897B), Color(0xFF7B3FB5), Color(0xFFC2185B), Color(0xFF795548)];
+Color visitLegColor(int seq) => visitLegColors[(seq - 1) % visitLegColors.length];
+
+/// 구간 보기에서 고르지 않은 구간·번호 (옅은 회색)
+const visitLegDim = Color(0xFFA9B0C3);
+
+/// 겹칠 때 두 색이 함께 보이게: 구간 번호에 따라 굵기를 달리하고, 굵은 것을 먼저(아래에) 그린다
+const _visitLegWidths = [9.0, 6.0, 3.5];
+
+/// 방문 순서대로 구간별 좌표. 구간 선이 하나라도 없으면(예전 서버) 빈 목록
+List<List<LatLng>> visitLegPoints(Map<String, dynamic> plan) {
+  final legs = [for (final o in plan['order'] as List? ?? const []) decodePolyline('${(o as Map)['geometry'] ?? ''}')];
+  return legs.isEmpty || legs.any((l) => l.length < 2) ? const [] : legs;
+}
+
+/// 지도에 그릴 방문 경로 선. [focus] = 진하게 볼 구간(0부터), null 이면 전체 보기
+List<Polyline> visitLegLines(Map<String, dynamic> plan, {int? focus}) {
+  final legs = visitLegPoints(plan);
+  if (legs.isEmpty) {
+    final line = decodePolyline('${plan['geometry'] ?? ''}');
+    return line.length < 2
+        ? const []
+        : [Polyline(points: line, color: Colors.white, strokeWidth: 10), Polyline(points: line, color: GK.navy, strokeWidth: 6)];
+  }
+  if (focus != null && focus >= 0 && focus < legs.length) {
+    return [
+      for (var i = 0; i < legs.length; i++)
+        if (i != focus) Polyline(points: legs[i], color: visitLegDim, strokeWidth: 4),
+      Polyline(points: legs[focus], color: Colors.white, strokeWidth: 12),
+      Polyline(points: legs[focus], color: GK.navy, strokeWidth: 7),
+    ];
+  }
+  double width(int i) => _visitLegWidths[i % _visitLegWidths.length];
+  final byWidth = [for (var i = 0; i < legs.length; i++) i]..sort((a, b) => width(b).compareTo(width(a)));
+  return [
+    for (final l in legs) Polyline(points: l, color: Colors.white, strokeWidth: 13),
+    for (final i in byWidth) Polyline(points: legs[i], color: visitLegColor(i + 1), strokeWidth: width(i)),
+  ];
+}
+
+/// 선을 따라 [everyM] 마다 (구간에 최소 1개) 화살표를 놓을 자리와 진행 방향(북 0°, 시계 방향)
+List<(LatLng, double)> visitLegArrowSpots(List<LatLng> pts, {double everyM = 150}) {
+  if (pts.length < 2) return const [];
+  const d = Distance();
+  final seg = [for (var i = 0; i < pts.length - 1; i++) d.as(LengthUnit.Meter, pts[i], pts[i + 1])];
+  final total = seg.fold<double>(0, (a, b) => a + b);
+  if (total <= 0) return const [];
+  final n = math.max(1, (total / everyM).floor());
+  final out = <(LatLng, double)>[];
+  var i = 0, walked = 0.0;
+  for (var k = 0; k < n; k++) {
+    final at = total * (k + .5) / n;
+    while (i < seg.length - 1 && walked + seg[i] < at) {
+      walked += seg[i++];
+    }
+    final t = seg[i] <= 0 ? 0.0 : ((at - walked) / seg[i]).clamp(0.0, 1.0);
+    final a = pts[i], b = pts[i + 1];
+    final bearing = math.atan2((b.longitude - a.longitude) * math.cos(a.latitude * math.pi / 180), b.latitude - a.latitude) * 180 / math.pi;
+    out.add((LatLng(a.latitude + (b.latitude - a.latitude) * t, a.longitude + (b.longitude - a.longitude) * t), (bearing + 360) % 360));
+  }
+  return out;
+}
+
+/// 진행 방향 화살표 표시 (흰 동그라미 + 구간 색 화살표)
+List<Marker> visitLegArrows(List<LatLng> pts, Color color, {double everyM = 150}) => [
+      for (final (at, deg) in visitLegArrowSpots(pts, everyM: everyM))
+        Marker(
+          point: at,
+          width: 18,
+          height: 18,
+          child: IgnorePointer(
+            child: Container(
+              decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle, border: Border.all(color: color, width: 1.5)),
+              child: Transform.rotate(angle: deg * math.pi / 180, child: Icon(Icons.arrow_upward_rounded, size: 13, color: color)),
+            ),
+          ),
+        ),
+    ];
 
 int _priorityTier(Map<String, dynamic> t) {
   final dis = registeredSupport(t).isNotEmpty;
@@ -2422,6 +2579,8 @@ class _LiveSeaRouteScreenState extends ConsumerState<LiveSeaRouteScreen> {
     // 풍랑 특보는 경로 서버가 아니라 대시보드 특보(warnings)에서 (B11 명세)
     final warnings = (ref.watch(liveDashboardProvider).valueOrNull?['warnings'] as Map?)?['items'] as List? ?? const [];
     final highSeas = warnings.where((w) => w is Map && w['hazard'] == 'high_seas').toList();
+    final phone = MediaQuery.sizeOf(c).width < 600;
+    final hazardAreas = ref.watch(riskAreasProvider).valueOrNull ?? const <RiskArea>[];
     return LivePage(title: '바다 위 대피 경로', children: [
       const Text('배 위에서 대피해야 할 때: 지도에서 지금 배 위치(바다)를 누르면 가장 가까운 항구와 방향, 항구에서 대피소까지 길을 보여 줍니다.'),
       const SizedBox(height: 6),
@@ -2456,6 +2615,12 @@ class _LiveSeaRouteScreenState extends ConsumerState<LiveSeaRouteScreen> {
                       onTap: (_, q) => busy ? null : _go(q)),
                   children: [
                     _tiles(),
+                    // 경로 안내 지도에는 침수·산사태 위험 지역을 늘 그린다 (2026-10-11 사용자 요청, 대시보드 지도와 같은 그림)
+                    if (hazardAreas.isEmpty)
+                      PolygonLayer(polygons: floodGridAreaPolygons(ref.watch(floodGridProvider).valueOrNull ?? const []))
+                    else
+                      PolygonLayer(
+                          polygons: hazardAreaPolygons(hazardAreas, kinds: const {HazardKind.flood, HazardKind.slide})),
                     if (p != null)
                       PolylineLayer(polylines: [
                         if (p.landPoints.length >= 2) Polyline(points: p.landPoints, color: Colors.white, strokeWidth: 9),
@@ -2474,16 +2639,20 @@ class _LiveSeaRouteScreenState extends ConsumerState<LiveSeaRouteScreen> {
                     ]),
                     _osm,
                   ]),
-                // AI 경로 설명 (2026-10-11): 이 화면의 해상 경로에도 지도 오른쪽 위에
-                if (p != null && seaBriefBody(p.raw, p.origin.latitude, p.origin.longitude) != null)
+                // AI 경로 설명 (2026-10-11): 이 화면의 해상 경로에도 지도 오른쪽 위에 (휴대폰 폭은 지도 아래 — 바로 밑 참고)
+                if (p != null && !phone && seaBriefBody(p.raw, p.origin.latitude, p.origin.longitude) != null)
                   Positioned(
                       right: 8,
                       top: 8,
                       child: RouteBriefCard(
                           maxWidth: MediaQuery.sizeOf(c).width < 700 ? 240 : 320,
-                          startCollapsed: MediaQuery.sizeOf(c).width < 700,
                           body: seaBriefBody(p.raw, p.origin.latitude, p.origin.longitude))),
               ]))),
+      // 휴대폰 폭: AI 경로 설명은 지도 칸 바로 아래 (2026-10-11 사용자 요청)
+      if (p != null && phone && seaBriefBody(p.raw, p.origin.latitude, p.origin.longitude) != null) ...[
+        RouteBriefCard(maxWidth: double.infinity, body: seaBriefBody(p.raw, p.origin.latitude, p.origin.longitude)),
+        const SizedBox(height: 8),
+      ],
       const Wrap(spacing: 14, runSpacing: 6, children: [
         _Legend(color: seaColor, label: '해상 구간 (방파제·곶을 피한 바닷길)', dashed: true),
         _Legend(color: portColor, label: '항구 접안점'),

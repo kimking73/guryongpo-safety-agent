@@ -3,6 +3,7 @@ import json
 import math
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 from shapely.geometry import box
 
@@ -88,6 +89,14 @@ def test_visits_returns_both_plans_in_order():
     # 쌍 경로 3×3=9번 + 최종 경로 2번 (모든 점을 한 번에)
     assert len(seen) == 11 and len(seen[-1]["points"]) == 4
     assert d["shortest"]["order"][0]["leg_distance_m"] == round(0.001 * 111_000)
+    # 구간마다 선이 따로 온다 (앞 지점 → 그 집): 첫 구간은 출발점에서 시작, 다음 구간은 앞 집에서 시작해 그 집에서 끝난다
+    stops = {s["id"]: (s["lat"], s["lon"]) for s in body["stops"]}
+    for plan in (d["shortest"], d["priority"]):
+        prev = (ORIGIN["lat"], ORIGIN["lon"])
+        for leg in plan["order"]:
+            pts = polyline.decode(leg["geometry"])
+            assert pts[0] == pytest.approx(prev, abs=1e-5) and pts[-1] == pytest.approx(stops[leg["id"]], abs=1e-5)
+            prev = stops[leg["id"]]
 
 
 def test_hazards_block_except_zones_with_stops():

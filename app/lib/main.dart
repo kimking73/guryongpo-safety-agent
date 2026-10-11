@@ -96,6 +96,9 @@ final seaRouteOff = StateProvider<bool>((_) => false);
 /// 출발 'GPS 선택'(2026-10-11): 켜져 있으면 대시보드 지도를 누른 곳이 현재 위치가 된다 (바다면 해상 경로 안내)
 final mapPickMode = StateProvider<bool>((_) => false);
 
+/// 지도 누르기로 고르는 것이 도착지인지 (false = 출발지). mapPickMode 가 켜져 있을 때만 뜻이 있다 (2026-10-11)
+final mapPickDest = StateProvider<bool>((_) => false);
+
 /// 길찾기(custom_route.dart)로 정한 목적지 id. 출발지가 내 위치가 아니면 이동 중 경로 재확인(GPS)을 끈다
 const customRouteId = 'custom';
 final customRouteFollowsUser = StateProvider<bool>((_) => true);
@@ -380,9 +383,30 @@ final placesProvider = FutureProvider<List<SavedPlace>>((ref) {
 final routeProvider =
     FutureProvider.family<SafetyRoute, String>((ref, facilityId) async {
   if (facilityId == aiRouteId) {
-    final route = ref.watch(aiRoute)?.route;
+    final answer = ref.watch(aiRoute);
+    final route = answer?.route;
     if (route == null) throw StateError('AI 경로가 없습니다.');
-    return route;
+    // AI가 계산한 경로는 한 가지 방식(안전한 경로)뿐이다. 경로 방식·이동 수단을 바꾸면 같은 도착지로 경로 서버에서 다시 받는다
+    // (2026-10-11: 예전엔 무엇을 골라도 AI 경로 그대로라 최단·안전이 같아 보였다)
+    final kind = ref.watch(routeKind), mode = ref.watch(travelMode);
+    final dest = answer!.destinationPos;
+    if (dest == null || (kind == route.routeType && mode == route.mode)) return route;
+    TravelSetting.mode = mode;
+    return ref.watch(repo).routeFor(
+        Facility(
+            // 서버 연결이면 'ai', 예시 모드면 예시 경로가 있는 시설 id — 예시 저장소가 그 id 로 경로를 찾는다
+            id: route.shelterId,
+            name: answer.destinationName ?? '목적지',
+            type: FacilityType.place,
+            position: dest,
+            address: '',
+            description: 'AI 안내 목적지',
+            distanceKm: 0,
+            walkMinutes: 0,
+            accessible: false),
+        UserMode.user,
+        kind,
+        ref.watch(routeStartOrigin) ?? ref.read(userLocation).position);
   }
   final selected = ref.watch(routeFacilitySnapshot);
   final facility = selected?.id == facilityId
@@ -414,6 +438,8 @@ final routeProvider =
 /// AI가 안내한 경로를 대시보드 지도에 띄운다 (서버를 다시 부르지 않고 AI가 계산한 경로 그대로)
 void showAiRoute(WidgetRef ref, ChatAnswer answer) {
   ref.read(aiRoute.notifier).state = answer;
+  // 처음에는 AI가 계산한 경로 그대로 보이게 이동 수단을 그 경로에 맞춘다
+  if (answer.route != null) ref.read(travelMode.notifier).state = answer.route!.mode;
   ref.invalidate(routeProvider(aiRouteId));
   startRouteToShelter(
     ref,
@@ -1636,6 +1662,7 @@ class Dashboard extends ConsumerWidget {
       this.mapOnly = false,
       this.showFacilities = false,
       this.routeBriefBody,
+      this.focusBounds,
       this.focusPoint});
 
   /// 방재단 방문 경로처럼 밖에서 그려 넣은 경로(extraPolylines)의 AI 경로 설명 요청 값 (route_brief_card.dart)
@@ -1649,6 +1676,8 @@ class Dashboard extends ConsumerWidget {
   /// 방재단 지도: 대피소·의료시설을 늘 그리고, 목록에서 고른 가구로 지도를 옮긴다 (2026-10-09)
   final bool showFacilities;
   final LatLng? focusPoint;
+  /// 이 범위가 다 보이게 지도를 부드럽게 옮긴다 (방재단 방문 경로: 전체 또는 고른 구간, 2026-10-12)
+  final LatLngBounds? focusBounds;
   @override
   Widget build(BuildContext c, WidgetRef ref) {
     // 방재단 현황(mapOnly)은 대시보드에서 정한 개인 경로(목적지·경로선·해상 경로)를 보이지 않는다 (2026-10-11 사용자 요청 —
@@ -1672,6 +1701,7 @@ class Dashboard extends ConsumerWidget {
       mapOnly: mapOnly,
       showFacilities: showFacilities,
       focusPoint: focusPoint,
+      focusBounds: focusBounds,
       demo: demo,
       floodGrids: demo ? null : ref.watch(floodGridProvider).valueOrNull,
       riskItems: liveRiskItems(live),
@@ -1708,6 +1738,8 @@ class Dashboard extends ConsumerWidget {
           data: (w) => w,
           loading: () => const WhereNow(WhereKind.checking),
           error: (_, __) => const WhereNow(WhereKind.unknown, reason: '바다·육지를 판별하지 못했습니다.')),
+      // 방재단 지도(mapOnly)는 지도만 — 주소 입력은 대시보드에서만
+      onEditLocation: mapOnly ? null : () => setLocationByAddress(c, ref),
       onLocate: () async {
         final msg = await useGpsOrigin(ref);
         if (msg != null && c.mounted) {
