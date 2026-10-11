@@ -47,6 +47,11 @@ class Classification(BaseModel):
     destination: str | None = Field(default=None, description=(
         "사용자가 가려는 장소 이름 그대로 (예: '구룡포항', '집', '직장', '충혼탑'). "
         "목적지 없이 대피소·대피 방법만 묻거나 이동 질문이 아니면 null"))
+    # 기준 위치 (2026-10-12): 질문 속 장소를 이번 질문의 기준으로 쓴다 (graph.make_manager → flood.pick_location)
+    place: str | None = Field(default=None, description=(
+        "사용자가 어느 곳의 상황을 묻는지, 또는 자기가 지금 있다고 말한 곳. 등록 장소 이름이면 그 이름 그대로 "
+        "(예: '가게', '집', '직장'), 아니면 사용자가 말한 주소·장소 이름 (예: '호미로 152', '구룡포시장'). "
+        "'여기'·'지금 있는 곳'처럼 현재 위치를 가리키거나 장소를 말하지 않았으면 null. 가려는 곳(destination)은 넣지 않는다"))
     mobility_limited: bool = Field(default=False, description=(
         "이번 질문에서 사용자가 직접 걷기 불편·무릎·다리 통증·지팡이·휠체어·거동이 불편한 동반자를 말했으면 true"))
     # 행동 권고 판단 로직(action.py)의 대화로만 알 수 있는 분기. 질문·이전 대화에 근거가 없으면 unknown
@@ -99,6 +104,11 @@ SYSTEM_PROMPT = f"""너는 포항 구룡포 재난 대응 서비스 '구룡가�
 - can_move·damage는 질문과 이전 대화에서 사용자가 직접 말한 것만으로 정한다. 추측하지 말고 모르면 unknown.
 - destination은 사용자가 가려는 곳을 말했을 때만 채운다 ("구룡포항까지 어떻게 가?" → 구룡포항, "집에 가도 돼?" → 집,
   "대피소 어디야?" → null). 사용자가 있는 곳(출발지)은 넣지 않는다.
+- place는 사용자가 특정 장소의 상황을 묻거나("우리 가게 침수됐어?" → 가게, "구룡포시장 쪽 비 많이 와?" → 구룡포시장)
+  자기가 있는 곳을 말했을 때("호미로 152에 있는데 가까운 대피소 알려줘" → 호미로 152) 채운다.
+  "여기", "지금 있는 곳", 장소 언급 없음 → null. 구룡포 전체를 묻는 말("구룡포 비 와?")도 null.
+  그 장소가 사용자의 등록 장소에 없는데 이전 대화에서 사용자가 그 장소의 주소·위치를 말했으면, 이름 대신 그 주소·위치를 넣는다
+  (예: 이전 대화 "가게는 호미로221번길 18에 있어" + 질문 "우리 가게 침수됐어?" → 호미로221번길 18).
 - 재검증 실패 사유가 주어지면, 그 사유를 해결하도록 선택을 조정한다."""
 
 
@@ -122,6 +132,11 @@ def _profile_line(user: UserProfile | None) -> str:
         parts.append("보호가 필요한 동반자 있음")
     if user.occupation:
         parts.append(f"직업 {user.occupation}")
+    # 분류기가 "우리 가게"를 등록 장소 이름으로 알아보도록 (좌표·주소는 넣지 않는다)
+    names = [("집" if user.home else None), *(p.label for p in user.frequent_places)]
+    names = list(dict.fromkeys(n for n in names if n))
+    if names:
+        parts.append("등록 장소: " + "·".join(names))
     return ", ".join(parts)
 
 
@@ -634,6 +649,9 @@ class MemoryFact(BaseModel):
     value: str = Field(description="age는 숫자, vision_impaired·hearing_impaired는 true/false, "
                                    "mobility는 walk·car·wheelchair·public_transport 중 하나, 나머지는 짧은 문장")
     quote: str = Field(description="근거가 된 사용자 발언 원문 일부")
+    # 2026-10-12: "가게는 ○○에 있어" → 프로필에 '가게'라는 이름으로 저장하고, 나중에 "우리 가게 침수됐어?"에 쓴다
+    label: str | None = Field(default=None, description=(
+        "frequent_place 전용 — 사용자가 그 장소를 부르는 이름 (예: '가게', '직장', '사무실', '작업장'). 이름 없이 장소만 말했으면 null"))
 
 
 class MemoryUpdate(BaseModel):
@@ -649,6 +667,10 @@ EXTRACTOR_PROMPT = """너는 재난 안내 서비스 '구룡가디언'의 사용
   vision_impaired 시각 장애·잘 안 보임, hearing_impaired 청각 장애·잘 안 들림,
   home_address 집 주소·집 위치(사용자가 말한 그대로: 도로명 주소, "구룡포시장 뒤" 같은 장소 설명),
   frequent_place 자주 가는 곳(장소 이름이나 주소 하나씩 — 예: "구룡포수협 위판장", "호미로 152")
+- 사용자가 자기 가게·직장·사무실·작업장이 어디 있는지 말하면 반드시 frequent_place 로 고른다.
+  value 는 위치를 말한 부분 그대로(주소·시장 이름·상호 포함), label 은 사용자가 부르는 이름.
+  예: "가게는 구룡포읍 호미로221번길 18 구룡포전통시장 내 ○○상사 안에 있어"
+      → value "구룡포읍 호미로221번길 18 구룡포전통시장 내 ○○상사", label "가게"
 고르지 말 것:
 - 보행 능력(다리·무릎이 불편함 등)과 보호가 필요한 동반자(아이·노부모 등) — 이 서비스는 저장하지 않는다
 - 추측·암시, AI 답변에만 있는 내용

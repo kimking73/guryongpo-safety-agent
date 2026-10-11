@@ -95,11 +95,13 @@ PATCH_SOURCE = {"birth_year": "age", "mobility": "mobility", "occupation": "occu
                 "hearing_impaired": "hearing_impaired"}
 
 
-def place_facts(facts) -> list[tuple[str, str]]:
-    """[(place_type, 말한 장소)] — 집 주소는 하나(마지막 것), 자주 가는 곳은 여러 개"""
+def place_facts(facts) -> list[tuple[str, str, str | None]]:
+    """[(place_type, 말한 장소, 부르는 이름)] — 집 주소는 하나(마지막 것), 자주 가는 곳은 여러 개.
+    부르는 이름("가게", "직장")은 자주 가는 곳에만, 사용자가 말했을 때만 있다 (2026-10-12)"""
     homes = [str(f.value).strip() for f in facts if f.field == "home_address" and str(f.value).strip()]
-    others = [str(f.value).strip() for f in facts if f.field == "frequent_place" and str(f.value).strip()]
-    return ([("home", homes[-1])] if homes else []) + [("frequent", p) for p in dict.fromkeys(others)]
+    others = {str(f.value).strip(): (getattr(f, "label", None) or "").strip() or None
+              for f in facts if f.field == "frequent_place" and str(f.value).strip()}
+    return ([("home", homes[-1], None)] if homes else []) + [("frequent", p, name) for p, name in others.items()]
 
 
 class ProfileWriter:
@@ -123,18 +125,23 @@ class ProfileWriter:
         done["profile"] = patch
         applied += [(PATCH_SOURCE[k], "") for k in patch if k in PATCH_SOURCE]
         places = r.json().get("places") or []
-        for kind, said in wanted:
+        for kind, said, name in wanted:
             where = self.locate(said) if self.locate else None
             if not where:
                 logger.info("장소 좌표를 찾지 못해 프로필에 넣지 않음: %s", said)
                 continue
-            body = {"place_type": kind, "label": "집" if kind == "home" else said[:40],
+            body = {"place_type": kind, "label": "집" if kind == "home" else (name or said)[:40],
                     "address": (where.get("address") or said)[:300],
                     "location": {"lat": where["lat"], "lng": where["lon"]}, "notify": True}
             home = next((p for p in places if p.get("place_type") == "home"), None) if kind == "home" else None
-            if kind == "frequent" and any(p.get("label") == body["label"] for p in places):
+            same = next((p for p in places if p.get("place_type") != "home" and p.get("label") == body["label"]), None) \
+                if kind == "frequent" else None
+            if same and not name:
                 continue
-            if home:
+            if same:
+                # 이름 붙은 곳("가게")을 다시 말했으면 위치를 고친다 (가게를 옮김·처음에 잘못 잡힘)
+                r = self.http.patch(f"/api/v1/user/places/{same['id']}", json=body, headers=_auth(token))
+            elif home:
                 body["label"] = home.get("label") or "집"
                 r = self.http.patch(f"/api/v1/user/places/{home['id']}", json=body, headers=_auth(token))
             else:
@@ -152,7 +159,10 @@ class ProfileWriter:
             f = next((f for f in reversed(facts) if f.field == field and (not said or str(f.value).strip() == said)), None)
             if f is None:
                 continue
-            items.append({"field": field, "label": LABELS.get(field, field), "value": readable(field, f.value)[:300],
+            shown = readable(field, f.value)
+            if field == "frequent_place" and (getattr(f, "label", None) or "").strip():
+                shown = f"{f.label.strip()}: {shown}"                # "가게: 호미로221번길 18 …"
+            items.append({"field": field, "label": LABELS.get(field, field), "value": shown[:300],
                           "quote": (f.quote or "").strip()[:500] or None})
         if not items:
             return 0
