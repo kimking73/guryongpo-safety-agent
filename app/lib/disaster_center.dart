@@ -13,7 +13,7 @@ import 'services/location_service.dart';
 import 'services/demo_mode.dart';
 import 'models/domain_models.dart';
 import 'route_brief_card.dart';
-import 'mobile/dashboard_cards.dart' show WeatherSection, warningIcon;
+import 'weather_section.dart' show WeatherSection, warningIcon;
 import 'ui/gk_theme.dart';
 import 'ui/wind_badge.dart';
 import 'ui/gk_widgets.dart';

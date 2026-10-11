@@ -1,13 +1,12 @@
-// 디자인 개편 (2026-10-08): 날씨 6칸 값 뽑기, 탭바 3/4개, AI 추천 질문 → 덧붙일 카드
+// 디자인 (2026-10-08 개편, 2026-10-11 웹·휴대폰 한 벌): 날씨 6칸 값 뽑기, 휴대폰 폭 하단 탭, 첫 화면 순서
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:guryongpo_safety/main.dart';
-import 'package:guryongpo_safety/mobile/onboarding.dart' show Onboarding;
+import 'package:guryongpo_safety/onboarding.dart' show Onboarding;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:guryongpo_safety/mobile/ai_chat.dart';
-import 'package:guryongpo_safety/mobile/app_shell.dart';
-import 'package:guryongpo_safety/mobile/dashboard_cards.dart';
+import 'package:guryongpo_safety/ui/gk_widgets.dart' show GkSideNav, GkEmergencyCall;
+import 'package:guryongpo_safety/weather_section.dart';
 
 void main() {
   test('서버 단계 → 디자인 단계', () {
@@ -79,29 +78,35 @@ void main() {
     expect(byKey['wave']!.levelText, '자료 없음');
   });
 
-  test('추천 질문 → 덧붙일 카드 (태풍·지원 탭을 AI 대화창으로 옮김)', () {
-    expect(cardFor('태풍 대비 체크리스트 알려줘'), 'checklist');
-    expect(cardFor('지금 태풍 정보 알려줘'), 'typhoon');
-    expect(cardFor('재난 후 내가 받을 수 있는 보험이 있는지 알려줘'), 'support');
-    expect(cardFor('가까운 대피소는 어디야?'), isNull);
-  });
-
-  testWidgets('하단 탭: 기본 3개, 방재단이면 방재단 현황까지 4개', (t) async {
-    await t.pumpWidget(const MaterialApp(home: Scaffold(bottomNavigationBar: DsTabBar(current: '/', responder: false))));
-    expect(find.text('대시보드'), findsOneWidget);
-    expect(find.text('AI 대화창'), findsOneWidget);
-    expect(find.text('사용자'), findsOneWidget);
-    expect(find.text('방재단 현황'), findsNothing);
-
-    await t.pumpWidget(const MaterialApp(home: Scaffold(bottomNavigationBar: DsTabBar(current: '/team', responder: true))));
-    expect(find.text('방재단 현황'), findsOneWidget);
-  });
-
-  test('대피 현황 칩 색·글자', () {
-    expect(evacStyle(null).label, '응답 전');
-    expect(evacStyle('evacuating').label, '대피 중');
-    expect(evacStyle('evacuated').label, '대피 완료');
-    expect(evacStyle('need_help').label, '도움 필요');
+  testWidgets('휴대폰 폭: 웹 화면 그대로 + 하단 탭(시연이면 방재단 현황까지 4개) · 머리줄 119', (t) async {
+    t.view.physicalSize = const Size(390, 844);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.reset);
+    final onError = FlutterError.onError;
+    FlutterError.onError = (d) {
+      if (d.library != 'image resource service') onError?.call(d);
+    };
+    addTearDown(() => FlutterError.onError = onError);
+    SharedPreferences.setMockInitialValues({});
+    Onboarding.reset();
+    Onboarding.setConsented();
+    Onboarding.setDone();
+    appBooted = false;
+    appRouter.go('/');
+    await t.pumpWidget(const ProviderScope(child: GuryongpoApp()));
+    for (var i = 0; i < 8; i++) {
+      await t.pump(const Duration(milliseconds: 300));
+    }
+    expect(appRouter.state.matchedLocation, '/');
+    expect(find.byType(NavigationBar), findsOneWidget);
+    expect(find.byType(GkSideNav), findsNothing);
+    final bar = find.byType(NavigationBar);
+    for (final label in ['대시보드', 'AI 대화창', '방재단 현황', '사용자']) {
+      expect(find.descendant(of: bar, matching: find.text(label)), findsOneWidget);
+    }
+    expect(find.byType(GkEmergencyCall), findsOneWidget);
+    await t.pumpWidget(const SizedBox());
+    await t.pump(const Duration(seconds: 1));
   });
 
   testWidgets('처음 들어온 기기: 동의 화면부터 → 두 동의 후 다음 → 내 정보(2/2)', (t) async {

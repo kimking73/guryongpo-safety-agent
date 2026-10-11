@@ -6,7 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import 'live_screens.dart';
 import 'main.dart';
-import 'mobile/profile_screen.dart' show disabilitiesOf;
+import 'profile_form.dart' show disabilitiesOf;
 import 'models/domain_models.dart';
 import 'patrol_screens.dart' show isPatrolRole, roleKo;
 import 'services/account_service.dart';
