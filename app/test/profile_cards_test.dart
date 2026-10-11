@@ -97,7 +97,11 @@ void main() {
     expect(find.textContaining('음성 언어'), findsNothing);
     expect(find.textContaining('접근성 자세히'), findsNothing);
     expect(find.text('바다 위 대피 경로'), findsNothing); // 사용자 화면 시연 버튼은 뺐다 (2026-10-11)
-    expect(find.text('방재단 현황 (시연)'), findsOneWidget); // 시연 모드는 시연 데이터 화면으로 바로
+    // 시연 모드 사용자 모드(기본)는 방재단 현황 대신 '방재단원 모드로 바꾸기' (2026-10-12 분할 화면 시연)
+    expect(find.text('방재단 현황 (시연)'), findsNothing);
+    expect(find.text('방재단원 모드로 바꾸기 (시연)'), findsOneWidget);
+    expect(find.text('사용자 모드'), findsOneWidget);
+    expect(find.text('방재단원 모드'), findsOneWidget);
   });
 
   testWidgets('수정 → 나이·이동 수단·직업 기타 입력 → 저장하면 요약에 보인다', (t) async {

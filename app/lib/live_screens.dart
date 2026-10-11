@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -10,12 +11,14 @@ import 'disaster_center.dart';
 import 'main.dart';
 import 'services/app_config.dart';
 import 'services/demo_mode.dart';
+import 'services/demo_role.dart';
 import 'services/demo_live_api.dart';
 import 'services/live_api.dart';
 import 'services/prototype_safety_store.dart';
 import 'prototype_safety_screens.dart' show prototypeEvacuationAlertId;
 import 'ui/gk_theme.dart';
 import 'ui/gk_widgets.dart';
+import 'ui/widgets.dart' show SegmentedPill;
 
 /// 실측 데이터 화면 (2026-10-05). 시연 모드를 끄면(기본) 이 화면들이, 켜면 disaster_center.dart·prototype_safety_screens.dart의
 /// 가상 시나리오 화면이 나온다. 자료가 없으면 지어내지 않고 "자료 없음 · 사유"를 보여 준다.
@@ -583,11 +586,30 @@ class DemoModeSwitch extends ConsumerWidget {
           padding: gkCompactPad,
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         const GkCardTitle('시연 모드'),
+        if (AppConfig.isRemote)
         GkSwitchRow(
             icon: Icons.science_rounded,
             label: '시연 모드',
             desc: '켜면 시연 시나리오(가상 위험 구역·예시 가구)로 보여 줘요. 끄면 실측 데이터만.',
             value: ref.watch(demoModeProvider),
             onChanged: (v) => ref.read(demoModeProvider.notifier).set(v)),
+        // 사용자 모드 / 방재단원 모드 (2026-10-12 사용자 요청: 분할 화면 시연 — 창마다 따로)
+        if (ref.watch(showDemoProvider)) ...[
+          const SizedBox(height: 10),
+          Semantics(
+            label: '시연 역할',
+            child: SegmentedPill<DemoRole>(
+              items: const [
+                (DemoRole.user, '사용자 모드', FontAwesomeIcons.user),
+                (DemoRole.responder, '방재단원 모드', FontAwesomeIcons.shieldHalved),
+              ],
+              value: ref.watch(demoRoleProvider),
+              onChanged: (r) => ref.read(demoRoleProvider.notifier).set(r),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text('창마다 따로 정해요. 분할 화면이면 한쪽은 사용자, 다른 쪽은 방재단원으로 — 사용자 모드엔 방재단 현황이 없어요.',
+              style: TextStyle(fontSize: 13, color: GK.muted, height: 1.4)),
+        ],
       ]));
 }

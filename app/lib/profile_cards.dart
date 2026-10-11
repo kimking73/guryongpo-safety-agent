@@ -12,6 +12,7 @@ import 'models/domain_models.dart';
 import 'patrol_screens.dart' show isPatrolRole, roleKo;
 import 'services/account_service.dart';
 import 'services/demo_mode.dart';
+import 'services/demo_role.dart';
 import 'services/evac_alarm.dart';
 import 'services/geocoding_service.dart';
 import 'services/live_api.dart';
@@ -751,9 +752,19 @@ class _SafetyFeaturesCardState extends ConsumerState<SafetyFeaturesCard> {
     final demo = ref.watch(showDemoProvider);
     final role = '${ref.watch(meProvider).valueOrNull?['role'] ?? ''}';
     // 시연 모드는 방재단 화면이 시연 데이터로 바로 열린다 (실제 역할을 주지 않음). 실측은 방재단·관리자만
-    final crew = demo || isPatrolRole(role);
+    // 시연 모드는 창마다 사용자 모드·방재단원 모드 (2026-10-12) — 사용자 모드면 '방재단원 모드로' 버튼
+    final crew = demo ? ref.watch(demoResponderViewProvider) : isPatrolRole(role);
     // '바다 위 대피 경로' 시연 버튼은 뺐다 (2026-10-11 사용자 요청) — 바다 위면 대시보드 경로 안내가 해상 경로를 준다
-    final team = _FeatureButton(
+    final team = demo && !crew
+        ? _FeatureButton(
+            icon: Icons.shield_rounded,
+            label: '방재단원 모드로 바꾸기 (시연)',
+            filled: true,
+            onTap: () {
+              ref.read(demoRoleProvider.notifier).set(DemoRole.responder);
+              c.push('/responder');
+            })
+        : _FeatureButton(
         icon: crew ? Icons.shield_rounded : Icons.badge_rounded,
         label: crew ? (demo ? '방재단 현황 (시연)' : '방재단 현황 · ${roleKo[role] ?? role}') : '방재단 로그인',
         filled: !crew,

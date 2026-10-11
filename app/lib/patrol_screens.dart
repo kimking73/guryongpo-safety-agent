@@ -646,6 +646,8 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
   int _calcSeq = 0;
   /// '내 방문 경로' [출발]을 보내는 중
   bool dispatching = false;
+  /// [실제 출발]을 보낸 시각 (경로를 다시 계산하면 지운다)
+  DateTime? departedAt;
 
   /// 시연 대시보드인지 (앱 안 예시 데이터, 서버 기록과 분리)
   bool get _demo => ref.read(liveApiProvider) is DemoLiveApi;
@@ -723,7 +725,13 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
   /// 방재단 업무 단계 바꾸기 (주민 대피 응답은 바꾸지 않는다)
   /// 완료로 바꾸면 주민 상태도 대피 완료로 (우선 확인 가구에도 대피 완료로 보인다, 2026-10-11 사용자 요청)
   Future<void> _setWork(Map<String, dynamic> t, WorkStatus w) => _patch(
-      t, {'work_status': workWire[w], if (w == WorkStatus.done) 'status': 'evacuated'}, '업무 상태: ${workKo[w]}');
+      t,
+      {
+        if (t['assigned_to'] == null) 'assigned_to': 'me', // 미배정이면 고른 단계로 내가 맡는다 (2026-10-12)
+        'work_status': workWire[w],
+        if (w == WorkStatus.done) 'status': 'evacuated',
+      },
+      '업무 상태: ${workKo[w]}');
 
   Future<void> _patch(Map<String, dynamic> t, Map<String, dynamic> body, String done) async {
     try {
@@ -1148,6 +1156,7 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
 
   void _clearVisit({bool pick = false}) {
     visitResult = null;
+    departedAt = null;
     visitLeg = null;
     visitError = null;
     visitLoading = false;
@@ -1239,6 +1248,7 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
       if (mounted && seq == _calcSeq) {
         setState(() {
           visitResult = r;
+          departedAt = null; // 새로 계산한 경로는 아직 출발 전
           visitLeg = null;
         });
       }
@@ -1258,6 +1268,7 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
     setState(() => dispatching = true);
     try {
       await ref.read(liveApiProvider).dispatch(id, stops);
+      departedAt = now;
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(_demo
@@ -1284,6 +1295,12 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
       builder: (dialog) => StatefulBuilder(builder: (dialog, setDialog) {
         final priority = priorityTargets(_targets);
         final numbers = _numbersOf(priority);
+        // 응답한 앱 사용자는 대피 중이어도 넣을 수 있게 우선 확인 가구 뒤에 번호 없이 (2026-10-12 사용자 요청 — 출발·도착 예정을 다시 보내려고)
+        final list = [
+          ...priority,
+          for (final t in _targets)
+            if (t['kind'] == 'app_user' && t['status'] != 'evacuated' && !numbers.containsKey('${t['id']}') && latLng(t['location']) != null) t,
+        ];
         final count = _routeTargets(_targets).length;
         return Dialog(
           insetPadding: const EdgeInsets.all(16),
@@ -1303,16 +1320,16 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
                 const SizedBox(height: 10),
                 if (detail == null)
                   const LinearProgressIndicator()
-                else if (priority.isEmpty)
+                else if (list.isEmpty)
                   const _Notice(Icons.check_circle_outline_rounded, '지금 우선 확인할 곳이 없습니다', null, GK.green)
                 else
                   Flexible(
                     child: ListView(shrinkWrap: true, children: [
-                      for (final t in priority)
+                      for (final t in list)
                         Padding(
                           padding: const EdgeInsets.symmetric(vertical: 4),
                           child: Row(children: [
-                            _NoCircle(numbers['${t['id']}']!, t['status'] as String?, size: 30),
+                            _NoCircle(numbers['${t['id']}'], t['status'] as String?, size: 30),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1598,17 +1615,42 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
               if (hasLegs) visitLeg = leg == (o['seq'] as num).toInt() - 1 ? null : (o['seq'] as num).toInt() - 1;
             }),
           ),
-        // [출발] (2026-10-12 사용자 요청): 경로의 집들을 내가 맡고 '가는 중' + 집마다 도착 예정 시각 → 시연이면 시민 화면에도
+        // [경로 계산] [실제 출발] (2026-10-12 사용자 요청): 계산만으로는 출발이 아니다 — [실제 출발]을 눌러야 경로의 집들을 내가 맡고
+        // '가는 중' + 집마다 도착 예정 시각 → 시연이면 사용자 화면(대피 현황 옆)에 출발·도착 예정을 보낸다
         if (!closed) ...[
-          const SizedBox(height: 6),
-          PillButton(dispatching ? '보내는 중…' : '출발',
-              icon: FontAwesomeIcons.personRunning,
-              height: 48,
-              fontSize: 16,
-              bg: Ds.navy,
-              fg: Colors.white,
-              onPressed: dispatching ? null : () => _dispatch(plan)),
-          Text(_demo ? '누르면 집마다 도착 예정 시각을 주민 화면(대피 현황 옆)에 보내요.' : '누르면 경로의 집들을 내가 맡아요.',
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(
+              child: PillButton('경로 계산',
+                  icon: FontAwesomeIcons.diamondTurnRight,
+                  height: 48,
+                  fontSize: 16,
+                  bg: Ds.soft,
+                  fg: Ds.navy,
+                  onPressed: visitLoading ? null : () => _calcVisit(picked)),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: PillButton(
+                  dispatching
+                      ? '보내는 중…'
+                      : departedAt == null
+                          ? '실제 출발'
+                          : '출발함 · ${clockHm(departedAt!)}',
+                  icon: FontAwesomeIcons.personRunning,
+                  height: 48,
+                  fontSize: 16,
+                  bg: Ds.navy,
+                  fg: Colors.white,
+                  onPressed: dispatching || visitLoading ? null : () => _dispatch(plan)),
+            ),
+          ]),
+          Text(
+              departedAt != null
+                  ? '출발을 보냈어요. 경로를 바꿨으면 [실제 출발]을 다시 눌러 새 도착 예정을 보내요.'
+                  : _demo
+                      ? '[실제 출발]을 누르면 집마다 도착 예정 시각과 출발 사실을 사용자 화면(대피 현황 옆)에 보내요.'
+                      : '[실제 출발]을 누르면 경로의 집들을 내가 맡아요.',
               style: dsText(12, color: Ds.muted)),
         ],
         if ((plan['still_inside'] as List? ?? const []).isNotEmpty)
@@ -2157,7 +2199,7 @@ class _TargetDetail extends StatelessWidget {
 }
 
 /// ⑤ 배정 현황 카드 (디자인): 이름 + 위치 · 오른쪽 담당(배지 아이콘 + 이름)과 업무 상태 알약 · 4칸 진행 막대(출발 → 방문 → 대피 동행 → 완료).
-/// 카드를 누르면 지도에서 위치를 보여 주고, 고른 카드에만 '업무 단계 바꾸기'가 나온다 ('내가 맡기'는 뺐다 — 2026-10-10 사용자 요청)
+/// 카드를 누르면 지도에서 위치를 보여 준다. '업무 단계 바꾸기'는 모든 카드에 (2026-10-12 — 미배정이면 고른 단계로 내가 맡는다)
 class _AssignCard extends StatelessWidget {
   const _AssignCard(
       {required this.t,
@@ -2225,10 +2267,9 @@ class _AssignCard extends StatelessWidget {
             if (w == WorkStatus.enRoute && DateTime.tryParse('${t['eta']}') != null)
               Text('도착 예정 ${clockHm(DateTime.parse('${t['eta']}').toLocal())}',
                   style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: GK.navy)),
-            if (selected) ...[
-              if (!closed)
+            // 업무 단계 바꾸기는 모든 카드에 — 미배정이면 고른 단계로 내가 맡는다 (2026-10-12 사용자 요청: 메뉴가 안 보여 단계를 못 바꿨다)
+            if (!closed && supportsWork) ...[
                 Wrap(spacing: 6, runSpacing: 0, children: [
-                  if (supportsWork && a != null)
                     PopupMenuButton<WorkStatus>(
                       tooltip: '업무 단계 바꾸기',
                       onSelected: onWork,

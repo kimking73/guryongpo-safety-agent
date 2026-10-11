@@ -37,6 +37,8 @@ import 'route_planner.dart';
 import 'custom_route.dart';
 import 'login_screen.dart';
 import 'services/demo_mode.dart';
+import 'services/demo_role.dart';
+import 'profile_form.dart' show disabilitiesOf;
 import 'prototype_safety_screens.dart';
 import 'services/demo_notifications.dart';
 import 'services/evac_alarm.dart';
@@ -1172,6 +1174,11 @@ class _ShellState extends ConsumerState<Shell> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) => _presentNextAlert());
+    final store = ref.read(prototypeSafetyProvider);
+    if (store.loaded) {
+      _demoBaseline = true;
+      _lastDemoResponse = store.demoAlertActive ? store.responseFor(prototypeEvacuationAlertId)?.wireValue : null;
+    }
   }
 
   void _scheduleAlertCheck() {
@@ -1206,6 +1213,40 @@ class _ShellState extends ConsumerState<Shell> {
     }
   }
 
+  /// 방재단원 모드에서 마지막으로 알린 시연 주민 응답 (같은 응답은 다시 알리지 않는다)
+  String? _lastDemoResponse;
+  /// 기기에 이미 남아 있던 응답은 창을 열 때 알리지 않는다 (기기 기록을 처음 읽은 뒤부터 바뀐 것만)
+  bool _demoBaseline = false;
+
+  /// 방재단원 모드 창: 다른 창(사용자 모드)의 시연 주민이 대피 현황에 응답하면 알림 (2026-10-12 사용자 요청)
+  void _listenDemoResponses() {
+    ref.listen<PrototypeSafetyController>(prototypeSafetyProvider, (_, store) {
+      final r = store.demoAlertActive ? store.responseFor(prototypeEvacuationAlertId) : null;
+      final key = r?.wireValue;
+      if (!_demoBaseline) {
+        _demoBaseline = store.loaded;
+        _lastDemoResponse = key;
+        return;
+      }
+      if (!ref.read(demoResponderViewProvider) || key == null || key == _lastDemoResponse) {
+        _lastDemoResponse = key;
+        return;
+      }
+      _lastDemoResponse = key;
+      unawaited(_announceDemoResponse(r!));
+    });
+  }
+
+  Future<void> _announceDemoResponse(EvacuationResponseStatus r) async {
+    final dis = disabilitiesOf(await AccountService().optionalProfile());
+    final kinds = [for (final (k, l) in const [('see', '시각'), ('hear', '청각'), ('body', '지체')]) if (dis.contains(k)) '$l장애'];
+    rootMessengerKey.currentState?.showSnackBar(SnackBar(
+      content: Text(['주민 응답이 왔어요', '앱 사용자 (시연 주민)', r.label, ...kinds].join(' · ')),
+      duration: const Duration(seconds: 8),
+      action: SnackBarAction(label: '보기', onPressed: () => appRouter.go('/responder')),
+    ));
+  }
+
   @override
   Widget build(BuildContext c) {
     ref.listen<List<AlertItem>>(
@@ -1225,7 +1266,10 @@ class _ShellState extends ConsumerState<Shell> {
     // 메뉴 4개 = web-prototype (2026-10-08 사용자 결정): 대시보드 · AI 대화창 · 사용자 · (방재단·관리자·시연) 방재단 현황.
     // 태풍 정보·선제 경고·지원 및 복구는 메뉴에서 빠지고 대시보드 카드·알림 종으로 간다 (주소는 그대로)
     final role = '${ref.watch(meProvider).valueOrNull?['role'] ?? ''}';
-    final crew = isPatrolRole(role) || ref.watch(showDemoProvider);
+    // 시연 모드는 창마다 사용자 모드·방재단원 모드 (2026-10-12 사용자 요청: 분할 화면 시연) — 사용자 모드엔 방재단 현황이 없다
+    final showDemo = ref.watch(showDemoProvider);
+    final crew = showDemo ? ref.watch(demoResponderViewProvider) : isPatrolRole(role);
+    _listenDemoResponses();
     final List<GkNavItem> nav = [
       ('대시보드', Icons.grid_view_rounded, '/'),
       ('AI 대화창', Icons.chat_bubble_rounded, '/ai'),
@@ -1235,6 +1279,12 @@ class _ShellState extends ConsumerState<Shell> {
     final wide = MediaQuery.sizeOf(c).width >= 840;
     final here = GoRouterState.of(c).uri.path;
     final found = nav.indexWhere((x) => x.$3 == here);
+    // 시연 사용자 모드에서 방재단 화면 주소로 오면 대시보드로
+    if (showDemo && !crew && here == '/responder') {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) GoRouter.of(context).go('/');
+      });
+    }
     ref.watch(gpsTracker);
     final body = Column(children: [StatusLine(compact119: !wide), Expanded(child: widget.child)]);
     if (wide) {
@@ -1703,7 +1753,8 @@ class EvacStatusChip extends ConsumerWidget {
                           fontWeight: FontWeight.w800,
                           color: evac.active ? GK.ink : GK.muted)),
                 ),
-                if (evac.demo) ...[
+                // 좁은 휴대폰 머리줄에선 '시연' 표시를 빼서 넘치지 않게 (화면 읽기 라벨엔 그대로, 2026-10-12)
+                if (evac.demo && !narrow) ...[
                   const SizedBox(width: 8),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -1754,8 +1805,20 @@ class _DispatchEtaPillState extends ConsumerState<DispatchEtaPill> {
   @override
   Widget build(BuildContext c) {
     final evac = evacHeaderState(ref);
+    // 실서버: 방재단이 맡으면 서버가 도착 예상 분을 준다 (alerts/assignment.py → MyEvacuation.assigned·eta_min)
+    final live = ref.watch(alertEvacuationProvider);
+    if (!evac.demo && live?['assigned'] == true) {
+      final m = (live?['eta_min'] as num?)?.toInt();
+      final text = m == null ? '방재단 배정 · 곧 도착' : '방재단 배정 · 약 $m분 후 도착';
+      return Semantics(
+          label: text,
+          excludeSemantics: true,
+          child: GkPill(widget.narrow ? (m == null ? '곧 도착' : '약 $m분 후 도착') : text,
+              icon: Icons.directions_run_rounded, bg: GK.navy, fg: Colors.white));
+    }
+    // 시연: 방재단원 모드 창에는 시민용 표시를 띄우지 않는다 (2026-10-12, 분할 화면)
     final d = ref.watch(prototypeSafetyProvider).demoDispatch;
-    if (!evac.demo || d == null || d.stage == 'done') return const SizedBox.shrink();
+    if (!evac.demo || d == null || d.stage == 'done' || ref.watch(demoResponderViewProvider)) return const SizedBox.shrink();
     final eta = d.eta.toLocal();
     final left = eta.difference(DateTime.now());
     final mins = (left.inSeconds / 60).ceil();
@@ -3381,7 +3444,8 @@ class ProfileScreen extends ConsumerWidget {
     final right = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       const ProfileAlertsCard(),
       gap,
-      if (AppConfig.isRemote) ...[const DemoModeSwitch(), gap],
+      // 시연 모드 카드: 서버 연결이면 켜고 끄기 + 역할, 서버 없이(목업)는 늘 시연이라 역할(사용자·방재단원)만 (2026-10-12)
+      if (AppConfig.isRemote || ref.watch(showDemoProvider)) ...[const DemoModeSwitch(), gap],
       const SafetyFeaturesCard(),
       const TeamStatusCard(),
     ]);

@@ -758,12 +758,16 @@ void main() {
     await t.tap(find.widgetWithText(PillButton, '1곳 경로 계산'));
     await _settle(t);
     expect(find.textContaining('출발하면 약 6분 뒤'), findsOneWidget);   // 출발 전: 누적 이동 시간
+    // 계산만으로는 출발이 아니다: [경로 계산] 옆 [실제 출발] (2026-10-12 사용자 요청)
+    expect(find.widgetWithText(PillButton, '경로 계산'), findsOneWidget);
+    expect(store.demoDispatch, isNull);
 
     final before = DateTime.now();
-    final go = find.widgetWithText(PillButton, '출발');
+    final go = find.widgetWithText(PillButton, '실제 출발');
     await t.ensureVisible(go);
     await t.tap(go);
     await _settle(t);
+    expect(find.textContaining('출발함 · '), findsOneWidget);
     // 시민에게 보낸 출동 기록: 가는 중 · 도착 예정 = 출발 + 6분
     final d = store.demoDispatch!;
     expect(d.stage, 'en_route');
@@ -786,6 +790,43 @@ void main() {
     expect(store.demoDispatch!.stage, 'visiting');
     await t.pumpWidget(const SizedBox.shrink());
     await t.pump(const Duration(minutes: 1));   // 남은 타이머(안내 메시지) 정리
+  });
+
+  // 2026-10-12 사용자 요청: 업무 단계 메뉴가 미배정 카드에서 안 보였다 · 대피 중으로 응답한 앱 사용자는 경로에 넣을 수 없었다
+  testWidgets('미배정 카드도 업무 단계 바꾸기 → 내가 맡고 그 단계, 대피 중 앱 사용자도 경로 안내 창에 나온다', (t) async {
+    _tall(t);
+    t.view.physicalSize = const Size(900, 9000);
+    SharedPreferences.setMockInitialValues({});
+    DemoLiveApi.resetDemoIncident();
+    final store = PrototypeSafetyController();
+    await store.load();
+    await store.startDemoAlert(prototypeEvacuationAlertId);
+    await store.respond(prototypeEvacuationAlertId, EvacuationResponseStatus.evacuating);
+    await t.pumpWidget(ProviderScope(
+        overrides: [prototypeSafetyProvider.overrideWith((_) => store)],
+        child: const MaterialApp(home: Scaffold(body: DemoPatrolScope(child: LiveResponderScreen())))));
+    await _settle(t);
+    // 미배정 앱 사용자 카드: 고르지 않아도 '업무 단계 바꾸기' → '방문 중' = 내가 맡고 방문 중
+    final card = find.byKey(const ValueKey('assign-${DemoLiveApi.meTargetId}'));
+    await t.ensureVisible(card);
+    expect(find.descendant(of: card, matching: find.text('미배정')), findsOneWidget);
+    await t.tap(find.descendant(of: card, matching: find.text('업무 단계 바꾸기')));
+    await t.pumpAndSettle();
+    await t.tap(find.text('방문 중').last);
+    await _settle(t);
+    expect(find.descendant(of: card, matching: find.text('나')), findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('방문 중')), findsOneWidget);
+    expect(store.demoDispatch?.stage, 'visiting');   // 사용자 쪽은 '방재단 도착'
+
+    // 경로 안내 창: 대피 중인 앱 사용자도 번호 없이 목록에 → 경로 추가
+    await t.ensureVisible(find.widgetWithText(MapMenuButton, '경로 안내'));
+    await t.tap(find.widgetWithText(MapMenuButton, '경로 안내'));
+    await _settle(t);
+    final row = find.ancestor(
+        of: find.descendant(of: find.byType(Dialog), matching: find.text('앱 사용자 (시연 주민)')), matching: find.byType(Row)).first;
+    expect(find.descendant(of: row, matching: find.widgetWithText(PillButton, '경로 추가')), findsOneWidget);
+    await t.pumpWidget(const SizedBox.shrink());
+    await t.pump(const Duration(minutes: 1));
   });
 
   testWidgets('시민 화면: 대피 현황 칩 옆에 방재단 출발·도착 예정, 다른 창이 보낸 것도 받는다', (t) async {

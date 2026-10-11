@@ -4,6 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:guryongpo_safety/main.dart';
 import 'package:guryongpo_safety/onboarding.dart' show Onboarding;
+import 'package:guryongpo_safety/services/demo_role.dart';
+import 'package:guryongpo_safety/services/prototype_safety_store.dart';
+import 'package:guryongpo_safety/prototype_safety_screens.dart' show prototypeEvacuationAlertId;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:guryongpo_safety/ui/gk_widgets.dart' show GkSideNav, GkEmergencyCall;
 import 'package:guryongpo_safety/weather_section.dart';
@@ -78,7 +81,7 @@ void main() {
     expect(byKey['wave']!.levelText, '자료 없음');
   });
 
-  testWidgets('휴대폰 폭: 웹 화면 그대로 + 하단 탭(시연이면 방재단 현황까지 4개) · 머리줄 119', (t) async {
+  testWidgets('휴대폰 폭: 웹 화면 그대로 + 하단 탭(시연 방재단원 모드면 방재단 현황까지 4개) · 머리줄 119', (t) async {
     t.view.physicalSize = const Size(390, 844);
     t.view.devicePixelRatio = 1;
     addTearDown(t.view.reset);
@@ -93,7 +96,8 @@ void main() {
     Onboarding.setDone();
     appBooted = false;
     appRouter.go('/');
-    await t.pumpWidget(const ProviderScope(child: GuryongpoApp()));
+    await t.pumpWidget(ProviderScope(
+        overrides: [demoRoleProvider.overrideWith((_) => DemoRoleNotifier(DemoRole.responder))], child: const GuryongpoApp()));
     for (var i = 0; i < 8; i++) {
       await t.pump(const Duration(milliseconds: 300));
     }
@@ -107,6 +111,60 @@ void main() {
     expect(find.byType(GkEmergencyCall), findsOneWidget);
     await t.pumpWidget(const SizedBox());
     await t.pump(const Duration(seconds: 1));
+  });
+
+  // 2026-10-12 사용자 요청: 시연 모드를 사용자 모드·방재단원 모드로 (분할 화면 시연)
+  Future<PrototypeSafetyController> pumpShell(WidgetTester t, DemoRole role) async {
+    t.view.physicalSize = const Size(390, 844);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.reset);
+    final onError = FlutterError.onError;
+    FlutterError.onError = (d) {
+      if (d.library != 'image resource service') onError?.call(d);
+    };
+    addTearDown(() => FlutterError.onError = onError);
+    SharedPreferences.setMockInitialValues({});
+    final store = PrototypeSafetyController();
+    await store.load();
+    Onboarding.reset();
+    Onboarding.setConsented();
+    Onboarding.setDone();
+    appBooted = false;
+    appRouter.go('/');
+    await t.pumpWidget(ProviderScope(overrides: [
+      demoRoleProvider.overrideWith((_) => DemoRoleNotifier(role)),
+      prototypeSafetyProvider.overrideWith((_) => store),
+    ], child: const GuryongpoApp()));
+    for (var i = 0; i < 8; i++) {
+      await t.pump(const Duration(milliseconds: 300));
+    }
+    return store;
+  }
+
+  testWidgets('시연 사용자 모드: 방재단 현황 메뉴가 없고, 주민 응답 알림도 띄우지 않는다', (t) async {
+    final store = await pumpShell(t, DemoRole.user);
+    final bar = find.byType(NavigationBar);
+    expect(find.descendant(of: bar, matching: find.text('방재단 현황')), findsNothing);
+    expect(find.descendant(of: bar, matching: find.text('사용자')), findsOneWidget);
+    await store.startDemoAlert(prototypeEvacuationAlertId);
+    await store.respond(prototypeEvacuationAlertId, EvacuationResponseStatus.needHelp);
+    await t.pump();
+    await t.pump(const Duration(milliseconds: 300));
+    expect(find.textContaining('주민 응답이 왔어요'), findsNothing);
+    await t.pumpWidget(const SizedBox());
+    await t.pump(const Duration(seconds: 10));
+  });
+
+  testWidgets('시연 방재단원 모드: 다른 창의 주민이 응답하면 "주민 응답이 왔어요" 알림', (t) async {
+    final store = await pumpShell(t, DemoRole.responder);
+    await store.startDemoAlert(prototypeEvacuationAlertId);
+    await store.respond(prototypeEvacuationAlertId, EvacuationResponseStatus.needHelp);
+    for (var i = 0; i < 4; i++) {
+      await t.pump(const Duration(milliseconds: 300));
+    }
+    expect(find.textContaining('주민 응답이 왔어요 · 앱 사용자 (시연 주민) · 도움 필요'), findsOneWidget);
+    await t.pumpWidget(const SizedBox());
+    await t.pump(const Duration(seconds: 10));
   });
 
   testWidgets('처음 들어온 기기: 동의 화면부터 → 두 동의 후 다음 → 내 정보(2/2)', (t) async {
