@@ -1917,6 +1917,8 @@ class Dashboard extends ConsumerWidget {
       this.extraPolygons = const [],
       this.extraMarkers = const [],
       this.extraPolylines = const [],
+      this.extraPolylinesAt,
+      this.extraMarkersAt,
       this.mapOnly = false,
       this.showFacilities = false,
       this.routeBriefBody,
@@ -1930,6 +1932,8 @@ class Dashboard extends ConsumerWidget {
   final List<Polygon> extraPolygons;
   final List<Marker> extraMarkers;
   final List<Polyline> extraPolylines;
+  final List<Polyline> Function(double zoom)? extraPolylinesAt;
+  final List<Marker> Function(double zoom)? extraMarkersAt;
   final bool mapOnly;
   /// 방재단 지도: 대피소·의료시설을 늘 그리고, 목록에서 고른 가구로 지도를 옮긴다 (2026-10-09)
   final bool showFacilities;
@@ -1956,6 +1960,8 @@ class Dashboard extends ConsumerWidget {
       extraPolygons: extraPolygons,
       extraMarkers: extraMarkers,
       extraPolylines: extraPolylines,
+      extraPolylinesAt: extraPolylinesAt,
+      extraMarkersAt: extraMarkersAt,
       mapOnly: mapOnly,
       showFacilities: showFacilities,
       focusPoint: focusPoint,
