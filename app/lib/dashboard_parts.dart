@@ -555,6 +555,13 @@ class _RouteMapState extends ConsumerState<RouteMap> with WidgetsBindingObserver
   }
 }
 
+/// '대피소 · 지진해일 대피장소 · 실외' / '의료시설 · 응급의료기관' — 시설 종류 한 줄 (위험 구역 경고 문구는 뺀다, 따로 보인다)
+String facilityKindText(Facility f) {
+  final head = f.type == FacilityType.shelter ? '대피소' : '의료시설';
+  final detail = f.description.split(' · ').where((s) => s.isNotEmpty && s != head && !s.contains('위험 구역')).join(' · ');
+  return detail.isEmpty ? head : '$head · $detail';
+}
+
 class ShelterPickerSheet extends ConsumerWidget {
   const ShelterPickerSheet({super.key});
 
@@ -590,8 +597,10 @@ class ShelterPickerSheet extends ConsumerWidget {
                         : Icons.local_hospital,
                 color: warn != null ? Colors.orange.shade800 : null),
             title: Text(facility.name),
-            subtitle: Text(
+            // 무슨 시설인지 (2026-10-11 사용자 요청): 대피소 종류·실내외 / 의료시설 응급 등급
+            subtitle: Text('${facilityKindText(facility)}\n'
                 '약 ${facility.distanceKm}km · 도보 ${facility.walkMinutes}분 · $label'),
+            isThreeLine: true,
             trailing: const Icon(Icons.chevron_right),
             onTap: () {
               final messenger = ScaffoldMessenger.of(context);

@@ -14,6 +14,7 @@ import '../models/domain_models.dart';
 import 'dashboard_cards.dart';
 import '../ui/tokens.dart';
 import '../ui/widgets.dart';
+import '../ui/wind_badge.dart';
 
 void _openLandslideMap() => launchUrl(Uri.parse(
     'https://sansatai.forest.go.kr/mhms_pub/mhms/lndsInfo/lndsMapViewPage.do'));
@@ -595,11 +596,10 @@ class _MDisasterDashboardState extends State<MDisasterDashboard> {
                             onTap: () => _showLiveWind(context, w),
                             child: Column(children: [
                               // 화살표는 불어가는 방향 = 풍향(불어오는 방향) + 180°
-                              Transform.rotate(
-                                angle: (w.$3 + 180) * math.pi / 180,
-                                child: Icon(Icons.navigation,
-                                    color: _windColor(w.$2, w.$2), size: 18 + math.min(w.$2, 24)),
-                              ),
+                              WindBadge(
+                                  color: _windColor(w.$2, w.$2),
+                                  level: WindBadge.levelOf(w.$2, w.$2),
+                                  towardDeg: w.$3 + 180),
                               Text('${w.$2.toStringAsFixed(1)}m/s',
                                   style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
                             ]),
@@ -620,16 +620,10 @@ class _MDisasterDashboardState extends State<MDisasterDashboard> {
                             onTap: () => _showWind(context, w.$1, w.$2, w.$3),
                             child: Column(
                               children: [
-                                Transform.rotate(
-                                  angle: (w.$3 == '북동풍' ? 225 : 270) *
-                                      math.pi /
-                                      180,
-                                  child: Icon(
-                                    Icons.navigation,
+                                WindBadge(
                                     color: _windColor(w.$2, w.$2 + 9),
-                                    size: 18 + w.$2,
-                                  ),
-                                ),
+                                    level: WindBadge.levelOf(w.$2, w.$2 + 9),
+                                    towardDeg: w.$3 == '북동풍' ? 225 : 270),
                                 Text(
                                   '${w.$2.toInt()}m/s',
                                   style: const TextStyle(
@@ -1390,6 +1384,8 @@ void _showHazard(BuildContext c, DemoHazard h) => showModalBottomSheet<void>(
 /// 위험 영역 면: 채움색 = 위험 단계, 테두리색 = 재난 종류 (파랑 침수·갈색 산사태). 시연 모드면 읍 전체 특보는 뺀다
 List<Polygon> hazardAreaPolygons(List<RiskArea> areas) => [
       for (final area in DemoData.mapAreas(areas))
+        // 주의 미만 침수 원은 그리지 않는다 — 투명색에 alpha를 주면 회색 원이 된다 (2026-10-11 회색 삭제)
+        if (area.hazard == 'landslide' || const ['주의', '경계', '심각'].contains(area.level))
         for (final ring in area.polygons)
           if (ring.length >= 3)
             Polygon(
@@ -1431,6 +1427,7 @@ List<Marker> floodGridDotMarkers(BuildContext context, List<FloodGrid> grids,
 /// 수위계 표식: 침수 영역 원의 중심(판정 원인 센서 실제 좌표). 누르면 센서 측정값
 List<Marker> floodSensorMarkers(BuildContext context, List<RiskArea> areas) => [
       for (final a in _floodSensors(DemoData.mapAreas(areas)))
+        if (const ['주의', '경계', '심각'].contains(a.level))
         Marker(
           point: a.sensor!,
           width: 30,
@@ -3267,12 +3264,12 @@ void _showMapLegend(BuildContext context,
             ],
             if (visible.contains(HazardKind.wind)) ...[
               section('바람'),
-              row(icon(Icons.navigation, Colors.blueGrey.shade700), '화살표 방향',
+              row(WindBadge(color: Colors.blueGrey.shade700, level: 1, towardDeg: 225, size: 20), '화살표 방향',
                   '바람이 불어가는 쪽'),
-              row(icon(Icons.navigation, _windColor(10, 10)), '회색', '평균 14m/s 미만'),
-              row(icon(Icons.navigation, _windColor(14, 14)), '주황',
+              row(WindBadge(color: _windColor(10, 10), level: 1, towardDeg: 225, size: 20), '회색', '평균 14m/s 미만'),
+              row(WindBadge(color: _windColor(14, 14), level: 2, towardDeg: 225, size: 20), '주황',
                   '평균 14m/s 이상 (강풍주의보 기준)'),
-              row(icon(Icons.navigation, _windColor(21, 21)), '빨강',
+              row(WindBadge(color: _windColor(21, 21), level: 3, towardDeg: 225, size: 20), '빨강',
                   '평균 21m/s 이상 (강풍경보 기준) · 화살표가 클수록 셈'),
             ],
             section('표식'),

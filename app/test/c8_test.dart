@@ -10,7 +10,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:guryongpo_safety/patrol_screens.dart';
 import 'package:guryongpo_safety/ui/map_menu.dart';
 import 'package:guryongpo_safety/ui/widgets.dart' show PillButton;
-import 'package:guryongpo_safety/prototype_safety_screens.dart' show prototypeEvacuationAlertId;
+import 'package:guryongpo_safety/prototype_safety_screens.dart'
+    show prototypeEvacuationAlertId, evacuationFlashTransitionInterval;
 import 'package:guryongpo_safety/services/live_api.dart';
 import 'package:guryongpo_safety/services/demo_live_api.dart';
 import 'package:latlong2/latlong.dart';
@@ -287,7 +288,12 @@ void main() {
     await t.ensureVisible(find.byTooltip('방문 결과').first);
     await t.tap(find.byTooltip('방문 결과').first);
     await t.pumpAndSettle();
-    await t.tap(find.text('함께 대피함'));
+    // 방문 결과는 4가지 (2026-10-11 사용자 요청)
+    for (final r in ['대피 완료', '대피 거부', '부재·확인 불가', '기타']) {
+      expect(find.widgetWithText(ListTile, r), findsOneWidget, reason: r);
+    }
+    expect(find.text('함께 대피함'), findsNothing);
+    await t.tap(find.widgetWithText(ListTile, '대피 완료'));
     await t.pumpAndSettle();
     await t.enterText(find.byType(TextField).last, '휠체어로 이동');
     await t.tap(find.text('기록'));
@@ -300,9 +306,16 @@ void main() {
     expect(find.text('대피 완료'), findsWidgets);
     // 김○○는 대피 완료가 되어 우선 확인 목록에서 빠지고, 박○○가 1번
     expect(find.textContaining('도움 필요 · 지체장애', findRichText: true), findsNothing);
-    // 방문 결과는 그 가구 줄 이름 옆에 남는다 (2026-10-11 사용자 요청)
-    expect(find.textContaining('방문: 함께 대피함'), findsOneWidget);
-    // 주민 대피 완료 ≠ 방재단 업무 완료: 배정 현황은 그대로 미배정
+    // 대피 완료는 우선 확인 가구·배정 현황 모두 '대피 완료 1곳 보기'로 접힌다 (2026-10-11 사용자 요청)
+    expect(find.text('대피 완료 1곳 보기'), findsNWidgets(2));
+    expect(find.textContaining('방문: 대피 완료'), findsNothing);
+    await t.ensureVisible(find.text('대피 완료 1곳 보기').first);
+    await t.tap(find.text('대피 완료 1곳 보기').first);
+    await _settle(t);
+    // 펼치면 방문 결과가 그 가구 줄 이름 옆에 보인다
+    expect(find.textContaining('방문: 대피 완료'), findsOneWidget);
+    expect(find.text('대피 완료 1곳 접기'), findsOneWidget);
+    // 담당 지정은 그대로 (배정 칸 숫자는 담당 기준)
     expect(find.text('배정 0가구 · 미배정 2가구'), findsOneWidget);
     await t.pumpWidget(const SizedBox.shrink()); // 10초 갱신 타이머 정리
   });
@@ -328,6 +341,51 @@ void main() {
     expect(find.text('지금 당장 대피해야 합니다'), findsNothing);
     expect(store.responseFor(prototypeEvacuationAlertId), EvacuationResponseStatus.evacuated);
     expect(s.seen, isEmpty);
+  });
+
+  // 2026-10-11 사용자 요청: 대피 현황 칩을 누르면 대피 중·대피 완료·도움 필요 팝업, 알림 방식은 사용자 화면 스위치대로
+  Future<PrototypeSafetyController> pumpChip(WidgetTester t, AccessibilitySettings a) async {
+    SharedPreferences.setMockInitialValues({});
+    final store = PrototypeSafetyController();
+    await store.load();
+    await store.updateAccessibility(a);
+    await t.pumpWidget(ProviderScope(
+        overrides: [prototypeSafetyProvider.overrideWith((_) => store), liveApiProvider.overrideWithValue(FakeServer({}).api())],
+        child: const MaterialApp(home: Scaffold(body: Center(child: EvacStatusChip())))));
+    await t.tap(find.byType(EvacStatusChip));
+    await t.pump();
+    await t.pump();
+    return store;
+  }
+
+  double flashOpacity(WidgetTester t) =>
+      t.widget<AnimatedOpacity>(find.byKey(const ValueKey('evacuation-flash'))).opacity;
+
+  testWidgets('대피 현황 칩: 진행 중인 경보가 없어도 시연 모드면 3버튼 팝업, 진동·화면 점멸 켜짐이면 깜빡인다', (t) async {
+    final store = await pumpChip(t, const AccessibilitySettings(strongVibration: true, screenFlash: true));
+    expect(find.text('지금 당장 대피해야 합니다'), findsOneWidget);
+    for (final s in ['대피 완료', '대피 중', '도움 필요']) {
+      expect(find.text(s), findsOneWidget);
+    }
+    expect(find.text('진동·화면 점멸 켜짐 · 사용자 화면에서 바꿀 수 있어요'), findsOneWidget);
+    await t.pump(evacuationFlashTransitionInterval);
+    expect(flashOpacity(t), greaterThan(0));
+    await t.tap(find.text('대피 완료'));
+    for (var i = 0; i < 10; i++) {
+      await t.pump(const Duration(milliseconds: 100)); // 깜빡임 타이머가 돌아 pumpAndSettle은 쓰지 않는다
+    }
+    expect(find.text('지금 당장 대피해야 합니다'), findsNothing);
+    expect(store.responseFor(prototypeEvacuationAlertId), EvacuationResponseStatus.evacuated);
+    await t.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('대피 현황 칩: 진동·화면 점멸을 끄면 팝업만 뜨고 깜빡이지 않는다', (t) async {
+    await pumpChip(t, const AccessibilitySettings(strongVibration: false, screenFlash: false));
+    expect(find.text('지금 당장 대피해야 합니다'), findsOneWidget);
+    expect(find.text('음성·진동·화면 점멸 알림 꺼짐 · 사용자 화면에서 켤 수 있어요'), findsOneWidget);
+    await t.pump(evacuationFlashTransitionInterval * 3);
+    expect(flashOpacity(t), 0);
+    await t.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets('민감정보 동의: 두 항목 모두 체크해야 등록 버튼이 켜진다', (t) async {
@@ -389,8 +447,10 @@ void main() {
     // 우선 확인 가구 줄에는 경로 추가 아이콘이 없다 — 지도 카드 '경로 안내'로만
     expect(find.byTooltip('경로에 추가'), findsNothing);
     expect(find.text('내 방문 경로'), findsNothing);
-    await t.ensureVisible(find.widgetWithText(PillButton, '경로 안내'));
-    await t.tap(find.widgetWithText(PillButton, '경로 안내'));
+    // 지도 카드 상위 메뉴 두 개 = 대시보드와 같은 모양 (2026-10-11)
+    expect(find.widgetWithText(MapMenuButton, '우선 확인 가구 지도'), findsOneWidget);
+    await t.ensureVisible(find.widgetWithText(MapMenuButton, '경로 안내'));
+    await t.tap(find.widgetWithText(MapMenuButton, '경로 안내'));
     await _settle(t);
     expect(find.text('방문 경로 안내'), findsOneWidget);
     expect(find.text('대피소·의료시설 선택'), findsNothing);
@@ -444,9 +504,13 @@ void main() {
     expect(registeredSupport(ts[3]), isEmpty);
   });
 
-  test('업무 상태는 주민 응답과 따로: 배정 없으면 미배정, 서버에 단계가 없으면 배정됨', () {
+  test('업무 상태: 배정 없으면 미배정, 서버에 단계가 없으면 배정됨, 방문 결과 대피 완료면 완료', () {
     expect(workStatusOf({'status': 'evacuated', 'assigned_to': null}), WorkStatus.unassigned);
     expect(workStatusOf({'status': 'evacuated', 'assigned_to': {'is_me': true}}), WorkStatus.assigned);
+    // 2026-10-11: 방문 결과 '대피 완료' → 배정 여부와 상관없이 완료 (예전 기록 '이송'도)
+    expect(workStatusOf({'status': 'evacuated', 'assigned_to': null, 'last_visit': {'result': 'evacuated_with_help'}}), WorkStatus.done);
+    expect(workStatusOf({'assigned_to': {'is_me': true}, 'last_visit': {'result': 'transported'}}), WorkStatus.done);
+    expect(workStatusOf({'assigned_to': {'is_me': true}, 'last_visit': {'result': 'not_home'}}), WorkStatus.assigned);
     expect(workStatusOf({'assigned_to': {'is_me': false}, 'work_status': 'escorting'}), WorkStatus.escorting);
     expect(workStep(WorkStatus.visiting), 1);
     expect(workStep(WorkStatus.assigned), -1);

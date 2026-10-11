@@ -45,20 +45,6 @@ String accessibilitySummary(Map<String, String> p) {
   return '사용 안 함';
 }
 
-/// 알림 카드의 시각·청각 지원 스위치를 프로필 값에도 남긴다 — 요약 카드·서버·AI가 같은 뜻을 보게.
-/// 켤 때 이미 '저시력'처럼 자세한 값이 있으면 그대로 둔다
-Future<void> saveSupportToProfile(String key, bool on) async {
-  final p = await AccountService().optionalProfile();
-  final now = _support(p, key);
-  if (on && _supportOn(now)) return;
-  if (!on && now == '필요 없음') return;
-  await AccountService().saveOptionalProfile({
-    ...p,
-    for (final legacy in _supportKeys[key]!.skip(1)) legacy: '',
-    key: on ? '지원 필요' : '필요 없음',
-  }..removeWhere((k, v) => v.isEmpty && _supportKeys[key]!.skip(1).contains(k)));
-}
-
 // ------------------------------------------------------------------ 내 정보 (요약 카드 ↔ 수정)
 
 class ProfileDetailsCard extends ConsumerStatefulWidget {
@@ -689,11 +675,6 @@ class ProfileAlertsCard extends ConsumerWidget {
     final acc = ref.watch(prototypeSafetyProvider);
     final a11y = acc.accessibility;
     Future<void> update(AccessibilitySettings next) => acc.updateAccessibility(next);
-    Future<void> support(String key, bool on, AccessibilitySettings next) async {
-      await update(next);
-      await saveSupportToProfile(key, on);
-      ref.read(profileRevision.notifier).state++;   // 내 정보 '접근성 지원' 줄 다시 읽기
-    }
 
     return GkCard(
       padding: gkCompactPad,
@@ -719,26 +700,7 @@ class ProfileAlertsCard extends ConsumerWidget {
             note: '광과민성이 있으면 꺼 두세요',
             value: a11y.screenFlash,
             onChanged: (v) => update(a11y.copyWith(screenFlash: v))),
-        GkSwitchRow(
-            icon: Icons.hearing_rounded,
-            label: '청각 지원',
-            desc: '켜면 진동·화면 점멸·큰 글씨도 함께 켜져요',
-            value: a11y.hearingSupport,
-            onChanged: (v) => support(
-                '청각 지원',
-                v,
-                v
-                    ? a11y.copyWith(hearingSupport: true, strongVibration: true, screenFlash: true, largeText: true)
-                    : a11y.copyWith(hearingSupport: false))),
-        GkSwitchRow(
-            icon: Icons.visibility_rounded,
-            label: '시각 지원',
-            desc: '켜면 음성 질문 자동 재생도 함께 켜져요',
-            value: a11y.visionSupport,
-            onChanged: (v) => support(
-                '시각 지원',
-                v,
-                v ? a11y.copyWith(visionSupport: true, voicePrompts: true) : a11y.copyWith(visionSupport: false))),
+        // 청각 지원·시각 지원 스위치는 뺐다 (2026-10-11 사용자 요청) — 진동·화면 점멸·음성 안내를 각각 켜고 끈다.
         // '음성 언어'·'접근성 자세히' 버튼은 위 스위치와 겹쳐 뺐다 (2026-10-09)
         const FcmPushSettingsCard(),
       ]),
