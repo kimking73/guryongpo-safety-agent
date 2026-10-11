@@ -27,11 +27,14 @@ class _WebRtcLink implements RealtimeLink {
     required String clientSecret,
     required void Function(Map<String, dynamic> event) onEvent,
     required void Function() onClosed,
+    bool microphone = true,
   }) async {
-    final mic = _mic = await web.window.navigator.mediaDevices
-        .getUserMedia(web.MediaStreamConstraints(
-            audio: {'echoCancellation': true, 'noiseSuppression': true, 'autoGainControl': true}.jsify()!))
-        .toDart;
+    final mic = _mic = microphone
+        ? await web.window.navigator.mediaDevices
+            .getUserMedia(web.MediaStreamConstraints(
+                audio: {'echoCancellation': true, 'noiseSuppression': true, 'autoGainControl': true}.jsify()!))
+            .toDart
+        : null;
     if (_closed) return _stopMic();
     final pc = _pc = web.RTCPeerConnection();
     final audio = _audio = web.HTMLAudioElement()..autoplay = true;
@@ -39,8 +42,12 @@ class _WebRtcLink implements RealtimeLink {
       final streams = e.streams.toDart;
       if (streams.isNotEmpty) audio.srcObject = streams.first;
     }).toJS;
-    for (final track in mic.getAudioTracks().toDart) {
-      pc.addTrack(track, mic);
+    if (mic != null) {
+      for (final track in mic.getAudioTracks().toDart) {
+        pc.addTrack(track, mic);
+      }
+    } else {
+      pc.addTransceiver('audio'.toJS, web.RTCRtpTransceiverInit(direction: 'recvonly')); // 듣기만
     }
     final dc = _dc = pc.createDataChannel('oai-events');
     dc.onopen = ((web.Event _) {

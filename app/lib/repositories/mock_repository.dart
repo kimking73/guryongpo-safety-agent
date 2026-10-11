@@ -27,10 +27,13 @@ abstract class SafetyRepository {
   Future<String?> registerDeviceToken(String token, String platform);
   Future<void> unregisterDeviceToken(String token);
   Future<void> markAlertRead(String alertId);
+  /// via: button(기본) · voice(시각장애인 음성 확인, transcript = 사용자가 한 말)
   Future<void> respondToAlert({
     required String alertId,
     required String status,
     required LatLng location,
+    String via = 'button',
+    String? transcript,
   });
   Future<SafetyRoute> routeFor(Facility facility, UserMode userMode, RouteType routeType, LatLng origin);
   Future<ChatAnswer> ask(String question, UserMode userMode, LatLng origin);
@@ -43,6 +46,9 @@ abstract class SafetyRepository {
 
   /// 실시간 음성 대화 세션 (ai /api/voice/session 응답 그대로). 쓸 수 없으면 null → 녹음 올리기 방식
   Future<Map<String, dynamic>?> voiceSession();
+
+  /// 시각장애인 대피 음성 확인·안내 세션 (ai /api/voice/evac-session 응답 그대로). 쓸 수 없으면 null → 버튼만
+  Future<Map<String, dynamic>?> evacVoiceSession(String mode, {String alertText = '', String announceText = ''});
 }
 
 class MockSafetyRepository implements SafetyRepository {
@@ -92,6 +98,8 @@ class MockSafetyRepository implements SafetyRepository {
     required String alertId,
     required String status,
     required LatLng location,
+    String via = 'button',
+    String? transcript,
   }) async {
     _alertResponses[alertId] = status;
   }
@@ -320,6 +328,10 @@ class MockSafetyRepository implements SafetyRepository {
 
   @override
   Future<Map<String, dynamic>?> voiceSession() async => null;
+
+  @override
+  Future<Map<String, dynamic>?> evacVoiceSession(String mode, {String alertText = '', String announceText = ''}) async =>
+      null;
 
   String _mockAnswer(String question) {
     if (question.contains('대피소'))

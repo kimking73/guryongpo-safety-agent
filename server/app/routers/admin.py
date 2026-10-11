@@ -123,7 +123,7 @@ def _open_incident(incident_id: str) -> dict:
 
 @router.patch("/incidents/{incident_id}/targets/{target_id}", summary="대상 상태 대신 기록 · 방문 담당 지정")
 def update_target(incident_id: uuid.UUID, target_id: uuid.UUID, body: TargetPatch, staff: StaffUser = Depends(require_staff)):
-    from alerts import evacuation
+    from alerts import assignment, evacuation
     iid, tid = str(incident_id), str(target_id)
     me = _me(staff)
     _open_incident(iid)
@@ -135,8 +135,11 @@ def update_target(incident_id: uuid.UUID, target_id: uuid.UUID, body: TargetPatc
         evacuation.record({"id": tid, "incident_id": iid, "user_id": t.get("user_id")}, data["status"], "responder",
                           by_user_id=me, note=data.get("note"))
     if "assigned_to" in data:
+        new = me if data["assigned_to"] == "me" else None
         db.execute("UPDATE care.incident_targets SET assigned_to = %(a)s, updated_at = now() WHERE id = %(tid)s",
-                   {"a": me if data["assigned_to"] == "me" else None, "tid": tid})
+                   {"a": new, "tid": tid})
+        if new is None or str(t.get("assigned_to") or "") != new:
+            assignment.on_assigned(iid, t, new)    # 새로 맡으면 도착 예상 시간 계산 + 주민에게 FCM (해제면 비움)
     if "note" in data and not data.get("status"):
         db.execute("UPDATE care.incident_targets SET note = %(n)s, updated_at = now() WHERE id = %(tid)s",
                    {"n": data["note"], "tid": tid})

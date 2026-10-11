@@ -70,3 +70,58 @@ def test_voice_session_endpoint(monkeypatch):
         raise R.RealtimeUnavailable("OPENAI_API_KEY가 없습니다")
     monkeypatch.setattr(R, "create_client_secret", down)
     assert TestClient(API.app).post("/api/voice/session").status_code == 503
+
+
+# ---- 시각장애인 대피 음성 확인 (B12) ----
+
+def test_evac_check_session_asks_three_choices_and_has_status_tool(monkeypatch):
+    monkeypatch.delenv("OPENAI_REALTIME_MODEL", raising=False)
+    c = R.evac_session_config("evac_check", alert_text="구룡포읍 침수 대피 경보")
+    assert c["model"] == "gpt-realtime-2" and c["tool_choice"] == "auto"
+    assert [t["name"] for t in c["tools"]] == [R.STATUS_TOOL, R.END_TOOL]
+    status = c["tools"][0]["parameters"]["properties"]["status"]
+    assert status["enum"] == ["evacuated", "evacuating", "need_help"]
+    for word in ("대피 완료", "대피 중", "도움 필요", "구룡포읍 침수 대피 경보."):
+        assert word in c["instructions"]
+    assert c["audio"]["input"]["turn_detection"]["create_response"]           # 대답을 듣는다
+
+
+def test_announce_session_only_reads_text():
+    c = R.evac_session_config("announce", announce_text="방재단원이 배정되었습니다. 약 7분 후 도착합니다.")
+    assert [t["name"] for t in c["tools"]] == [R.END_TOOL]
+    assert "약 7분 후 도착합니다." in c["instructions"]
+    assert c["audio"]["input"]["turn_detection"]["create_response"] is False  # 듣고 답하지 않는다
+    for bad in ({"mode": "announce"}, {"mode": "chat"}):
+        try:
+            R.evac_session_config(**bad)
+            raise AssertionError("ValueError여야 한다")
+        except ValueError:
+            pass
+
+
+def test_evac_client_secret_result():
+    seen = []
+    out = R.create_evac_client_secret("evac_check", alert_text="경보", http=fake_openai(seen), api_key="sk-real")
+    assert seen[0][2]["session"]["tools"][0]["name"] == R.STATUS_TOOL
+    assert out["client_secret"] == "ek_test" and out["status_tool"] == R.STATUS_TOOL and out["mode"] == "evac_check"
+    assert out["statuses"] == list(R.EVAC_STATUSES) and "sk-real" not in json.dumps(out)
+
+
+def test_evac_session_endpoint(monkeypatch):
+    def fake(mode, alert_text="", announce_text=""):
+        if mode == "announce" and not announce_text:
+            raise ValueError("읽을 문장이 없습니다")
+        return {"client_secret": "ek_e", "expires_at": 1, "model": "gpt-realtime-2", "calls_url": R.CALLS_URL,
+                "mode": mode, "status_tool": R.STATUS_TOOL, "end_tool": R.END_TOOL,
+                "statuses": list(R.EVAC_STATUSES), "read_out_prefix": ""}
+    monkeypatch.setattr(R, "create_evac_client_secret", fake)
+    client = TestClient(API.app)
+    res = client.post("/api/voice/evac-session", json={"mode": "evac_check", "alert_text": "경보"})
+    assert res.status_code == 200 and res.json()["status_tool"] == R.STATUS_TOOL
+    assert client.post("/api/voice/evac-session", json={"mode": "announce"}).status_code == 422
+    assert client.post("/api/voice/evac-session", json={"mode": "chat"}).status_code == 422
+
+    def down(*a, **k):
+        raise R.RealtimeUnavailable("OPENAI_API_KEY가 없습니다")
+    monkeypatch.setattr(R, "create_evac_client_secret", down)
+    assert client.post("/api/voice/evac-session", json={"mode": "evac_check"}).status_code == 503

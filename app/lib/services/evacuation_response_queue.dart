@@ -9,17 +9,25 @@ class PendingEvacuationResponse {
     required this.alertId,
     required this.status,
     required this.location,
+    this.via = 'button',
+    this.transcript,
   });
 
   final String alertId;
   final String status;
   final LatLng location;
 
+  /// button · voice (시각장애인 음성 확인 — transcript 는 사용자가 한 말)
+  final String via;
+  final String? transcript;
+
   Map<String, Object> toJson() => {
         'alert_id': alertId,
         'status': status,
         'lat': location.latitude,
         'lng': location.longitude,
+        'via': via,
+        if (transcript != null) 'transcript': transcript!,
       };
 
   factory PendingEvacuationResponse.fromJson(Map<String, dynamic> json) =>
@@ -30,6 +38,8 @@ class PendingEvacuationResponse {
           (json['lat'] as num).toDouble(),
           (json['lng'] as num).toDouble(),
         ),
+        via: json['via'] as String? ?? 'button',
+        transcript: json['transcript'] as String?,
       );
 }
 
