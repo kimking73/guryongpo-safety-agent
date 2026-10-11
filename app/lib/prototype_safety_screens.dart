@@ -451,7 +451,7 @@ class _EvacuationVoiceDemoScreenState
     setState(() => selectedPhrase = phrase);
     await ref
         .read(prototypeSafetyProvider)
-        .respond(prototypeEvacuationAlertId, status);
+        .respond(prototypeEvacuationAlertId, status, via: 'voice');
     if (!mounted) return;
     final settings = ref.read(prototypeSafetyProvider).accessibility;
     if (shouldAutoPlayAccessibilityPrompt(

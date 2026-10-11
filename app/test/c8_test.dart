@@ -686,6 +686,147 @@ void main() {
     expect(notified, 1);
   });
 
+  // 2026-10-12 사용자 요청: 다른 계정(다른 브라우저·기기)끼리 사용자 모드 ↔ 방재단원 모드 연동 — 시연 응답을 서버에 저장
+  test('시연 응답·시연 경보 시작을 서버에도 저장한다 (장애 유형 포함), 실패해도 기기 기록은 남는다', () async {
+    SharedPreferences.setMockInitialValues({'optional_profile': '{"청각 지원":"지원 필요"}'});
+    final fake = FakeServer({
+      'POST /api/v1/demo/evacuation/start': (_) => {'id': 'demo-user-a'},
+      'POST /api/v1/demo/evacuation/response': (_) => {'id': 'demo-user-a'},
+    });
+    final api = fake.api();
+    final original = PrototypeSafetyController.server;
+    addTearDown(() => PrototypeSafetyController.server = original);
+    PrototypeSafetyController.server = () => api;
+    final store = PrototypeSafetyController();
+    await store.load();
+    await store.startDemoAlert(prototypeEvacuationAlertId);
+    await store.respond(prototypeEvacuationAlertId, EvacuationResponseStatus.needHelp, via: 'alarm');
+    expect([for (final o in fake.seen) '${o.method} ${o.path}'],
+        ['POST /api/v1/demo/evacuation/start', 'POST /api/v1/demo/evacuation/response']);
+    expect(fake.seen.first.data, {'needs': ['hearing']});
+    expect(fake.seen.last.data, {'status': 'need_help', 'needs': ['hearing'], 'via': 'alarm'});
+    expect(store.lastServerSaved, isTrue);
+    expect(demoSavedNote(store), '서버에 저장 · 방재단 화면에 전달');
+
+    // 서버가 안 받으면: 기기 기록은 남고 '서버 저장 실패'
+    PrototypeSafetyController.server = () => FakeServer({}).api();
+    await store.respond(prototypeEvacuationAlertId, EvacuationResponseStatus.evacuated);
+    expect(store.responseFor(prototypeEvacuationAlertId), EvacuationResponseStatus.evacuated);
+    expect(store.lastServerSaved, isFalse);
+    // 서버 연결이 아니면(목업·시연 끔) 보내지 않는다
+    PrototypeSafetyController.server = () => null;
+    await store.respond(prototypeEvacuationAlertId, EvacuationResponseStatus.evacuating);
+    expect(store.lastServerSaved, isNull);
+    store.dispose();
+  });
+
+  test('주민 앱이 서버에서 다른 계정 방재단원의 출동 기록(도착 예정)을 받는다', () async {
+    SharedPreferences.setMockInitialValues({});
+    Map<String, dynamic>? dispatch = {
+      'departed_at': '2026-10-12T12:00:00+09:00',
+      'eta': '2026-10-12T12:07:00+09:00',
+      'responder': '시연 방재단원',
+      'stage': 'en_route',
+    };
+    final fake = FakeServer({
+      'POST /api/v1/demo/evacuation/start': (_) => {'id': 'demo-user-a'},
+      'GET /api/v1/demo/evacuation/me': (_) => {'id': 'demo-user-a', 'status': 'need_help', 'dispatch': dispatch},
+    });
+    final api = fake.api();
+    final original = PrototypeSafetyController.server;
+    addTearDown(() => PrototypeSafetyController.server = original);
+    PrototypeSafetyController.server = () => api;
+    final store = PrototypeSafetyController();
+    await store.load();
+    await store.pullFromServer();
+    expect(store.demoDispatch, isNull);           // 시연 경보 전이면 묻지 않는다
+    await store.startDemoAlert(prototypeEvacuationAlertId);
+    await store.pullFromServer();
+    expect(store.demoDispatch?.stage, 'en_route');
+    expect(store.demoDispatch?.eta, DateTime.parse('2026-10-12T12:07:00+09:00'));
+    dispatch = null;                              // 방재단원이 배정을 풀면 지워진다
+    await store.pullFromServer();
+    expect(store.demoDispatch, isNull);
+    store.dispose();
+  });
+
+  testWidgets('다른 계정의 시연 응답(서버)이 방재단 화면에 응답·장애 유형으로 보이고, 출발·해제를 서버로 보낸다', (t) async {
+    _tall(t);
+    t.view.physicalSize = const Size(900, 9000);
+    SharedPreferences.setMockInitialValues({});
+    DemoLiveApi.resetDemoIncident();
+    final read = DemoLiveApi.readServerResponses, write = DemoLiveApi.writeServerDispatch;
+    addTearDown(() {
+      DemoLiveApi.readServerResponses = read;
+      DemoLiveApi.writeServerDispatch = write;
+      DemoLiveApi.resetDemoIncident();
+    });
+    const other = 'demo-user-7b1d2c3e-4f50-4a6b-8c7d-9e0f1a2b3c4d';
+    final rows = [
+      {
+        'id': other, 'label': '하린', 'status': 'need_help', 'needs': ['hearing'], 'minutes_since_alert': 2,
+        'started_at': '2026-10-12T12:00:00+09:00', 'is_me': false, 'location': {'lat': 35.9887, 'lng': 129.5549},
+        'dispatch': null, 'dispatch_by_me': false,
+      },
+    ];
+    final sent = <(String, Map<String, dynamic>?)>[];
+    DemoLiveApi.readServerResponses = (_) async => rows;
+    DemoLiveApi.writeServerDispatch = (_, id, d) async => sent.add((id, d));
+    final store = PrototypeSafetyController();
+    await store.load();
+    await t.pumpWidget(ProviderScope(
+        overrides: [prototypeSafetyProvider.overrideWith((_) => store)],
+        child: const MaterialApp(home: Scaffold(body: DemoPatrolScope(child: LiveResponderScreen())))));
+    await _settle(t);
+    final card = find.byKey(const ValueKey('assign-$other'));
+    expect(find.descendant(of: card, matching: find.text('하린')), findsOneWidget);
+    expect(find.descendant(of: card, matching: find.textContaining('주민 응답 도움 필요 · 청각')), findsOneWidget);
+    expect(find.textContaining('앱 사용자 (시연 주민)'), findsNothing);     // 이 기기에는 시연 경보가 없다
+
+    final api = DemoLiveApi();
+    final eta = DateTime(2026, 10, 12, 12, 7);
+    await api.dispatch(DemoLiveApi.incidentId, [(other, eta)]);
+    expect(sent.single.$1, other);
+    expect(sent.single.$2?['stage'], 'en_route');
+    expect(DateTime.parse('${sent.single.$2?['eta']}').isAtSameMomentAs(eta), isTrue);   // UTC 로 보내도 같은 시각
+    await api.patchTarget(DemoLiveApi.incidentId, other, {'work_status': 'visiting'});
+    expect(sent.last.$2?['stage'], 'visiting');
+    await api.patchTarget(DemoLiveApi.incidentId, other, {'assigned_to': null});
+    expect(sent.last.$2, isNull);
+    await _settle(t);
+    await t.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('서버에 내 시연 응답이 있으면 이 기기 줄(앱 사용자)을 겹쳐 넣지 않고 (나)로 보인다', (t) async {
+    _tall(t);
+    t.view.physicalSize = const Size(900, 9000);
+    SharedPreferences.setMockInitialValues({});
+    DemoLiveApi.resetDemoIncident();
+    final read = DemoLiveApi.readServerResponses;
+    addTearDown(() {
+      DemoLiveApi.readServerResponses = read;
+      DemoLiveApi.resetDemoIncident();
+    });
+    DemoLiveApi.readServerResponses = (_) async => [
+          {
+            'id': 'demo-user-me', 'label': '시연 주민 caa7', 'status': 'evacuating', 'needs': <String>[],
+            'minutes_since_alert': 1, 'started_at': '2026-10-12T12:00:00+09:00', 'is_me': true,
+            'location': {'lat': 35.9893, 'lng': 129.5541}, 'dispatch': null, 'dispatch_by_me': false,
+          },
+        ];
+    final store = PrototypeSafetyController();
+    await store.load();
+    await store.startDemoAlert(prototypeEvacuationAlertId);
+    await t.pumpWidget(ProviderScope(
+        overrides: [prototypeSafetyProvider.overrideWith((_) => store)],
+        child: const MaterialApp(home: Scaffold(body: DemoPatrolScope(child: LiveResponderScreen())))));
+    await _settle(t);
+    expect(find.text('시연 주민 caa7 (나)'), findsWidgets);
+    expect(find.text('앱 사용자 (시연 주민)'), findsNothing);
+    await _settle(t);
+    await t.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('가구 대리 등록 (2026-10-11): 이름·주소(필수)·연락처·장애 유형만, 지체·시각 → 보행 불편·시각', (t) async {
     final api = _CaptureDemoApi();
     _tall(t);

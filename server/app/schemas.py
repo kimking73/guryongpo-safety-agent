@@ -161,6 +161,27 @@ class EvacuationResponseInput(_In):
     transcript: Optional[str] = Field(default=None, max_length=500)
 
 
+# 시연 대피 응답 (2026-10-12, app/demo_evac.py) — 장애 유형은 '내 정보'의 시각·청각·지체만
+DemoNeed = Literal["vision", "hearing", "mobility_limited"]
+
+
+class DemoEvacStart(_In):
+    needs: list[DemoNeed] = Field(default_factory=list, max_length=3)
+
+
+class DemoEvacResponse(_In):
+    status: ButtonStatus
+    needs: list[DemoNeed] = Field(default_factory=list, max_length=3)
+    via: Literal["button", "voice", "dashboard", "alarm"] = "button"
+
+
+class DemoDispatchInput(_In):
+    departed_at: str = Field(min_length=10, max_length=40)       # ISO 시각 (앱이 보낸 그대로 돌려준다)
+    eta: str = Field(min_length=10, max_length=40)
+    responder: str = Field(default="시연 방재단원", min_length=1, max_length=40)
+    stage: Literal["en_route", "visiting", "done"] = "en_route"
+
+
 class IncidentCircle(_In):
     center: LatLng
     radius_m: float = Field(ge=50, le=5000)

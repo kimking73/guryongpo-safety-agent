@@ -1,9 +1,15 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../profile_form.dart' show disabilitiesOf;
+import 'account_service.dart';
+import 'app_config.dart';
+import 'demo_mode.dart';
+import 'live_api.dart';
 import 'storage_events.dart';
 
 enum EvacuationResponseStatus { evacuated, evacuating, needHelp }
@@ -197,9 +203,10 @@ class DemoDispatch {
   DemoDispatch copyWith({String? stage}) =>
       DemoDispatch(departedAt: departedAt, eta: eta, responder: responder, stage: stage ?? this.stage);
 
+  // UTC 로 적는다 (2026-10-12): 서버를 거쳐 다른 기기가 읽어도 같은 시각 — 화면은 toLocal() 로 보인다
   Map<String, Object> toJson() => {
-        'departed_at': departedAt.toIso8601String(),
-        'eta': eta.toIso8601String(),
+        'departed_at': departedAt.toUtc().toIso8601String(),
+        'eta': eta.toUtc().toIso8601String(),
         'responder': responder,
         'stage': stage,
       };
@@ -228,6 +235,13 @@ const _needsLabels = <String, String>{
 
 String householdNeedLabel(String value) => _needsLabels[value] ?? value;
 
+/// '내 정보'의 장애 유형 → 시연 대상 needs (대리 등록과 같은 이름: 시각 vision · 청각 hearing · 지체 mobility_limited)
+const demoProfileNeeds = {'see': 'vision', 'hear': 'hearing', 'body': 'mobility_limited'};
+
+/// 이 기기 '내 정보'의 장애 유형을 시연 needs 로 (서버 시연 응답·방재단 화면 표시)
+Future<List<String>> myDemoNeeds() async =>
+    [for (final d in disabilitiesOf(await AccountService().optionalProfile())) if (demoProfileNeeds[d] case final n?) n];
+
 final prototypeSafetyProvider =
     ChangeNotifierProvider<PrototypeSafetyController>((ref) {
   final c = PrototypeSafetyController();
@@ -249,11 +263,71 @@ class PrototypeSafetyController extends ChangeNotifier {
     _instances.add(this);
   }
 
+  /// 시연 응답을 주고받을 서버 (2026-10-12 사용자 요청: 다른 계정의 방재단원 모드와 연동). 서버 연결 + 시연 모드일 때만,
+  /// 아니면 null (목업·시연 끔 — 지금처럼 기기에만). 테스트가 바꿔 끼운다
+  static LiveApi? Function() server = () => DemoData.on ? (_live ??= LiveApi()) : null;
+  static LiveApi? _live;
+
+  /// 서버에서 내 시연 응답·방재단 출동 기록을 다시 읽는 주기 (서버 연결일 때만 돈다)
+  static const serverPollEvery = Duration(seconds: 5);
+  Timer? _serverPoll;
+  bool _pulling = false;
+
+  /// 마지막 시연 응답의 서버 저장 결과: null = 서버로 보내지 않음(목업·시연 끔), true = 저장됨, false = 실패(이 기기에만 기록)
+  bool? lastServerSaved;
+
+  Future<bool?> _toServer(Future<Object?> Function(LiveApi api, List<String> needs) call) async {
+    final api = server();
+    if (api == null) return lastServerSaved = null;
+    try {
+      await call(api, await myDemoNeeds());
+      return lastServerSaved = true;
+    } catch (e) {
+      debugPrint('시연 응답 서버 저장 실패: $e');
+      return lastServerSaved = false;
+    }
+  }
+
+  /// 서버의 내 시연 응답을 읽어 방재단 출동 기록(다른 계정·기기의 방재단원이 쓴 것)을 받는다.
+  /// 서버에 내 응답이 없으면(예: 서버 저장 전에 응답한 기기) 이 기기의 시연 경보·응답을 올린다
+  Future<void> pullFromServer() async {
+    if (_pulling || !_demoAlertActive) return;
+    final api = server();
+    if (api == null) return;
+    _pulling = true;
+    try {
+      final mine = await api.demoEvacMine();
+      if (mine == null) {
+        final r = _responses.values.isEmpty ? null : _responses.values.last;
+        await _toServer((api, needs) async {
+          await api.demoEvacStart(needs);
+          if (r != null) await api.demoEvacRespond(r.wireValue, needs);
+          return null;
+        });
+        return;
+      }
+      final raw = mine['dispatch'];
+      DemoDispatch? d;
+      try {
+        d = raw is Map ? DemoDispatch.fromJson(Map<String, dynamic>.from(raw)) : null;
+      } on FormatException {
+        d = null;
+      }
+      if (jsonEncode(d?.toJson()) == jsonEncode(_dispatch?.toJson())) return;
+      await saveDemoDispatch(d);
+    } catch (e) {
+      debugPrint('시연 출동 기록 읽기 실패: $e');
+    } finally {
+      _pulling = false;
+    }
+  }
+
   /// 이 앱(창) 안의 컨트롤러들 — 방재단 시연 화면이 출동 기록을 쓰면 같은 창의 시민 표시도 바로 바뀌게
   static final _instances = <PrototypeSafetyController>{};
 
   @override
   void dispose() {
+    _serverPoll?.cancel();
     _instances.remove(this);
     super.dispose();
   }
@@ -354,6 +428,11 @@ class PrototypeSafetyController extends ChangeNotifier {
     }
     _loaded = true;
     notifyListeners();
+    // 서버 연결이면 방재단 출동 기록을 주기적으로 받는다 (시연 경보가 진행 중일 때만 실제로 묻는다)
+    if (AppConfig.isRemote) {
+      _serverPoll ??= Timer.periodic(serverPollEvery, (_) => unawaited(pullFromServer()));
+      unawaited(pullFromServer());
+    }
   }
 
   /// 다른 창이 바꾼 시연 응답·시연 경보만 다시 읽는다 (웹 'storage' 이벤트). 팝업은 띄우지 않는다.
@@ -381,7 +460,9 @@ class PrototypeSafetyController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> respond(String alertId, EvacuationResponseStatus status) async {
+  /// 시연 응답: 이 기기에 저장 → 서버 연결 + 시연 모드면 서버에도 (다른 계정의 방재단원 화면이 읽는다, 2026-10-12).
+  /// 서버 결과는 [lastServerSaved] — 실패해도 기기 기록은 남는다
+  Future<void> respond(String alertId, EvacuationResponseStatus status, {String via = 'button'}) async {
     _responses = {..._responses, alertId: status};
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
@@ -392,6 +473,7 @@ class PrototypeSafetyController extends ChangeNotifier {
           entry.key: entry.value.wireValue,
       }),
     );
+    await _toServer((api, needs) => api.demoEvacRespond(status.wireValue, needs, via: via));
   }
 
   /// 새 시연 대피 경보 시작: 이전 시연 경보의 응답은 지운다 — 지난 응답이 새 경보의 상태로 남지 않게 (2026-10-09)
@@ -410,6 +492,8 @@ class PrototypeSafetyController extends ChangeNotifier {
           entry.key: entry.value.wireValue,
       }),
     );
+    // 서버에도 새 시연 경보 (내 응답 '응답 없음', 지난 출동 기록 지움) — 다른 계정의 방재단원 화면에 바로 나온다
+    await _toServer((api, needs) => api.demoEvacStart(needs));
   }
 
   Future<void> updateAccessibility(AccessibilitySettings settings) async {

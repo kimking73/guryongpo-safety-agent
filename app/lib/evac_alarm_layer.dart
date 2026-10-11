@@ -55,12 +55,12 @@ class EvacAlarmLayer extends StatelessWidget {
     unawaited(EvacAlarm.stop());
   }
 
-  /// 시연 경보('10초 뒤 경보 시연'): 서버로 보내지 않고 기기에만 기록
+  /// 시연 경보('10초 뒤 경보 시연'): 서버 연결 + 시연 모드면 서버 시연 응답으로 (다른 계정의 방재단원 화면에), 아니면 기기에만
   static Future<void> _demoRespond(WidgetRef ref, String status) async {
     final s = EvacuationResponseStatusLabel.fromWireValue(status);
     if (s == null) return;
-    await recordPrototypeEvacuationResponse(ref, s);
-    showResponseMessage('시연 응답: ${s.label} (기기에만 기록, 서버로 보내지 않음)');
+    await recordPrototypeEvacuationResponse(ref, s, via: 'alarm');
+    showResponseMessage('시연 응답: ${s.label} (${demoSavedNote(ref.read(prototypeSafetyProvider))})');
   }
 }
 

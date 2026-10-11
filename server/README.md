@@ -208,6 +208,10 @@ DATABASE_URL=postgresql://guardian:guardian-local-only@localhost:5433/guardian .
 - 동의: 본인 등록은 앱 동의(`consent: true`), 대리 등록은 서면·구두 확인(`consent_method`·`consent_by`). 일시·방법·동의자·**동의서 버전**(`households.CONSENT_VERSION`, 지금 v1) 저장 — 문구가 바뀌면 버전을 올린다
 - 동의 철회 = 가구 삭제 (대피 대상·방문 기록도 함께). 대리 등록 가구에 연결만 된 주민이 철회하면 연결만 끊음
 - 건강 정보(혈액형·병력 메모)는 `care.user_health` — AI 읽기 전용 계정은 못 읽음 (`01m_v0_4_households.sql` 이 기존 값을 옮기고 public 컬럼 삭제). `/user` 응답 형식은 같음
+- 시연 대피 응답 (2026-10-12, `app/demo_evac.py`): 시연 모드 앱의 대피 경보 응답을 계정당 한 줄(`care.demo_evac`, 이력 `care.demo_evac_log`,
+  `db/init/01m_v0_8_demo_evac.sql`)로 저장 — `POST /demo/evacuation/start`·`/response`(주민), `GET /demo/evacuation/responses`(다른 계정의
+  방재단원 모드 화면, 최근 3시간), `PUT|DELETE /demo/evacuation/{id}/dispatch`(방재단 출동 기록) → `GET /demo/evacuation/me`(주민이 받음).
+  시연 데이터라 로그인만(역할 불필요), 별명·응답·장애 유형만 공유. 실제 대피 상황·FCM·이관과 분리
 - 시연용 가상 가구: `/internal/simulate` `demo_households` (5곳, "[시연] …", 침수 경보 영역 2곳·산사태 취약지역 100m 안 1곳) / `demo_households_clear`. `clear` 는 가구를 지우지 않음
 
 ### 시연 시나리오

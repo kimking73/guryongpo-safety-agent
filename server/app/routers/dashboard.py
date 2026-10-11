@@ -2,11 +2,12 @@
 from typing import Literal, Optional, get_args
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from .. import db, layers
 from ..auth import AuthUser, current_user, optional_user
 from ..errors import ApiError
+from ..schemas import DemoDispatchInput, DemoEvacResponse, DemoEvacStart
 
 router = APIRouter(tags=["dashboard"])
 # 위험지역 고정 영역은 산사태 취약지역만 사용 (침수·해안 영역 레이어는 두지 않음 — 침수는 실시간 판정 영역 risk_areas)
@@ -100,6 +101,52 @@ def get_demo_layer(layer_id: Literal["flood_grid", "stations"], bbox: Optional[s
 def get_demo_households():
     from .. import households
     return households.list_demo()
+
+
+# ------------------------------------------------------------------ 시연 대피 응답 (2026-10-12, app/demo_evac.py)
+# 시연 모드의 대피 경보 응답을 서버에 저장 → 다른 계정의 방재단원 모드 화면이 읽고, 방재단 출동 기록은 주민 화면이 받는다.
+# 실제 대피 상황·FCM 과는 분리. 시연 데이터라 역할 없이 로그인만 (사용자 결정)
+@router.post("/demo/evacuation/start", summary="시연 대피 경보 시작 — 내 시연 응답을 '응답 없음'으로 새로 (출동 기록도 지움)")
+def post_demo_evac_start(body: DemoEvacStart, u: AuthUser = Depends(current_user)):
+    from .. import demo_evac, users
+    uid, _ = users.ensure_user(u)
+    return demo_evac.start(uid, body.needs)
+
+
+@router.post("/demo/evacuation/response", summary="시연 대피 응답 저장 (대피 완료 / 대피 중 / 도움 필요) + 이력")
+def post_demo_evac_response(body: DemoEvacResponse, u: AuthUser = Depends(current_user)):
+    from .. import demo_evac, users
+    uid, _ = users.ensure_user(u)
+    return demo_evac.respond(uid, body.status, body.needs, body.via)
+
+
+@router.get("/demo/evacuation/me", summary="내 시연 대피 응답 + 방재단 출동 기록 (없으면 null)")
+def get_demo_evac_me(u: AuthUser = Depends(current_user)):
+    from .. import demo_evac, users
+    uid = users.find_user_id(u)
+    return demo_evac.mine(uid) if uid else None
+
+
+@router.get("/demo/evacuation/responses", summary="최근 시연 대피 응답 전체 (방재단원 모드 화면용, 최근 3시간)")
+def get_demo_evac_responses(u: AuthUser = Depends(current_user)):
+    from .. import demo_evac, users
+    return demo_evac.responses(users.find_user_id(u))
+
+
+@router.put("/demo/evacuation/{target_id}/dispatch", status_code=204, summary="방재단 출동 기록 쓰기 (출발·도착 예정·업무 단계)")
+def put_demo_evac_dispatch(target_id: str, body: DemoDispatchInput, u: AuthUser = Depends(current_user)):
+    from .. import demo_evac, users
+    uid, _ = users.ensure_user(u)
+    demo_evac.dispatch(target_id, body.model_dump(), uid)
+    return Response(status_code=204)
+
+
+@router.delete("/demo/evacuation/{target_id}/dispatch", status_code=204, summary="방재단 출동 기록 지우기 (배정 해제)")
+def delete_demo_evac_dispatch(target_id: str, u: AuthUser = Depends(current_user)):
+    from .. import demo_evac, users
+    uid, _ = users.ensure_user(u)
+    demo_evac.dispatch(target_id, None, uid)
+    return Response(status_code=204)
 
 
 @router.get("/hotlines", summary="긴급 전화 목록 (실데이터)")

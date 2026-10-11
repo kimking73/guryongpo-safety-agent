@@ -3,7 +3,8 @@ import 'dart:math' as math;
 import '../profile_form.dart' show disabilitiesOf;
 import 'account_service.dart';
 import 'live_api.dart';
-import 'prototype_safety_store.dart' show DemoDispatch, PrototypeSafetyController;
+import 'demo_mode.dart';
+import 'prototype_safety_store.dart' show DemoDispatch, PrototypeSafetyController, demoProfileNeeds;
 
 /// 시연 모드용 방재단 데이터 (2026-10-05). 시연 모드에서 방재단 화면(patrol_screens.dart, C8)이 [LiveApi] 대신 이 클래스를 쓴다.
 /// 가구 목록: 앱 안 6곳 (시각·청각·지체 예시). 예전엔 서버 DB의 시연 가구(GET /api/v1/demo/households)를
@@ -76,7 +77,19 @@ class DemoLiveApi extends LiveApi {
   static String? myResponse;
   static const meTargetId = 'demo-me';
   /// 프로필 장애 유형 → 가구 needs (대리 등록과 같은 이름)
-  static const _profileNeeds = {'see': 'vision', 'hear': 'hearing', 'body': 'mobility_limited'};
+  static const _profileNeeds = demoProfileNeeds;
+
+  /// 서버에 저장된 시연 주민 응답 (2026-10-12 사용자 요청: 다른 계정의 사용자 모드 응답을 이 방재단원 화면에).
+  /// 서버 연결 + 시연 모드일 때만 읽고, 아니면 null → 예전처럼 이 기기의 시연 기록만. 테스트가 바꿔 끼운다
+  static Future<List<Map<String, dynamic>>?> Function(DemoLiveApi api) readServerResponses =
+      (api) async => DemoData.on ? api.demoEvacResponses() : null;
+
+  /// 서버 시연 주민에게 출동 기록 보내기 (null = 지우기). 테스트가 바꿔 끼운다
+  static Future<void> Function(DemoLiveApi api, String targetId, Map<String, dynamic>? dispatch) writeServerDispatch =
+      (api, id, d) => api.demoEvacDispatch(id, d);
+
+  /// 마지막으로 읽은 서버 시연 주민 (대상 id → 서버 행) — 출동 기록을 보낼 곳·지금 기록을 안다
+  static final _server = <String, Map<String, dynamic>>{};
   /// 가구별 시연 상태 (응답·담당·업무 단계·마지막 방문). 처음 보는 가구는 아래 순서표로 채운다
   static final _state = <String, Map<String, dynamic>>{};
   /// 앞 4곳(대피 경보 지역 안): 1·2번 도움 요청, 3·4번 응답 없음 — 출발점에서 가장 가까운 3번(동쪽)이 응답 없음이라
@@ -159,7 +172,60 @@ class DemoLiveApi extends LiveApi {
         'in_area': lat == null || lng == null || _distM(lat, lng) <= _radiusM,
       });
     }
-    if (myAlertActive) {
+    // 서버의 시연 주민들 (다른 계정·기기 포함). 못 읽으면 이 기기 기록만으로 (같은 브라우저 시연은 그대로)
+    List<Map<String, dynamic>>? server;
+    try {
+      server = await readServerResponses(this);
+    } catch (_) {
+      server = null;
+    }
+    _server
+      ..clear()
+      ..addAll({for (final r in server ?? const <Map<String, dynamic>>[]) '${r['id']}': r});
+    for (final r in server ?? const <Map<String, dynamic>>[]) {
+      final id = '${r['id']}';
+      final st = _stateFor(id, 1);
+      // 주민이 새 시연 경보를 시작했으면 지난 배정·단계·방문은 지운다
+      if (st['started'] != r['started_at']) {
+        st
+          ..['started'] = r['started_at']
+          ..['assigned'] = null
+          ..['work'] = null
+          ..['eta'] = null
+          ..['visit'] = null;
+      }
+      st['status'] = r['status'] ?? 'no_response';
+      // 다른 창·기기의 방재단원이 보낸 출동 기록 → 배정·단계·도착 예정 (내 메모리에 배정이 없을 때)
+      final d = _dispatchOf(r);
+      if (st['assigned'] == null && d != null && d.stage != 'done') {
+        final mine = r['dispatch_by_me'] == true;
+        st['assigned'] = {'user_id': null, 'nickname': mine ? _meNick : d.responder, 'is_me': mine};
+        st['work'] = d.stage;
+        st['eta'] = d.eta.toIso8601String();
+      }
+      out.add({
+        'id': id,
+        'kind': 'app_user',
+        'household_id': null,
+        'label': r['is_me'] == true ? '${r['label']} (나)' : '${r['label']}',
+        'address': '시연 위치 (주소는 공유하지 않음)',
+        'location': r['location'],
+        'phone': null,
+        'needs': [for (final n in r['needs'] as List? ?? const []) '$n'],
+        'has_app': true,
+        'status': st['status'],
+        'minutes_since_alert': (r['minutes_since_alert'] as num?)?.toInt() ?? 0,
+        'reminder_count': 0,
+        'escalated': false,
+        'assigned_to': st['assigned'],
+        'work_status': st['work'],
+        'last_visit': st['visit'],
+        'eta': st['eta'],
+        'in_area': true,
+      });
+    }
+    // 이 기기의 시연 주민 줄: 서버에 내 응답이 없을 때만 (있으면 위 서버 줄과 겹친다)
+    if (myAlertActive && !(server ?? const []).any((r) => r['is_me'] == true)) {
       final st = _stateFor(meTargetId, 1);
       st['status'] = myResponse ?? 'no_response';
       // 방재단 창을 새로 열었으면 메모리엔 없지만 기기에 남은 출동 기록으로 배정·단계·도착 예정을 되살린다
@@ -230,7 +296,8 @@ class DemoLiveApi extends LiveApi {
   @override
   Future<Map<String, dynamic>> incident(String id, {double? lat, double? lng}) async {
     final targets = await _demoTargets();
-    return {..._incidentRow(targets), 'area': _area(), 'targets': targets, 'next_poll_sec': 10};
+    // 다른 계정의 응답이 몇 초 안에 보이게 5초마다 (2026-10-12)
+    return {..._incidentRow(targets), 'area': _area(), 'targets': targets, 'next_poll_sec': 5};
   }
 
   /// 담당 지정(assigned_to: me|null) · 업무 단계(work_status) · 상태 — 앱 메모리에만
@@ -249,7 +316,7 @@ class DemoLiveApi extends LiveApi {
     }
     if (body['work_status'] != null) st['work'] = body['work_status'];
     if (body['status'] != null) st['status'] = body['status'];
-    if (targetId == meTargetId) await _syncMeDispatch(st);
+    await _syncDispatch(targetId, st);
     return {'id': targetId};
   }
 
@@ -265,18 +332,41 @@ class DemoLiveApi extends LiveApi {
       st['assigned'] = {'user_id': null, 'nickname': _meNick, 'is_me': true};
       st['work'] = 'en_route';
       st['eta'] = eta.toIso8601String();
+      final d = DemoDispatch(departedAt: now, eta: eta, responder: '시연 방재단원', stage: 'en_route');
       if (id == meTargetId) {
-        await PrototypeSafetyController.saveDemoDispatch(
-            DemoDispatch(departedAt: now, eta: eta, responder: '시연 방재단원', stage: 'en_route'));
+        await PrototypeSafetyController.saveDemoDispatch(d);
+      } else if (_server.containsKey(id)) {
+        await _saveServerDispatch(id, d);
       }
     }
   }
 
-  /// 시연 주민 대상의 배정·단계가 바뀌면 시민에게 보낸 출동 기록도 맞춘다: 방문 중 → 도착, 완료 → 끝, 배정 해제 → 지움
-  static Future<void> _syncMeDispatch(Map<String, dynamic> st) async {
-    final d = await PrototypeSafetyController.storedDemoDispatch();
+  static DemoDispatch? _dispatchOf(Map<String, dynamic>? row) {
+    final raw = row?['dispatch'];
+    if (raw is! Map) return null;
+    try {
+      return DemoDispatch.fromJson(Map<String, dynamic>.from(raw));
+    } on FormatException {
+      return null;
+    }
+  }
+
+  /// 서버 시연 주민에게 출동 기록 보내기 (그 주민 앱이 5초마다 받아 '방재단 출발 · 도착 예정'을 띄운다)
+  Future<void> _saveServerDispatch(String targetId, DemoDispatch? d) async {
+    await writeServerDispatch(this, targetId, d?.toJson());
+    _server[targetId]?['dispatch'] = d?.toJson();
+  }
+
+  /// 시연 주민 대상의 배정·단계가 바뀌면 시민에게 보낸 출동 기록도 맞춘다: 방문 중 → 도착, 완료 → 끝, 배정 해제 → 지움.
+  /// 이 기기의 시연 주민(demo-me)은 기기 저장소로, 서버 시연 주민(다른 계정)은 서버로 (2026-10-12)
+  Future<void> _syncDispatch(String targetId, Map<String, dynamic> st) async {
+    final local = targetId == meTargetId;
+    if (!local && !_server.containsKey(targetId)) return;
+    final d = local ? await PrototypeSafetyController.storedDemoDispatch() : _dispatchOf(_server[targetId]);
+    Future<void> save(DemoDispatch? x) =>
+        local ? PrototypeSafetyController.saveDemoDispatch(x) : _saveServerDispatch(targetId, x);
     if (st['assigned'] == null) {
-      if (d != null) await PrototypeSafetyController.saveDemoDispatch(null);
+      if (d != null) await save(null);
       return;
     }
     final stage = switch (st['work']) { 'visiting' || 'escorting' => 'visiting', 'done' => 'done', _ => 'en_route' };
@@ -285,10 +375,9 @@ class DemoLiveApi extends LiveApi {
       final eta = DateTime.tryParse('${st['eta']}');
       if (stage == 'en_route' && eta == null) return;
       final now = DateTime.now();
-      await PrototypeSafetyController.saveDemoDispatch(DemoDispatch(
-          departedAt: now, eta: eta ?? now, responder: '시연 방재단원', stage: stage));
+      await save(DemoDispatch(departedAt: now, eta: eta ?? now, responder: '시연 방재단원', stage: stage));
     } else if (d.stage != stage) {
-      await PrototypeSafetyController.saveDemoDispatch(d.copyWith(stage: stage));
+      await save(d.copyWith(stage: stage));
     }
   }
 
@@ -307,18 +396,21 @@ class DemoLiveApi extends LiveApi {
       st['status'] = 'evacuated';
       st['work'] = 'done';
     }
-    if (targetId == meTargetId) await _syncMeDispatch(st);
+    await _syncDispatch(targetId, st);
     return {'id': 'demo-visit-${DateTime.now().microsecondsSinceEpoch}'};
   }
 
   Map<String, dynamic> _targetState(String targetId) {
-    if (targetId == meTargetId) return _stateFor(meTargetId, 1);
+    if (targetId == meTargetId || _server.containsKey(targetId)) return _stateFor(targetId, 1);
     final hid = targetId.replaceFirst('demo-target-', '');
     return _state[hid] ?? _stateFor(hid, 0);
   }
 
   /// 시연 기록 지우기 (테스트·시연 다시 시작)
-  static void resetDemoIncident() => _state.clear();
+  static void resetDemoIncident() {
+    _state.clear();
+    _server.clear();
+  }
 
   /// 서버 시연 가구 표시명의 '[시연] ' 머리 떼기 (서버는 이 머리로 시연 가구를 가려내므로 서버 데이터는 그대로 둔다)
   static String stripDemoPrefix(String label) => label.startsWith('[시연]') ? label.substring('[시연]'.length).trimLeft() : label;

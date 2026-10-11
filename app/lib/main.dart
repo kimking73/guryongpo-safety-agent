@@ -525,16 +525,21 @@ void startRouteToShelter(WidgetRef ref, String shelterId,
 
 Future<void> _recordPrototypeEvacuationResponse(
   WidgetRef ref,
-  EvacuationResponseStatus status,
-) async {
+  EvacuationResponseStatus status, {
+  String via = 'button',
+}) async {
   if (ref.read(offline)) {
     _showResponseMessage('오프라인 상태입니다. 온라인 상태로 바꾸어서 다시 응답을 시도하십시오');
     return;
   }
   try {
-    await ref
-        .read(prototypeSafetyProvider)
-        .respond(prototypeEvacuationAlertId, status);
+    final store = ref.read(prototypeSafetyProvider);
+    await store.respond(prototypeEvacuationAlertId, status, via: via);
+    // 서버 연결 + 시연 모드인데 서버 저장이 안 됐으면 알린다 (다른 계정의 방재단원 화면에 안 보인다)
+    if (store.lastServerSaved == false) {
+      _showResponseMessage('응답을 서버에 저장하지 못했어요. 이 기기에만 기록했어요 — 연결을 확인하고 다시 눌러 주세요');
+      return;
+    }
     if (status == EvacuationResponseStatus.evacuating) {
       try {
         await ref.read(facilitiesProvider.future);
@@ -558,8 +563,15 @@ final _responseQueue = EvacuationResponseQueue();
 bool _retryingEvacuationResponses = false;
 
 // 대피 경보 화면(evac_alarm_layer.dart)이 같은 시연 응답 처리를 쓰도록 공개
-Future<void> recordPrototypeEvacuationResponse(WidgetRef ref, EvacuationResponseStatus status) =>
-    _recordPrototypeEvacuationResponse(ref, status);
+Future<void> recordPrototypeEvacuationResponse(WidgetRef ref, EvacuationResponseStatus status, {String via = 'button'}) =>
+    _recordPrototypeEvacuationResponse(ref, status, via: via);
+
+/// 시연 응답이 어디에 기록됐는지 (2026-10-12: 서버 연결 + 시연 모드면 서버에 저장돼 다른 계정의 방재단원 화면에 간다)
+String demoSavedNote(PrototypeSafetyController store) => switch (store.lastServerSaved) {
+      true => '서버에 저장 · 방재단 화면에 전달',
+      false => '서버 저장 실패 · 이 기기에만 기록',
+      null => '이 기기에만 기록',
+    };
 void showResponseMessage(String message) => _showResponseMessage(message);
 
 void _showResponseMessage(String message) {
@@ -826,7 +838,7 @@ class _NotificationBootstrapState extends ConsumerState<_NotificationBootstrap>
       if (!mounted) return;
       if (alert.id == prototypeEvacuationAlertId) {
         final s = EvacuationResponseStatusLabel.fromWireValue(status);
-        if (s != null) await _recordPrototypeEvacuationResponse(ref, s);
+        if (s != null) await _recordPrototypeEvacuationResponse(ref, s, via: 'alarm');
         return;
       }
       _mergeAlerts([alert]);
@@ -1218,7 +1230,8 @@ class _ShellState extends ConsumerState<Shell> {
   /// 기기에 이미 남아 있던 응답은 창을 열 때 알리지 않는다 (기기 기록을 처음 읽은 뒤부터 바뀐 것만)
   bool _demoBaseline = false;
 
-  /// 방재단원 모드 창: 다른 창(사용자 모드)의 시연 주민이 대피 현황에 응답하면 알림 (2026-10-12 사용자 요청)
+  /// 방재단원 모드 창: 다른 창(사용자 모드)의 시연 주민이 대피 현황에 응답하면 알림 (2026-10-12 사용자 요청).
+  /// 서버 연결 + 시연 모드면 아래 서버 읽기(_pollDemoServer)가 알린다 — 같은 응답을 두 번 알리지 않게 여기선 건너뛴다
   void _listenDemoResponses() {
     ref.listen<PrototypeSafetyController>(prototypeSafetyProvider, (_, store) {
       final r = store.demoAlertActive ? store.responseFor(prototypeEvacuationAlertId) : null;
@@ -1228,13 +1241,61 @@ class _ShellState extends ConsumerState<Shell> {
         _lastDemoResponse = key;
         return;
       }
-      if (!ref.read(demoResponderViewProvider) || key == null || key == _lastDemoResponse) {
+      if (!ref.read(demoResponderViewProvider) || DemoData.on || key == null || key == _lastDemoResponse) {
         _lastDemoResponse = key;
         return;
       }
       _lastDemoResponse = key;
       unawaited(_announceDemoResponse(r!));
     });
+  }
+
+  /// 서버의 시연 주민 응답 읽기 (방재단원 모드 + 서버 연결, 2026-10-12 사용자 요청: 다른 계정의 응답도 알림)
+  Timer? _demoServerPoll;
+  /// 주민별 마지막으로 본 '상태|경보 시작' (null = 아직 기준 없음 — 창을 열 때 이미 있던 응답은 알리지 않는다)
+  Map<String, String>? _demoServerSeen;
+
+  void _syncDemoServerPoll(bool on) {
+    if (on == (_demoServerPoll != null)) return;
+    _demoServerPoll?.cancel();
+    _demoServerPoll = null;
+    _demoServerSeen = null;
+    if (!on) return;
+    _demoServerPoll = Timer.periodic(PrototypeSafetyController.serverPollEvery, (_) => unawaited(_pollDemoServer()));
+    unawaited(_pollDemoServer());
+  }
+
+  Future<void> _pollDemoServer() async {
+    final api = PrototypeSafetyController.server();
+    if (api == null) return;
+    final List<Map<String, dynamic>> rows;
+    try {
+      rows = await api.demoEvacResponses();
+    } catch (_) {
+      return;
+    }
+    if (!mounted || _demoServerPoll == null) return;
+    final seen = _demoServerSeen;
+    _demoServerSeen = {for (final r in rows) '${r['id']}': '${r['status']}|${r['started_at']}'};
+    if (seen == null) return;
+    for (final r in rows) {
+      final status = EvacuationResponseStatusLabel.fromWireValue('${r['status']}');
+      if (status == null || seen['${r['id']}'] == _demoServerSeen!['${r['id']}']) continue;
+      const kindKo = {'vision': '시각장애', 'hearing': '청각장애', 'mobility_limited': '지체장애'};
+      final kinds = [for (final n in r['needs'] as List? ?? const []) if (kindKo[n] case final k?) k];
+      final who = r['is_me'] == true ? '${r['label']} (나)' : '${r['label']}';
+      rootMessengerKey.currentState?.showSnackBar(SnackBar(
+        content: Text(['주민 응답이 왔어요', who, status.label, ...kinds].join(' · ')),
+        duration: const Duration(seconds: 8),
+        action: SnackBarAction(label: '보기', onPressed: () => appRouter.go('/responder')),
+      ));
+    }
+  }
+
+  @override
+  void dispose() {
+    _demoServerPoll?.cancel();
+    super.dispose();
   }
 
   Future<void> _announceDemoResponse(EvacuationResponseStatus r) async {
@@ -1270,6 +1331,10 @@ class _ShellState extends ConsumerState<Shell> {
     final showDemo = ref.watch(showDemoProvider);
     final crew = showDemo ? ref.watch(demoResponderViewProvider) : isPatrolRole(role);
     _listenDemoResponses();
+    final serverDemoCrew = crew && ref.watch(serverDemoProvider);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _syncDemoServerPoll(serverDemoCrew);
+    });
     final List<GkNavItem> nav = [
       ('대시보드', Icons.grid_view_rounded, '/'),
       ('AI 대화창', Icons.chat_bubble_rounded, '/ai'),
@@ -1639,7 +1704,7 @@ Future<void> showEvacuationAlertDemo(BuildContext context, WidgetRef ref, {bool 
           final s = EvacuationResponseStatusLabel.fromWireValue(status);
           if (s == null) return;
           await _recordPrototypeEvacuationResponse(ref, s);
-          _showResponseMessage('시연 응답: ${s.label} (기기에만 기록, 서버로 보내지 않음)');
+          _showResponseMessage('시연 응답: ${s.label} (${demoSavedNote(ref.read(prototypeSafetyProvider))})');
         },
       ),
     );
@@ -3092,7 +3157,7 @@ class AlertsScreen extends ConsumerWidget {
               '대피 확인 경보입니다. 현재 상태를 말하거나 화면에서 선택해 주세요. 대피 완료, 대피 중, 도움 필요.')),
           accessibleNavigation: MediaQuery.accessibleNavigationOf(c),
           onResponse: (status) =>
-              _recordPrototypeEvacuationResponse(ref, status),
+              _recordPrototypeEvacuationResponse(ref, status, via: 'dashboard'),
         ),
         Wrap(spacing: 8, runSpacing: 8, children: [
           FilledButton.icon(
