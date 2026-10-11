@@ -263,7 +263,7 @@ class _MLoginScreenState extends ConsumerState<MLoginScreen> {
             '내 위치 주변의 위험 경고와 가장 가까운 대피소·대피 경로 안내에 써요.', () => setState(() => cLoc = !cLoc)),
         const SizedBox(height: 12),
         _webConsent(cDis, Icons.accessible_forward_rounded, '장애 정보(시각·청각·지체) 민감정보 수집 동의',
-            '음성·진동 알림, 경사·계단을 피하는 경로처럼 나에게 맞는 안내에 써요.', () => setState(() => cDis = !cDis)),
+            '음성 알림, 경사·계단을 피하는 경로처럼 나에게 맞는 안내에 써요.', () => setState(() => cDis = !cDis)),
       ]),
     );
 

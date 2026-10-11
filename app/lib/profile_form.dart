@@ -119,14 +119,13 @@ class _ProfileFormState extends ConsumerState<ProfileForm> {
 
       await geocode('home', home.text, '집');
       await AccountService().saveOptionalProfile(p);
-      // 장애 유형에 맞춰 알림 방식 자동 설정 (디자인: 시각 → 음성, 청각 → 진동·점멸)
+      // 장애 유형에 맞춰 알림 방식 자동 설정 (디자인: 시각 → 음성, 청각 → 점멸)
       final store = ref.read(prototypeSafetyProvider);
       final a = store.accessibility;
       await store.updateAccessibility(a.copyWith(
         visionSupport: dis.contains('see'),
         voicePrompts: dis.contains('see') ? true : a.voicePrompts,
         hearingSupport: dis.contains('hear'),
-        strongVibration: dis.contains('hear') ? true : a.strongVibration,
         screenFlash: dis.contains('hear') ? true : a.screenFlash,
       ));
       if (dis.contains('see')) {

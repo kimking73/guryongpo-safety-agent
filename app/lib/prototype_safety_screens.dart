@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -13,7 +12,6 @@ import 'services/prototype_safety_store.dart';
 const prototypeEvacuationAlertId = 'demo-flood-evacuation';
 const evacuationFlashTransitionInterval = Duration(milliseconds: 500);
 const evacuationFlashDuration = Duration(seconds: 30);
-const evacuationHapticPulseLimit = 8;
 const _evacuationFlashTransitionLimit = 60;
 
 const _evacuationVoicePrompt =
@@ -39,10 +37,8 @@ class EvacuationDemoScreen extends ConsumerStatefulWidget {
 
 class _EvacuationDemoScreenState extends ConsumerState<EvacuationDemoScreen> {
   Timer? _flashTimer;
-  Timer? _hapticTimer;
   bool _flashOn = false;
   int _flashTransitions = 0;
-  int _hapticPulses = 0;
 
   @override
   void initState() {
@@ -62,10 +58,8 @@ class _EvacuationDemoScreenState extends ConsumerState<EvacuationDemoScreen> {
 
   void _startAlertEffects(AccessibilitySettings settings) {
     _flashTimer?.cancel();
-    _hapticTimer?.cancel();
     _flashOn = false;
     _flashTransitions = 0;
-    _hapticPulses = 0;
 
     if (settings.hearingSupport && settings.screenFlash) {
       _flashTimer = Timer.periodic(evacuationFlashTransitionInterval, (timer) {
@@ -81,18 +75,6 @@ class _EvacuationDemoScreenState extends ConsumerState<EvacuationDemoScreen> {
         }
       });
     }
-
-    if (settings.hearingSupport && settings.strongVibration) {
-      _hapticTimer = Timer.periodic(evacuationFlashTransitionInterval, (timer) {
-        if (!mounted || _hapticPulses >= evacuationHapticPulseLimit) {
-          timer.cancel();
-          return;
-        }
-        _hapticPulses++;
-        unawaited(HapticFeedback.vibrate().catchError((Object _) {}));
-        if (_hapticPulses >= evacuationHapticPulseLimit) timer.cancel();
-      });
-    }
   }
 
   Future<void> _replayPrompt() =>
@@ -101,7 +83,6 @@ class _EvacuationDemoScreenState extends ConsumerState<EvacuationDemoScreen> {
   @override
   void dispose() {
     _flashTimer?.cancel();
-    _hapticTimer?.cancel();
     unawaited(DemoSpeech.instance.stop());
     super.dispose();
   }
@@ -137,10 +118,9 @@ class _EvacuationDemoScreenState extends ConsumerState<EvacuationDemoScreen> {
           if (prefs.hearingSupport) ...[
             const SizedBox(height: 8),
             const ListTile(
-              leading: Icon(Icons.vibration),
+              leading: Icon(Icons.flash_on),
               title: Text('청각 지원 경보'),
-              subtitle: Text(
-                  '앱이 열린 동안 기본 진동과 초당 1회 주기의 화면 점멸을 최대 30초간 시연합니다. 진동 세기는 기기에 따라 다릅니다.'),
+              subtitle: Text('앱이 열린 동안 초당 1회 주기의 화면 점멸을 최대 30초간 시연합니다.'),
             ),
           ],
         ],
@@ -338,12 +318,11 @@ class AccessibilitySettingsScreen extends ConsumerWidget {
             SwitchListTile(
               secondary: const Icon(Icons.hearing),
               title: const Text('청각 지원 경보'),
-              subtitle: const Text('켜면 반복 진동, 화면 점멸, 큰 글씨가 함께 켜집니다.'),
+              subtitle: const Text('켜면 화면 점멸, 큰 글씨가 함께 켜집니다.'),
               value: settings.hearingSupport,
               onChanged: (value) => update(value
                   ? settings.copyWith(
                       hearingSupport: true,
-                      strongVibration: true,
                       screenFlash: true,
                       largeText: true,
                     )
@@ -359,14 +338,6 @@ class AccessibilitySettingsScreen extends ConsumerWidget {
                   : settings.copyWith(visionSupport: false)),
             ),
             const Divider(height: 1),
-            SwitchListTile(
-              title: const Text('반복 진동 알림'),
-              subtitle:
-                  const Text('운영체제 기본 진동을 반복합니다. 진동 세기와 패턴은 기기에 따라 다릅니다.'),
-              value: settings.strongVibration,
-              onChanged: (value) =>
-                  update(settings.copyWith(strongVibration: value)),
-            ),
             SwitchListTile(
               title: const Text('화면 점멸'),
               subtitle: const Text('초당 1회 주기, 최대 30초 · 광과민성이 있으면 꺼 두세요'),

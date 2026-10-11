@@ -361,13 +361,13 @@ void main() {
   double flashOpacity(WidgetTester t) =>
       t.widget<AnimatedOpacity>(find.byKey(const ValueKey('evacuation-flash'))).opacity;
 
-  testWidgets('대피 현황 칩: 진행 중인 경보가 없어도 시연 모드면 3버튼 팝업, 진동·화면 점멸 켜짐이면 깜빡인다', (t) async {
-    final store = await pumpChip(t, const AccessibilitySettings(strongVibration: true, screenFlash: true));
+  testWidgets('대피 현황 칩: 진행 중인 경보가 없어도 시연 모드면 3버튼 팝업, 화면 점멸 켜짐이면 깜빡인다', (t) async {
+    final store = await pumpChip(t, const AccessibilitySettings(screenFlash: true));
     expect(find.text('지금 당장 대피해야 합니다'), findsOneWidget);
     for (final s in ['대피 완료', '대피 중', '도움 필요']) {
       expect(find.text(s), findsOneWidget);
     }
-    expect(find.text('진동·화면 점멸 켜짐 · 사용자 화면에서 바꿀 수 있어요'), findsOneWidget);
+    expect(find.text('화면 점멸 켜짐 · 사용자 화면에서 바꿀 수 있어요'), findsOneWidget);
     await t.pump(evacuationFlashTransitionInterval);
     expect(flashOpacity(t), greaterThan(0));
     await t.tap(find.text('대피 완료'));
@@ -379,10 +379,10 @@ void main() {
     await t.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('대피 현황 칩: 진동·화면 점멸을 끄면 팝업만 뜨고 깜빡이지 않는다', (t) async {
-    await pumpChip(t, const AccessibilitySettings(strongVibration: false, screenFlash: false));
+  testWidgets('대피 현황 칩: 화면 점멸을 끄면 팝업만 뜨고 깜빡이지 않는다', (t) async {
+    await pumpChip(t, const AccessibilitySettings(screenFlash: false));
     expect(find.text('지금 당장 대피해야 합니다'), findsOneWidget);
-    expect(find.text('음성·진동·화면 점멸 알림 꺼짐 · 사용자 화면에서 켤 수 있어요'), findsOneWidget);
+    expect(find.text('음성·화면 점멸 알림 꺼짐 · 사용자 화면에서 켤 수 있어요'), findsOneWidget);
     await t.pump(evacuationFlashTransitionInterval * 3);
     expect(flashOpacity(t), 0);
     await t.pumpWidget(const SizedBox.shrink());

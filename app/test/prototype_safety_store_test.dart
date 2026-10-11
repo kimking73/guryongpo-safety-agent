@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -35,7 +34,7 @@ void main() {
   test('explicit saved screen-flash choices survive loading', () async {
     SharedPreferences.setMockInitialValues({
       'prototype_accessibility_v1':
-          '{"hearingSupport":true,"visionSupport":false,"strongVibration":true,"screenFlash":true,"largeText":true,"voicePrompts":true}',
+          '{"hearingSupport":true,"visionSupport":false,"screenFlash":true,"largeText":true,"voicePrompts":true}',
     });
     final controller = PrototypeSafetyController();
     await controller.load();
@@ -242,21 +241,8 @@ void main() {
       controller.accessibility.copyWith(
         hearingSupport: true,
         screenFlash: true,
-        strongVibration: true,
       ),
     );
-    final hapticCalls = <String>[];
-    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-      SystemChannels.platform,
-      (call) async {
-        if (call.method == 'HapticFeedback.vibrate') {
-          hapticCalls.add(call.method);
-        }
-        return null;
-      },
-    );
-    addTearDown(() => tester.binding.defaultBinaryMessenger
-        .setMockMethodCallHandler(SystemChannels.platform, null));
 
     await tester.pumpWidget(ProviderScope(
       overrides: [prototypeSafetyProvider.overrideWith((ref) => controller)],
@@ -301,7 +287,6 @@ void main() {
           .color,
       isNull,
     );
-    expect(hapticCalls, hasLength(evacuationHapticPulseLimit));
   });
 
   testWidgets('hearing and vision support enable their related preferences',
@@ -316,7 +301,6 @@ void main() {
     await tester.tap(find.text('청각 지원 경보'));
     await tester.pumpAndSettle();
     expect(controller.accessibility.hearingSupport, isTrue);
-    expect(controller.accessibility.strongVibration, isTrue);
     expect(controller.accessibility.screenFlash, isTrue);
     expect(controller.accessibility.largeText, isTrue);
 

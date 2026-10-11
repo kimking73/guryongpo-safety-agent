@@ -24,7 +24,6 @@ import 'services/account_service.dart';
 import 'services/location_service.dart';
 import 'services/geocoding_service.dart';
 import 'services/demo_speech.dart';
-import 'services/alert_vibration.dart';
 import 'services/voice_service.dart';
 import 'services/voice_conversation.dart';
 import 'services/realtime_voice.dart';
@@ -1426,8 +1425,8 @@ class EvacuationAlertDialog extends ConsumerStatefulWidget {
 class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
   bool _busy = false;
 
-  // 사용자 화면 '알림' 스위치대로 (2026-10-11 사용자 요청): 화면 점멸 · 진동 알림 · 음성 안내 자동 재생
-  Timer? _flash, _vibrate;
+  // 사용자 화면 '알림' 스위치대로 (2026-10-11 사용자 요청): 화면 점멸 · 음성 안내 자동 재생
+  Timer? _flash;
   bool _flashOn = false;
   int _flashTicks = 0;
   bool _voice = false;
@@ -1467,14 +1466,6 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
           }
           setState(() => _flashOn = ++_flashTicks % 2 == 1);
           unawaited(EvacAlarm.torch(_flashOn));   // 손전등도 같은 박자로 (2026-10-11 사용자 요청, Android 앱)
-        });
-      }
-      if (a.strongVibration) {
-        var pulses = 0;
-        alertVibrate();
-        _vibrate = Timer.periodic(const Duration(milliseconds: 900), (t) {
-          if (++pulses >= evacuationHapticPulseLimit) t.cancel();
-          alertVibrate();
         });
       }
       if (a.visionSupport) {
@@ -1545,8 +1536,6 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
   @override
   void dispose() {
     _flash?.cancel();
-    _vibrate?.cancel();
-    alertVibrateStop();
     unawaited(EvacAlarm.torch(false));
     if (widget.alarm) unawaited(EvacAlarm.stop());
     if (_voice) unawaited(DemoSpeech.instance.stop());
@@ -1620,12 +1609,11 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
     }
     final on = [
       if (_voice) '음성 안내',
-      if (a.strongVibration) '진동',
       if (a.screenFlash) '화면 점멸',
     ];
     return Row(mainAxisAlignment: MainAxisAlignment.center, children: [
       Flexible(
-        child: Text(on.isEmpty ? '음성·진동·화면 점멸 알림 꺼짐 · 사용자 화면에서 켤 수 있어요' : '${on.join('·')} 켜짐 · 사용자 화면에서 바꿀 수 있어요',
+        child: Text(on.isEmpty ? '음성·화면 점멸 알림 꺼짐 · 사용자 화면에서 켤 수 있어요' : '${on.join('·')} 켜짐 · 사용자 화면에서 바꿀 수 있어요',
             textAlign: TextAlign.center, style: const TextStyle(fontSize: 13, color: GK.muted)),
       ),
       if (_voice)

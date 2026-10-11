@@ -41,7 +41,6 @@ class AccessibilitySettings {
   const AccessibilitySettings({
     this.hearingSupport = false,
     this.visionSupport = false,
-    this.strongVibration = true,
     this.screenFlash = false,
     this.largeText = true,
     this.voicePrompts = true,
@@ -49,7 +48,6 @@ class AccessibilitySettings {
 
   final bool hearingSupport;
   final bool visionSupport;
-  final bool strongVibration;
   final bool screenFlash;
   final bool largeText;
   final bool voicePrompts;
@@ -57,7 +55,6 @@ class AccessibilitySettings {
   AccessibilitySettings copyWith({
     bool? hearingSupport,
     bool? visionSupport,
-    bool? strongVibration,
     bool? screenFlash,
     bool? largeText,
     bool? voicePrompts,
@@ -65,7 +62,6 @@ class AccessibilitySettings {
       AccessibilitySettings(
         hearingSupport: hearingSupport ?? this.hearingSupport,
         visionSupport: visionSupport ?? this.visionSupport,
-        strongVibration: strongVibration ?? this.strongVibration,
         screenFlash: screenFlash ?? this.screenFlash,
         largeText: largeText ?? this.largeText,
         voicePrompts: voicePrompts ?? this.voicePrompts,
@@ -74,7 +70,6 @@ class AccessibilitySettings {
   Map<String, Object> toJson() => {
         'hearingSupport': hearingSupport,
         'visionSupport': visionSupport,
-        'strongVibration': strongVibration,
         'screenFlash': screenFlash,
         'largeText': largeText,
         'voicePrompts': voicePrompts,
@@ -84,7 +79,6 @@ class AccessibilitySettings {
       AccessibilitySettings(
         hearingSupport: json['hearingSupport'] == true,
         visionSupport: json['visionSupport'] == true,
-        strongVibration: json['strongVibration'] != false,
         // Missing values in older or partially written preferences should be
         // safe by default. Explicitly saved user choices are preserved.
         screenFlash: json['screenFlash'] == true,
