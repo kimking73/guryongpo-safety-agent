@@ -4,10 +4,10 @@
 1. Read `.claude/docs/timeline.md` → status table, "다음 세션 시작점", "이월 항목", work log.
 2. From `코드/`: `git pull` (teammates push to `main`), then `docker compose up -d` and `docker compose ps`
    (db, api, ai all healthy). If `.env` changed since the ai container started: `docker compose up -d --force-recreate ai`.
-3. Baseline tests: `.venv/bin/python -m pytest -q` → **214 passed** (2026-10-10). `-m "db and not live"` needs local db + `AI_DB_*`
+3. Baseline tests: `.venv/bin/python -m pytest -q` → **217 passed** (2026-10-11). `-m "db and not live"` needs local db + `AI_DB_*`
    in `.env` (plain `-m db` also runs paid live tests). `-m live` calls real OpenAI (routing, B3 injection, extractor; a few 원).
    If `docker compose ps` hangs, restart the OrbStack app (happened 2026-10-08); VM checks still work.
-   Other lanes' baselines: server 220 passed·8 skipped, route 76, app 101 with 7 known failures (see timeline "다음 세션 시작점";
+   Other lanes' baselines: server 223 passed·8 skipped, route 77, app 7 known failures as of 10-09 (not fully rerun since) (see timeline "다음 세션 시작점";
    run Flutter on an ASCII-path copy).
 3a. **OpenAI spend check — warn the user** (user's budget 200,000원/month, user request 2026-10-01): read
    `curl -s localhost:8001/api/ai/usage` (local container), the VM's same URL over ssh, and
@@ -27,15 +27,25 @@
 - If code moved, fix file:line references here, in `architectural_patterns.md`, and in `../CLAUDE.md`.
 - Commit; if `git push` is blocked for Claude, ask the user to run `! git push`.
 
-## Current status (2026-10-09, Day 17)
+## Current status (2026-10-11, Day 19)
 - Timeline is 28 days (Day 1 = 2026-09-23; Day 21 = extra features integration). **Done: B1, B8, B2, B3, B6, B7.**
-  **B10** done criteria met (https://34-64-177-195.nip.io). **B11** 1st pass + AI link (`request_sea_route`, 10-07). **C8** built and deployed.
-  **B13** (visit priority, `../server/app/priority.py`) + responder multi-stop visit route (`../route/guardian_route/visits.py`, app 'my visit route' card) built and deployed (10-08~09).
-  **B4**: only the proactive alert message function for A5 is left (+ recovery/support agent added 10-08). **B5**: voice deferred (no GCP key → 503).
-  Marking B4/B5/B10/J1/B11/B13 done waits for the user. B also changed lanes A and C on the user's request (10-05~09: demo mode,
-  login forced, server profile as the single user-info store, `care.profile_updates`, app redesign to `../web-prototype/`, B13 in `server/`,
-  patrol screen) — sharing with 조하린·김다인 is pending (timeline 이월 항목). **A test incident (`b13_test`) is open on the VM — delete it after the user checks.**
-  Deployed: VM server 1b1affc, web 74a8f10 (2026-10-09). This Mac can ssh to the VM. Next: timeline "다음 세션 시작점".
+  **B10** done criteria met (https://34-64-177-195.nip.io). **B11** 1st pass + AI link (`request_sea_route`) + `POST /api/route/sea/check`. **C8** built and deployed.
+  **B13** (visit priority, `../server/app/priority.py`) + responder multi-stop visit route (`../route/guardian_route/visits.py`) deployed.
+  **B4**: only the proactive alert message function for A5 is left. **B5**: voice deferred (no GCP key → 503). **B12**, **B9** not started.
+  Marking B4/B5/B10/J1/B11/B13 done waits for the user. B also changed lanes A and C on the user's request (demo mode, login forced,
+  server profile as the single user-info store, `care.profile_updates`, app redesign, B13 in `server/`, patrol screen, menu transitions,
+  patrol map card) — sharing with 조하린·김다인 is pending (timeline 이월 항목). **A test incident (`b13_test`) is open on the VM — delete it after the user checks.**
+  Deployed: VM server + web 559837d (2026-10-11). VM ssh needs the key in the agent (`ssh-add --apple-load-keychain`). Next: timeline "다음 세션 시작점"
+  (an app-screen avoidance test was in progress — see "진행 중이던 것").
+- 2026-10-10~11 AI changes: answer style rules `llm.STYLE_RULES` (conclusion first, 1–2 sentences, 1–2 numbers; hazard pieces joined into one
+  paragraph by `action.compose_summaries`); no agent selected in chat → `graph.direct_reply` and END (classifier `user_info` echo or service intro);
+  to-do list only when asked or in the danger branch (classifier `wants_action`); dependents follow-up removed; when the advisor's own route
+  passes a hazard zone, code appends that fact to the route step (`action.with_passing_zones` — the checker blocked answers that omitted it);
+  walking ability / dependents are no longer extracted or read from the server profile (김다인 1a4fa25, user decision 10-09).
+- LangSmith tracing (2026-10-11, `guardian_ai/tracing.py`): off unless `LANGSMITH_TRACING=true` + `LANGSMITH_API_KEY`; `LANGSMITH_TRACE_SCOPE=demo`
+  (default) sends demo-mode chats only — real users' location/age/disability must not leave the server without a consent decision.
+  `make_client()` wraps OpenAI with `wrap_openai`; `ChatService.chat` and the background `_collect` both run inside `tracing.scope(demo)`.
+  No key anywhere yet (local or VM) — waiting for the user.
 - User info (2026-10-08): the server profile (`user_profiles`·`user_places`) is the only store — read by `tools.get_user_profile`,
   written after each signed-in answer by `profile_sync.ProfileWriter` with the user's own token (+ log `/api/v1/user/profile-updates`).
   `ai_memory.store` is retired (data kept). Signed-in = token uid == request user_id (`api._signed_in`); demo chats also write.
@@ -124,6 +134,7 @@ Flutter app/web (teammate C). This lane (B) also owns GraphHopper routing and GC
 | `guardian_ai/memory.py` | `CONVERSATION_TTL_MIN` (short-term conversation memory; long-term store retired 2026-10-08) |
 | `guardian_ai/profile_sync.py` | Chat facts → server profile: `to_patch`, `ProfileWriter.apply(token, facts)` (POST /api/v1/user, places), `describe` |
 | `guardian_ai/db.py` | Read-only PostgreSQL access (`Database`, `default_fetch`, `conninfo()` from `AI_DB_*`) |
+| `guardian_ai/tracing.py` | Optional LangSmith tracing: `configured()`, `allowed(demo)`, `scope(demo)` context, `wrap_client` (off by default, demo chats only) |
 | `guardian_ai/usage.py` | OpenAI token/cost ledger per month (`data/openai_usage.json`, volume `ai-data` in compose), warns at 50/80/100% of `OPENAI_BUDGET_KRW`; `GET /api/ai/usage` |
 | `guardian_ai/llm.py` | `make_client()`, `OpenAIClassifier`, `OpenAIWriter` (flood sentences), `OpenAIFactChecker` (`OPENAI_VERIFY_MODEL`, `OPENAI_VERIFY_EFFORT`, `checks_intent`), specialist/action/polish writers, prompts |
 | `guardian_ai/service.py` | `ChatRequest`/`ChatResponse`, `ChatService` (service.py:119; real nodes wired in `__init__`, `chat()` streams for `timings`), `Card`·`RouteInfo`, checkpointer + `STATE_TYPES` allowlist |

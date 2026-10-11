@@ -304,8 +304,11 @@ def gif(paths: list[Path], out: Path, ms: int = 1500) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--seed", type=int, default=20261001)
+    ap.add_argument("--out", type=Path, default=None, help="산출물 폴더 (기본 route/out/avoid_demo) — 예전 결과를 남기고 다시 돌릴 때")
     a = ap.parse_args()
     rng = random.Random(a.seed)
+    global OUT
+    OUT = a.out or OUT
     OUT.mkdir(parents=True, exist_ok=True)
 
     mem = MemoryHazards()
