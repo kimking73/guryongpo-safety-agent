@@ -26,6 +26,12 @@ DEFAULT_MODEL = "gpt-6-luna"
 DEFAULT_TIMEOUT_MS = 10_000
 # gpt-6-luna는 추론 모델(기본 medium). 분류는 쉬운 작업이라 low로 지연을 줄인다.
 CLASSIFY_REASONING_EFFORT = "low"
+
+
+def reasoning_effort(default: str = "low") -> str:
+    """LLM 호출의 생각 깊이. OPENAI_REASONING_EFFORT가 있으면 모든 단계에 그 값을 쓴다 (지연 실험용, 예: none).
+    비우면 단계별 기본값(low). 2026-10-11 실험: none은 분류가 날씨 질문을 놓쳤다 — 운영에는 넣지 않았다."""
+    return os.environ.get("OPENAI_REASONING_EFFORT") or default
 HISTORY_TURNS = 6          # 분류에 참고할 최근 대화 메시지 수
 
 
@@ -177,7 +183,7 @@ class OpenAIClassifier:
             instructions=SYSTEM_PROMPT,
             input=build_prompt(state),
             text_format=Classification,                       # 응답 JSON이 Classification 형태를 따르게 한다
-            reasoning={"effort": CLASSIFY_REASONING_EFFORT},
+            reasoning={"effort": reasoning_effort(CLASSIFY_REASONING_EFFORT)},
             # temperature는 넣지 않는다: 추론 모델(gpt-6-luna)은 지원하지 않는다
         )
         self.tracker.record(self.model, getattr(response, "usage", None))
@@ -249,7 +255,7 @@ class OpenAIWriter:
             body.append(f"재검증 실패 사유:\n{feedback}")
         response = self.client.responses.parse(
             model=self.model, instructions=WRITER_PROMPT, input="\n".join(body),
-            text_format=FloodAnswer, reasoning={"effort": "low"})
+            text_format=FloodAnswer, reasoning={"effort": reasoning_effort()})
         self.tracker.record(self.model, getattr(response, "usage", None))
         result = response.output_parsed
         if not isinstance(result, FloodAnswer) or not result.summary.strip():
@@ -302,7 +308,7 @@ class OpenAILocationWriter:
             body.append(f"재검증 실패 사유:\n{feedback}")
         response = self.client.responses.parse(
             model=self.model, instructions=LOCATION_WRITER_PROMPT, input="\n".join(body),
-            text_format=FloodAnswer, reasoning={"effort": "low"})
+            text_format=FloodAnswer, reasoning={"effort": reasoning_effort()})
         self.tracker.record(self.model, getattr(response, "usage", None))
         result = response.output_parsed
         if not isinstance(result, FloodAnswer) or not result.summary.strip():
@@ -375,7 +381,7 @@ class OpenAISpecialistWriter:
             body.append(f"재검증 실패 사유:\n{feedback}")
         response = self.client.responses.parse(
             model=self.model, instructions=self.prompt, input="\n".join(body),
-            text_format=FloodAnswer, reasoning={"effort": "low"})
+            text_format=FloodAnswer, reasoning={"effort": reasoning_effort()})
         self.tracker.record(self.model, getattr(response, "usage", None))
         result = response.output_parsed
         if not isinstance(result, FloodAnswer) or not result.summary.strip():
@@ -434,7 +440,7 @@ class OpenAIActionWriter:
             body.append(f"재검증 실패 사유:\n{feedback}")
         response = self.client.responses.parse(
             model=self.model, instructions=ACTION_WRITER_PROMPT, input="\n".join(body),
-            text_format=ActionAnswer, reasoning={"effort": "low"})
+            text_format=ActionAnswer, reasoning={"effort": reasoning_effort()})
         self.tracker.record(self.model, getattr(response, "usage", None))
         result = response.output_parsed
         if not isinstance(result, ActionAnswer) or not [x for x in result.steps if x.strip()]:
@@ -479,7 +485,7 @@ class OpenAIPolisher:
             body.append(f"재다듬기 사유:\n{feedback}")
         response = self.client.responses.parse(
             model=self.model, instructions=POLISH_PROMPT, input="\n".join(body),
-            text_format=PolishAnswer, reasoning={"effort": "low"})
+            text_format=PolishAnswer, reasoning={"effort": reasoning_effort()})
         self.tracker.record(self.model, getattr(response, "usage", None))
         result = response.output_parsed
         if not isinstance(result, PolishAnswer) or not result.text.strip():
@@ -535,7 +541,8 @@ class OpenAIFactChecker:
         self.tracker = tracker or get_tracker()
         # medium은 8~12초로 응답 제한(10초)을 자주 넘겨 내용 검사가 통째로 빠졌다. low(약 4초)도 같은 문제를 잡았다 (2026-10-03 live)
         # → 기본 low. 더 깊게 보려면 OPENAI_VERIFY_EFFORT=medium (지연 늘어남)
-        self.reasoning_effort = reasoning_effort or os.environ.get("OPENAI_VERIFY_EFFORT") or "low"
+        self.reasoning_effort = (reasoning_effort or os.environ.get("OPENAI_VERIFY_EFFORT")
+                                 or globals()["reasoning_effort"]())
         # True면 의도 검증도 같은 호출로 — (내용, 의도) 두 결과를 돌려준다 (verify.make_hallucination_check가 나눠 쓴다)
         self.checks_intent = checks_intent
 
@@ -609,7 +616,7 @@ class OpenAIMemoryExtractor:
         body += [f"\n사용자: {question}", f"AI: {answer}"]
         response = self.client.responses.parse(
             model=self.model, instructions=EXTRACTOR_PROMPT, input="\n".join(body),
-            text_format=MemoryUpdate, reasoning={"effort": "low"})
+            text_format=MemoryUpdate, reasoning={"effort": reasoning_effort()})
         self.tracker.record(self.model, getattr(response, "usage", None))
         result = response.output_parsed
         if not isinstance(result, MemoryUpdate):

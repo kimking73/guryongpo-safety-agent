@@ -42,7 +42,7 @@ from .action import ACTION_WORDS, NOT_READY, make_action_advisor  # noqa: F401 �
 from .verify import make_hallucination_check
 from .state import (
     MAX_POLISH_RETRY,   # 다듬기 재시도 한도 (1회)
-    MAX_RETRY,          # 검증 실패 시 관리자부터 다시 하는 한도 (2회)
+    MAX_RETRY,          # 검증 실패 시 관리자부터 다시 하는 한도 (1회)
     RESET,              # reducer에 보내면 누적된 값을 비우는 신호
     CheckResult,
     DisasterType,

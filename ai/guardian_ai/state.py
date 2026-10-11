@@ -234,5 +234,5 @@ class GuardianState(TypedDict, total=False):
     used_fallback: bool
 
 
-MAX_RETRY = 2
+MAX_RETRY = 1
 MAX_POLISH_RETRY = 1
