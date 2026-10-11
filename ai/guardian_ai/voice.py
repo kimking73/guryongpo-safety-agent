@@ -2,7 +2,8 @@
 
 - 앱은 녹음 파일만 보낸다. Google 키는 서버(ai 컨테이너)만 갖는다 (서버 명세 v0.3 공통 규약).
 - 녹음 형식은 기기마다 다르다(웹 webm/opus, 안드로이드·iOS m4a/aac) → ffmpeg로 16kHz mono 16bit PCM으로 바꿔 STT에 보낸다.
-- 키: 서비스 계정 JSON 경로 `GCP_VOICE_CREDENTIALS` (예: secrets/gcp-voice.json). 없으면 available=False → API가 503.
+- 키: 서비스 계정 JSON 경로 `GCP_VOICE_CREDENTIALS` (예: secrets/gcp-voice.json) 또는 API 키 `GCP_VOICE_API_KEY`
+  (조직 정책이 서비스 계정 키 발급을 막을 때 — 두 API는 API 키도 받는다). 둘 다 없으면 available=False → API가 503.
 - B12(음성 대피 확인)가 stt·tts를 그대로 쓴다.
 """
 
@@ -31,6 +32,10 @@ SPEAKING_RATE = 0.95             # 노인·관광객이 듣기 쉽게 조금 느
 TTS_CACHE_S = 600                # 같은 문장(경고 읽기 등)은 10분 동안 다시 합성하지 않는다
 TIMEOUT_S = 10.0
 DEFAULT_CREDENTIALS = "secrets/gcp-voice.json"
+# 연속 음성 대화를 끝내는 말. 받아쓴 문장 전체가 이 중 하나일 때만 끝낸다 ("그만 대피해도 돼?"는 질문이다)
+END_PHRASES = {"그만", "그만해", "그만할게", "그만할래", "대화종료", "대화끝", "음성대화종료", "종료", "종료해", "끝", "끝낼게",
+               "끝내", "끝내자", "됐어", "됐어요", "이제됐어", "고마워그만", "그만해줘", "종료해줘", "끝내줘"}
+END_REPLY = "네, 음성 대화를 마칠게요."
 
 
 class VoiceUnavailable(Exception):
@@ -43,6 +48,11 @@ class NoSpeech(Exception):
 
 class BadAudio(Exception):
     """너무 길거나 변환할 수 없는 녹음 → 422"""
+
+
+def is_end_phrase(transcript: str) -> bool:
+    """받아쓴 말이 '대화를 끝내자'는 뜻인가 — 띄어쓰기·문장부호를 뺀 문장 전체가 END_PHRASES와 같을 때만."""
+    return "".join(ch for ch in transcript if ch.isalnum()) in END_PHRASES
 
 
 def to_pcm16k(data: bytes, run: Callable[..., Any] = subprocess.run) -> bytes:
@@ -64,10 +74,11 @@ def to_pcm16k(data: bytes, run: Callable[..., Any] = subprocess.run) -> bytes:
 
 class GoogleVoice:
     """Google STT·TTS. token()은 서비스 계정 토큰(google-auth)이 만료 전에 알아서 새로 받는다.
+    API 키(api_key 또는 GCP_VOICE_API_KEY)가 있으면 토큰 대신 그 키를 머리말(X-Goog-Api-Key)로 보낸다 — 서비스 계정 파일보다 우선.
     http: 테스트에서 가짜 Google을 넣을 때만 (httpx.Client, base 주소 무시하고 전체 URL로 부른다)."""
 
     def __init__(self, credentials_path: str | None = None, http: httpx.Client | None = None,
-                 token: Callable[[], str] | None = None, voice_name: str | None = None):
+                 token: Callable[[], str] | None = None, voice_name: str | None = None, api_key: str | None = None):
         self.voice_name = voice_name or os.environ.get("GCP_VOICE_NAME") or DEFAULT_VOICE
         self.http = http or httpx.Client(timeout=TIMEOUT_S)
         self._token = token
@@ -77,7 +88,10 @@ class GoogleVoice:
         # 인자 > GCP_VOICE_CREDENTIALS > secrets/gcp-voice.json (키 파일만 넣으면 .env를 안 고쳐도 되게)
         path = credentials_path if credentials_path is not None else (
             os.environ.get("GCP_VOICE_CREDENTIALS") or DEFAULT_CREDENTIALS)
-        self.available = token is not None or bool(path and os.path.exists(path))
+        # 테스트가 토큰·경로를 직접 줄 때는 환경 변수의 API 키를 보지 않는다
+        self._api_key = api_key if api_key is not None else (
+            (os.environ.get("GCP_VOICE_API_KEY") or "").strip() if token is None and credentials_path is None else "")
+        self.available = token is not None or bool(self._api_key) or bool(path and os.path.exists(path))
         self._path = path
 
     def token(self) -> str:
@@ -97,7 +111,8 @@ class GoogleVoice:
 
     def _post(self, url: str, body: dict[str, Any]) -> dict[str, Any]:
         try:
-            res = self.http.post(url, json=body, headers={"Authorization": f"Bearer {self.token()}"})
+            auth = {"X-Goog-Api-Key": self._api_key} if self._api_key else {"Authorization": f"Bearer {self.token()}"}
+            res = self.http.post(url, json=body, headers=auth)
         except httpx.HTTPError as e:
             raise VoiceUnavailable(f"Google 음성 서비스에 연결하지 못했습니다 ({type(e).__name__})") from e
         if res.status_code != 200:

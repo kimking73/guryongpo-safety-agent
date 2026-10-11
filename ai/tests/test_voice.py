@@ -78,6 +78,22 @@ def test_no_credentials_means_unavailable(monkeypatch):
     assert not V.GoogleVoice().available
 
 
+def test_api_key_instead_of_service_account(monkeypatch):
+    """조직 정책이 서비스 계정 키 발급을 막을 때: GCP_VOICE_API_KEY → 토큰 없이 X-Goog-Api-Key 머리말."""
+    seen = []
+
+    def handler(req):
+        seen.append((req.headers.get("x-goog-api-key"), req.headers.get("authorization"), str(req.url)))
+        return httpx.Response(200, json={"audioContent": base64.b64encode(b"MP3").decode()})
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    monkeypatch.setenv("GCP_VOICE_API_KEY", "k-123")
+    monkeypatch.delenv("GCP_VOICE_CREDENTIALS", raising=False)
+    g = V.GoogleVoice(http=http)
+    assert g.available and g.tts("안녕하세요") == b"MP3"
+    assert seen == [("k-123", None, V.TTS_URL)]            # 주소에 키를 붙이지 않는다 (로그에 남지 않게)
+    assert not V.GoogleVoice(credentials_path="").available  # 경로를 직접 준 경우는 환경 변수 키를 보지 않는다
+
+
 # --- API ------------------------------------------------------------------------
 
 @pytest.fixture
@@ -102,6 +118,25 @@ def test_voice_round_trip(client):
     assert body["transcript"] == "비가 많이 오는데 어떻게 해야 해?" and body["answer"]
     assert base64.b64decode(body["audio_b64"]).startswith(b"MP3:")
     assert {"stt", "tts", "voice_total", "total"} <= set(body["timings"])
+
+
+def test_end_phrase_only_when_whole_sentence():
+    for said in ("그만", "그만.", "대화 종료", "끝낼게!", " 됐어요 "):
+        assert V.is_end_phrase(said), said
+    for said in ("그만 대피해도 돼?", "비가 그만 왔으면 좋겠어", "종료된 특보 알려줘", ""):
+        assert not V.is_end_phrase(said), said
+
+
+def test_voice_end_phrase_skips_chat(client):
+    """'그만'은 질문이 아니다 — 대화를 돌리지 않고 인사와 end_conversation만."""
+    res = client(fake_google(transcript="그만.")).post(
+        "/api/voice", data={"user_id": "u1", "conversation_id": "c1"}, files={"audio": ("q.wav", b"x", "audio/wav")})
+    body = res.json()
+    assert res.status_code == 200 and body["end_conversation"] is True and body["transcript"] == "그만."
+    assert body["answer"] == V.END_REPLY and base64.b64decode(body["audio_b64"]) == b"MP3:" + V.END_REPLY.encode()
+    assert body["conversation_id"] == "c1" and "total" not in body["timings"]
+    normal = client(fake_google()).post("/api/voice", data={"user_id": "u1"}, files={"audio": ("q.wav", b"x", "audio/wav")})
+    assert normal.json()["end_conversation"] is False
 
 
 def test_voice_errors(client):

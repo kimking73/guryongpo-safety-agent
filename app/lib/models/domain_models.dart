@@ -320,9 +320,12 @@ class ChatAnswer {
 
 /// 음성 질문 결과: 받아쓴 질문 + 답 (답 음성은 answer.audio)
 class VoiceAnswer {
-  const VoiceAnswer(this.transcript, this.answer);
+  const VoiceAnswer(this.transcript, this.answer, {this.endConversation = false});
   final String transcript;
   final ChatAnswer answer;
+
+  /// 사용자가 "그만" 등으로 음성 대화를 끝내자고 함 (서버 end_conversation) → 다시 듣지 않는다
+  final bool endConversation;
 }
 
 /// 채팅 화면의 말풍선 하나

@@ -25,6 +25,8 @@ import 'services/geocoding_service.dart';
 import 'services/demo_speech.dart';
 import 'services/alert_vibration.dart';
 import 'services/voice_service.dart';
+import 'services/voice_conversation.dart';
+import 'services/realtime_voice.dart';
 import 'dashboard_parts.dart';
 import 'disaster_center.dart';
 import 'live_screens.dart';
@@ -176,26 +178,80 @@ class ChatController {
     }
   }
 
-  /// 음성 질문 (녹음이 끝난 wav). 받아쓴 질문·답을 붙이고 답 음성을 재생한다 — 다른 메뉴에 있어도 재생
-  Future<void> askVoice(Uint8List wav) async {
+  /// 실시간 음성 대화에서 들은 질문 (RealtimeVoice): 글 질문과 같은 길(/api/chat)로 답을 받아 붙이고, 읽을 문장을 돌려준다.
+  /// 소리는 Realtime 모델이 내므로 여기서는 재생하지 않는다.
+  Future<String> askSpoken(String question) async {
+    add([ChatMessage('🎤 $question', true)]);
+    _ref.read(chatLoading.notifier).state = true;
+    try {
+      final answer = await _ref.read(repo).ask(question, UserMode.user, _ref.read(userLocation).position);
+      add([ChatMessage(answer.text, false, answer: answer)]);
+      return answer.voiceText ?? answer.text;
+    } catch (_) {
+      const answer = ChatAnswer('AI 서비스에 연결하지 못했습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.', isError: true);
+      add([ChatMessage(answer.text, false, answer: answer)]);
+      return answer.text;
+    } finally {
+      _ref.read(chatLoading.notifier).state = false;
+    }
+  }
+
+  /// 음성 질문 (녹음이 끝난 wav). 받아쓴 질문·답을 붙이고 답 음성을 재생한다 — 다른 메뉴에 있어도 재생.
+  /// 연속 음성 대화(VoiceConversation)가 결과를 보고 다시 들을지 정한다. [shouldPlay]가 false면 답 음성을 틀지 않는다.
+  Future<VoiceTurn> askVoice(Uint8List wav, {void Function()? onSpeaking, bool Function()? shouldPlay}) async {
     _ref.read(chatLoading.notifier).state = true;
     ChatAnswer? answer;
+    var turn = VoiceTurn.answered;
     try {
       final v = await _ref.read(repo).askVoice(wav, UserMode.user, _ref.read(userLocation).position);
       answer = v.answer;
+      if (v.endConversation) turn = VoiceTurn.ended;
       add([ChatMessage('🎤 ${v.transcript}', true), ChatMessage(v.answer.text, false, answer: v.answer)]);
     } catch (e) {
+      turn = e is RemoteError && e.status == 422 ? VoiceTurn.notHeard : VoiceTurn.failed;
       add([ChatMessage(e is RemoteError ? e.message : '음성 질문을 처리하지 못했습니다. 다시 시도해 주세요.', false)]);
     } finally {
       _ref.read(chatLoading.notifier).state = false;
     }
-    if (answer?.audio != null) {
+    if (answer?.audio != null && (shouldPlay?.call() ?? true)) {
+      onSpeaking?.call();
       try {
         await VoicePlayer.instance.play(answer!.audio!);
       } catch (_) {}
     }
+    return turn;
   }
 }
+
+/// 음성 대화 (2026-10-11): 마이크 한 번 → 손대지 않고 묻고 듣기. AI 대화창과 대시보드 AiPanel이 함께 쓴다.
+/// 웹은 실시간 음성(OpenAI Realtime이 듣고 말하고 답은 LangGraph — realtime_voice.dart)을 먼저 해 보고,
+/// 안 되면(휴대폰 앱·서버 미지원) 녹음 올리기 방식(voice_conversation.dart, Google 받아쓰기·음성 합성)으로 넘어간다.
+final voiceConversation = StateNotifierProvider<VoiceHub, VoiceState>((ref) {
+  final chat = ref.read(chatController);
+  void say(String text) => chat.add([ChatMessage(text, false)]);
+  final hub = VoiceHub(
+      realtime: RealtimeVoice(
+          openSession: () async {
+            final j = await ref.read(repo).voiceSession();
+            return j == null ? null : RealtimeSession.fromJson(j);
+          },
+          ask: chat.askSpoken,
+          say: say),
+      upload: VoiceConversation(ask: chat.askVoice, say: say, stopPlayback: VoicePlayer.instance.stop));
+  ref.onDispose(() {
+    hub.realtime.dispose();
+    hub.upload.dispose();
+  });
+  return hub;
+});
+
+/// 연속 음성 대화 상태를 마이크 칸에 보여 줄 문구
+String voiceStateLabel(VoiceState s) => switch (s) {
+      VoiceState.listening => '듣고 있어요… 말씀하세요',
+      VoiceState.thinking => '답을 만드는 중…',
+      VoiceState.speaking => '말하는 중…',
+      VoiceState.off => '',
+    };
 
 final userOccupation = StateProvider<String>((_) => '');
 final autoVoiceAlerts = StateProvider<bool>((_) => false);
@@ -2850,8 +2906,6 @@ class AiScreen extends ConsumerStatefulWidget {
 class _AiScreenState extends ConsumerState<AiScreen> {
   final input = TextEditingController();
   final scroll = ScrollController();
-  bool recording = false;
-  VoiceRecorder? recorder;
   bool hasJob = false;
 
   /// 답을 기다리는 중 (앱 전체 상태 — 다른 메뉴에 갔다 와도 이어짐)
@@ -2902,38 +2956,16 @@ class _AiScreenState extends ConsumerState<AiScreen> {
     await _chat.ask(question);
   }
 
-  /// 마이크: 누르면 녹음, 다시 누르면(또는 28초) 서버로 보내 받아쓴 질문·답을 보여 주고 답 음성을 재생 (대시보드 AiPanel과 같은 흐름)
+  /// 마이크: 한 번 누르면 연속 음성 대화 시작 (듣기 → 말이 끝나면 자동 전송 → 답 음성 → 다시 듣기), 다시 누르면 중지.
+  /// 대화는 앱 전체 상태(voiceConversation)라 다른 메뉴로 가도 이어진다 — 대시보드 AiPanel과 같은 대화.
   Future<void> toggleMic() async {
+    final voice = ref.read(voiceConversation.notifier);
+    if (voice.active) return voice.stop();
     if (ref.read(chatLoading)) return;
-    if (recording) return finishVoice();
-    await VoicePlayer.instance.stop();
-    recorder ??= VoiceRecorder();
-    final ok = await recorder!.start(onLimit: finishVoice);
-    if (!mounted) return;
-    if (!ok) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('마이크 권한이 필요합니다. 브라우저·기기 설정에서 허용해 주세요.')));
-      return;
-    }
-    setState(() => recording = true);
-  }
-
-  /// 녹음은 이 화면에서 끝내고, 서버로 보내 답 받기는 chatController가 한다 (화면을 떠나도 이어짐)
-  Future<void> finishVoice() async {
-    if (!recording) return;
-    final loadingNotifier = ref.read(chatLoading.notifier);
-    setState(() => recording = false);
-    loadingNotifier.state = true;
-    final wav = await recorder!.stop();
-    loadingNotifier.state = false;
-    if (wav == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('녹음이 너무 짧습니다. 버튼을 누르고 말씀한 뒤 다시 눌러 주세요.')));
-      }
-      return;
-    }
-    await _chat.askVoice(wav);
+    final ok = await voice.start();
+    if (!mounted || ok) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('마이크 권한이 필요합니다. 브라우저·기기 설정에서 허용해 주세요.')));
   }
 
   // 침수 위험·도보 안전·대피 요령 질문은 뺐다 (2026-10-11 사용자 요청, 휴대폰 추천 질문과 같게)
@@ -2995,6 +3027,7 @@ class _AiScreenState extends ConsumerState<AiScreen> {
     final messages = ref.watch(chatMessages);
     // 답은 chatController가 붙인다 — 이 화면에 있을 때 붙으면 아래로
     ref.listen(chatMessages, (_, __) => _scrollToEnd());
+    final voice = ref.watch(voiceConversation); // 연속 음성 대화 상태 (꺼짐·듣는 중·답 만드는 중·말하는 중)
     final narrow = MediaQuery.sizeOf(c).width < 600;
     final pad = gkPagePadding(c);
     return Align(
@@ -3019,7 +3052,7 @@ class _AiScreenState extends ConsumerState<AiScreen> {
                           : null),
                 ),
               if (loading)
-                _bubble(ChatMessage(recording ? '듣고 있어요…' : '구룡포 정보를 확인하고 있습니다…', false),
+                _bubble(const ChatMessage('구룡포 정보를 확인하고 있습니다…', false),
                     showAvatar: messages.isEmpty || messages.last.mine),
             ]),
           ),
@@ -3047,13 +3080,14 @@ class _AiScreenState extends ConsumerState<AiScreen> {
                 decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(999), boxShadow: GK.shadow),
                 child: Row(children: [
                   Expanded(
-                    child: recording
-                        ? const Row(children: [
-                            Icon(Icons.graphic_eq_rounded, color: GK.red, size: 30),
-                            SizedBox(width: 10),
+                    child: voice != VoiceState.off
+                        ? Row(children: [
+                            Icon(voice == VoiceState.listening ? Icons.graphic_eq_rounded : Icons.record_voice_over_rounded,
+                                color: voice == VoiceState.listening ? GK.red : GK.navy, size: 30),
+                            const SizedBox(width: 10),
                             Expanded(
-                                child: Text('듣고 있어요… 말씀이 끝나면 중지를 누르세요',
-                                    overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 18, color: GK.muted))),
+                                child: Text(voiceStateLabel(voice),
+                                    overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 18, color: GK.muted))),
                           ])
                         : TextField(
                             controller: input,
@@ -3068,10 +3102,10 @@ class _AiScreenState extends ConsumerState<AiScreen> {
                                 contentPadding: EdgeInsets.symmetric(vertical: 12)),
                           ),
                   ),
-                  if (recording)
+                  if (voice != VoiceState.off)
                     GkPill('중지', icon: Icons.stop_circle_rounded, filled: true, bg: GK.red, big: true, onTap: toggleMic)
                   else
-                    _roundButton(Icons.mic_rounded, '음성 질문', GK.tint, GK.navy, loading ? null : toggleMic),
+                    _roundButton(Icons.graphic_eq_rounded, '음성 대화', GK.tint, GK.navy, loading ? null : toggleMic),
                   const SizedBox(width: 8),
                   _roundButton(loading ? null : Icons.arrow_upward_rounded, '보내기', GK.navy, Colors.white,
                       loading ? null : () => send()),
@@ -3105,13 +3139,6 @@ class _AiScreenState extends ConsumerState<AiScreen> {
 
   @override
   void dispose() {
-    // 녹음 중에 다른 메뉴로 가면 거기까지 녹음한 것으로 질문한다 (답은 대화 기록에 붙음)
-    if (recording) {
-      recording = false; // 28초 제한(onLimit)이 사라진 화면의 finishVoice를 부르지 않게
-      recorder!.stop().then((wav) {
-        if (wav != null) _chat.askVoice(wav);
-      });
-    }
     input.dispose();
     scroll.dispose();
     super.dispose();

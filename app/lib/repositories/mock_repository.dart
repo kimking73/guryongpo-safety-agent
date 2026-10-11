@@ -40,6 +40,9 @@ abstract class SafetyRepository {
 
   /// 문장 → 음성(mp3). 음성 기능을 쓸 수 없으면 null
   Future<Uint8List?> speak(String text);
+
+  /// 실시간 음성 대화 세션 (ai /api/voice/session 응답 그대로). 쓸 수 없으면 null → 녹음 올리기 방식
+  Future<Map<String, dynamic>?> voiceSession();
 }
 
 class MockSafetyRepository implements SafetyRepository {
@@ -314,6 +317,9 @@ class MockSafetyRepository implements SafetyRepository {
 
   @override
   Future<Uint8List?> speak(String text) async => null;
+
+  @override
+  Future<Map<String, dynamic>?> voiceSession() async => null;
 
   String _mockAnswer(String question) {
     if (question.contains('대피소'))

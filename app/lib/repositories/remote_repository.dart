@@ -283,9 +283,14 @@ class RemoteSafetyRepository implements SafetyRepository {
       if (DemoData.on) 'demo': 'true',
     });
     final r = await _guard(() => _client.ai.post<Map<String, dynamic>>('/api/voice', data: form), passDetail: const {422, 503});
+    final answer = chatAnswerFromJson(r.data!, names: await _routeHazardNames());
+    // "그만" 등 끝내는 말: 대화를 거치지 않은 인사만 온다 — 대화 id·프로필은 그대로
+    if (r.data!['end_conversation'] == true) {
+      return VoiceAnswer(r.data!['transcript'] as String, answer, endConversation: true);
+    }
     _conversationId = r.data!['conversation_id'] as String?;
     AccountSync.instance.pullAfterChat();
-    return VoiceAnswer(r.data!['transcript'] as String, chatAnswerFromJson(r.data!, names: await _routeHazardNames()));
+    return VoiceAnswer(r.data!['transcript'] as String, answer);
   }
 
   @override
@@ -299,6 +304,16 @@ class RemoteSafetyRepository implements SafetyRepository {
     }
   }
 
+  @override
+  Future<Map<String, dynamic>?> voiceSession() async {
+    try {
+      final r = await _client.ai.post<Map<String, dynamic>>('/api/voice/session');
+      return r.data;
+    } on DioException {
+      return null; // 서버에 OpenAI 키 없음(503)·예전 서버(404)·꺼짐 → 녹음 올리기 방식으로
+    }
+  }
+
   /// passDetail: 이 상태 코드면 서버가 보낸 문구(FastAPI detail)를 그대로 보여 준다
   Future<Response<T>> _guard<T>(Future<Response<T>> Function() call,
       {String? notFound, Set<int> passDetail = const {}}) async {
@@ -308,7 +323,7 @@ class RemoteSafetyRepository implements SafetyRepository {
       final status = e.response?.statusCode;
       if (status == 404 && notFound != null) throw RemoteError(notFound);
       final body = e.response?.data;
-      if (passDetail.contains(status) && body is Map && body['detail'] is String) throw RemoteError(body['detail'] as String);
+      if (passDetail.contains(status) && body is Map && body['detail'] is String) throw RemoteError(body['detail'] as String, status: status);
       if (e.type == DioExceptionType.receiveTimeout) throw const RemoteError('서버 응답이 늦습니다. 잠시 후 다시 시도해 주세요.');
       if (status == null) throw const RemoteError('서버에 연결하지 못했습니다. 인터넷 연결을 확인해 주세요.');
       throw RemoteError('서버 오류가 발생했습니다 ($status). 잠시 후 다시 시도해 주세요.');
@@ -318,8 +333,11 @@ class RemoteSafetyRepository implements SafetyRepository {
 
 /// 화면에 그대로 보여 줄 수 있는 오류 문구
 class RemoteError implements Exception {
-  const RemoteError(this.message);
+  const RemoteError(this.message, {this.status});
   final String message;
+
+  /// 서버 문구를 그대로 넘긴 경우의 HTTP 상태 (예: 음성 422 = 못 알아들음, 503 = 음성 기능 꺼짐)
+  final int? status;
   @override
   String toString() => message;
 }

@@ -26,6 +26,8 @@ dependencies:
   flutter_tts: ^4.2.5
   font_awesome_flutter: 11.0.0
   flutter_svg: ^2.3.0
+  # 실시간 음성 대화의 브라우저 WebRTC (lib/services/realtime_link_web.dart)
+  web: ^1.1.0
 
 dev_dependencies:
   flutter_test:

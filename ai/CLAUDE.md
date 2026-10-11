@@ -42,6 +42,11 @@
   to-do list only when asked or in the danger branch (classifier `wants_action`); dependents follow-up removed; when the advisor's own route
   passes a hazard zone, code appends that fact to the route step (`action.with_passing_zones` — the checker blocked answers that omitted it);
   walking ability / dependents are no longer extracted or read from the server profile (김다인 1a4fa25, user decision 10-09).
+- Realtime voice (2026-10-11, `guardian_ai/realtime.py`): `POST /api/voice/session` mints a 10-min OpenAI client secret for `gpt-realtime-2`
+  (`OPENAI_REALTIME_MODEL`/`_VOICE`); the web app connects by WebRTC and the model only calls tools (`tool_choice=required`: `ask_guardian` →
+  app calls `/api/chat`, answer read back verbatim via `read_out_prefix`; `end_conversation`). LangGraph is unchanged. Spoken audio is outside the
+  checker and Realtime cost is outside `usage.py`. Upload flow `/api/voice` (Google STT/TTS) stays as the fallback — still no Google key
+  (org policy blocks service-account keys; `GCP_VOICE_API_KEY` supported instead); `/api/voice` returns `end_conversation` for whole-sentence end phrases.
 - LangSmith tracing (2026-10-11, `guardian_ai/tracing.py`): off unless `LANGSMITH_TRACING=true` + `LANGSMITH_API_KEY`; `LANGSMITH_TRACE_SCOPE=demo`
   (default) sends demo-mode chats only — real users' location/age/disability must not leave the server without a consent decision.
   `make_client()` wraps OpenAI with `wrap_openai`; `ChatService.chat` and the background `_collect` both run inside `tracing.scope(demo)`.

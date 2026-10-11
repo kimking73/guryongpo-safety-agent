@@ -21,8 +21,9 @@ from . import state as S
 from .auth import signed_in_uid
 from .route_brief import RouteBriefRequest, RouteBriefResponse, RouteBriefService
 from .service import ChatRequest, ChatResponse, ChatService
-from .voice import MAX_BYTES, BadAudio, GoogleVoice, NoSpeech, VoiceUnavailable, to_pcm16k
+from .voice import END_REPLY, MAX_BYTES, BadAudio, GoogleVoice, NoSpeech, VoiceUnavailable, is_end_phrase, to_pcm16k
 from .usage import get_tracker
+from . import realtime
 
 # guardian_ai 로그(라우팅 결과 등)를 컨테이너 로그에 INFO부터 남긴다
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -100,6 +101,8 @@ class VoiceResponse(ChatResponse):
     """POST /api/voice 응답 = 채팅 응답 + 받아쓴 질문 + 답 음성(mp3, base64). 음성 합성에 실패하면 audio_b64는 null."""
     transcript: str
     audio_b64: str | None = None
+    # 연속 음성 대화: 사용자가 "그만" 등으로 끝내자고 함 → 앱이 다시 듣지 않는다 (voice.is_end_phrase)
+    end_conversation: bool = False
 
 
 class TtsRequest(BaseModel):
@@ -131,6 +134,16 @@ def voice(audio: UploadFile = File(...), user_id: str = Form(...), conversation_
     except (VoiceUnavailable, NoSpeech, BadAudio) as e:
         raise _voice_error(e) from e
     t_stt = _t.perf_counter() - t0
+    if is_end_phrase(transcript):
+        # 끝내는 말은 질문이 아니다 — 대화(LLM)를 거치지 않고 인사만 돌려준다
+        try:
+            bye = base64.b64encode(google.tts(END_REPLY)).decode()
+        except VoiceUnavailable:
+            bye = None
+        logger.info("음성 대화 종료 '%s'", transcript)
+        return VoiceResponse(conversation_id=conversation_id or "", answer=END_REPLY, voice_text=END_REPLY,
+                             transcript=transcript, audio_b64=bye, end_conversation=True,
+                             timings={"stt": round(t_stt, 2), "voice_total": round(_t.perf_counter() - t0, 2)})
     req = ChatRequest(
         user_id=user_id, question=transcript, conversation_id=conversation_id, remember=remember, demo=demo,
         current_location=S.Location(lat=lat, lon=lon) if lat is not None and lon is not None else None,
@@ -146,6 +159,27 @@ def voice(audio: UploadFile = File(...), user_id: str = Form(...), conversation_
                "voice_total": round(_t.perf_counter() - t0, 2)}
     logger.info("음성 응답 %.1fs (받아쓰기 %.1f, 음성 %.1f) '%s'", timings["voice_total"], t_stt, timings["tts"], transcript)
     return VoiceResponse(**{**res.model_dump(), "timings": timings}, transcript=transcript, audio_b64=audio_b64)
+
+
+class VoiceSession(BaseModel):
+    """POST /api/voice/session 응답 — 앱(웹)이 OpenAI Realtime과 WebRTC로 직접 연결할 때 쓰는 임시 키와 약속한 이름들."""
+    client_secret: str
+    expires_at: int | None = None
+    model: str
+    calls_url: str
+    ask_tool: str
+    end_tool: str
+    read_out_prefix: str
+
+
+@app.post("/api/voice/session", response_model=VoiceSession)
+def voice_session() -> VoiceSession:
+    """실시간 음성 대화 시작 (realtime.py): OpenAI 임시 키(10분)를 받아 준다. 진짜 키는 서버 밖으로 나가지 않는다.
+    답 내용은 앱이 도구 호출을 받을 때마다 /api/chat으로 만든다."""
+    try:
+        return VoiceSession(**realtime.create_client_secret())
+    except realtime.RealtimeUnavailable as e:
+        raise HTTPException(503, f"실시간 음성 대화를 지금 쓸 수 없습니다. {e}") from e
 
 
 @app.post("/api/tts", responses={200: {"content": {"audio/mpeg": {}}}})
