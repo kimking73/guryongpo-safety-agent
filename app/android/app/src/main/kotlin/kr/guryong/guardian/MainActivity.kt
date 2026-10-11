@@ -36,6 +36,8 @@ class MainActivity : FlutterActivity() {
     private fun handleIntent(i: Intent?) {
         when {
             isNotification(i, "evac_alarm") -> { evacOverLock = true; showOverLock(true) }
+            // 방재단 도착 안내(시각장애인 음성, 2026-10-12): 읽는 동안 잠금 화면 위에 — 다 읽으면 앱이 lockScreen(false)
+            isNotification(i, "responder_eta") -> { evacOverLock = true; showOverLock(true) }
             isNotification(i, "alert_notice") -> wakeForNotice()
         }
     }

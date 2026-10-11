@@ -47,6 +47,62 @@ class EvacAlarm {
   /// 알림의 3버튼 중 하나를 눌렀을 때
   static Future<void> Function(AlertItem alert, String status)? onAction;
 
+  // ---- 방재단 배정 안내 (2026-10-12, B12): 서버 FCM responder_assigned → 시각장애인은 화면을 켜고 음성으로 읽는다
+  static const etaNotificationId = 7311;
+  static const _etaKind = 'responder_eta';
+
+  /// 배정 안내 알림으로 앱이 열렸을 때 읽을 문장 (bootstrap 이 정해 둔다). 정해지기 전에 열리면 [pendingEta]에 둔다
+  static void Function(String text, String? incidentId)? onResponderEta;
+  static (String, String?)? pendingEta;
+
+  /// FCM data(kind=responder_assigned) → 읽을 문장. 다른 푸시면 null
+  static String? etaTextFromPush(Map<String, dynamic> data) {
+    if (data['kind'] != 'responder_assigned') return null;
+    final text = '${data['tts_text'] ?? ''}'.trim();
+    if (text.isNotEmpty) return text;
+    final min = int.tryParse('${data['eta_min'] ?? ''}');
+    return min == null ? '방재단원이 배정되었습니다. 곧 찾아갑니다.' : '방재단원이 배정되었습니다. 약 $min분 후 도착합니다.';
+  }
+
+  /// 화면이 꺼져 있어도 켜서 앱을 여는 배정 안내 알림 (사이렌 없음, 한 번 울림). Android 만
+  static Future<void> showResponderEta(String text, {String? incidentId, bool initialize = false}) async {
+    if (!supported) return;
+    final plugin = FlutterLocalNotificationsPlugin();
+    if (initialize) {
+      await plugin.initialize(const InitializationSettings(
+          android: AndroidInitializationSettings('@mipmap/ic_launcher')));
+    }
+    await plugin.show(
+      etaNotificationId,
+      '방재단원이 오고 있습니다',
+      text,
+      NotificationDetails(
+        android: AndroidNotificationDetails(
+          'responder_eta_v1',
+          '방재단 도착 안내',
+          channelDescription: '방재단원이 배정되면 도착 예상 시간을 음성으로 알려 줍니다',
+          importance: Importance.max,
+          priority: Priority.max,
+          category: AndroidNotificationCategory.call,
+          visibility: NotificationVisibility.public,
+          fullScreenIntent: true,
+          autoCancel: true,
+          styleInformation: BigTextStyleInformation(text),
+        ),
+      ),
+      payload: jsonEncode({'kind': _etaKind, 'text': text, 'incidentId': incidentId}),
+    );
+  }
+
+  /// 배정 안내를 읽고 난 뒤: 알림을 치우고, 대피 경보 화면이 없으면 잠금 화면 위 표시를 푼다
+  static Future<void> doneResponderEta() async {
+    if (!supported) return;
+    try {
+      await FlutterLocalNotificationsPlugin().cancel(etaNotificationId);
+    } catch (_) {}
+    if (evacAlarmCurrent.value == null) await _invoke('lockScreen', false);
+  }
+
   /// 사이렌 알림을 띄운다. FCM 백그라운드 처리기(다른 isolate)에서도 부르므로 그때는 플러그인을 여기서 초기화한다
   static Future<void> show(AlertItem alert, {bool initialize = false}) async {
     if (!supported) return;
@@ -120,6 +176,19 @@ class EvacAlarm {
   /// DemoNotifications 가 받은 알림 응답 중 우리 것이면 처리하고 true
   static Future<bool> handleResponse(NotificationResponse response) async {
     final payload = response.payload;
+    if (payload != null && payload.contains('"$_etaKind"')) {
+      try {
+        final d = jsonDecode(payload) as Map;
+        final text = '${d['text'] ?? ''}', incident = d['incidentId'] as String?;
+        final open = onResponderEta;
+        if (open != null) {
+          open(text, incident);
+        } else {
+          pendingEta = (text, incident);
+        }
+      } catch (_) {}
+      return true;
+    }
     if (payload == null || !payload.contains('"$_kind"')) return false;
     final Map<String, dynamic> d;
     try {

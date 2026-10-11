@@ -40,6 +40,7 @@ import 'services/demo_mode.dart';
 import 'prototype_safety_screens.dart';
 import 'services/demo_notifications.dart';
 import 'services/evac_alarm.dart';
+import 'services/evac_voice_check.dart';
 import 'evac_alarm_layer.dart';
 import 'services/prototype_safety_store.dart';
 import 'services/fcm_notification_service.dart';
@@ -243,6 +244,16 @@ final voiceConversation = StateNotifierProvider<VoiceHub, VoiceState>((ref) {
     hub.upload.dispose();
   });
   return hub;
+});
+
+/// 시각장애인 대피 음성 확인·방재단 도착 안내 (B12, 2026-10-12) — gpt-realtime, Google 음성 안 씀 (evac_voice_check.dart)
+final evacVoiceCheck = Provider<EvacVoiceCheck>((ref) {
+  final check = EvacVoiceCheck(openSession: (mode, {alertText = '', announceText = ''}) async {
+    final j = await ref.read(repo).evacVoiceSession(mode, alertText: alertText, announceText: announceText);
+    return j == null ? null : EvacVoiceSession.fromJson(j);
+  });
+  ref.onDispose(() => unawaited(check.stop()));
+  return check;
 });
 
 /// 연속 음성 대화 상태를 마이크 칸에 보여 줄 문구
@@ -566,8 +577,10 @@ Future<void> _afterResponseSuccess(
 Future<_ResponseSubmitResult> _submitEvacuationResponse(
   WidgetRef ref,
   AlertItem alert,
-  String status,
-) async {
+  String status, {
+  String via = 'button',
+  String? transcript,
+}) async {
   if (ref.read(offline)) {
     _showResponseMessage('오프라인 상태입니다. 온라인 상태로 바꾸어서 다시 응답을 시도하십시오');
     return _ResponseSubmitResult.blockedOffline;
@@ -579,6 +592,8 @@ Future<_ResponseSubmitResult> _submitEvacuationResponse(
           alertId: alert.id,
           status: status,
           location: location,
+          via: via,
+          transcript: transcript,
         );
     await _responseQueue.remove(alert.id);
     await _afterResponseSuccess(ref, alert.id, status);
@@ -590,6 +605,8 @@ Future<_ResponseSubmitResult> _submitEvacuationResponse(
           alertId: alert.id,
           status: status,
           location: location,
+          via: via,
+          transcript: transcript,
         ));
       } catch (_) {
         _showResponseMessage('응답을 기기에 저장하지 못했습니다. 온라인 연결 후 다시 시도해 주세요.');
@@ -622,6 +639,8 @@ Future<void> retryQueuedEvacuationResponses(WidgetRef ref) async {
               alertId: response.alertId,
               status: response.status,
               location: response.location,
+              via: response.via,
+              transcript: response.transcript,
             );
         await _responseQueue.remove(response.alertId);
         await _afterResponseSuccess(ref, response.alertId, response.status);
@@ -661,6 +680,9 @@ class _NotificationBootstrapState extends ConsumerState<_NotificationBootstrap>
   Timer? _netTimer;
   bool _pollInFlight = false;
   String? _since;
+
+  /// 방재단 도착 안내를 이미 한 대피 상황 (푸시와 폴링이 같은 배정을 두 번 읽지 않게)
+  final _etaAnnounced = <String>{};
   ProviderSubscription<bool>? _offlineSubscription;
 
   @override
@@ -764,6 +786,12 @@ class _NotificationBootstrapState extends ConsumerState<_NotificationBootstrap>
       }
       evacAlarmCurrent.value = alert;
     };
+    EvacAlarm.onResponderEta = (text, incident) => unawaited(_announceEta(text, incident));
+    final pending = EvacAlarm.pendingEta;
+    if (pending != null) {
+      EvacAlarm.pendingEta = null;
+      unawaited(_announceEta(pending.$1, pending.$2));
+    }
     EvacAlarm.onAction = (alert, status) async {
       evacAlarmShownIds.add(alert.id);
       await _authReady.future;
@@ -776,6 +804,34 @@ class _NotificationBootstrapState extends ConsumerState<_NotificationBootstrap>
       _mergeAlerts([alert]);
       await _submitEvacuationResponse(ref, alert, status);
     };
+  }
+
+  /// 방재단 배정 → 도착 예상 시간 안내 (2026-10-12, B12). 시각장애인은 gpt-realtime 이 읽고, 그 밖은 화면 아래 안내
+  Future<void> _announceEta(String text, String? incident) async {
+    if (incident != null && !_etaAnnounced.add(incident)) {
+      unawaited(EvacAlarm.doneResponderEta());
+      return;
+    }
+    if (ref.read(prototypeSafetyProvider).accessibility.visionSupport) {
+      await ref.read(evacVoiceCheck).announce(text);
+    } else {
+      rootMessengerKey.currentState
+          ?.showSnackBar(SnackBar(content: Text(text), duration: const Duration(seconds: 10)));
+    }
+    await EvacAlarm.doneResponderEta();
+  }
+
+  /// 폴링으로 알게 된 배정 (푸시를 못 받았을 때) — 서버 MyEvacuation.assigned · eta_min
+  void _checkAssigned(Map<String, dynamic>? evacuation) {
+    if (evacuation == null || evacuation['assigned'] != true) return;
+    final incident = '${evacuation['incident_id']}';
+    if (_etaAnnounced.contains(incident)) return;
+    final min = evacuation['eta_min'] as int?;
+    unawaited(_announceEta(
+        min == null
+            ? '방재단원이 배정되었습니다. 곧 찾아갑니다. 안전한 곳에서 기다려 주세요.'
+            : '방재단원이 배정되었습니다. 약 $min분 후 도착합니다. 안전한 곳에서 기다려 주세요.',
+        incident));
   }
 
   Future<void> _pollAlerts({bool fullRefresh = false}) async {
@@ -801,6 +857,7 @@ class _NotificationBootstrapState extends ConsumerState<_NotificationBootstrap>
       ref.read(alertPollIntervalProvider.notifier).state =
           result.nextPollSeconds.clamp(5, 300).toInt();
       ref.read(alertEvacuationProvider.notifier).state = result.evacuation;
+      _checkAssigned(result.evacuation);
       ref.invalidate(alertsProvider);
     } catch (error) {
       if (mounted) {
@@ -1204,6 +1261,11 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
   bool _voice = false;
   bool _voicePending = false;
 
+  // 시각장애인 대피 음성 확인 (B12, 2026-10-12): gpt-realtime 이 묻고 대답을 via=voice 로 저장 (evac_voice_check.dart)
+  late final EvacVoiceCheck _check;
+  bool _voiceCheck = false;
+  String? _voiceNotice;
+
   void _close() => widget.onClose != null ? widget.onClose!() : Navigator.of(context).pop();
 
   /// 화면을 만지면 사이렌을 멈추고(앱 안 팝업이 떠 있을 때 온 사이렌도), 경보 화면이면 미뤄 둔 음성 안내를 읽는다
@@ -1218,6 +1280,7 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
   @override
   void initState() {
     super.initState();
+    _check = ref.read(evacVoiceCheck); // dispose 에서도 쓰므로 미리
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final a = ref.read(prototypeSafetyProvider).accessibility;
@@ -1242,16 +1305,66 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
           alertVibrate();
         });
       }
-      // 음성은 '음성 안내 자동 재생' 스위치만 본다 (시각 지원 스위치는 2026-10-11 뺐다)
-      _voice = ref.read(autoVoiceAlerts);
-      // 경보 화면이면 사이렌과 겹치지 않게 처음 만질 때까지 미룬다
-      if (_voice && widget.alarm) {
-        _voicePending = true;
-      } else if (_voice) {
-        _speak();
+      if (a.visionSupport) {
+        // 시각장애인: 화면이 꺼진 채 울려도 만질 때까지 기다리지 않고 바로 음성으로 묻는다 (기기 TTS·Google 음성 안 씀)
+        unawaited(_startVoiceCheck());
+      } else {
+        // 음성은 '음성 안내 자동 재생' 스위치만 본다 (시각 지원 스위치는 2026-10-11 뺐다)
+        _voice = ref.read(autoVoiceAlerts);
+        // 경보 화면이면 사이렌과 겹치지 않게 처음 만질 때까지 미룬다
+        if (_voice && widget.alarm) {
+          _voicePending = true;
+        } else if (_voice) {
+          _speak();
+        }
       }
       setState(() {});
     });
+  }
+
+  /// 사이렌을 멈추고 gpt-realtime 으로 상태를 묻는다. 대답이 없거나 연결하지 못하면 사이렌·버튼으로 돌아간다
+  Future<void> _startVoiceCheck() async {
+    if (_voiceCheck || _busy) return;
+    setState(() {
+      _voiceCheck = true;
+      _voiceNotice = null;
+    });
+    await EvacAlarm.silence();
+    final result = await _check.check(alertText: widget.alert.title, save: _saveSpoken);
+    if (!mounted) return;
+    setState(() {
+      _voiceCheck = false;
+      _voiceNotice = switch (result) {
+        EvacVoiceResult.noAnswer => '음성 대답이 없어요. 버튼을 누르거나 다시 듣기를 눌러 주세요.',
+        EvacVoiceResult.unavailable => '음성 확인을 지금 쓸 수 없어요. 버튼을 눌러 주세요.',
+        _ => null,
+      };
+    });
+    if (widget.alarm && (result == EvacVoiceResult.noAnswer || result == EvacVoiceResult.unavailable)) {
+      unawaited(EvacAlarm.show(widget.alert)); // 응답할 때까지 다시 울린다 (서버 2분 재알림도 그대로)
+    }
+  }
+
+  /// 모델이 고른 상태 저장 → 읽어 줄 문장
+  Future<String> _saveSpoken(String status, String transcript) async {
+    if (!mounted) return evacVoiceSavedText(status);
+    setState(() => _busy = true);
+    final demo = widget.onRespond;
+    if (demo != null) {
+      _close();
+      await demo(status);
+      return evacVoiceSavedText(status);
+    }
+    final result =
+        await _submitEvacuationResponse(ref, widget.alert, status, via: 'voice', transcript: transcript);
+    if (result == _ResponseSubmitResult.sent || result == _ResponseSubmitResult.queued) {
+      if (mounted) _close();
+      return evacVoiceSavedText(status, queued: result == _ResponseSubmitResult.queued);
+    }
+    if (mounted) setState(() => _busy = false);
+    return result == _ResponseSubmitResult.blockedOffline
+        ? '인터넷이 끊겨 저장하지 못했어요. 화면의 버튼을 눌러 주세요.'
+        : '상태를 저장하지 못했어요. 화면의 버튼을 눌러 주세요.';
   }
 
   void _speak() => unawaited(DemoSpeech.instance.speak(
@@ -1265,6 +1378,8 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
     unawaited(EvacAlarm.torch(false));
     if (widget.alarm) unawaited(EvacAlarm.stop());
     if (_voice) unawaited(DemoSpeech.instance.stop());
+    // 저장 뒤 확인 문장을 읽는 중이면 끝까지 두고, 아직 대답을 기다리는 중이면 닫는다
+    if (_check.listening) unawaited(_check.stop());
     super.dispose();
   }
 
@@ -1272,6 +1387,7 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
     if (_busy) return;
     setState(() => _busy = true);
     unawaited(EvacAlarm.silence());
+    if (_voiceCheck) unawaited(_check.stop()); // 버튼으로 응답 → 음성 확인 끝
     final demo = widget.onRespond;
     if (demo != null) {
       _close();
@@ -1315,6 +1431,21 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
   /// 켜진 알림 방식 안내 줄 (사용자 화면 '알림' 스위치)
   Widget _effectsLine() {
     final a = ref.watch(prototypeSafetyProvider).accessibility;
+    if (a.visionSupport) {
+      return Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Flexible(
+          child: Text(
+              _voiceNotice ?? (_voiceCheck ? '음성으로 묻고 있어요 · 대피 완료, 대피 중, 도움 필요 중 하나를 말씀하세요' : '음성 확인'),
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: GK.navy)),
+        ),
+        if (!_voiceCheck)
+          IconButton(
+              tooltip: '음성으로 다시 묻기',
+              onPressed: _busy ? null : () => unawaited(_startVoiceCheck()),
+              icon: const Icon(Icons.record_voice_over_rounded, color: GK.navy)),
+      ]);
+    }
     final on = [
       if (_voice) '음성 안내',
       if (a.strongVibration) '진동',

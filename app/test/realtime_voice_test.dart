@@ -16,7 +16,8 @@ class FakeLink implements RealtimeLink {
   String? secret;
 
   @override
-  Future<void> connect({required callsUrl, required clientSecret, required onEvent, required onClosed}) async {
+  Future<void> connect(
+      {required callsUrl, required clientSecret, required onEvent, required onClosed, bool microphone = true}) async {
     if (failConnect) throw StateError('마이크 권한 없음');
     secret = clientSecret;
     emit = onEvent;

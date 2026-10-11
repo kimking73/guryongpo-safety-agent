@@ -1631,13 +1631,15 @@ components:
         - reminder: 미응답 재알림 / 대피 중 재확인 (같은 alert_id)
         - escalation: 방재단·담당 생활지원사에게 — 도움 요청·장시간 미응답 대상 (incident_id, target_id)
         - incident_closed: 대피 상황 종료
+        - responder_assigned: 주민에게 — 방재단원이 나를 맡음 (incident_id, target_id, eta_min, tts_text). 시각장애인 앱은 tts_text 를 음성으로 읽는다
         접근성(C7): 앱이 사용자 alert_prefs 에 따라 tts_text 읽기·강한 진동·화면 깜빡임을 한다.
       required: [kind]
       properties:
-        kind: { type: string, enum: [alert, evacuation, reminder, escalation, incident_closed] }
+        kind: { type: string, enum: [alert, evacuation, reminder, escalation, incident_closed, responder_assigned] }
         alert_id: { type: string }
         incident_id: { type: string }
-        target_id: { type: string, description: escalation 만 }
+        target_id: { type: string, description: 'escalation · responder_assigned' }
+        eta_min: { type: string, examples: ['7'], description: 'responder_assigned — 도착 예상 분 (방재단원 위치를 모르면 없음)' }
         hazard: { type: string }
         level: { type: string }
         level_num: { type: string, examples: ['3'] }
@@ -1726,6 +1728,9 @@ components:
         status: { $ref: '#/components/schemas/EvacStatus' }
         status_at: { type: [string, 'null'], format: date-time }
         started_at: { type: string, format: date-time }
+        assigned: { type: boolean, description: 방재단원이 나를 맡았는지 }
+        assigned_at: { type: [string, 'null'], format: date-time }
+        eta_min: { type: [integer, 'null'], description: '방재단원 도착까지 남은 분 (최소 1). 위치를 몰라 계산 못 하면 null' }
 
     # ------------------------------------------------------------ 취약 가구 (A13)
     HouseholdNeed:

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -168,7 +169,7 @@ def overview(caregiver: Optional[str]) -> dict:
 # 진행 중인 대피 상황에서 내 상태 — 여럿이면 높은 단계·최근 것
 MY_EVAC_SQL = """
 SELECT i.id AS incident_id, t.alert_id, i.hazard::text AS hazard, i.level::text AS level, i.title,
-       t.status::text AS status, t.status_at, i.started_at
+       t.status::text AS status, t.status_at, i.started_at, t.assigned_to, t.assigned_at, t.assignee_eta_s
 FROM care.incident_targets t JOIN care.incidents i ON i.id = t.incident_id
 WHERE t.user_id = %(uid)s AND t.household_id IS NULL AND t.alert_id IS NOT NULL AND i.closed_at IS NULL
 ORDER BY i.level DESC, i.started_at DESC LIMIT 1
@@ -181,4 +182,15 @@ def my_evacuation(user_id: Optional[str]) -> Optional[dict]:
         return None
     return {"incident_id": str(r["incident_id"]), "alert_id": str(r["alert_id"]), "hazard": r["hazard"],
             "level": r["level"], "title": r["title"], "status": r["status"], "status_at": iso(r.get("status_at")),
-            "started_at": iso(r["started_at"])}
+            "started_at": iso(r["started_at"]), **_assignee(r)}
+
+
+def _assignee(r: dict) -> dict:
+    """방재단 배정 (alerts/assignment.py) — eta_min 은 배정 때 계산한 시간에서 지난 시간을 뺀 남은 분 (최소 1)"""
+    if not r.get("assigned_to"):
+        return {"assigned": False, "assigned_at": None, "eta_min": None}
+    at, eta_s, eta_min = r.get("assigned_at"), r.get("assignee_eta_s"), None
+    if eta_s is not None:
+        left = eta_s - ((datetime.now(timezone.utc) - at).total_seconds() if at else 0)
+        eta_min = max(1, math.ceil(left / 60))
+    return {"assigned": True, "assigned_at": iso(at), "eta_min": eta_min}

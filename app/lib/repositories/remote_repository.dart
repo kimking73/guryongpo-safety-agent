@@ -136,13 +136,17 @@ class RemoteSafetyRepository implements SafetyRepository {
     required String alertId,
     required String status,
     required LatLng location,
+    String via = 'button',
+    String? transcript,
   }) async {
     await _client.api.post<void>(
       '/api/v1/alerts/$alertId/response',
       data: {
         'status': status,
-        'via': 'button',
+        'via': via,
         'location': {'lat': location.latitude, 'lng': location.longitude},
+        if (transcript != null && transcript.isNotEmpty)
+          'transcript': transcript.length > 500 ? transcript.substring(0, 500) : transcript,
       },
     );
   }
@@ -311,6 +315,20 @@ class RemoteSafetyRepository implements SafetyRepository {
       return r.data;
     } on DioException {
       return null; // 서버에 OpenAI 키 없음(503)·예전 서버(404)·꺼짐 → 녹음 올리기 방식으로
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>?> evacVoiceSession(String mode, {String alertText = '', String announceText = ''}) async {
+    try {
+      final r = await _client.ai.post<Map<String, dynamic>>('/api/voice/evac-session', data: {
+        'mode': mode,
+        'alert_text': alertText.length > 200 ? alertText.substring(0, 200) : alertText,
+        'announce_text': announceText.length > 300 ? announceText.substring(0, 300) : announceText,
+      });
+      return r.data;
+    } on DioException {
+      return null; // 키 없음(503)·꺼짐 → 음성 없이 버튼만 (Google 음성으로 넘어가지 않는다)
     }
   }
 
