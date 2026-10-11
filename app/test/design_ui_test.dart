@@ -27,7 +27,14 @@ void main() {
       'widgets': [
         {
           'type': 'wind',
-          'data': {'value': 21.3, 'wind_gust': 30, 'wind_dir': 45, 'level': 'warning', 'station_name': '구룡포', 'observed_at': null}
+          'data': {
+            'value': 21.3, 'wind_gust': 30, 'wind_dir': 45, 'level': 'warning', 'station_name': '구룡포', 'observed_at': null,
+            'series': [
+              {'t': '2026-10-11T10:10:00+09:00', 'v': 12.0},
+              {'t': '2026-10-11T10:50:00+09:00', 'v': 9.5},
+              {'t': '2026-10-11T11:20:00+09:00', 'v': 21.3},
+            ]
+          }
         },
         {
           'type': 'water_level',
@@ -55,6 +62,12 @@ void main() {
     expect(byKey['wind']!.value, '21.3');
     expect(byKey['wind']!.level, '경보');
     expect(byKey['wind']!.note, contains('북동풍'));
+    // 눌렀을 때 표: 시각별 최대, 최근 것부터 (값만 본다 — 시각 글자는 기기 시간대에 따라 다르다)
+    expect(byKey['wind']!.table.map((r) => r.$2), ['21.3', '12']);
+    expect(byKey['river']!.table.first, ('B', '140cm · 주의'));
+    expect(byKey['dust']!.table, isEmpty);
+    // 칸에 바로 보이는 권고 문구
+    expect(byKey['wind']!.description, contains('외출을 삼가세요'));
     expect(byKey['river']!.value, '140'); // 가장 높은 단계 지점
     expect(byKey['river']!.level, '주의');
     expect(byKey['dust']!.value, '18 / 9');

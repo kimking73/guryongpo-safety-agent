@@ -280,9 +280,17 @@ class WeatherItem {
       required this.note,
       required this.icon,
       required this.badge,
-      this.source = ''});
+      this.source = '',
+      this.tableTitle = '',
+      this.tableHead = '시각',
+      this.table = const []});
   final String key, title, value, unit, level, note, source;
   final FaIconData icon, badge;
+
+  /// 눌렀을 때 보이는 표 (2026-10-11 사용자 요청): 시각(또는 지점) · 값. 서버가 시간별 값을 주는 항목만 (강풍·강우량·파고),
+  /// 수위는 지점별 지금 값. 비어 있으면 표 대신 안내 한 줄
+  final String tableTitle, tableHead;
+  final List<(String, String)> table;
 
   /// 누르면 보이는 '실시간 관측·예보 자세히' 카드 (LiveRealtimeCards.only)
   Set<String> get detailKeys => switch (key) {
@@ -298,8 +306,8 @@ class WeatherItem {
   /// 쉬운 말 설명 (디자인: 고령자도 바로 이해)
   String get description {
     const d = {
-      'wind': ['바람이 약해요', '바람이 조금 불어요', '바람이 강해요. 간판·나뭇가지를 조심하세요', '우산이 뒤집힐 만큼 센 바람이에요'],
-      'rain': ['비가 오지 않거나 약해요', '비가 조금 와요', '비가 많이 와요. 낮은 길을 피하세요', '길에 물이 찰 만큼 비가 많이 와요'],
+      'wind': ['바람이 약해요', '바람이 조금 불어요', '바람이 강해요. 간판·나뭇가지를 조심하세요', '우산이 뒤집힐 만큼 센 바람이에요. 외출을 삼가세요'],
+      'rain': ['비가 오지 않거나 약해요', '비가 조금 와요. 우산을 챙기세요', '비가 많이 와요. 우산을 챙기고 낮은 길을 피하세요', '길에 물이 찰 만큼 비가 많이 와요. 외출을 미루세요'],
       'wave': ['바다가 잔잔해요', '파도가 조금 있어요', '파도가 높아요. 해안에 가지 마세요', '파도가 매우 높아요. 바닷가에 절대 가지 마세요'],
       'river': ['하천 물높이가 안정적이에요', '아직 괜찮지만 물이 불어나고 있어요', '물이 많이 불었어요. 하천에서 멀어지세요', '물이 넘칠 수 있어요. 바로 높은 곳으로 가세요'],
       'dust': ['공기가 깨끗해요. 마스크 없어도 돼요', '공기가 보통이에요', '공기가 나빠요. 마스크를 쓰세요', '공기가 매우 나빠요. 바깥 활동을 줄이세요'],
@@ -315,9 +323,12 @@ class WeatherItem {
 List<WeatherItem> weatherItems(Map<String, dynamic>? dashboard, {required bool demo}) {
   if (demo) {
     return const [
-      WeatherItem(key: 'wind', title: '강풍', value: '21', unit: 'm/s', level: '경보', note: '북동풍 · 순간 30m/s', icon: FontAwesomeIcons.wind, badge: FontAwesomeIcons.hurricane, source: '예시 자료'),
-      WeatherItem(key: 'rain', title: '강우량', value: '32', unit: 'mm/h', level: '주의', note: '오늘 누적 118mm', icon: FontAwesomeIcons.houseFloodWater, badge: FontAwesomeIcons.cloudShowersHeavy, source: '예시 자료'),
-      WeatherItem(key: 'wave', title: '파고', value: '3.2', unit: 'm', level: '주의', note: '최대 4.8m · 해안 접근 금지', icon: FontAwesomeIcons.houseTsunami, badge: FontAwesomeIcons.water, source: '예시 자료'),
+      WeatherItem(key: 'wind', title: '강풍', value: '21', unit: 'm/s', level: '경보', note: '북동풍 · 순간 30m/s', icon: FontAwesomeIcons.wind, badge: FontAwesomeIcons.hurricane, source: '예시 자료',
+          tableTitle: '최근 6시간 (시간별 최대)', table: [('지금', '21'), ('1시간 전', '19'), ('2시간 전', '16'), ('3시간 전', '12'), ('4시간 전', '9'), ('5시간 전', '7')]),
+      WeatherItem(key: 'rain', title: '강우량', value: '32', unit: 'mm/h', level: '주의', note: '오늘 누적 118mm', icon: FontAwesomeIcons.houseFloodWater, badge: FontAwesomeIcons.cloudShowersHeavy, source: '예시 자료',
+          tableTitle: '최근 6시간 (1시간 강수)', table: [('지금', '32'), ('1시간 전', '28'), ('2시간 전', '24'), ('3시간 전', '18'), ('4시간 전', '11'), ('5시간 전', '5')]),
+      WeatherItem(key: 'wave', title: '파고', value: '3.2', unit: 'm', level: '주의', note: '최대 4.8m · 해안 접근 금지', icon: FontAwesomeIcons.houseTsunami, badge: FontAwesomeIcons.water, source: '예시 자료',
+          tableTitle: '앞으로 12시간 예보', table: [('지금', '3.2'), ('3시간 뒤', '3.9'), ('6시간 뒤', '4.8'), ('9시간 뒤', '4.1'), ('12시간 뒤', '3.0')]),
       WeatherItem(key: 'river', title: '수위', value: '2.4', unit: 'm', level: '관심', note: '최근 1시간 +0.3m', icon: FontAwesomeIcons.houseChimney, badge: FontAwesomeIcons.water, source: '예시 자료'),
       WeatherItem(key: 'dust', title: '미세 / 초미세먼지', value: '18 / 9', unit: '㎍', level: '좋음', note: '환기 가능', icon: FontAwesomeIcons.faceSmile, badge: FontAwesomeIcons.maskFace, source: '예시 자료'),
       WeatherItem(key: 'uv', title: '자외선 지수', value: '1', unit: '', level: '좋음', note: '흐림', icon: FontAwesomeIcons.cloud, badge: FontAwesomeIcons.sun, source: '예시 자료'),
@@ -332,12 +343,39 @@ List<WeatherItem> weatherItems(Map<String, dynamic>? dashboard, {required bool d
       _ok(d) && d!['station_name'] != null ? '${d['station_name']} · ${hhmm(d['observed_at'])} $suffix' : '';
   String why(Map<String, dynamic>? d) => '${d?['reason'] ?? '서버에 자료가 없어요'}';
 
+  // 시간별 표: 관측(10분 간격)은 시각별로 묶어 최근 것부터 (peak = 그 시각 최대, 아니면 마지막 값), 예보는 시간 순서 그대로
+  List<(String, String)> hourly(Map<String, dynamic>? d, {bool peak = false, bool forecast = false}) {
+    if (!_ok(d)) return const [];
+    final pts = <(DateTime, double)>[];
+    for (final p in d!['series'] as List? ?? const []) {
+      final t = DateTime.tryParse('${(p as Map)['t']}')?.toLocal();
+      final v = (p['v'] as num?)?.toDouble();
+      if (t != null && v != null) pts.add((t, v));
+    }
+    pts.sort((a, b) => a.$1.compareTo(b.$1));
+    if (forecast) return [for (final (t, v) in pts) ('${t.day}일 ${t.hour}시', fmtNum(v))];
+    final byHour = <DateTime, double>{};
+    for (final (t, v) in pts) {
+      final h = DateTime(t.year, t.month, t.day, t.hour);
+      byHour[h] = peak && byHour[h] != null ? math.max(byHour[h]!, v) : v;
+    }
+    final hours = byHour.keys.toList()..sort((a, b) => b.compareTo(a));
+    return [for (final h in hours) ('${h.hour}시', fmtNum(byHour[h]))];
+  }
+
   // 수위: 값이 있는 지점 중 가장 높은 단계
+  var waterTable = const <(String, String)>[];
   var waterLv = '', waterV = '-', waterU = '', waterNote = why(water);
   if (_ok(water)) {
     final st = [for (final s in water!['stations'] as List? ?? const []) Map<String, dynamic>.from(s as Map)];
     int rank(Map<String, dynamic> s) => _levelOrder.indexOf(levelLabel(s['level'] as String?));
     final worst = st.isEmpty ? null : st.reduce((a, b) => rank(b) > rank(a) ? b : a);
+    waterTable = [
+      for (final s in [...st]..sort((a, b) => rank(b).compareTo(rank(a))))
+        ('${s['station_name'] ?? '-'}',
+            '${s['value'] == null ? (s['source_level_label'] ?? '-') : '${fmtNum(s['value'], 0)}${s['unit'] ?? ''}'}'
+                '${levelLabel(s['level'] as String?).isEmpty ? '' : ' · ${levelLabel(s['level'] as String?)}'}'),
+    ];
     if (worst != null) {
       waterLv = levelLabel(worst['level'] as String?);
       waterV = worst['value'] == null ? '${worst['source_level_label'] ?? '-'}' : fmtNum(worst['value'], 0);
@@ -359,23 +397,24 @@ List<WeatherItem> weatherItems(Map<String, dynamic>? dashboard, {required bool d
         value: _ok(wind) ? fmtNum(wind!['value']) : '-', unit: 'm/s',
         level: _ok(wind) ? levelLabel(wind!['level'] as String?) : '',
         note: _ok(wind) ? '${windFrom(wind!['wind_dir'])} · 순간 ${fmtNum(wind['wind_gust'])}m/s' : why(wind),
-        source: src(wind)),
+        source: src(wind), tableTitle: '최근 6시간 (시간별 최대)', table: hourly(wind, peak: true)),
     WeatherItem(
         key: 'rain', title: '강우량', icon: FontAwesomeIcons.houseFloodWater, badge: FontAwesomeIcons.cloudShowersHeavy,
         value: _ok(rain) ? fmtNum(rain!['value']) : '-', unit: 'mm/h',
         level: _ok(rain) ? levelLabel(rain!['level'] as String?) : '',
         note: _ok(rain) ? '오늘 누적 ${fmtNum(rain!['rain_day'])}mm' : why(rain),
-        source: src(rain)),
+        source: src(rain), tableTitle: '최근 6시간 (1시간 강수)', table: hourly(rain)),
     WeatherItem(
         key: 'wave', title: '파고', icon: FontAwesomeIcons.houseTsunami, badge: FontAwesomeIcons.water,
         value: _ok(wave) ? fmtNum(wave!['value']) : '-', unit: 'm',
         level: _ok(wave) ? levelLabel(wave!['level'] as String?) : '',
         note: _ok(wave) ? '예보 값 · 실측 파고는 수집하지 않아요' : why(wave),
-        source: src(wave, '부터 24시간 예보')),
+        source: src(wave, '부터 24시간 예보'), tableTitle: '앞으로 24시간 예보', table: hourly(wave, forecast: true)),
     WeatherItem(
         key: 'river', title: '수위', icon: FontAwesomeIcons.houseChimney, badge: FontAwesomeIcons.water,
         value: waterV, unit: waterU, level: waterLv, note: waterNote,
-        source: _ok(water) ? '포항 디지털 트윈 · ${hhmm(water!['observed_at'])} 수집' : ''),
+        source: _ok(water) ? '포항 디지털 트윈 · ${hhmm(water!['observed_at'])} 수집' : '',
+        tableTitle: '지점별 지금 값', tableHead: '지점', table: waterTable),
     WeatherItem(
         key: 'dust', title: '미세 / 초미세먼지', icon: FontAwesomeIcons.faceSmile, badge: FontAwesomeIcons.maskFace,
         value: pm10 == null && pm25 == null ? '-' : '${fmtNum(pm10?['value'], 0)} / ${fmtNum(pm25?['value'], 0)}',
@@ -429,8 +468,23 @@ class WeatherSection extends ConsumerWidget {
         // 휴대폰은 2열, 넓은 웹 화면은 3열 (칸 크기는 그대로)
         final cols = c.maxWidth >= 900 ? 3 : 2;
         final w = (c.maxWidth - 6 * (cols - 1)) / cols;
-        return Wrap(spacing: 6, runSpacing: 6, children: [
-          for (final it in items) SizedBox(width: w, child: _WeatherTile(item: it, dashboard: async?.valueOrNull)),
+        // 권고 문구 길이가 달라도 같은 줄의 칸 높이는 같게
+        return Column(children: [
+          for (var i = 0; i < items.length; i += cols) ...[
+            if (i > 0) const SizedBox(height: 6),
+            IntrinsicHeight(
+              child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                for (var j = i; j < i + cols; j++) ...[
+                  if (j > i) const SizedBox(width: 6),
+                  SizedBox(
+                      width: w,
+                      child: j < items.length
+                          ? _WeatherTile(item: items[j], dashboard: async?.valueOrNull)
+                          : null),
+                ],
+              ]),
+            ),
+          ],
         ]);
       }),
       const SizedBox(height: 6),
@@ -477,7 +531,8 @@ class _WeatherTile extends StatelessWidget {
           child: Container(
             constraints: const BoxConstraints(minHeight: 64),
             padding: const EdgeInsets.all(10),
-            child: Row(children: [
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
               _WeatherIcon(item: item, size: 38),
               const SizedBox(width: 9),
               Expanded(
@@ -502,6 +557,10 @@ class _WeatherTile extends StatelessWidget {
                   ]),
                 ]),
               ),
+            ]),
+            // 권고 문구 (2026-10-11 사용자 요청 — 예전에는 눌러야 보였다)
+            const SizedBox(height: 6),
+            Text(item.description, style: dsText(13, weight: FontWeight.w600, color: Ds.sub, height: 1.35)),
             ]),
           ),
         ),
@@ -585,11 +644,60 @@ Future<void> showWeatherDetail(BuildContext context, WeatherItem w, {Map<String,
             Text(w.source, style: dsText(13, color: Ds.muted)),
           ],
           ],
+          const SizedBox(height: 18),
+          _WeatherTable(item: w),
           const SizedBox(height: 24),
           PillButton('닫기', height: 58, fontSize: 18, onPressed: () => Navigator.of(c).pop()),
         ]),
       ),
     );
+
+/// 날씨 상세의 표: 시각(또는 지점) · 값. 표로 줄 자료가 없으면 안내 한 줄
+class _WeatherTable extends StatelessWidget {
+  const _WeatherTable({required this.item});
+  final WeatherItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    if (item.table.isEmpty) {
+      return Text(
+          item.tableTitle.isEmpty ? '이 항목은 시간별 값을 아직 모으지 않아요. 지금 값만 보여 드려요.' : '시간별 값이 아직 없어요.',
+          style: dsText(14, color: Ds.muted));
+    }
+    Widget row(String a, String b, {bool head = false, bool first = false}) => Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+              color: head ? Ds.track : Colors.white,
+              border: head ? null : const Border(top: BorderSide(color: Ds.track))),
+          child: Row(children: [
+            Expanded(
+                child: Text(a,
+                    style: dsText(head ? 14 : 16,
+                        weight: head || first ? FontWeight.w800 : FontWeight.w600, color: head ? Ds.sub : Ds.navy))),
+            const SizedBox(width: 12),
+            Text(b,
+                style: dsText(head ? 14 : 16,
+                    weight: head || first ? FontWeight.w800 : FontWeight.w600, color: head ? Ds.sub : Ds.navy)),
+          ]),
+        );
+    final unit = item.tableHead == '시각' && item.unit.isNotEmpty ? '값 (${item.unit})' : '값';
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(item.tableTitle, style: dsText(16, weight: FontWeight.w800)),
+      const SizedBox(height: 8),
+      ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          decoration: BoxDecoration(border: Border.all(color: Ds.track), borderRadius: BorderRadius.circular(14)),
+          child: Column(children: [
+            row(item.tableHead, unit, head: true),
+            for (var i = 0; i < item.table.length; i++)
+              row(item.table[i].$1, item.table[i].$2, first: i == 0 && item.tableHead == '시각' && !item.tableTitle.contains('예보')),
+          ]),
+        ),
+      ),
+    ]);
+  }
+}
 
 // ------------------------------------------------------------------ 지도 카드 아래 경로 안내 줄
 
