@@ -76,6 +76,34 @@ def test_writer_moves_existing_home_and_skips_known_place():
     assert seen[1][3]["label"] == "우리집"                            # 집 이름은 사용자가 붙인 그대로
 
 
+def test_named_place_is_saved_under_its_name_and_moved_when_said_again():
+    """ "가게는 ○○에 있어" → 프로필에 '가게'로 저장 (2026-10-12). 같은 이름을 다시 말하면 위치를 고친다"""
+    said = "구룡포읍 호미로221번길 18 구룡포전통시장 내 우주상사"
+    shop = MemoryFact(field="frequent_place", value=said, quote="가게는 …", label="가게")
+    where = {"lat": 35.989438, "lon": 129.553404, "address": "경북 포항시 남구 구룡포읍 호미로221번길 18"}
+    seen = []
+    done = P.ProfileWriter(client=fake_api(seen), locate=lambda t: where).apply("tok", [shop])
+    assert seen[1][:2] == ("POST", "/api/v1/user/places")
+    assert (seen[1][3]["label"], seen[1][3]["place_type"], seen[1][3]["address"]) == ("가게", "frequent", where["address"])
+    assert done["places"] == ["가게"]
+    assert seen[2][3]["items"][0]["value"] == f"가게: {said}"            # 수집 기록에도 이름과 함께
+    seen = []
+    P.ProfileWriter(client=fake_api(seen, [{"id": "p9", "place_type": "frequent", "label": "가게"}]),
+                    locate=lambda t: where).apply("tok", [shop])
+    assert (seen[1][0], seen[1][1]) == ("PATCH", "/api/v1/user/places/p9")
+
+
+def test_place_queries_pull_road_address_and_skip_area_only_words():
+    long = "경북 포항시 남구 구룡포읍 호미로221번길 18 구룡포전통시장 내 우주상사 안"
+    qs = _place_queries(long)
+    assert qs[0] == long and qs[1] == "호미로221번길 18"                # 원문 다음에 도로명 주소만
+    assert "호미로 152" in _place_queries("구룡포읍 호미로 152")
+    assert "구룡포길 71-3" in _place_queries("구룡포읍 구룡포길 71-3 2층")
+    # "구룡포"만 남으면 이름에 '구룡포'가 든 대피소로 잡힌다 → 검색하지 않는다
+    assert _place_queries("구룡포 우주상사") == ["구룡포 우주상사"]
+    assert _place_queries("구룡포전통시장 내") == ["구룡포전통시장 내", "구룡포전통시장"]
+
+
 def test_writer_does_nothing_without_facts():
     seen = []
     assert P.ProfileWriter(client=fake_api(seen)).apply("tok", []) == {"profile": {}, "places": [], "recorded": 0}

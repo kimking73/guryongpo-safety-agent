@@ -373,8 +373,11 @@ def make_action_advisor(writer: ActionWriter | None = None, fetch: Fetch | None 
         # 검증기가 "위험을 낮춰 말함"으로 막았다 (2026-10-03 live)
         if "위험 지역" in decision.path:
             where = next((n.value for n in decision.notes if n.key == "사용자 위치"), "")
-            reason = (f"현재 위치가 {where}에 있어" if where.startswith("위험 영역 안")
-                      else "현재 위치의 위험 여부를 확인할 수 없어" if where else "현재 위치를 알 수 없어")
+            # 질문에서 말한 장소 기준이면 그 이름으로 ("우리 가게 침수됐어?" → 기준 위치(가게), 2026-10-12)
+            ref = state.get("reference_location")
+            spot = f"기준 위치({ref.label or state.get('reference_query') or '말씀하신 장소'})" if ref else "현재 위치"
+            reason = (f"{spot}가 {where}에 있어" if where.startswith("위험 영역 안")
+                      else f"{spot}의 위험 여부를 확인할 수 없어" if where else f"{spot}를 알 수 없어")
             draft = f"{reason} 위험 지역 기준으로 안내합니다.\n\n" + draft
         if decision.emergency:
             draft = EMERGENCY_STEP + "\n\n" + draft                      # 답변 맨 앞에도 (판단 로직 규칙)

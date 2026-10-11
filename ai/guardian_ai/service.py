@@ -149,6 +149,7 @@ class ChatService:
         """
         nodes: dict[str, G.Node] = {}
         phase_of = None             # 재난 단계 판정 (실제 서비스만 — DB를 읽는다)
+        locate = None               # 질문 속 기준 장소 → 좌표 (실제 서비스만 — DB·카카오를 읽는다)
         self.user_source = None   # 로그인 uid → 서버 프로필 (실제 서비스만; 테스트는 직접 넣는다)
         if classifier is None:
             self.user_source = server_profile
@@ -165,6 +166,7 @@ class ChatService:
             from .llm import OpenAIMemoryExtractor
             classifier = OpenAIClassifier()
             phase_of = decide_phase
+            locate = locate_reference
             extractor = OpenAIMemoryExtractor()
             writer = P.ProfileWriter(locate=_locate_place)
             executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="profile")
@@ -182,7 +184,7 @@ class ChatService:
                 G.HALLUCINATION_CHECK: make_hallucination_check(checker=OpenAIFactChecker()),
             }
         self.app = G.build_graph(
-            {G.MANAGER: G.make_manager(classifier, phase_of=phase_of), **nodes, **(overrides or {})},
+            {G.MANAGER: G.make_manager(classifier, phase_of=phase_of, locate=locate), **nodes, **(overrides or {})},
             checkpointer=checkpointer or make_checkpointer(),
         )
         self.writer = writer
@@ -316,16 +318,28 @@ def server_profile(uid: str) -> dict:
 _RELATIVE = re.compile(r"\s*(바로\s*)?(뒤|뒷편|앞|앞쪽|옆|근처|부근|인근|건너편|맞은편|쪽|위쪽|아래쪽)$")
 
 
+# "…우주상사 안", "구룡포전통시장 내" — 띄어 쓴 경우만 뗀다 ("시내"·"안" 으로 끝나는 이름을 건드리지 않게)
+_INSIDE = re.compile(r"\s+(안|안쪽|내)$")
+# 도로명 주소: "호미로221번길 18", "호미로 152", "구룡포길 71-3". 긴 문구("경북 포항시 … 호미로221번길 18 구룡포전통시장 내 ○○상사")는
+# 통째로는 장소 검색에 안 잡히고 이 부분만 넣어야 잡힌다 (2026-10-12)
+_ROAD_ADDRESS = re.compile(r"[가-힣0-9]+(?:로|길)\s*\d+(?:-\d+)?(?:번길\s*\d+(?:-\d+)?)?")
+# 이것만으로는 장소가 아닌 말. "구룡포 우주상사"에서 마지막 단어를 떼면 "구룡포"만 남아 이름에 '구룡포'가 든 대피소로 잡혔다
+_AREA_ONLY = {"구룡포", "구룡포읍", "포항", "포항시", "남구", "경북", "경상북도"}
+
+
 def _place_queries(text: str) -> list[str]:
-    """검색해 볼 형태들: 원문 → 위치 표현을 뗀 것 → 마지막 단어를 뗀 것 ("구룡포수협 위판장" → "구룡포수협")"""
+    """검색해 볼 형태들: 원문 → 도로명 주소만 → 위치 표현을 뗀 것 → 마지막 단어를 뗀 것 ("구룡포수협 위판장" → "구룡포수협")"""
     t = (text or "").strip()
     out = [t]
-    bare = _RELATIVE.sub("", t).strip()
+    m = _ROAD_ADDRESS.search(t)
+    if m:
+        out.append(m.group(0))
+    bare = _INSIDE.sub("", _RELATIVE.sub("", t).strip()).strip()
     out.append(bare)
     words = bare.split()
     if len(words) > 1:
         out.append(" ".join(words[:-1]))
-    return [q for i, q in enumerate(out) if q and q not in out[:i]]
+    return [q for i, q in enumerate(out) if q and q not in out[:i] and not set(q.split()) <= _AREA_ONLY]
 
 
 def _locate_place(text: str) -> dict | None:
@@ -336,4 +350,18 @@ def _locate_place(text: str) -> dict | None:
         found = T.find_place(q)
         if found.get("available") and not found.get("out_of_area"):
             return {"lat": found["lat"], "lon": found["lon"], "address": found.get("address") or found.get("name")}
+    return None
+
+
+def locate_reference(query: str, user: S.UserProfile | None = None) -> S.Location | None:
+    """질문 속 기준 장소("가게", "호미로 152", "구룡포시장") → 좌표 (관리자 graph.make_manager의 locate).
+    등록 장소 → 대피소·의료시설 이름 → 카카오 순 (tools.find_place). 구룡포 밖·못 찾음은 None → 현재 위치 기준으로 답한다.
+    이름은 등록 장소면 그 이름("가게"), 아니면 사용자가 말한 그대로 — 긴 문구면 실제로 찾은 부분("호미로221번길 18")"""
+    from . import tools as T
+    said = query.strip()
+    for q in _place_queries(query):
+        found = T.find_place(q, user)
+        if found.get("available") and not found.get("out_of_area"):
+            label = found["name"] if found.get("source") == "user" else (said if len(said) <= 20 else q)
+            return S.Location(lat=found["lat"], lon=found["lon"], label=label[:40])
     return None

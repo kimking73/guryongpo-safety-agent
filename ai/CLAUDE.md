@@ -4,7 +4,7 @@
 1. Read `.claude/docs/timeline.md` → status table, "다음 세션 시작점", "이월 항목", work log.
 2. From `코드/`: `git pull` (teammates push to `main`), then `docker compose up -d` and `docker compose ps`
    (db, api, ai all healthy). If `.env` changed since the ai container started: `docker compose up -d --force-recreate ai`.
-3. Baseline tests: `.venv/bin/python -m pytest -q` → **223 passed** (2026-10-11). `-m "db and not live"` needs local db + `AI_DB_*`
+3. Baseline tests: `.venv/bin/python -m pytest -q` → **242 passed** (2026-10-12). `-m "db and not live"` needs local db + `AI_DB_*`
    in `.env` (plain `-m db` also runs paid live tests). `-m live` calls real OpenAI (routing, B3 injection, extractor; a few 원).
    If `docker compose ps` hangs, restart the OrbStack app (happened 2026-10-08); VM checks still work.
    Other lanes' baselines: server 223 passed·8 skipped, route 77, app 7 known failures as of 10-09 (not fully rerun since) (see timeline "다음 세션 시작점";
@@ -42,6 +42,12 @@
   to-do list only when asked or in the danger branch (classifier `wants_action`); dependents follow-up removed; when the advisor's own route
   passes a hazard zone, code appends that fact to the route step (`action.with_passing_zones` — the checker blocked answers that omitted it);
   walking ability / dependents are no longer extracted or read from the server profile (김다인 1a4fa25, user decision 10-09).
+- Places said in chat (2026-10-12): the classifier's `place` (a place the user asks about or says they are at — "우리 가게 침수됐어?", "호미로 152에 있는데…")
+  → `graph.make_manager(locate=service.locate_reference)` → `state.reference_location`, which `flood.pick_location` now puts first
+  (said place → current location → home → town center; reset every question; not found → current location + a note in the 기준 위치 label).
+  Saving: the extractor's `MemoryFact.label` ("가게") names the frequent place; `service._place_queries` also tries the road-address part alone
+  (long phrases never match Kakao keyword search) and skips area-only words ("구룡포"); same label said again → PATCH. Known limit: asking about a
+  remote place while elsewhere also gives the evacuation route from that place.
 - Realtime voice (2026-10-11, `guardian_ai/realtime.py`): `POST /api/voice/session` mints a 10-min OpenAI client secret for `gpt-realtime-2`
   (`OPENAI_REALTIME_MODEL`/`_VOICE`); the web app connects by WebRTC and the model only calls tools (`tool_choice=required`: `ask_guardian` →
   app calls `/api/chat`, answer read back verbatim via `read_out_prefix`; `end_conversation`). LangGraph is unchanged. Spoken audio is outside the

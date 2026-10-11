@@ -205,6 +205,8 @@ class GuardianState(TypedDict, total=False):
     selected_agents: list[Specialist]
     manager_feedback: str                # 검증 실패 사유 (재시도 시)
     destination_query: str | None        # 질문에서 뽑은 목적지 이름 ("구룡포항", "집"). 없으면 가까운 대피소로 안내
+    reference_query: str | None          # 질문에서 뽑은 기준 장소 ("가게", "호미로 152") — 그곳의 상황을 묻거나 거기 있다고 말함
+    reference_location: Location | None  # 그 장소의 좌표 (찾았을 때만). 있으면 현재 위치보다 먼저 기준 위치로 쓴다 (flood.pick_location)
     can_move: Literal["yes", "no", "unknown"]   # 대화로 본 스스로 이동 가능 여부 (행동 권고 판단 로직)
     damage: Literal["yes", "no", "unknown"]     # 대화로 본 거주지 피해 유무 (재난 후 분기)
     wants_action: bool | None            # 사용자가 행동·대비·대피를 물었는가 (None = 모름 → 예전 규칙). '지금 할 일'을 붙일지에 쓴다
