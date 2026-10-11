@@ -5,6 +5,11 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 대피 경보(재난문자처럼): 화면이 꺼져 있어도 잠금 화면 위 전체 화면 경보 · 진동 -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- 경보 때 손전등 깜빡임 — 플래시가 없는 기기도 설치는 된다 -->
+    <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
     <application
         android:label="guryongpo_safety"
         android:name="${applicationName}"

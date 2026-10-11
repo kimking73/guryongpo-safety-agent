@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 대피 경보 사이렌은 코드에서 이름으로만 불러서, 빌드 축소 때 지워지지 않게 남긴다 -->
+<resources xmlns:tools="http://schemas.android.com/tools" tools:keep="@raw/evac_siren" />

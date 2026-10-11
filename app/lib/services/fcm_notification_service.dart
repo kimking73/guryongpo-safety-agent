@@ -9,6 +9,7 @@ import '../models/domain_models.dart';
 import '../repositories/mock_repository.dart';
 import 'app_config.dart';
 import 'auth_service.dart';
+import 'evac_alarm.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -17,6 +18,9 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   if (Firebase.apps.isEmpty && options != null) {
     await Firebase.initializeApp(options: options);
   }
+  // 대피 경보는 서버가 data 전용으로 보낸다 → 여기서 사이렌 + 전체 화면 경보를 직접 띄운다 (2026-10-11)
+  final alert = EvacAlarm.fromPush(message.data);
+  if (alert != null) await EvacAlarm.show(alert, initialize: true);
 }
 
 class FcmNotificationService {
@@ -57,6 +61,13 @@ class FcmNotificationService {
     }
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
     _foregroundSubscription = FirebaseMessaging.onMessage.listen((message) {
+      // 앱을 보고 있을 때 온 대피 경보: 사이렌을 울리고 경보 화면을 바로 띄운다
+      final evac = EvacAlarm.fromPush(message.data,
+          title: message.notification?.title, body: message.notification?.body);
+      if (evac != null) {
+        unawaited(EvacAlarm.show(evac));
+        EvacAlarm.onOpen?.call(evac);
+      }
       unawaited(_onForeground?.call(_preview(message)));
     });
     _openedSubscription =
@@ -93,6 +104,8 @@ class FcmNotificationService {
     );
     if (settings.authorizationStatus == AuthorizationStatus.authorized ||
         settings.authorizationStatus == AuthorizationStatus.provisional) {
+      // 대피 경보가 잠금 화면 위에 뜨려면 '전체 화면 알림' 권한도 (Android 14부터 사용자가 켬)
+      await EvacAlarm.requestPermissions();
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_enabledKey, true);
       final token = await FirebaseMessaging.instance.getToken();

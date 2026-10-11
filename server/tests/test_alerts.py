@@ -82,6 +82,26 @@ def test_fcm_payload_strings():
     assert all(isinstance(v, str) for v in d.values())
 
 
+def test_fcm_alarm_kinds():
+    from alerts.fcm import is_alarm, payload
+    assert is_alarm(payload("evacuation", alert_id=ALERT))
+    assert is_alarm(payload("reminder", alert_id=ALERT, status="no_response"))
+    assert not is_alarm(payload("reminder", alert_id=ALERT, status="evacuating"))   # '대피 중' 재확인은 조용히
+    assert not is_alarm(payload("alert", alert_id=ALERT))
+
+
+def test_fcm_alarm_message_is_data_only():
+    pytest.importorskip("firebase_admin")
+    from alerts import fcm
+    m = fcm._message(fcm.Push(token="t", title="[대피] 호우", body="대피하세요",
+                              data=fcm.payload("evacuation", alert_id=ALERT)))
+    assert m.notification is None                       # 앱이 직접 사이렌 + 전체 화면 경보를 띄우게
+    assert m.data["title"] == "[대피] 호우" and m.data["body"] == "대피하세요"
+    assert m.android.priority == "high" and m.android.ttl == fcm.ALARM_TTL
+    plain = fcm._message(fcm.Push(token="t", title="a", body="b", data=fcm.payload("alert", alert_id=ALERT)))
+    assert plain.notification is not None
+
+
 def test_fcm_skipped_without_firebase(monkeypatch):
     from alerts import fcm
     monkeypatch.setattr(fcm, "_app", lambda: None)

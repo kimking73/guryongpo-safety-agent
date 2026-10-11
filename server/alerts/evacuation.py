@@ -145,7 +145,7 @@ def remind(t: dict) -> None:
     fcm.send([fcm.Push(token=r["fcm_token"], title=title, body=f"{hz} 대피 상황입니다. {body}",
                        data=fcm.payload("reminder", alert_id=t["alert_id"], incident_id=t["incident_id"],
                                         hazard=t["hazard"], level=t["level"], level_num=LEVEL_NUM[t["level"]],
-                                        action="respond", tts_text=t.get("tts_text")))
+                                        action="respond", tts_text=t.get("tts_text"), status=t["status"]))
               for r in db.fetch_all(DEVICES_SQL, {"uid": t["user_id"]})])
 
 

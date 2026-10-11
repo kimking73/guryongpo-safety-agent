@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import 'evac_alarm.dart';
 import 'prototype_safety_store.dart';
 
 class DemoNotifications {
@@ -62,6 +63,8 @@ class DemoNotifications {
   }
 
   Future<void> _handleResponse(NotificationResponse response) async {
+    // 대피 경보 사이렌 알림(services/evac_alarm.dart)은 같은 플러그인을 쓰므로 여기서 넘겨준다
+    if (await EvacAlarm.handleResponse(response)) return;
     final status = EvacuationResponseStatusLabel.fromWireValue(
       response.actionId,
     );

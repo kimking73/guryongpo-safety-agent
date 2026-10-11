@@ -35,6 +35,8 @@ import 'login_screen.dart';
 import 'services/demo_mode.dart';
 import 'prototype_safety_screens.dart';
 import 'services/demo_notifications.dart';
+import 'services/evac_alarm.dart';
+import 'evac_alarm_layer.dart';
 import 'services/prototype_safety_store.dart';
 import 'services/fcm_notification_service.dart';
 import 'services/evacuation_response_queue.dart';
@@ -458,6 +460,11 @@ enum _ResponseSubmitResult { sent, queued, blockedOffline, failed }
 final _responseQueue = EvacuationResponseQueue();
 bool _retryingEvacuationResponses = false;
 
+// 대피 경보 화면(evac_alarm_layer.dart)이 같은 시연 응답 처리를 쓰도록 공개
+Future<void> recordPrototypeEvacuationResponse(WidgetRef ref, EvacuationResponseStatus status) =>
+    _recordPrototypeEvacuationResponse(ref, status);
+void showResponseMessage(String message) => _showResponseMessage(message);
+
 void _showResponseMessage(String message) {
   rootMessengerKey.currentState?.showSnackBar(SnackBar(
     content: Text(message),
@@ -608,6 +615,7 @@ class _NotificationBootstrapState extends ConsumerState<_NotificationBootstrap>
     });
     WidgetsBinding.instance.addObserver(this);
     _startNetCheck();
+    _wireEvacAlarm();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final controller = ref.read(prototypeSafetyProvider);
       await controller.load();
@@ -650,6 +658,7 @@ class _NotificationBootstrapState extends ConsumerState<_NotificationBootstrap>
       } catch (_) {
         // Auth or push setup must never prevent mock mode and polling fallback.
       }
+      if (!_authReady.isCompleted) _authReady.complete();
       await _pollAlerts();
       unawaited(retryQueuedEvacuationResponses(ref));
     });
@@ -674,6 +683,34 @@ class _NotificationBootstrapState extends ConsumerState<_NotificationBootstrap>
 
   void _mergeAlerts(List<AlertItem> incoming) {
     mergeAlertItems(ref, incoming);
+  }
+
+  /// 로그인 준비가 끝났는지 — 꺼진 앱을 알림 버튼으로 열었을 때 응답은 이것을 기다렸다가 보낸다
+  final _authReady = Completer<void>();
+
+  /// 대피 경보 사이렌 알림(services/evac_alarm.dart) → 경보 화면 / 알림 버튼 응답 (2026-10-11)
+  void _wireEvacAlarm() {
+    EvacAlarm.onOpen = (alert) {
+      if (!mounted || evacAlarmCurrent.value?.id == alert.id) return;
+      final answered = ref.read(alertCenterProvider).any((a) => a.id == alert.id && a.myStatus != null);
+      if (answered) {
+        unawaited(EvacAlarm.stop());
+        return;
+      }
+      evacAlarmCurrent.value = alert;
+    };
+    EvacAlarm.onAction = (alert, status) async {
+      evacAlarmShownIds.add(alert.id);
+      await _authReady.future;
+      if (!mounted) return;
+      if (alert.id == prototypeEvacuationAlertId) {
+        final s = EvacuationResponseStatusLabel.fromWireValue(status);
+        if (s != null) await _recordPrototypeEvacuationResponse(ref, s);
+        return;
+      }
+      _mergeAlerts([alert]);
+      await _submitEvacuationResponse(ref, alert, status);
+    };
   }
 
   Future<void> _pollAlerts({bool fullRefresh = false}) async {
@@ -749,6 +786,8 @@ class GuryongpoApp extends StatelessWidget {
         // 디자인 = web-prototype (2026-10-08) — ui/gk_theme.dart
         theme: gkTheme(),
         routerConfig: appRouter,
+        // 대피 경보 화면은 모든 화면(첫 화면 포함) 위에 (evac_alarm_layer.dart)
+        builder: (_, child) => EvacAlarmLayer(child: child ?? const SizedBox.shrink()),
       );
 }
 
@@ -992,7 +1031,8 @@ class _ShellState extends ConsumerState<Shell> {
   }
 
   Future<void> _presentNextAlert() async {
-    if (!mounted || _showingEvacuationAlert) return;
+    // 재난문자처럼 뜬 경보 화면(EvacAlarmLayer)이 있거나 거기서 이미 보여 준 경보면 팝업을 또 띄우지 않는다
+    if (!mounted || _showingEvacuationAlert || evacAlarmCurrent.value != null) return;
     final pending = ref.read(pendingResponseIdsProvider);
     final alert = ref
         .read(alertCenterProvider)
@@ -1000,7 +1040,8 @@ class _ShellState extends ConsumerState<Shell> {
             item.responseRequired &&
             item.myStatus == null &&
             !pending.contains(item.id) &&
-            !_shownAlertIds.contains(item.id))
+            !_shownAlertIds.contains(item.id) &&
+            !evacAlarmShownIds.contains(item.id))
         .firstOrNull;
     if (alert == null) return;
     _showingEvacuationAlert = true;
@@ -1070,11 +1111,18 @@ class _ShellState extends ConsumerState<Shell> {
 }
 
 class EvacuationAlertDialog extends ConsumerStatefulWidget {
-  const EvacuationAlertDialog({super.key, required this.alert, this.onRespond});
+  const EvacuationAlertDialog(
+      {super.key, required this.alert, this.onRespond, this.alarm = false, this.onClose});
   final AlertItem alert;
 
   /// 시연용: 주면 서버로 보내지 않고 이 함수로 응답을 처리한다 (showEvacuationAlertDemo)
   final Future<void> Function(String status)? onRespond;
+
+  /// 재난문자처럼 뜬 경보 화면(EvacAlarmLayer): 사이렌이 울리는 중 — 음성 안내는 처음 만질 때까지 미룬다
+  final bool alarm;
+
+  /// 닫기 (경보 화면은 팝업 경로가 아니라서 Navigator.pop 대신)
+  final VoidCallback? onClose;
 
   @override
   ConsumerState<EvacuationAlertDialog> createState() =>
@@ -1089,6 +1137,18 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
   bool _flashOn = false;
   int _flashTicks = 0;
   bool _voice = false;
+  bool _voicePending = false;
+
+  void _close() => widget.onClose != null ? widget.onClose!() : Navigator.of(context).pop();
+
+  /// 화면을 만지면 사이렌을 멈추고(앱 안 팝업이 떠 있을 때 온 사이렌도), 경보 화면이면 미뤄 둔 음성 안내를 읽는다
+  void _touch() {
+    unawaited(EvacAlarm.silence());
+    if (_voicePending) {
+      _voicePending = false;
+      _speak();
+    }
+  }
 
   @override
   void initState() {
@@ -1101,10 +1161,12 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
         _flash = Timer.periodic(evacuationFlashTransitionInterval, (t) {
           if (!mounted || _flashTicks >= 60) {
             t.cancel();
+            unawaited(EvacAlarm.torch(false));
             if (mounted) setState(() => _flashOn = false);
             return;
           }
           setState(() => _flashOn = ++_flashTicks % 2 == 1);
+          unawaited(EvacAlarm.torch(_flashOn));   // 손전등도 같은 박자로 (2026-10-11 사용자 요청, Android 앱)
         });
       }
       if (a.strongVibration) {
@@ -1117,7 +1179,12 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
       }
       // 음성은 '음성 안내 자동 재생' 스위치만 본다 (시각 지원 스위치는 2026-10-11 뺐다)
       _voice = ref.read(autoVoiceAlerts);
-      if (_voice) _speak();
+      // 경보 화면이면 사이렌과 겹치지 않게 처음 만질 때까지 미룬다
+      if (_voice && widget.alarm) {
+        _voicePending = true;
+      } else if (_voice) {
+        _speak();
+      }
       setState(() {});
     });
   }
@@ -1130,6 +1197,8 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
     _flash?.cancel();
     _vibrate?.cancel();
     alertVibrateStop();
+    unawaited(EvacAlarm.torch(false));
+    if (widget.alarm) unawaited(EvacAlarm.stop());
     if (_voice) unawaited(DemoSpeech.instance.stop());
     super.dispose();
   }
@@ -1137,9 +1206,10 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
   Future<void> _respond(String status) async {
     if (_busy) return;
     setState(() => _busy = true);
+    unawaited(EvacAlarm.silence());
     final demo = widget.onRespond;
     if (demo != null) {
-      Navigator.of(context).pop();
+      _close();
       await demo(status);
       return;
     }
@@ -1147,7 +1217,7 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
     if (!mounted) return;
     if (result == _ResponseSubmitResult.sent ||
         result == _ResponseSubmitResult.queued) {
-      Navigator.of(context).pop();
+      _close();
       return;
     }
     setState(() => _busy = false);
@@ -1200,7 +1270,15 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
 
   /// 대피 확인 경보 = web-prototype EvacModal (2026-10-08). 화면 점멸이 켜져 있으면 뒤 화면 전체가 빨갛게 깜빡인다
   @override
-  Widget build(BuildContext context) => Stack(fit: StackFit.expand, children: [
+  Widget build(BuildContext context) {
+    // 같은 경보에 다른 창(경보 화면·알림 버튼)에서 이미 응답했으면 이 창은 닫는다
+    ref.listen<List<AlertItem>>(alertCenterProvider, (_, next) {
+      if (!_busy && next.any((a) => a.id == widget.alert.id && a.myStatus != null)) _close();
+    });
+    return Listener(onPointerDown: (_) => _touch(), child: _body());
+  }
+
+  Widget _body() => Stack(fit: StackFit.expand, children: [
         Positioned.fill(
           child: IgnorePointer(
             child: AnimatedOpacity(
@@ -1264,7 +1342,7 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
 
 /// 시연: 실제 대피 확인 경보와 같은 팝업을 띄운다 (2026-10-05 사용자 요청). 응답은 서버로 보내지 않고 기기의
 /// 시연 기록(prototypeSafetyProvider)에만 남는다 — '대피 중'이면 실제처럼 가까운 대피소 경로 안내를 시작한다
-const _demoEvacuationAlert = AlertItem(
+const demoEvacuationAlert = AlertItem(
   id: prototypeEvacuationAlertId,
   title: '[대피 확인] 호우 경보 · 현재 위치 (시연)',
   level: 'warning',
@@ -1284,7 +1362,7 @@ Future<void> showEvacuationAlertDemo(BuildContext context, WidgetRef ref, {bool 
       context: context,
       barrierDismissible: false,
       builder: (_) => EvacuationAlertDialog(
-        alert: _demoEvacuationAlert,
+        alert: demoEvacuationAlert,
         onRespond: (status) async {
           final s = EvacuationResponseStatusLabel.fromWireValue(status);
           if (s == null) return;

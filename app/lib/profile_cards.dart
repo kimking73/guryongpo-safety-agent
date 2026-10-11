@@ -5,12 +5,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'live_screens.dart';
+import 'evac_alarm_layer.dart';
 import 'main.dart';
 import 'profile_form.dart' show disabilitiesOf;
 import 'models/domain_models.dart';
 import 'patrol_screens.dart' show isPatrolRole, roleKo;
 import 'services/account_service.dart';
 import 'services/demo_mode.dart';
+import 'services/evac_alarm.dart';
 import 'services/geocoding_service.dart';
 import 'services/live_api.dart';
 import 'services/prototype_safety_store.dart';
@@ -696,13 +698,26 @@ class ProfileAlertsCard extends ConsumerWidget {
         GkSwitchRow(
             icon: Icons.flash_on_rounded,
             label: '화면 점멸',
-            desc: '대피 알림이 오면 화면이 빨갛게 깜빡여요',
+            desc: '대피 알림이 오면 화면이 빨갛게 깜빡여요 (휴대폰 앱은 손전등도)',
             note: '광과민성이 있으면 꺼 두세요',
             value: a11y.screenFlash,
             onChanged: (v) => update(a11y.copyWith(screenFlash: v))),
         // 청각 지원·시각 지원 스위치는 뺐다 (2026-10-11 사용자 요청) — 진동·화면 점멸·음성 안내를 각각 켜고 끈다.
         // '음성 언어'·'접근성 자세히' 버튼은 위 스위치와 겹쳐 뺐다 (2026-10-09)
         const FcmPushSettingsCard(),
+        // 재난문자처럼 (2026-10-11): 누르고 화면을 끄거나 무음으로 바꾸면 10초 뒤 사이렌 + 잠금 화면 위 경보 (Android 앱, 기기에만 기록)
+        if (EvacAlarm.supported) ...[
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+            onPressed: () async {
+              await scheduleEvacAlarmDemo(ref);
+              showResponseMessage('10초 뒤 대피 경보가 울려요 — 화면을 끄거나 무음으로 바꿔 보세요');
+            },
+            icon: const Icon(Icons.campaign_rounded),
+            label: const Text('잠금 화면 경보 시연 (10초 뒤)'),
+          ),
+        ],
       ]),
     );
   }
