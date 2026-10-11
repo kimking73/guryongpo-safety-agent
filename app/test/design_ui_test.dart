@@ -105,7 +105,7 @@ void main() {
     expect(find.byType(NavigationBar), findsOneWidget);
     expect(find.byType(GkSideNav), findsNothing);
     final bar = find.byType(NavigationBar);
-    for (final label in ['대시보드', 'AI 대화창', '방재단 현황', '사용자']) {
+    for (final label in ['대시보드', 'AI 대화창', '방재단 현황', '사용자 정보']) {
       expect(find.descendant(of: bar, matching: find.text(label)), findsOneWidget);
     }
     expect(find.byType(GkEmergencyCall), findsOneWidget);
@@ -145,7 +145,7 @@ void main() {
     final store = await pumpShell(t, DemoRole.user);
     final bar = find.byType(NavigationBar);
     expect(find.descendant(of: bar, matching: find.text('방재단 현황')), findsNothing);
-    expect(find.descendant(of: bar, matching: find.text('사용자')), findsOneWidget);
+    expect(find.descendant(of: bar, matching: find.text('사용자 정보')), findsOneWidget);
     await store.startDemoAlert(prototypeEvacuationAlertId);
     await store.respond(prototypeEvacuationAlertId, EvacuationResponseStatus.needHelp);
     await t.pump();
