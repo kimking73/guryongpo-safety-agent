@@ -83,8 +83,12 @@ void main() {
     expect(ys, [...ys]..sort(), reason: '나이 → 장애 유형 → 접근성 지원 → 이동 수단 → 직업 → 집 → 내 장소 순서');
     expect(find.text('설정 안 함'), findsOneWidget);
     expect(find.text('내 장소 추가하기'), findsOneWidget);
-    for (final s in ['음성 안내 자동 재생', '진동 알림', '화면 점멸', '청각 지원', '시각 지원', '재난 푸시 알림']) {
+    for (final s in ['음성 안내 자동 재생', '진동 알림', '화면 점멸', '재난 푸시 알림']) {
       expect(find.widgetWithText(GkSwitchRow, s), findsOneWidget, reason: s);
+    }
+    // 청각 지원·시각 지원 스위치는 뺐다 (2026-10-11 사용자 요청)
+    for (final s in ['청각 지원', '시각 지원']) {
+      expect(find.widgetWithText(GkSwitchRow, s), findsNothing, reason: s);
     }
     expect(find.text('광과민성이 있으면 꺼 두세요'), findsOneWidget);
     for (final gone in ['경고·대피 확인', '재난 후 지원·복구', '내 가구 등록', '보행 능력', '보호가 필요한 동반자', '출발 위치']) {
@@ -137,19 +141,6 @@ void main() {
     expect(find.text('지체 · 청각'), findsOneWidget);
     final saved = (await SharedPreferences.getInstance()).getString('optional_profile');
     expect(saved, allOf(contains('"지체 지원":"지원 필요"'), contains('"청각 지원":"지원 필요"'), contains('"시각 지원":"필요 없음"')));
-  });
-
-  testWidgets('시각 지원 스위치 → 접근성 지원 요약 (켬 → 시각, 끔 → 사용 안 함)', (t) async {
-    await setSize(t, 1280);
-    await t.pumpWidget(app());
-    await t.pumpAndSettle();
-    await t.tap(find.widgetWithText(GkSwitchRow, '시각 지원'));
-    await t.pumpAndSettle();
-    // 장애 유형·접근성 지원은 같은 프로필 키(시각 지원)를 본다 — 두 줄 모두 '시각' (2026-10-11)
-    expect(find.widgetWithText(GkInfoRow, '시각'), findsNWidgets(2));
-    await t.tap(find.widgetWithText(GkSwitchRow, '시각 지원'));
-    await t.pumpAndSettle();
-    expect(find.widgetWithText(GkInfoRow, '사용 안 함'), findsOneWidget);
   });
 
   testWidgets('내 장소 추가하기 → 장소 등록 창', (t) async {

@@ -14,6 +14,7 @@ import 'services/demo_mode.dart';
 import 'models/domain_models.dart';
 import 'mobile/dashboard_cards.dart' show WeatherSection, warningIcon;
 import 'ui/gk_theme.dart';
+import 'ui/wind_badge.dart';
 import 'ui/gk_widgets.dart';
 import 'ui/map_menu.dart';
 
@@ -106,6 +107,7 @@ List<Polygon> _disasterFloodPolygons(List<FloodGrid> grids,
 
 List<Marker> _clusteredFacilities(List<Facility> facilities, double zoom,
     {String? selectedId,
+    bool compact = false,
     required List<RiskArea> riskAreas,
     required ValueChanged<Facility> onFacilityTap,
     required ValueChanged<LatLng> onClusterTap}) {
@@ -128,6 +130,7 @@ List<Marker> _clusteredFacilities(List<Facility> facilities, double zoom,
     for (final bucket in buckets.values)
       if (bucket.length == 1)
         _facilityMarker(bucket.single,
+            compact: compact,
             warning: shelterExclusion(bucket.single, riskAreas) != null,
             onTap: () => onFacilityTap(bucket.single))
       else
@@ -138,8 +141,8 @@ List<Marker> _clusteredFacilities(List<Facility> facilities, double zoom,
             bucket.map((f) => f.position.longitude).reduce((a, b) => a + b) /
                 bucket.length,
           ),
-          width: 48,
-          height: 48,
+          width: compact ? 38 : 48,
+          height: compact ? 38 : 48,
           child: Semantics(
             button: true,
             label:
@@ -165,12 +168,13 @@ List<Marker> _clusteredFacilities(List<Facility> facilities, double zoom,
   ];
 }
 
+/// compact: 방재단 지도에서 사람 아이콘과 덜 겹치게 조금 작게 (2026-10-11)
 Marker _facilityMarker(Facility facility,
-        {bool warning = false, required VoidCallback onTap}) =>
+        {bool warning = false, bool compact = false, required VoidCallback onTap}) =>
     Marker(
       point: facility.position,
-      width: 46,
-      height: 50,
+      width: compact ? 38 : 46,
+      height: compact ? 40 : 50,
       child: Tooltip(
         message:
             '${facility.type == FacilityType.shelter ? '대피소' : '의료시설'} · ${facility.name}${warning ? ' · 위험 구역 주의' : ''}',
@@ -189,7 +193,7 @@ Marker _facilityMarker(Facility facility,
                   color: facility.type == FacilityType.shelter
                       ? Colors.teal.shade800
                       : Colors.red.shade700,
-                  size: 30,
+                  size: compact ? 24 : 30,
                 ),
               ),
               if (warning)
@@ -687,6 +691,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
     final route = routeMode ? widget.safetyRoute : null;
     final facilityMarkers = _clusteredFacilities(widget.facilities, mapZoom,
         selectedId: destination?.id,
+        compact: widget.mapOnly,
         riskAreas: widget.riskAreas,
         onFacilityTap: (facility) => _showFacility(context, facility),
         onClusterTap: (point) => focusOn(point));
@@ -756,17 +761,16 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                         if (!compositeView || w.$2 >= 21)
                         Marker(
                           point: w.$1,
-                          width: 76,
-                          height: 64,
-                          // 화살표만 (2026-10-10): 크고 붉을수록 강함, 숫자는 누르면 나오는 상세에서
+                          width: WindBadge.boxFor(WindBadge.levelOf(w.$2, w.$2)),
+                          height: WindBadge.boxFor(WindBadge.levelOf(w.$2, w.$2)),
+                          // 원형 배지 (2026-10-11): 크고 붉을수록 강함, 숫자는 누르면 나오는 상세에서
                           child: GestureDetector(
                             onTap: () => _showLiveWind(context, w),
                             // 화살표는 불어가는 방향 = 풍향(불어오는 방향) + 180°
-                            child: Transform.rotate(
-                              angle: (w.$3 + 180) * math.pi / 180,
-                              child: Icon(Icons.navigation,
-                                  color: _windColor(w.$2, w.$2), size: 18 + math.min(w.$2, 24)),
-                            ),
+                            child: WindBadge(
+                                color: _windColor(w.$2, w.$2),
+                                level: WindBadge.levelOf(w.$2, w.$2),
+                                towardDeg: w.$3 + 180),
                           ),
                         ),
                     if (visible.contains(HazardKind.wind) && widget.demo)
@@ -779,20 +783,14 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                         if (!compositeView || w.$2 >= 21)
                         Marker(
                           point: w.$1,
-                          width: 76,
-                          height: 64,
+                          width: WindBadge.boxFor(WindBadge.levelOf(w.$2, w.$2 + 9)),
+                          height: WindBadge.boxFor(WindBadge.levelOf(w.$2, w.$2 + 9)),
                           child: GestureDetector(
                             onTap: () => _showWind(context, w.$1, w.$2, w.$3),
-                            child: Transform.rotate(
-                              angle: (w.$3 == '북동풍' ? 225 : 270) *
-                                  math.pi /
-                                  180,
-                              child: Icon(
-                                Icons.navigation,
+                            child: WindBadge(
                                 color: _windColor(w.$2, w.$2 + 9),
-                                size: 18 + w.$2,
-                              ),
-                            ),
+                                level: WindBadge.levelOf(w.$2, w.$2 + 9),
+                                towardDeg: w.$3 == '북동풍' ? 225 : 270),
                           ),
                         ),
                     if (widget.demo && visible.contains(HazardKind.slide))
@@ -1404,7 +1402,9 @@ HazardKind? _areaKind(String hazard) => switch (hazard) {
 List<Polygon> hazardAreaPolygons(List<RiskArea> areas, {Set<HazardKind>? kinds, bool severeOnly = false}) => [
       for (final area in DemoData.mapAreas(areas))
         if ((kinds == null || _areaKind(area.hazard) == null || kinds.contains(_areaKind(area.hazard))) &&
-            (!severeOnly || area.hazard == 'landslide' || area.level == '심각'))
+            (!severeOnly || area.hazard == 'landslide' || area.level == '심각') &&
+            // 주의 미만 침수 원은 그리지 않는다 — 투명색에 alpha를 주면 회색 원이 된다 (2026-10-11 회색 삭제)
+            (area.hazard == 'landslide' || _sensorRiskLevels.contains(area.level)))
         for (final ring in area.polygons)
           if (ring.length >= 3)
             Polygon(
@@ -1440,9 +1440,10 @@ List<Marker> floodGridDotMarkers(BuildContext context, List<FloodGrid> grids,
     ];
 
 /// 수위계 표식: 침수 영역 원의 중심(판정 원인 센서 실제 좌표). 누르면 센서 측정값
+/// 주의 미만(회색) 수위계는 그리지 않는다 (2026-10-11 사용자 요청: 회색 삭제 — 지도 겹침 줄이기)
 List<Marker> floodSensorMarkers(BuildContext context, List<RiskArea> areas, {bool severeOnly = false}) => [
       for (final a in _floodSensors(DemoData.mapAreas(areas)))
-        if (!severeOnly || a.level == '심각')
+        if ((!severeOnly || a.level == '심각') && _sensorRiskLevels.contains(a.level))
         Marker(
           point: a.sensor!,
           width: 30,
@@ -1466,7 +1467,8 @@ List<Marker> floodSensorMarkers(BuildContext context, List<RiskArea> areas, {boo
 
 /// 수위계 표식 색: 주의 이상은 단계 색, 그 아래는 회색 (파란 테두리 없앰, 2026-10-10)
 Color _sensorColor(String level) =>
-    const ['주의', '경계', '심각'].contains(level) ? _floodColor(level) : Colors.blueGrey.shade400;
+    _sensorRiskLevels.contains(level) ? _floodColor(level) : Colors.blueGrey.shade400;
+const _sensorRiskLevels = ['주의', '경계', '심각'];
 
 /// 지도 왼쪽 위에 늘 펼쳐 두는 범례 (2026-10-10, 사용자 결정): 지금 켠 층에 맞는 것만.
 /// 색 = 위험 단계는 침수·강풍만, 산사태는 취약 지역 한 색. 수치는 쓰지 않는다
@@ -1488,12 +1490,14 @@ class MapLegendCard extends StatelessWidget {
   Widget build(BuildContext context) {
     const label = TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: GK.navy);
     const note = TextStyle(fontSize: 11, color: GK.muted, height: 1.3);
-    Widget swatch(Color c) => Container(
-        width: 16,
-        height: 12,
+    // circle = 지도에 원으로 그리는 것 (산사태 취약 지역, 2026-10-11 사용자 요청)
+    Widget swatch(Color c, {bool circle = false}) => Container(
+        width: circle ? 14 : 16,
+        height: circle ? 14 : 12,
         decoration: BoxDecoration(
             color: c.withValues(alpha: .35),
-            borderRadius: BorderRadius.circular(3),
+            shape: circle ? BoxShape.circle : BoxShape.rectangle,
+            borderRadius: circle ? null : BorderRadius.circular(3),
             border: Border.all(color: c, width: 2)));
     Widget mark(IconData i, Color c) => SizedBox(width: 18, child: Icon(i, color: c, size: 17));
     Widget section(String t) => Padding(
@@ -1533,11 +1537,11 @@ class MapLegendCard extends StatelessWidget {
             ],
             if (visible.contains(HazardKind.slide)) ...[
               section('산사태'),
-              row(swatch(_slideColor), '산사태 취약 지역'),
+              row(swatch(_slideColor, circle: true), '산사태 취약 지역'),
             ],
             if (visible.contains(HazardKind.wind)) ...[
               section('바람'),
-              row(mark(Icons.navigation, _windColor(21, 21)), '화살표', '불어가는 쪽 · 크고 붉을수록 강함'),
+              row(SizedBox(width: 18, child: WindBadge(color: _windColor(21, 21), level: 3, towardDeg: 225, size: 17)), '화살표', '불어가는 쪽 · 크고 붉을수록 강함'),
             ],
             section('주요 표식'),
             row(mark(Icons.my_location, _riskColor('경계')), '현위치', '색 = 지금 위치의 위험 단계'),
@@ -3209,11 +3213,12 @@ void _showMapLegend(BuildContext context,
     bool hasDestination = false,
     bool showFacilities = false,
     bool showPlaces = true}) {
-  Widget fill(Color c, {Color? border}) => Container(
-      width: 22,
-      height: 14,
+  Widget fill(Color c, {Color? border, bool circle = false}) => Container(
+      width: circle ? 16 : 22,
+      height: circle ? 16 : 14,
       decoration: BoxDecoration(
           color: c.withValues(alpha: .35),
+          shape: circle ? BoxShape.circle : BoxShape.rectangle,
           border: Border.all(color: border ?? c, width: 2)));
   Widget line(Color c, {bool dotted = false}) => SizedBox(
       width: 22,
@@ -3286,11 +3291,11 @@ void _showMapLegend(BuildContext context,
             ],
             if (visible.contains(HazardKind.slide)) ...[
               section('산사태'),
-              Wrap(spacing: 8, runSpacing: 6, children: [chip(fill(_slideColor), '산사태 취약 지역')]),
+              Wrap(spacing: 8, runSpacing: 6, children: [chip(fill(_slideColor, circle: true), '산사태 취약 지역')]),
             ],
             if (visible.contains(HazardKind.wind)) ...[
               section('바람'),
-              row(icon(Icons.navigation, _windColor(21, 21)), '화살표', '바람이 불어가는 쪽 · 크고 붉을수록 강함'),
+              row(WindBadge(color: _windColor(21, 21), level: 3, towardDeg: 225, size: 20), '화살표', '바람이 불어가는 쪽 · 크고 붉을수록 강함'),
             ],
             section('주요 표식'),
             row(icon(Icons.my_location, _riskColor('경계')), '현위치', '색 = 지금 위치의 위험 단계'),
@@ -3345,9 +3350,9 @@ void _showMapLegend(BuildContext context,
                   ],
                   if (visible.contains(HazardKind.wind)) ...[
                     section('바람 기준'),
-                    row(icon(Icons.navigation, _windColor(10, 10)), '주의', '강풍주의보 기준 아래'),
-                    row(icon(Icons.navigation, _windColor(14, 14)), '경계', '강풍주의보 기준 이상'),
-                    row(icon(Icons.navigation, _windColor(21, 21)), '심각', '강풍경보 기준 이상'),
+                    row(WindBadge(color: _windColor(10, 10), level: 1, towardDeg: 225, size: 20), '주의', '강풍주의보 기준 아래'),
+                    row(WindBadge(color: _windColor(14, 14), level: 2, towardDeg: 225, size: 20), '경계', '강풍주의보 기준 이상'),
+                    row(WindBadge(color: _windColor(21, 21), level: 3, towardDeg: 225, size: 20), '심각', '강풍경보 기준 이상'),
                   ],
                   section('표식 더 보기'),
                   if (showFacilities) row(facilityMark, '숫자 원', '가까운 시설 묶음 — 누르면 그곳으로 확대'),

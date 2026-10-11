@@ -20,6 +20,7 @@ import 'services/live_api.dart';
 import 'services/demo_live_api.dart';
 import 'services/prototype_safety_store.dart';
 import 'ui/gk_widgets.dart';
+import 'ui/map_menu.dart' show MapMenuButton, MapButtonKind, MapIcons;
 import 'ui/tokens.dart' show Ds, dsText;
 import 'ui/widgets.dart' show PillButton, SegmentedPill;
 import 'services/location_service.dart';
@@ -98,16 +99,17 @@ Color statusColor(String? s) => switch (s) {
       _ => Colors.grey,
     };
 
-/// 방문 결과 (서버 VisitInput.result) — 앞 3개는 대상 상태를 '대피 완료'로 바꾼다
+/// 방문 결과 (서버 VisitInput.result) — 고르는 항목은 4개로 줄였다 (2026-10-11 사용자 요청).
+/// '대피 완료'는 대상 상태를 대피 완료로 바꾸고 방재단 배정도 완료로 본다 (workStatusOf)
 const visitResults = <(String, String)>[
-  ('evacuated_with_help', '함께 대피함'),
-  ('already_evacuated', '이미 대피함'),
-  ('transported', '차량·구급 이송'),
+  ('evacuated_with_help', '대피 완료'),
   ('refused', '대피 거부'),
-  ('not_home', '부재'),
+  ('not_home', '부재·확인 불가'),
   ('other', '기타'),
 ];
-final visitKo = {for (final r in visitResults) r.$1: r.$2};
+/// 대상 상태를 대피 완료로 바꾸는 결과 (서버 VISIT_STATUS). 예전 기록(이미 대피함·이송)도 '대피 완료'로 보인다
+const evacuatedVisits = {'evacuated_with_help', 'already_evacuated', 'transported'};
+final visitKo = {for (final r in visitResults) r.$1: r.$2, 'already_evacuated': '대피 완료', 'transported': '대피 완료'};
 
 String needsText(Object? needs) => [for (final n in needs as List? ?? const []) needKo[n] ?? '$n'].join(', ');
 
@@ -621,10 +623,14 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
   WorkStatus? workFilter;
   /// 지도를 옮길 점 — 목록에서 가구를 고를 때만 (지도 표식을 누를 때는 옮기지 않는다)
   LatLng? focus;
+  /// 완료된 곳 목록을 펼쳤는지 (우선 확인 가구 · 배정 현황 따로). 완료는 접어 두고 눌러서 본다 (2026-10-11 사용자 요청)
+  bool priorityDoneOpen = false, assignDoneOpen = false;
 
   // 내 방문 경로 (2026-10-09): '경로 안내' 창에서 '경로 추가'한 곳(이 기기에서만)을 모두 도는 길 — 최단 / 우선순위 최단.
   // 대시보드 경로 안내(개인용)와 상태를 나누지 않는다 (2026-10-11)
   bool routeOpen = false;
+  /// 지도 카드 상위 메뉴(우선 확인 가구 지도 · 경로 안내)의 하위 칸이 펼쳐져 있는지
+  bool menuOpen = true;
   Set<String> visitStops = {};
   LatLng? visitOrigin;               // null = 내 위치
   String visitOriginLabel = '내 위치';
@@ -709,8 +715,9 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
   }
 
   /// 방재단 업무 단계 바꾸기 (주민 대피 응답은 바꾸지 않는다)
-  Future<void> _setWork(Map<String, dynamic> t, WorkStatus w) =>
-      _patch(t, {'work_status': workWire[w]}, '업무 상태: ${workKo[w]}');
+  /// 완료로 바꾸면 주민 상태도 대피 완료로 (우선 확인 가구에도 대피 완료로 보인다, 2026-10-11 사용자 요청)
+  Future<void> _setWork(Map<String, dynamic> t, WorkStatus w) => _patch(
+      t, {'work_status': workWire[w], if (w == WorkStatus.done) 'status': 'evacuated'}, '업무 상태: ${workKo[w]}');
 
   Future<void> _patch(Map<String, dynamic> t, Map<String, dynamic> body, String done) async {
     try {
@@ -839,27 +846,61 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
               if (latLng(t['location']) != null)
                 _MapPoint('${t['id']}', latLng(t['location'])!, numbers['${t['id']}'], t['status'] as String?, '${t['label']}'),
           ];
+    final narrow = MediaQuery.sizeOf(c).width < 600;
+    final canRoute = incidentId != null && !closed;
     return GkCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-          Expanded(
-            child: Wrap(spacing: 10, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.end, children: [
-              const Text('지도', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: GK.ink)),
-              Text(incidentId == null ? '등록 장애 가구 · 대피소' : '우선 확인 가구 · 대피소',
-                  style: const TextStyle(fontSize: 17, color: GK.muted, height: 1.6)),
-              if (demo) const _Tag('예시 위치 · 실제 지도 연결 전', icon: Icons.info_outline_rounded),
-            ]),
-          ),
-          // 방재단 경로 안내 (2026-10-11 사용자 요청): 대시보드 경로 안내(개인용)와 따로 — 누르면 우선 확인 가구 목록 창
-          if (incidentId != null && !closed)
-            PillButton(routeOpen ? '방문 경로 수정' : '경로 안내',
-                expand: false, height: 40, fontSize: 15, icon: FontAwesomeIcons.route, onPressed: _showRouteAddDialog),
+        // 상위 메뉴 두 개 = 대시보드 지도 카드의 '재난 지도 · 경로 안내'와 같은 모양 (2026-10-11 사용자 요청).
+        // 누르면 그 메뉴의 하위 칸만 펼치고, 보고 있는 메뉴를 다시 누르면 접고 펼친다
+        Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+          MapMenuButton(
+              label: '우선 확인 가구 지도',
+              icon: MapIcons.layers,
+              kind: MapButtonKind.menu,
+              big: !narrow,
+              selected: !routeOpen,
+              expanded: !routeOpen && menuOpen,
+              onTap: () => setState(() {
+                    if (routeOpen) {
+                      routeOpen = false;
+                      menuOpen = true;
+                    } else {
+                      menuOpen = !menuOpen;
+                    }
+                  })),
+          // 방재단 경로 안내: 대시보드 경로 안내(개인용)와 따로 — 넣은 곳이 없으면 우선 확인 가구 목록 창부터
+          MapMenuButton(
+              label: '경로 안내',
+              icon: MapIcons.route,
+              kind: MapButtonKind.menu,
+              big: !narrow,
+              selected: routeOpen,
+              expanded: routeOpen && menuOpen,
+              tooltip: canRoute ? null : '진행 중인 대피 경보가 있을 때 방문 경로를 안내해요',
+              onTap: !canRoute
+                  ? null
+                  : () {
+                      if (routeOpen) {
+                        setState(() => menuOpen = !menuOpen);
+                      } else if (visitStops.isEmpty) {
+                        _showRouteAddDialog();
+                      } else {
+                        setState(() {
+                          routeOpen = true;
+                          menuOpen = true;
+                        });
+                      }
+                    }),
+          if (demo) const _Tag('예시 위치 · 실제 지도 연결 전', icon: Icons.info_outline_rounded),
         ]),
-        const SizedBox(height: 8),
+        if (menuOpen && !routeOpen) ...[
+          const SizedBox(height: 4),
+          _FilterBar(households: households ?? const [], filter: filter, onChanged: (f) => setState(() => filter = f)),
+          _MapLegend(withTargets: incidentId != null),
+        ],
+        if (menuOpen && routeOpen && incidentId != null) _visitPanel(),
+        const SizedBox(height: 10),
         _map(points, geoJsonRings(detail?['area'])),
-        _FilterBar(households: households ?? const [], filter: filter, onChanged: (f) => setState(() => filter = f)),
-        // 지도 범례 대신 방문 경로 안내 (2026-10-11 사용자 요청, 휴대폰 화면과 같게)
-        if (incidentId != null) _visitPanel(),
         if (sel != null) ...[
           const SizedBox(height: 10),
           _TargetDetail(
@@ -875,11 +916,24 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
 
   // ------------------------------------------------------------------ ④ 우선 확인 가구
   Widget _prioritySection(BuildContext c, List<Map<String, dynamic>> priority, Map<String, int> numbers, bool closed) {
-    // 방문 결과를 기록해 우선 확인에서 빠진 가구(대피 완료 등)도 결과와 함께 아래에 남긴다 (2026-10-11 사용자 요청)
-    final visited = [
+    // 방문 결과를 기록해 우선 확인에서 빠진 가구도 결과와 함께 아래에 남긴다 (2026-10-11 사용자 요청).
+    // 대피 완료(방문 결과 또는 배정 현황 완료)는 '대피 완료 N곳'으로 접어 두고 눌러서 펼친다
+    final rest = [
       for (final t in _targets)
-        if (t['in_area'] != false && t['last_visit'] != null && !numbers.containsKey('${t['id']}')) t
+        if (t['in_area'] != false && !numbers.containsKey('${t['id']}') && (t['last_visit'] != null || workStatusOf(t) == WorkStatus.done)) t
     ];
+    final visited = [for (final t in rest) if (workStatusOf(t) != WorkStatus.done) t];
+    final done = [for (final t in rest) if (workStatusOf(t) == WorkStatus.done) t];
+    Widget row(Map<String, dynamic> t) => Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: _PriorityRow(
+              t: t,
+              no: numbers['${t['id']}'],
+              selected: '${t['id']}' == selected,
+              closed: closed,
+              onTap: () => _pick(t),
+              onVisit: () => _visit(t)),
+        );
     return GkCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         const Text('우선 확인 가구', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: GK.ink)),
@@ -898,17 +952,13 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
         else ...[
           if (priority.isEmpty)
             const _Notice(Icons.check_circle_outline_rounded, '지금 우선 확인할 곳이 없습니다', '위험지역 안 도움 필요·응답 없음이 0곳입니다.', GK.green),
-          for (final t in [...priority, ...visited])
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: _PriorityRow(
-                  t: t,
-                  no: numbers['${t['id']}'],
-                  selected: '${t['id']}' == selected,
-                  closed: closed,
-                  onTap: () => _pick(t),
-                  onVisit: () => _visit(t)),
-            ),
+          for (final t in [...priority, ...visited]) row(t),
+          if (done.isNotEmpty)
+            _DoneFold(
+                count: done.length,
+                open: priorityDoneOpen,
+                onToggle: () => setState(() => priorityDoneOpen = !priorityDoneOpen),
+                children: [for (final t in done) row(t)]),
         ],
       ]),
     );
@@ -923,7 +973,11 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
       counts[w] = (counts[w] ?? 0) + 1;
     }
     final assigned = targets.where((t) => t['assigned_to'] != null).length;
-    final shown = [for (final t in targets) if (workFilter == null || workStatusOf(t) == workFilter) t]
+    // 전체 보기에서는 완료를 맨 아래 '대피 완료 N곳'으로 접는다 (완료 칩을 누르면 바로 보인다)
+    final shown = [
+      for (final t in targets)
+        if (workFilter == null ? workStatusOf(t) != WorkStatus.done : workStatusOf(t) == workFilter) t
+    ]
       ..sort((a, b) {
         final w = workStatusOf(a).index.compareTo(workStatusOf(b).index);
         if (w != 0) return w;
@@ -957,6 +1011,17 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
       );
     }
 
+    Widget card(Map<String, dynamic> t) => Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: _AssignCard(
+              t: t,
+              selected: '${t['id']}' == selected,
+              closed: closed,
+              supportsWork: supports,
+              onWork: (w) => _setWork(t, w),
+              onTap: () => _pick(t)),
+        );
+
     return GkCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Wrap(spacing: 10, runSpacing: 4, alignment: WrapAlignment.spaceBetween, crossAxisAlignment: WrapCrossAlignment.center, children: [
@@ -980,20 +1045,17 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
           const LinearProgressIndicator()
         else if (targets.isEmpty)
           const _Notice(Icons.inbox_outlined, '이 대피 상황의 대상이 없습니다', null, GK.muted)
-        else if (shown.isEmpty)
+        else if (shown.isEmpty && (workFilter != null || (counts[WorkStatus.done] ?? 0) == 0))
           const _Notice(Icons.filter_alt_off_outlined, '이 상태인 곳이 없습니다', null, GK.muted)
-        else
-          for (final t in shown)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: _AssignCard(
-                  t: t,
-                  selected: '${t['id']}' == selected,
-                  closed: closed,
-                  supportsWork: supports,
-                  onWork: (w) => _setWork(t, w),
-                  onTap: () => _pick(t)),
-            ),
+        else ...[
+          for (final t in shown) card(t),
+          if (workFilter == null && (counts[WorkStatus.done] ?? 0) > 0)
+            _DoneFold(
+                count: counts[WorkStatus.done]!,
+                open: assignDoneOpen,
+                onToggle: () => setState(() => assignDoneOpen = !assignDoneOpen),
+                children: [for (final t in targets) if (workStatusOf(t) == WorkStatus.done) card(t)]),
+        ],
       ]),
     );
   }
@@ -1001,12 +1063,17 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
   /// 지도 = 대시보드 지도 칸 그대로(재난 층·전체 화면·등록 장소 위험) + 대피 영역(빨간 테두리) + 사람 아이콘 (2026-10-09 사용자 요청)
   /// + 대피소·의료시설, 목록에서 고른 곳으로 이동
   Widget _map(List<_MapPoint> points, List<List<LatLng>> rings) {
-    final plan = _visitPlan;
+    // 방문 경로 선은 '경로 안내' 메뉴를 보고 있을 때만 그린다
+    final plan = routeOpen ? _visitPlan : null;
     final line = plan == null ? const <LatLng>[] : decodePolyline('${plan['geometry']}');
     final at = {for (final p in points) p.id: p.at};
+    // 방문 경로를 띄우면 경로에 넣은 가구 · 위험 지역(재난 층·대피 영역) · 경로만 (2026-10-11 사용자 요청):
+    // 대피소·의료시설과 경로에 안 넣은 우선 확인 가구·등록 가구는 숨긴다
+    final routing = line.length > 1;
+    final shown = routing ? [for (final p in points) if (visitStops.contains(p.id)) p] : points;
     return Dashboard(
       mapOnly: true,
-      showFacilities: true,
+      showFacilities: !routing,
       focusPoint: focus,
       extraPolygons: [
         for (final r in rings)
@@ -1019,20 +1086,20 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
         ],
       ],
       extraMarkers: [
-        ..._peopleMarkers(points, selected, (id) => setState(() => selected = id)),
+        ..._peopleMarkers(shown, selected, (id) => setState(() => selected = id)),
         if (plan != null) ...[
           // 방문 순서: 사람 아이콘 왼쪽 아래 남색 번호 (오른쪽 위 흰 번호 = 우선 확인 번호)
           for (final o in plan['order'] as List)
             if (at['${o['id']}'] != null)
               Marker(
                 point: at['${o['id']}']!,
-                width: 24,
-                height: 24,
+                width: 20,
+                height: 20,
                 alignment: const Alignment(-1.9, 1.9),
                 child: Container(
                   alignment: Alignment.center,
                   decoration: BoxDecoration(color: GK.navy, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
-                  child: Text('${o['seq']}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Colors.white)),
+                  child: Text('${o['seq']}', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Colors.white)),
                 ),
               ),
           Marker(
@@ -1225,7 +1292,10 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
     );
     if (!mounted) return;
     final changed = before.length != visitStops.length || !before.containsAll(visitStops);
-    setState(() => routeOpen = visitStops.isNotEmpty);
+    setState(() {
+      routeOpen = visitStops.isNotEmpty;
+      if (routeOpen) menuOpen = true;
+    });
     if (changed || (visitStops.isNotEmpty && visitResult == null)) _autoCalc();
   }
 
@@ -1509,7 +1579,10 @@ const workColor = {
   WorkStatus.assigned: GK.muted,
 };
 
+/// 방재단 업무 상태. 방문 결과 '대피 완료'를 기록했거나 업무 단계가 완료면 배정 여부와 상관없이 완료
+/// (2026-10-11 사용자 요청: 우선 확인 가구 ↔ 방재단 배정 현황 완료 표시를 맞춘다 — 실제 서버엔 업무 단계 칸이 없어 방문 기록으로 판단)
 WorkStatus workStatusOf(Map<String, dynamic> t) {
+  if (t['work_status'] == 'done' || evacuatedVisits.contains((t['last_visit'] as Map?)?['result'])) return WorkStatus.done;
   if (t['assigned_to'] == null) return WorkStatus.unassigned;
   return switch (t['work_status']) {
     'en_route' => WorkStatus.enRoute,
@@ -1749,6 +1822,42 @@ class _PriorityRow extends StatelessWidget {
   }
 }
 
+/// 완료된 곳 접기 (2026-10-11 사용자 요청): '대피 완료 N곳 보기' 한 줄 → 누르면 아래에 조금 흐리게 펼친다
+class _DoneFold extends StatelessWidget {
+  const _DoneFold({required this.count, required this.open, required this.onToggle, required this.children});
+  final int count;
+  final bool open;
+  final VoidCallback onToggle;
+  final List<Widget> children;
+  static const _green = Color(0xff178a4c);
+  @override
+  Widget build(BuildContext c) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Semantics(
+          button: true,
+          expanded: open,
+          child: InkWell(
+            onTap: onToggle,
+            borderRadius: BorderRadius.circular(GK.radiusInner),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 48),
+              child: Row(children: [
+                const Icon(Icons.task_alt_rounded, color: _green, size: 22),
+                const SizedBox(width: 8),
+                Expanded(
+                    child: Text(open ? '대피 완료 $count곳 접기' : '대피 완료 $count곳 보기',
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: GK.muted))),
+                Icon(open ? Icons.expand_less_rounded : Icons.expand_more_rounded, color: GK.muted),
+              ]),
+            ),
+          ),
+        ),
+        if (open) ...[
+          const SizedBox(height: 6),
+          Opacity(opacity: .7, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children)),
+        ],
+      ]);
+}
+
 /// 기록한 방문 결과 (가구 이름 옆): 결과 · 시각, 메모가 있으면 누르고 있을 때 보인다
 class _VisitPill extends StatelessWidget {
   const _VisitPill(this.visit);
@@ -1756,7 +1865,7 @@ class _VisitPill extends StatelessWidget {
   @override
   Widget build(BuildContext c) {
     final result = '${visit['result']}';
-    final done = const {'evacuated_with_help', 'already_evacuated', 'transported'}.contains(result);
+    final done = evacuatedVisits.contains(result);
     final color = done ? const Color(0xff178a4c) : GK.orangeInk;
     final note = visit['note'];
     final pill = Container(
@@ -2027,8 +2136,9 @@ List<Marker> _peopleMarkers(List<_MapPoint> points, String? selected, ValueChang
       for (final p in [...points.where((p) => p.id != selected), ...points.where((p) => p.id == selected)])
         Marker(
           point: p.at,
-          width: p.id == selected ? 54 : 42,
-          height: p.id == selected ? 54 : 42,
+          // 크기 42→34 (2026-10-11 사용자 요청: 재난 표식·대피소와 겹침 줄이기)
+          width: p.id == selected ? 44 : 34,
+          height: p.id == selected ? 44 : 34,
           child: GestureDetector(
             onTap: () => onTap(p.id),
             child: Tooltip(
@@ -2043,21 +2153,21 @@ List<Marker> _peopleMarkers(List<_MapPoint> points, String? selected, ValueChang
                         shape: BoxShape.circle,
                         border: Border.all(color: p.id == selected ? GK.navy : Colors.white, width: p.id == selected ? 4 : 2),
                         boxShadow: const [BoxShadow(blurRadius: 4, color: Colors.black38)]),
-                    child: Icon(personIcon(p.kind), color: Colors.white, size: p.id == selected ? 30 : 26),
+                    child: Icon(personIcon(p.kind), color: Colors.white, size: p.id == selected ? 25 : 21),
                   ),
                 ),
                 if (p.rank != null)
                   Positioned(
-                    right: -6,
-                    top: -6,
+                    right: -5,
+                    top: -5,
                     child: Container(
-                      constraints: const BoxConstraints(minWidth: 22),
-                      height: 22,
-                      padding: const EdgeInsets.symmetric(horizontal: 5),
+                      constraints: const BoxConstraints(minWidth: 18),
+                      height: 18,
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
-                          color: Colors.white, borderRadius: BorderRadius.circular(11), border: Border.all(color: statusColor(p.status), width: 2)),
-                      child: Text('${p.rank}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: statusColor(p.status))),
+                          color: Colors.white, borderRadius: BorderRadius.circular(9), border: Border.all(color: statusColor(p.status), width: 2)),
+                      child: Text('${p.rank}', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: statusColor(p.status))),
                     ),
                   ),
               ]),
@@ -2077,7 +2187,7 @@ Future<bool> showVisitSheet(BuildContext context, WidgetRef ref,
       showDragHandle: true,
       builder: (s) => SafeArea(
           child: ListView(shrinkWrap: true, children: [
-            ListTile(title: Text('방문 결과 · ${target['label']}'), subtitle: const Text('앞의 세 가지는 대상 상태를 "대피 완료"로 바꿉니다.')),
+            ListTile(title: Text('방문 결과 · ${target['label']}'), subtitle: const Text('대피 완료는 대상 상태와 방재단 배정을 모두 "대피 완료"로 바꿉니다.')),
             for (final r in visitResults)
               ListTile(leading: const Icon(Icons.assignment_turned_in_outlined), title: Text(r.$2), onTap: () => Navigator.pop(s, r)),
           ])));
@@ -2172,11 +2282,14 @@ const seaColor = Color(0xff1565c0), landColor = Color(0xff2e7d32), portColor = C
 
 /// 대시보드 '경로 안내' (2026-10-10 사용자 요청): 지금 위치(GPS 또는 직접 지정한 출발지)가 바다 위면 화면을 따로 열지 않고
 /// 그 위치에서 바로 해상 경로(바다 → 가까운 항구 → 대피소)를 받아 대시보드 지도에 그린다. 바다가 아니면 null
+/// 육지 출발지(집·내 장소 등)를 골랐거나 X로 끝냈으면 null. 도착은 경로 안내 '도착:'에서 고른 곳(없으면 가까운 대피소)
 final seaRoutePlanProvider = FutureProvider<SeaRoutePlan?>((ref) async {
+  if (ref.watch(seaRouteOff) || ref.watch(routeOriginPoint) != null) return null;
   final where = await ref.watch(whereNowProvider.future);
   if (where.kind != WhereKind.sea) return null;
   final p = ref.watch(userLocation).position;
-  final r = await ref.watch(liveApiProvider).seaRoute(p.latitude, p.longitude);
+  final to = ref.watch(seaDestPoint)?.at;
+  final r = await ref.watch(liveApiProvider).seaRoute(p.latitude, p.longitude, toLat: to?.latitude, toLon: to?.longitude);
   return SeaRoutePlan(r, p);
 });
 
@@ -2202,6 +2315,8 @@ class SeaRoutePanel extends ConsumerWidget {
   const SeaRoutePanel({super.key});
   @override
   Widget build(BuildContext c, WidgetRef ref) {
+    // X로 끝냈거나 육지 출발지를 골랐으면 비운다 — 아래 경로 안내 줄(출발·도착)은 그대로 남는다 (2026-10-11)
+    if (ref.watch(seaRouteOff) || ref.watch(routeOriginPoint) != null) return const SizedBox.shrink();
     final plan = ref.watch(seaRoutePlanProvider);
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       const Text('지금 위치가 바다 위로 확인됐어요. 가까운 항구까지 바닷길과 항구에서 대피소까지 길을 지도에 그려요.',

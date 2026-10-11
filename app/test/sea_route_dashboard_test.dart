@@ -8,6 +8,7 @@ import 'package:guryongpo_safety/disaster_center.dart';
 import 'package:guryongpo_safety/live_screens.dart';
 import 'package:guryongpo_safety/main.dart';
 import 'package:guryongpo_safety/patrol_screens.dart';
+import 'package:guryongpo_safety/route_planner.dart';
 import 'package:guryongpo_safety/services/live_api.dart';
 
 const _ship = LatLng(35.975, 129.575);
@@ -37,9 +38,12 @@ final _seaJson = <String, dynamic>{
 class _SeaApi extends LiveApi {
   _SeaApi() : super(api: Dio(), route: Dio());
   final calls = <LatLng>[];
+  final dests = <LatLng?>[];
   @override
-  Future<Map<String, dynamic>> seaRoute(double lat, double lon, {String profile = 'adult'}) async {
+  Future<Map<String, dynamic>> seaRoute(double lat, double lon,
+      {String profile = 'adult', double? toLat, double? toLon}) async {
     calls.add(LatLng(lat, lon));
+    dests.add(toLat == null || toLon == null ? null : LatLng(toLat, toLon));
     return _seaJson;
   }
 }
@@ -70,6 +74,43 @@ void main() {
     addTearDown(c.dispose);
     expect(await c.read(seaRoutePlanProvider.future), isNull);
     expect(api.calls, isEmpty);
+  });
+
+  test('도착을 고르면 그곳까지, X로 끝내면 해상 경로를 그리지 않는다 (2026-10-11)', () async {
+    final api = _SeaApi();
+    final c = _container(api, const WhereNow(WhereKind.sea));
+    addTearDown(c.dispose);
+    c.listen(seaRoutePlanProvider, (_, __) {});
+    await c.read(seaRoutePlanProvider.future);
+    expect(api.dests, [null]); // 처음엔 경로 서버가 가까운 대피소를 고른다
+    const home = LatLng(35.985, 129.555);
+    c.read(seaDestPoint.notifier).state = const RoutePoint('집', home);
+    expect(await c.read(seaRoutePlanProvider.future), isNotNull);
+    expect(api.dests.last, home);
+    c.read(seaRouteOff.notifier).state = true;
+    expect(await c.read(seaRoutePlanProvider.future), isNull);
+    expect(api.calls, hasLength(2));
+  });
+
+  testWidgets('경로 안내 줄: 바다 위에서도 출발·도착·종료(X)가 남는다 (2026-10-11)', (t) async {
+    final api = _SeaApi();
+    final c = _container(api, const WhereNow(WhereKind.sea));
+    addTearDown(c.dispose);
+    await t.pumpWidget(UncontrolledProviderScope(
+        container: c, child: const MaterialApp(home: Scaffold(body: SingleChildScrollView(child: RoutePlanner())))));
+    await t.pump();
+    await t.pump();
+    expect(find.text('출발:'), findsOneWidget);
+    expect(find.text('도착:'), findsOneWidget);
+    expect(find.text('구룡포 실내체육관'), findsOneWidget); // 경로 서버가 고른 대피소
+    await t.tap(find.byTooltip('경로 안내 종료'));
+    await t.pump();
+    await t.pump();
+    expect(c.read(seaRouteOff), isTrue);
+    expect(find.text('출발:'), findsOneWidget); // 끝내도 출발·도착은 남아 다시 고를 수 있다
+    await t.tap(find.text('경로 보기'));
+    await t.pump();
+    expect(c.read(seaRouteOff), isFalse);
   });
 
   testWidgets('경로 안내 칸: 바다 위면 버튼 대신 항구까지 바닷길·대피소까지 길을 바로 보여 준다', (t) async {

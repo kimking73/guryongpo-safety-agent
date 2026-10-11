@@ -3,12 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:latlong2/latlong.dart';
 
-import 'dashboard_parts.dart' show ShelterPickerSheet;
+import 'dashboard_parts.dart' show ShelterPickerSheet, facilityKindText;
 import 'disaster_center.dart' show WhereKind;
 import 'live_screens.dart' show whereNowProvider;
 import 'main.dart';
 import 'models/domain_models.dart';
 import 'origin_picker.dart';
+import 'patrol_screens.dart' show seaRoutePlanProvider;
 import 'services/account_service.dart';
 import 'services/geocoding_service.dart';
 import 'services/location_service.dart';
@@ -73,11 +74,16 @@ class RoutePlanner extends ConsumerWidget {
       // 바다: 해상 경로(SeaRoutePanel)가 그린다 — 그리던 육상 경로는 닫는다
       ref.read(routeOriginPoint.notifier).state = null;
       ref.read(routeFacilityId.notifier).state = null;
+      ref.read(seaRouteOff.notifier).state = false;
     } else {
       // 육지: 그리던 육상 경로를 새 위치에서 다시 받는다
       _setOrigin(ref, null);
     }
   }
+
+  /// 바다 위에서 현위치 출발 = 해상 경로 안내 중 (육지 출발지를 고르면 일반 경로)
+  static bool _seaMode(WidgetRef ref) =>
+      ref.read(routeOriginPoint) == null && ref.read(whereNowProvider).valueOrNull?.kind == WhereKind.sea;
 
   /// 출발 ↔ 도착
   static void _swap(WidgetRef ref) {
@@ -99,6 +105,12 @@ class RoutePlanner extends ConsumerWidget {
         ? null
         : RoutePoint((o['homeName'] ?? '').trim().isEmpty ? '집' : o['homeName']!.trim(), LatLng(homeLat, homeLon));
     void toast(String msg) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    // 바다 위 해상 경로의 도착 (2026-10-11): 고른 곳을 해상 경로 도착으로 (null = 항구에서 가장 가까운 대피소)
+    final sea = !origin && _seaMode(ref);
+    void seaTo(RoutePoint? p) {
+      ref.read(seaDestPoint.notifier).state = p;
+      ref.read(seaRouteOff.notifier).state = false;
+    }
 
     void choose(RoutePoint? p) {
       if (p != null && !inServiceArea(p.at)) {
@@ -108,7 +120,10 @@ class RoutePlanner extends ConsumerWidget {
       if (origin) {
         // 집·내 장소·직접 입력을 고르면 'GPS 선택'으로 정해 둔 현재 위치는 풀고 GPS로 돌아간다
         if (p != null && ref.read(userLocation).manual) useGpsOrigin(ref);
+        ref.read(seaRouteOff.notifier).state = false;
         _setOrigin(ref, p);
+      } else if (sea) {
+        seaTo(p);
       } else {
         _routeTo(ref, p ?? RoutePoint('현위치', ref.read(userLocation).position));
       }
@@ -138,9 +153,19 @@ class RoutePlanner extends ConsumerWidget {
         ref.read(mapPickMode.notifier).state = true;
         toast('지도에서 출발할 곳을 눌러 주세요. 바다를 누르면 해상 경로를 안내해요.');
       case 'nearest':
-        startRouteToShelter(ref, nearestShelterId(ref), routeType: ref.read(routeKind));
+        if (sea) {
+          seaTo(null);
+        } else {
+          startRouteToShelter(ref, nearestShelterId(ref), routeType: ref.read(routeKind));
+        }
       case 'shelters':
-        await showModalBottomSheet<void>(context: context, showDragHandle: true, builder: (_) => const ShelterPickerSheet());
+        if (sea) {
+          final f = await showModalBottomSheet<Facility>(
+              context: context, showDragHandle: true, builder: (_) => const _FacilityListSheet());
+          if (f != null) seaTo(RoutePoint(f.name, f.position));
+        } else {
+          await showModalBottomSheet<void>(context: context, showDragHandle: true, builder: (_) => const ShelterPickerSheet());
+        }
       case RoutePoint p:
         choose(p);
     }
@@ -188,12 +213,52 @@ class RoutePlanner extends ConsumerWidget {
         TextButton(onPressed: () => ref.read(mapPickMode.notifier).state = false, child: const Text('취소')),
       ]),
     );
-    // 바다 위: 해상 경로는 위 '경로 안내' 칸(SeaRoutePanel)이 그린다. 여기서는 출발지만 바꿀 수 있게
+    // 바다 위: 해상 경로는 위 '경로 안내' 칸(SeaRoutePanel)이 그린다. 여기서도 출발·도착을 바꾸고 X로 끝낼 수 있게
+    // (2026-10-11 사용자 요청). 도착을 안 골랐으면 경로 서버가 고른 대피소(항구에서 가장 가까운 곳)를 보여 준다
     if (atSea && from == null) {
+      final off = ref.watch(seaRouteOff);
+      final plan = off ? null : ref.watch(seaRoutePlanProvider).valueOrNull;
+      final seaDest = ref.watch(seaDestPoint);
+      final serverDest = plan?.destination?['name'];
       return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         const SizedBox(height: 10),
-        originButton,
+        Row(children: [
+          Expanded(child: originButton),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 6),
+            child: FaIcon(FontAwesomeIcons.arrowRightLong, size: 12, color: Ds.muted),
+          ),
+          Expanded(
+            child: RouteEndButton(
+              title: '도착',
+              icon: FontAwesomeIcons.houseFlag,
+              label: seaDest?.label ?? (serverDest is String && serverDest.isNotEmpty ? serverDest : '가까운 대피소'),
+              onTap: () => _pick(context, ref, origin: false),
+            ),
+          ),
+          const SizedBox(width: 6),
+          if (off)
+            PillButton('경로 보기',
+                expand: false,
+                height: _h,
+                fontSize: 13,
+                icon: FontAwesomeIcons.diamondTurnRight,
+                onPressed: () => ref.read(seaRouteOff.notifier).state = false)
+          else
+            CircleButton(FontAwesomeIcons.xmark,
+                size: _h,
+                iconSize: 13,
+                bg: Ds.bg,
+                tooltip: '경로 안내 종료',
+                onPressed: () => ref.read(seaRouteOff.notifier).state = true),
+        ]),
         if (picking) pickBanner,
+        if (off)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(6, 6, 6, 0),
+            child: Text("해상 경로 안내를 끝냈어요. 출발·도착을 바꾸거나 '경로 보기'를 누르면 다시 안내해요.",
+                style: dsText(13, color: Ds.muted, height: 1.4)),
+          ),
       ]);
     }
 
@@ -300,7 +365,7 @@ class RoutePlanner extends ConsumerWidget {
   }
 }
 
-/// 경로 방식: [최단 거리] [안전한 경로 ✓] [오르막 회피 ✓]. 최단 거리는 둘 다 끈 상태, 나머지 둘은 따로 켜고 끈다
+/// 경로 방식: [최단 거리 ✓|안전한 경로 ✓] 중 하나 + [오르막 회피 ✓] 켜고 끄기 → nearest · safest · uphill(최단+오르막) · flat(안전+오르막)
 /// 휴대폰 대시보드 경로 안내 줄(RouteSummaryRows)도 같은 것을 쓴다 (2026-10-11)
 class RouteOptions extends StatelessWidget {
   const RouteOptions({super.key, required this.kind, required this.uphillOk, required this.onChanged, this.height = RoutePlanner._h});
@@ -312,46 +377,56 @@ class RouteOptions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final safe = kind.avoidsHazards, uphill = uphillOk && kind.avoidsUphill;
-    Widget seg(String label, FaIconData icon, bool on, VoidCallback? onTap, {bool toggle = true}) => Expanded(
-          child: Semantics(
-            button: !toggle,
-            toggled: toggle ? on : null,
-            selected: toggle ? null : on,
-            child: Material(
-              color: on ? Ds.navy : Colors.transparent,
-              shape: const StadiumBorder(),
-              clipBehavior: Clip.antiAlias,
-              child: InkWell(
-                onTap: onTap,
-                child: SizedBox(
-                  height: height,
-                  child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    FaIcon(toggle && on ? FontAwesomeIcons.check : icon,
-                        size: 11, color: onTap == null ? Ds.off : (on ? Colors.white : Ds.navy)),
-                    const SizedBox(width: 4),
-                    Flexible(
-                      child: Text(label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: dsText(14, weight: FontWeight.w800, color: onTap == null ? Ds.off : (on ? Colors.white : Ds.sub))),
-                    ),
-                  ]),
+    // 켜도 원래 아이콘은 그대로 두고, 켜진 것은 글자 뒤 체크로 알린다 (2026-10-11 사용자 요청: 켜면 아이콘이 사라졌다)
+    Widget seg(String label, FaIconData icon, bool on, VoidCallback? onTap, {bool toggle = true, String? tooltip}) {
+      final fg = onTap == null ? Ds.off : (on ? Colors.white : Ds.navy);
+      Widget body = Semantics(
+        button: !toggle,
+        toggled: toggle ? on : null,
+        selected: toggle ? null : on,
+        child: Material(
+          color: on ? Ds.navy : Colors.transparent,
+          shape: const StadiumBorder(),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            child: SizedBox(
+              height: height,
+              child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                FaIcon(icon, size: 11, color: fg),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: Text(label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: dsText(14, weight: FontWeight.w800, color: onTap == null ? Ds.off : (on ? Colors.white : Ds.sub))),
                 ),
-              ),
+                if (toggle && on) ...[
+                  const SizedBox(width: 4),
+                  const FaIcon(FontAwesomeIcons.check, size: 10, color: Colors.white),
+                ],
+              ]),
             ),
           ),
-        );
+        ),
+      );
+      if (tooltip != null) body = Tooltip(message: tooltip, child: body);
+      return Expanded(child: body);
+    }
     return Container(
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(color: Ds.bg, borderRadius: BorderRadius.circular(Ds.pill)),
       child: Row(children: [
-        seg('최단 거리', FontAwesomeIcons.arrowRightLong, !safe && !uphill, () => onChanged(RouteType.nearest), toggle: false),
+        // 최단 거리 ↔ 안전한 경로는 둘 중 하나 (위험 구역을 피하는지), 오르막 회피는 어느 쪽과도 함께 켠다
+        // (2026-10-11 사용자 요청: 최단 거리 + 오르막 회피 = 위험 구역은 그대로, 오르막만 줄이기)
+        seg('최단 거리', FontAwesomeIcons.arrowRightLong, !safe, () => onChanged(routeTypeOf(safe: false, uphill: uphill))),
         const SizedBox(width: 2),
         seg('안전한 경로', FontAwesomeIcons.shieldHalved, safe, () => onChanged(routeTypeOf(safe: !safe, uphill: uphill))),
-        if (uphillOk) ...[
-          const SizedBox(width: 2),
-          seg('오르막 회피', FontAwesomeIcons.arrowTrendDown, uphill, () => onChanged(routeTypeOf(safe: safe, uphill: !uphill))),
-        ],
+        // 자동차면 오르막 회피는 숨기지 않고 흐리게 둔다 (버튼·아이콘이 사라지지 않게)
+        const SizedBox(width: 2),
+        seg('오르막 회피', FontAwesomeIcons.arrowTrendDown, uphill,
+            uphillOk ? () => onChanged(routeTypeOf(safe: safe, uphill: !uphill)) : null,
+            tooltip: uphillOk ? null : '자동차는 오르막 회피를 쓸 수 없어요 (도보만)'),
       ]),
     );
   }
@@ -395,6 +470,38 @@ class RouteEndButton extends StatelessWidget {
           ),
         ),
       );
+}
+
+/// 해상 경로 도착으로 쓸 대피소·의료시설 목록 (고른 시설을 돌려준다, 2026-10-11). 대피소 먼저, 가까운 순
+class _FacilityListSheet extends ConsumerWidget {
+  const _FacilityListSheet();
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final list = [...?ref.watch(facilitiesProvider).valueOrNull]..sort((a, b) {
+        final sa = a.type == FacilityType.shelter ? 0 : 1, sb = b.type == FacilityType.shelter ? 0 : 1;
+        return sa != sb ? sa - sb : a.distanceKm.compareTo(b.distanceKm);
+      });
+    return SafeArea(
+      child: ListView(shrinkWrap: true, children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+          child: Text('도착할 대피소·의료시설', style: dsText(18, weight: FontWeight.w800)),
+        ),
+        if (list.isEmpty)
+          const ListTile(title: Text('시설 목록을 불러오지 못했어요.'))
+        else
+          for (final f in list)
+            ListTile(
+              dense: true,
+              leading: FaIcon(f.type == FacilityType.shelter ? FontAwesomeIcons.houseFlag : FontAwesomeIcons.hospital,
+                  size: 16, color: Ds.navy),
+              title: Text(f.name, style: dsText(15, weight: FontWeight.w700)),
+              subtitle: Text(facilityKindText(f), style: dsText(12, color: Ds.muted)),
+              onTap: () => Navigator.pop(context, f),
+            ),
+      ]),
+    );
+  }
 }
 
 /// 출발·도착 고르는 시트. 돌려주는 값: 'cur' · 'home' · 'map'(GPS 선택) · 'nearest' · 'shelters' · RoutePoint(내 장소·직접 입력)

@@ -134,11 +134,9 @@ class _MEvacuationAlertDialogState extends ConsumerState<MEvacuationAlertDialog>
     setState(() => _busy = false);
   }
 
-  Widget _choice(String status, String title, String sub, Color circle,
-      Widget icon, {bool red = false}) {
-    final fg = red ? Colors.white : Ds.ink;
+  Widget _choice(String status, String title, String sub, Color circle, Widget icon) {
     return Material(
-      color: red ? Ds.danger : Ds.bg,
+      color: Ds.bg,
       borderRadius: BorderRadius.circular(38),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -159,9 +157,8 @@ class _MEvacuationAlertDialogState extends ConsumerState<MEvacuationAlertDialog>
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title, style: dsText(20, weight: FontWeight.w800, color: fg)),
-                    Text(sub,
-                        style: dsText(15, color: red ? Colors.white : Ds.sub)),
+                    Text(title, style: dsText(20, weight: FontWeight.w800, color: Ds.ink)),
+                    Text(sub, style: dsText(15, color: Ds.sub)),
                   ]),
             ),
           ]),
@@ -241,9 +238,9 @@ class _MEvacuationAlertDialogState extends ConsumerState<MEvacuationAlertDialog>
           _choice('evacuating', '대피 중', '지금 대피소로 가고 있어요', Ds.warn,
               const FaIcon(FontAwesomeIcons.personWalking, size: 22, color: Colors.white)),
           const SizedBox(height: 8),
-          _choice('need_help', '도움 필요', '혼자 이동하기 어려워요', Colors.white,
-              Text('SOS', style: dsText(17, weight: FontWeight.w900, color: Ds.danger)),
-              red: true),
+          // 세 버튼 모두 회색 바탕, 도움 필요는 빨간 원 SOS로만 구분 (2026-10-11 사용자 요청)
+          _choice('need_help', '도움 필요', '혼자 이동하기 어려워요', Ds.danger,
+              Text('SOS', style: dsText(17, weight: FontWeight.w900, color: Colors.white))),
           if (_busy)
             const Padding(
                 padding: EdgeInsets.all(8), child: CircularProgressIndicator()),

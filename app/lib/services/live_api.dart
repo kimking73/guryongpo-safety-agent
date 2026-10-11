@@ -67,9 +67,11 @@ class LiveApi {
       _send(_api.post<Map<String, dynamic>>('/api/v1/admin/households', data: body));
 
   // ---- 해상 → 최근접 항 → 육상 경로 (B11, route 서버, 좌표 키 lat·lon) ----
-  Future<Map<String, dynamic>> seaRoute(double lat, double lon, {String profile = 'adult'}) =>
+  /// [toLat]·[toLon] = 도착 (2026-10-11, 경로 안내 '도착:'에서 고른 곳). 없으면 항구에서 가장 가까운 갈 만한 대피소
+  Future<Map<String, dynamic>> seaRoute(double lat, double lon, {String profile = 'adult', double? toLat, double? toLon}) =>
       _send(_route.post<Map<String, dynamic>>('/api/route/sea', data: {
         'origin': {'lat': lat, 'lon': lon},
+        if (toLat != null && toLon != null) 'destination': {'lat': toLat, 'lon': toLon},
         'profile': profile,
         if (DemoData.on) 'demo': true,
       }));

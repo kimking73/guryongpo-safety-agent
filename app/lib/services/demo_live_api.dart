@@ -226,7 +226,7 @@ class DemoLiveApi extends LiveApi {
     return {'id': targetId};
   }
 
-  /// 방문 기록 — 앞의 세 결과는 주민 상태를 대피 완료로 (서버 규칙과 같게). 업무 단계는 바꾸지 않는다
+  /// 방문 기록 — 대피 완료 결과는 주민 상태를 대피 완료로 (서버 규칙과 같게), 업무 단계도 완료로 (2026-10-11)
   @override
   Future<Map<String, dynamic>> recordVisit(String incidentId, String targetId, Map<String, dynamic> body) async {
     final st = _targetState(targetId);
@@ -237,7 +237,10 @@ class DemoLiveApi extends LiveApi {
       'note': body['note'],
       'responder': {'user_id': null, 'nickname': '시연 방재단원(나)'},
     };
-    if (const {'evacuated_with_help', 'already_evacuated', 'transported'}.contains(result)) st['status'] = 'evacuated';
+    if (const {'evacuated_with_help', 'already_evacuated', 'transported'}.contains(result)) {
+      st['status'] = 'evacuated';
+      st['work'] = 'done';
+    }
     return {'id': 'demo-visit-${DateTime.now().microsecondsSinceEpoch}'};
   }
 

@@ -92,16 +92,17 @@ Color statusColor(String? s) => switch (s) {
       _ => Colors.grey,
     };
 
-/// 방문 결과 (서버 VisitInput.result) — 앞 3개는 대상 상태를 '대피 완료'로 바꾼다
+/// 방문 결과 (서버 VisitInput.result) — 고르는 항목은 4개로 줄였다 (2026-10-11 사용자 요청).
+/// '대피 완료'는 대상 상태를 대피 완료로 바꾸고 방재단 배정도 완료로 본다 (workStatusOf)
 const visitResults = <(String, String)>[
-  ('evacuated_with_help', '함께 대피함'),
-  ('already_evacuated', '이미 대피함'),
-  ('transported', '차량·구급 이송'),
+  ('evacuated_with_help', '대피 완료'),
   ('refused', '대피 거부'),
-  ('not_home', '부재'),
+  ('not_home', '부재·확인 불가'),
   ('other', '기타'),
 ];
-final visitKo = {for (final r in visitResults) r.$1: r.$2};
+/// 대상 상태를 대피 완료로 바꾸는 결과 (서버 VISIT_STATUS). 예전 기록(이미 대피함·이송)도 '대피 완료'로 보인다
+const evacuatedVisits = {'evacuated_with_help', 'already_evacuated', 'transported'};
+final visitKo = {for (final r in visitResults) r.$1: r.$2, 'already_evacuated': '대피 완료', 'transported': '대피 완료'};
 
 String needsText(Object? needs) => [for (final n in needs as List? ?? const []) needKo[n] ?? '$n'].join(', ');
 
@@ -1491,7 +1492,7 @@ Future<bool> showVisitSheet(BuildContext context, WidgetRef ref,
       showDragHandle: true,
       builder: (s) => SafeArea(
           child: ListView(shrinkWrap: true, children: [
-            ListTile(title: Text('방문 결과 · ${target['label']}'), subtitle: const Text('앞의 세 가지는 대상 상태를 "대피 완료"로 바꿉니다.')),
+            ListTile(title: Text('방문 결과 · ${target['label']}'), subtitle: const Text('대피 완료는 대상 상태를 "대피 완료"로 바꿉니다.')),
             for (final r in visitResults)
               ListTile(leading: const Icon(Icons.assignment_turned_in_outlined), title: Text(r.$2), onTap: () => Navigator.pop(s, r)),
           ])));

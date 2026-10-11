@@ -15,6 +15,9 @@ import 'package:guryongpo_safety/repositories/mock_repository.dart';
 import 'package:guryongpo_safety/repositories/remote_repository.dart';
 import 'package:guryongpo_safety/services/account_service.dart';
 import 'package:guryongpo_safety/ui/map_menu.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:guryongpo_safety/live_screens.dart' show whereNowProvider;
+import 'package:guryongpo_safety/route_planner.dart';
 
 const _chat = {
   'conversation_id': 'c1',
@@ -367,5 +370,36 @@ void main() {
     expect(container.read(originLabelProvider), 'GPS 선택 위치'); // 출발 버튼 글자
     await t.pumpWidget(const SizedBox());
     await t.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('경로 방식: 켜도 아이콘은 그대로, 자동차면 오르막 회피는 숨기지 않고 흐리게 (2026-10-11)', (t) async {
+    SharedPreferences.setMockInitialValues({});
+    final container = ProviderContainer(overrides: [
+      repo.overrideWithValue(MockSafetyRepository()),
+      whereNowProvider.overrideWith((_) async => const WhereNow(WhereKind.land)),
+    ]);
+    addTearDown(container.dispose);
+    await t.pumpWidget(UncontrolledProviderScope(
+        container: container, child: const MaterialApp(home: Scaffold(body: SingleChildScrollView(child: RoutePlanner())))));
+    await t.pump();
+    Finder icon(FaIconData i) => find.byWidgetPredicate((w) => w is FaIcon && w.icon == i.data);
+    container.read(routeKind.notifier).state = RouteType.safest;
+    await t.pump();
+    await t.tap(find.text('오르막 회피'));
+    await t.pump();
+    expect(container.read(routeKind), RouteType.flat); // 안전한 경로 + 오르막 회피
+    expect(icon(FontAwesomeIcons.arrowTrendDown), findsOneWidget);
+    expect(icon(FontAwesomeIcons.shieldHalved), findsOneWidget);
+    expect(icon(FontAwesomeIcons.check), findsNWidgets(2)); // 켜진 두 칸 글자 뒤 체크
+    // 최단 거리 + 오르막 회피 함께 (2026-10-11): 최단 거리를 눌러도 오르막 회피는 그대로
+    await t.tap(find.text('최단 거리'));
+    await t.pump();
+    expect(container.read(routeKind), RouteType.uphill);
+    expect(icon(FontAwesomeIcons.check), findsNWidgets(2));
+    container.read(travelMode.notifier).state = TravelMode.car;
+    await t.pump();
+    expect(find.text('오르막 회피'), findsOneWidget);
+    expect(icon(FontAwesomeIcons.arrowTrendDown), findsOneWidget);
+    await t.pumpWidget(const SizedBox());
   });
 }

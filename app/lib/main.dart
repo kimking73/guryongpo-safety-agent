@@ -22,6 +22,7 @@ import 'services/account_service.dart';
 import 'services/location_service.dart';
 import 'services/geocoding_service.dart';
 import 'services/demo_speech.dart';
+import 'services/alert_vibration.dart';
 import 'services/voice_service.dart';
 import 'dashboard_parts.dart';
 import 'disaster_center.dart';
@@ -88,6 +89,12 @@ class RoutePoint {
 }
 
 final routeOriginPoint = StateProvider<RoutePoint?>((_) => null);
+
+/// 바다 위 해상 경로 안내의 '도착:'에서 고른 곳 (2026-10-11). null = 항구에서 가장 가까운 대피소 (경로 서버가 고른다)
+final seaDestPoint = StateProvider<RoutePoint?>((_) => null);
+
+/// 해상 경로 안내를 X로 끝냈는지. 도착을 다시 고르거나 '경로 보기'를 누르거나 바다 위 새 출발을 고르면 다시 안내한다
+final seaRouteOff = StateProvider<bool>((_) => false);
 
 /// 출발 'GPS 선택'(2026-10-11): 켜져 있으면 대시보드 지도를 누른 곳이 현재 위치가 된다 (바다면 해상 경로 안내)
 final mapPickMode = StateProvider<bool>((_) => false);
@@ -1120,6 +1127,56 @@ class EvacuationAlertDialog extends ConsumerStatefulWidget {
 class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
   bool _busy = false;
 
+  // 사용자 화면 '알림' 스위치대로 (2026-10-11 사용자 요청): 화면 점멸 · 진동 알림 · 음성 안내 자동 재생
+  Timer? _flash, _vibrate;
+  bool _flashOn = false;
+  int _flashTicks = 0;
+  bool _voice = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final a = ref.read(prototypeSafetyProvider).accessibility;
+      if (a.screenFlash) {
+        // 0.5초마다 바뀌어 초당 1번 깜빡, 최대 30초 (광과민성 기준 안쪽)
+        _flash = Timer.periodic(evacuationFlashTransitionInterval, (t) {
+          if (!mounted || _flashTicks >= 60) {
+            t.cancel();
+            if (mounted) setState(() => _flashOn = false);
+            return;
+          }
+          setState(() => _flashOn = ++_flashTicks % 2 == 1);
+        });
+      }
+      if (a.strongVibration) {
+        var pulses = 0;
+        alertVibrate();
+        _vibrate = Timer.periodic(const Duration(milliseconds: 900), (t) {
+          if (++pulses >= evacuationHapticPulseLimit) t.cancel();
+          alertVibrate();
+        });
+      }
+      // 음성은 '음성 안내 자동 재생' 스위치만 본다 (시각 지원 스위치는 2026-10-11 뺐다)
+      _voice = ref.read(autoVoiceAlerts);
+      if (_voice) _speak();
+      setState(() {});
+    });
+  }
+
+  void _speak() => unawaited(DemoSpeech.instance.speak(
+      '대피 확인 경보입니다. ${widget.alert.title}. 지금 당장 대피해야 합니다. 대피 완료, 대피 중, 도움 필요 중에서 골라 주세요.'));
+
+  @override
+  void dispose() {
+    _flash?.cancel();
+    _vibrate?.cancel();
+    alertVibrateStop();
+    if (_voice) unawaited(DemoSpeech.instance.stop());
+    super.dispose();
+  }
+
   Future<void> _respond(String status) async {
     if (_busy) return;
     setState(() => _busy = true);
@@ -1139,35 +1196,69 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
     setState(() => _busy = false);
   }
 
-  /// 상태 버튼 (프로토타입 EvacModal: 원 아이콘 + 이름·설명, 도움 필요만 빨강)
-  Widget _choice(String status, IconData icon, String label, String desc, Color color) {
-    final help = status == 'need_help';
-    return Material(
-      color: help ? GK.red : GK.bg,
-      shape: const StadiumBorder(),
-      child: InkWell(
-        customBorder: const StadiumBorder(),
-        onTap: _busy ? null : () => _respond(status),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(10, 10, 22, 10),
-          child: Row(children: [
-            GkCircleIcon(icon, size: 52, bg: help ? Colors.white : color, fg: help ? GK.red : Colors.white),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(label, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: help ? Colors.white : GK.ink)),
-                Text(desc, style: TextStyle(fontSize: 15, color: help ? Colors.white.withValues(alpha: .9) : GK.muted)),
-              ]),
-            ),
-          ]),
+  /// 상태 버튼 (프로토타입 EvacModal: 원 아이콘 + 이름·설명). 세 버튼 모두 회색 바탕 — 도움 필요는 빨간 원 아이콘으로만
+  /// 구분한다 (2026-10-11 사용자 요청: 빨간 버튼 하나만 너무 튀었다)
+  Widget _choice(String status, IconData icon, String label, String desc, Color color) => Material(
+        color: GK.bg,
+        shape: const StadiumBorder(),
+        child: InkWell(
+          customBorder: const StadiumBorder(),
+          onTap: _busy ? null : () => _respond(status),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 10, 22, 10),
+            child: Row(children: [
+              GkCircleIcon(icon, size: 52, bg: color, fg: Colors.white),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(label, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: GK.ink)),
+                  Text(desc, style: const TextStyle(fontSize: 15, color: GK.muted)),
+                ]),
+              ),
+            ]),
+          ),
         ),
+      );
+
+  /// 켜진 알림 방식 안내 줄 (사용자 화면 '알림' 스위치)
+  Widget _effectsLine() {
+    final a = ref.watch(prototypeSafetyProvider).accessibility;
+    final on = [
+      if (_voice) '음성 안내',
+      if (a.strongVibration) '진동',
+      if (a.screenFlash) '화면 점멸',
+    ];
+    return Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+      Flexible(
+        child: Text(on.isEmpty ? '음성·진동·화면 점멸 알림 꺼짐 · 사용자 화면에서 켤 수 있어요' : '${on.join('·')} 켜짐 · 사용자 화면에서 바꿀 수 있어요',
+            textAlign: TextAlign.center, style: const TextStyle(fontSize: 13, color: GK.muted)),
       ),
-    );
+      if (_voice)
+        IconButton(
+            tooltip: '다시 듣기',
+            onPressed: _speak,
+            icon: const Icon(Icons.volume_up_rounded, color: GK.navy)),
+    ]);
   }
 
-  /// 대피 확인 경보 = web-prototype EvacModal (2026-10-08)
+  /// 대피 확인 경보 = web-prototype EvacModal (2026-10-08). 화면 점멸이 켜져 있으면 뒤 화면 전체가 빨갛게 깜빡인다
   @override
-  Widget build(BuildContext context) => Dialog(
+  Widget build(BuildContext context) => Stack(fit: StackFit.expand, children: [
+        Positioned.fill(
+          child: IgnorePointer(
+            child: AnimatedOpacity(
+              key: const ValueKey('evacuation-flash'),
+              duration: const Duration(milliseconds: 120),
+              opacity: _flashOn ? .55 : 0,
+              child: Container(
+                  decoration: BoxDecoration(color: GK.red, border: Border.all(color: Colors.white, width: 10))),
+            ),
+          ),
+        ),
+        _dialog(),
+      ]);
+
+  Widget _dialog() => Dialog(
         insetPadding: const EdgeInsets.all(20),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(36)),
         child: ConstrainedBox(
@@ -1204,6 +1295,8 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
               _choice('evacuating', Icons.directions_walk_rounded, '대피 중', '지금 대피소로 가고 있어요', GK.orange),
               const SizedBox(height: 10),
               _choice('need_help', Icons.sos_rounded, '도움 필요', '혼자 이동하기 어려워요', GK.red),
+              const SizedBox(height: 8),
+              _effectsLine(),
               if (_busy)
                 const Center(child: Padding(padding: EdgeInsets.all(10), child: CircularProgressIndicator())),
             ]),
@@ -1287,9 +1380,18 @@ EvacHeaderState evacHeaderState(WidgetRef ref) {
       _ => (label: '대피 경보 없음', icon: Icons.verified_user_outlined, fg: GK.muted, iconBg: GK.bg),
     };
 
-/// 대피 현황 칩을 누르면: 진행 중인 경보의 응답 팝업을 다시 연다 (응답 바꾸기)
+/// 대피 현황 칩을 누르면: 진행 중인 경보의 응답 팝업을 다시 연다 (응답 바꾸기).
+/// 진행 중인 경보가 없으면 시연 모드에서는 새 시연 경보 팝업을 띄우고 (2026-10-11 사용자 요청 — 대시보드 시연 카드가
+/// 빠진 뒤 팝업을 열 곳이 없었다), 아니면 응답할 경보가 없다고 알린다
 void openEvacHeader(BuildContext c, WidgetRef ref, EvacHeaderState st) {
-  if (!st.active) return;
+  if (!st.active) {
+    if (ref.read(showDemoProvider)) {
+      showEvacuationAlertDemo(c, ref);
+    } else {
+      _showResponseMessage('지금 응답할 대피 경보가 없어요');
+    }
+    return;
+  }
   if (st.demo) {
     showEvacuationAlertDemo(c, ref, newAlert: false);
     return;
@@ -1310,11 +1412,16 @@ class EvacStatusChip extends ConsumerWidget {
   Widget build(BuildContext c, WidgetRef ref) {
     final evac = evacHeaderState(ref);
     final st = evacHeaderStyle(evac.status);
+    final canOpen = evac.active || ref.watch(showDemoProvider);
     return Tooltip(
-      message: evac.active ? '눌러서 대피 응답 바꾸기' : '진행 중인 대피 경보가 없습니다',
+      message: evac.active
+          ? '눌러서 대피 응답 바꾸기'
+          : canOpen
+              ? '눌러서 대피 경보 팝업 시연'
+              : '진행 중인 대피 경보가 없습니다',
       child: Semantics(
         label: '대피 현황 ${st.label}${evac.demo ? ' (시연)' : ''}',
-        button: evac.active,
+        button: true,
         excludeSemantics: true,
         child: Material(
           color: Colors.white,
@@ -1322,7 +1429,7 @@ class EvacStatusChip extends ConsumerWidget {
               side: evac.status == 'need_help' ? const BorderSide(color: GK.red, width: 2) : BorderSide.none),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
-            onTap: evac.active ? () => openEvacHeader(c, ref, evac) : null,
+            onTap: () => openEvacHeader(c, ref, evac),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(6, 6, 16, 6),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
