@@ -374,7 +374,7 @@ def make_action_advisor(writer: ActionWriter | None = None, fetch: Fetch | None 
         if "위험 지역" in decision.path:
             where = next((n.value for n in decision.notes if n.key == "사용자 위치"), "")
             # 질문에서 말한 장소 기준이면 그 이름으로 ("우리 가게 침수됐어?" → 기준 위치(가게), 2026-10-12)
-            ref = state.get("reference_location")
+            ref = state.get("reference_location") or state.get("pinned_origin")
             spot = f"기준 위치({ref.label or state.get('reference_query') or '말씀하신 장소'})" if ref else "현재 위치"
             reason = (f"{spot}가 {where}에 있어" if where.startswith("위험 영역 안")
                       else f"{spot}의 위험 여부를 확인할 수 없어" if where else f"{spot}를 알 수 없어")
