@@ -59,6 +59,9 @@ class VisitLeg(BaseModel):
     tier: int
     leg_distance_m: int      # 직전 지점(출발점 또는 앞 집)에서 이 집까지
     leg_duration_s: int
+    # 직전 지점 → 이 집 구간의 선 (인코딩 polyline, 2026-10-12). 앱이 구간마다 색·방향을 달리 그려 겹치는 길을 구분한다.
+    # 쌍 경로 기준이라 전체 geometry(한 번에 이은 경로)와 조금 다를 수 있다. 길이 없으면 ""
+    geometry: str = ""
 
 
 class VisitPlan(BaseModel):
@@ -150,9 +153,12 @@ def plan(service: RouteService, req: VisitRequest) -> VisitResponse:
         legs = list(pool.map(leg, pairs))
     cost = [[0.0] * (n + 1) for _ in range(n + 1)]
     time = [[0.0] * (n + 1) for _ in range(n + 1)]
+    lines: dict[tuple[int, int], str] = {}
     for (i, j), path, loosened in legs:
         cost[i][j] = path["distance"] if path else UNREACHABLE
         time[i][j] = path["time"] / 1000 if path else 0
+        if path:
+            lines[(i, j)] = path["points"]
         if path and loosened:
             lifted.update(z.id for z in zones if z.id in block and _line(path["points"]).intersects(z.geometry))
     if all(cost[0][j] >= UNREACHABLE for j in range(1, n + 1)):
@@ -171,7 +177,7 @@ def plan(service: RouteService, req: VisitRequest) -> VisitResponse:
         out = []
         for seq, k in enumerate(order, 1):
             out.append(VisitLeg(id=ids[k], seq=seq, tier=tiers[k], leg_distance_m=round(min(cost[prev][k + 1], UNREACHABLE)),
-                                leg_duration_s=round(time[prev][k + 1])))
+                                leg_duration_s=round(time[prev][k + 1]), geometry=lines.get((prev, k + 1), "")))
             prev = k + 1
         return VisitPlan(order=out, distance_m=round(path["distance"]), duration_s=round(path["time"] / 1000),
                          geometry=path["points"], still_inside=[z.id for z in zones if line.intersects(z.geometry)])

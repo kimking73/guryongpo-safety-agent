@@ -294,6 +294,7 @@ class DisasterDashboard extends StatefulWidget {
     this.mapOnly = false,
     this.where = const WhereNow(WhereKind.unknown),
     this.onLocate,
+    this.onEditLocation,
     this.onSeaRoute,
     this.seaRoutePanel,
     this.seaRouteLines = const [],
@@ -301,6 +302,7 @@ class DisasterDashboard extends StatefulWidget {
     this.routeBriefBody,
     this.showFacilities = false,
     this.focusPoint,
+    this.focusBounds,
   });
 
   final bool routeActive;
@@ -336,6 +338,8 @@ class DisasterDashboard extends StatefulWidget {
   final Widget? routePlanner;
   /// 출발 'GPS 선택' 중이면 지도를 누른 곳을 넘긴다 (2026-10-11). null이면 평소처럼 침수 칸 설명
   final ValueChanged<LatLng>? onMapPick;
+  /// '주소 입력' 버튼: 도로명 주소로 현재 위치를 바꾸고 그 위치를 돌려준다 (취소면 null). null 이면 버튼을 그리지 않는다
+  final Future<LatLng?> Function()? onEditLocation;
   /// 디자인 = web-prototype (2026-10-08): '경보·주의보' 카드의 기상청 특보 (/dashboard warnings 위젯 items)
   final List<Map<String, dynamic>> warnings;
   /// 빨간 '최근 재난문자' 카드 (/dashboard disaster_messages items, null = 수집 전 → messagesReason) · 없으면 서버 머리 경고(headline)
@@ -371,12 +375,14 @@ class DisasterDashboard extends StatefulWidget {
   final bool showFacilities;
   /// 바뀌면 지도를 이 점으로 옮기고 확대한다 (방재단 목록에서 가구를 고를 때)
   final LatLng? focusPoint;
+  /// 바뀌면 이 범위가 다 보이게 지도를 부드럽게 옮긴다 (방재단 방문 경로의 전체·구간 보기)
+  final LatLngBounds? focusBounds;
 
   @override
   State<DisasterDashboard> createState() => _DisasterDashboardState();
 }
 
-class _DisasterDashboardState extends State<DisasterDashboard> {
+class _DisasterDashboardState extends State<DisasterDashboard> with SingleTickerProviderStateMixin {
   _DashboardMode dashboardMode = _DashboardMode.emergency;
   /// 재난 지도에서 켠 재난 (여러 개 동시). 처음엔 모두 켬
   final layers = <HazardKind>{};
@@ -384,9 +390,14 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
   /// 켜면 개별 재난 선택은 꺼지고, 개별 재난을 고르면 꺼진다
   bool dangerOnly = true;
   /// '위험 재난 표시'가 켜지면 종합 보기: 침수·강풍은 심각만, 산사태는 취약 지역 모두, 범례도 심각 한 칸
-  bool get compositeView => dangerOnly;
-  /// 지도에 그리는 위험 층. 경로 모드는 경로가 피하는 침수·산사태
-  Set<HazardKind> get _visible => dashboardMode == _DashboardMode.facilities
+  bool get compositeView => dangerOnly && !_routeView;
+  /// 경로를 안내하는 중인가: 대시보드 '경로 안내' 메뉴, 또는 방재단 지도(mapOnly)에 방문 경로를 그렸을 때.
+  /// 이때는 재난 지도에서 무엇을 켜 두었든 침수(주의 이상 모두)와 산사태 위험 지역을 늘 그린다 (2026-10-11 사용자 요청) —
+  /// 경로가 무엇을 피하고 무엇을 지나는지 보여야 한다
+  bool get _routeView =>
+      dashboardMode == _DashboardMode.facilities || (widget.mapOnly && widget.extraPolylines.isNotEmpty);
+  /// 지도에 그리는 위험 층. 경로 안내 중에는 경로가 피하는 침수·산사태
+  Set<HazardKind> get _visible => _routeView
       ? const {HazardKind.flood, HazardKind.slide}
       : dangerOnly
           ? const {..._mapKinds, HazardKind.overlap}
@@ -402,6 +413,26 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
   Map<String, String> savedProfile = {};
   List<SavedPlace> savedPlaces = [];
   String? fittedRouteKey;
+  /// 경로가 바뀔 때 지도를 한 번에 옮기지 않고 부드럽게 옮긴다 (2026-10-11 사용자 요청: 최단 거리 ↔ 안전한 경로를 오갈 때)
+  late final AnimationController _flight = AnimationController(vsync: this, duration: const Duration(milliseconds: 550));
+  VoidCallback? _flightTick;
+
+  /// 지금 화면에서 [bounds] 가 다 보이는 화면으로 부드럽게 옮긴다. 옮기는 중에 또 부르면 그 자리에서 새 목표로 이어 간다
+  void _flyToBounds(LatLngBounds bounds) {
+    final from = mapController.camera;
+    final to = CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(60)).fit(from);
+    if (_flightTick != null) _flight.removeListener(_flightTick!);
+    final curve = CurvedAnimation(parent: _flight, curve: Curves.easeInOutCubic);
+    final lat = Tween<double>(begin: from.center.latitude, end: to.center.latitude);
+    final lon = Tween<double>(begin: from.center.longitude, end: to.center.longitude);
+    final zoom = Tween<double>(begin: from.zoom, end: to.zoom);
+    _flightTick = () {
+      if (mounted) mapController.move(LatLng(lat.evaluate(curve), lon.evaluate(curve)), zoom.evaluate(curve));
+    };
+    _flight
+      ..addListener(_flightTick!)
+      ..forward(from: 0);
+  }
   /// 시연 = 가상 격자, 실측 = 서버 침수 격자
   List<FloodGrid> get _grids => widget.demo ? demoFloodGrid(0) : (widget.floodGrids ?? const <FloodGrid>[]);
   /// 지점의 위험 단계 (주의·경계·심각 / 미확인 또는 정상)
@@ -419,7 +450,9 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
     // 구룡포 일대로 한정 (2026-10-05): 화면 전체가 범위 안에 있어야 하고(밖은 보이지 않음), 처음엔 범위를 꽉 채운다
     initialCameraFit: CameraFit.insideBounds(bounds: guryongpoBounds),
     cameraConstraint: CameraConstraint.contain(bounds: guryongpoBounds),
-    onPositionChanged: (camera, _) {
+    onPositionChanged: (camera, hasGesture) {
+      // 사용자가 지도를 직접 움직이면 자동 이동은 멈춘다
+      if (hasGesture && _flight.isAnimating) _flight.stop();
       if ((camera.zoom - mapZoom).abs() > .2 &&
           mounted &&
           !zoomUpdateScheduled) {
@@ -474,6 +507,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
 
   @override
   void dispose() {
+    _flight.dispose();
     mapController.dispose();
     super.dispose();
   }
@@ -531,13 +565,34 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
     }
   }
 
-  Widget _locateButton(MapController ctl) => MapMenuButton(
-        label: locating ? '확인 중' : '현위치',
-        icon: MapIcons.locate,
+  Widget _locateButton(MapController ctl) {
+    final gps = MapMenuButton(
+      label: locating ? '확인 중' : '현위치',
+      icon: MapIcons.locate,
+      kind: MapButtonKind.action,
+      tooltip: '내 위치를 확인하고 지도 가운데로 옮기기',
+      onTap: locating ? null : () => locate(ctl),
+    );
+    final edit = widget.onEditLocation;
+    if (edit == null) return gps;
+    // 현위치를 주소로 고치기 (2026-10-11 사용자 요청) — '현위치' 바로 위에 둔다 (휴대폰 폭에서 '전체 화면'과 겹치지 않게 세로로)
+    return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+      MapMenuButton(
+        label: '주소 입력',
+        icon: MapIcons.address,
         kind: MapButtonKind.action,
-        tooltip: '내 위치를 확인하고 지도 가운데로 옮기기',
-        onTap: locating ? null : () => locate(ctl),
-      );
+        tooltip: '도로명 주소를 넣어 현위치를 바꾸기',
+        onTap: () async {
+          final p = await edit();
+          if (p == null || !mounted) return;
+          setState(() => focus = p);
+          ctl.move(p, math.max(ctl.camera.zoom, 15));
+        },
+      ),
+      const SizedBox(height: 6),
+      gps,
+    ]);
+  }
 
   /// 재난 지도 하위 항목: 위험 재난 표시 · 침수 격자 · 강풍 · 산사태 위험 지역 (여러 개 선택) / 태풍 지도 열기 (화면 이동)
   Widget _emergencyLayerControls() {
@@ -658,6 +713,12 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
         if (mounted) mapController.move(fp, math.max(mapController.camera.zoom, 16));
       });
     }
+    final fb = widget.focusBounds, ob = oldWidget.focusBounds;
+    if (fb != null && (ob == null || fb.southWest != ob.southWest || fb.northEast != ob.northEast)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _flyToBounds(fb);
+      });
+    }
     if (!oldWidget.routeActive && widget.routeActive) {
       dashboardMode = _DashboardMode.facilities;
       submenuOpen = true;
@@ -678,15 +739,12 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
     if (key == fittedRouteKey) return;
     fittedRouteKey = key;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        mapController.fitCamera(CameraFit.bounds(
-            bounds: bounds, padding: const EdgeInsets.all(60)));
-      }
+      if (mounted) _flyToBounds(bounds);
     });
   }
 
   /// 지도 (대시보드 카드 안·전체 화면 공통). 전체 화면은 컨트롤러·옵션을 따로 쓴다 (한 컨트롤러는 지도 하나에만 붙는다)
-  Widget _buildMap(BuildContext context, MapController ctl, MapOptions options) {
+  Widget _buildMap(BuildContext context, MapController ctl, MapOptions options, {bool briefBelow = false}) {
     final routeMode = dashboardMode == _DashboardMode.facilities;
     // 경로 모드(경로 안내)에서도 긴급 지도와 같은 침수·산사태 층을 보인다 (2026-10-07) — 경로가 무엇을 피하는지 보이게
     final visible = _visible;
@@ -930,23 +988,16 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                 ),
                 if (widget.extraMarkers.isNotEmpty) MarkerLayer(markers: widget.extraMarkers),
                 if (routeMode && widget.seaRouteMarkers.isNotEmpty) MarkerLayer(markers: widget.seaRouteMarkers),
-                // 판단에 필요한 경고는 범례 안에 숨기지 않고 지도에 바로 (2026-10-09): 위험 구역을 못 피한 경로
-                if (route != null && (route.stillInside.isNotEmpty || !route.hazardsOk))
-                  Positioned(
-                    left: 8,
-                    right: 8,
-                    bottom: 8,
-                    child: RouteHazardBanner(route: route),
-                  ),
+                // 지도 아래쪽의 빨간 테두리 경고 띠(RouteHazardBanner)는 뺐다 (2026-10-11 사용자 요청 — 지도와 아래 버튼을 가렸다).
+                // 위험 구역을 지나는 경로라는 경고는 AI 경로 설명 칸이 맡는다 (접혀 있어도 빨간 테두리 + '위험 N')
                 // AI 경로 설명 (2026-10-11): 지도에 경로가 있으면 늘 오른쪽 위 — 고른 경로, 해상 경로, 방재단 방문 경로 모두.
-                // 좁은 화면은 접힌 채로 (범례와 겹치지 않게)
-                if (route != null || (widget.routeBriefBody != null && (widget.mapOnly || routeMode)))
+                // 휴대폰 폭(briefBelow)은 지도를 가리지 않게 지도 칸 바로 아래에 따로 둔다. 어디서든 접힌 채로 시작
+                if (!briefBelow && (route != null || (widget.routeBriefBody != null && (widget.mapOnly || routeMode))))
                   Positioned(
                     right: 8,
                     top: 8,
                     child: RouteBriefCard(
                         maxWidth: MediaQuery.sizeOf(context).width < 700 ? 240 : 320,
-                        startCollapsed: MediaQuery.sizeOf(context).width < 700,
                         body: route != null ? null : widget.routeBriefBody),
                   ),
                 // 범례는 지도 왼쪽 위에 늘 펼쳐 둔다 (2026-10-10: '범례' 버튼·침수 범례·침수 위험 단계 상자 대신 하나로)
@@ -955,7 +1006,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
                   top: 8,
                   child: MapLegendCard(
                     visible: visible,
-                    severeOnly: !routeMode && compositeView,
+                    severeOnly: compositeView,
                     showFacilities: routeMode || widget.showFacilities,
                     hasDestination: destination != null,
                     hasRoute: route != null,
@@ -1105,7 +1156,7 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
     final map = ClipRRect(
       borderRadius: BorderRadius.circular(GK.radiusInner),
       child: Stack(children: [
-        Positioned.fill(child: _buildMap(context, mapController, mapOptions)),
+        Positioned.fill(child: _buildMap(context, mapController, mapOptions, briefBelow: narrow)),
         // 내 위치 확인 + 지도 가운데로 (출발 위치 표시 칸 대신, 2026-10-09)
         Positioned(left: 11, bottom: 11, child: _locateButton(mapController)),
         Positioned(
@@ -1177,6 +1228,15 @@ class _DisasterDashboardState extends State<DisasterDashboard> {
               )
             else ...[
               SizedBox(height: narrow ? 380 : 460, child: map),
+              // 휴대폰 폭: AI 경로 설명은 지도 위에 겹치지 않고 지도 칸 바로 아래 (2026-10-11 사용자 요청), 접힌 채로 시작
+              if (narrow &&
+                  ((routeMode && widget.safetyRoute != null) ||
+                      (widget.routeBriefBody != null && (widget.mapOnly || routeMode)))) ...[
+                const SizedBox(height: 10),
+                RouteBriefCard(
+                    maxWidth: double.infinity,
+                    body: routeMode && widget.safetyRoute != null ? null : widget.routeBriefBody),
+              ],
               if (!routeMode) ...[const SizedBox(height: 12), places],
             ],
           ]),
@@ -1487,7 +1547,7 @@ const _sensorRiskLevels = ['주의', '경계', '심각'];
 
 /// 지도 왼쪽 위 범례 (2026-10-10, 사용자 결정): 지금 켠 층에 맞는 것만.
 /// 색 = 위험 단계는 침수·강풍만, 산사태는 취약 지역 한 색. 수치는 쓰지 않는다.
-/// 처음에는 펼쳐 두고, 제목 줄을 누르면 접고 편다 (2026-10-11 사용자 요청 — 지도를 가릴 때 닫을 수 있게)
+/// 처음에는 접어 두고, 제목 줄을 누르면 펴고 접는다 (2026-10-11 사용자 요청 — 지도를 가리지 않게)
 class MapLegendCard extends StatefulWidget {
   const MapLegendCard(
       {super.key,
@@ -1507,7 +1567,8 @@ class MapLegendCard extends StatefulWidget {
 }
 
 class _MapLegendCardState extends State<MapLegendCard> {
-  bool open = true;
+  // 처음에는 접어 둔다 — '범례' 줄을 누르면 펴진다 (2026-10-11 사용자 요청: 지도를 가리지 않게)
+  bool open = false;
 
   @override
   Widget build(BuildContext context) {
@@ -3213,37 +3274,6 @@ class _RecoveryScreenState extends State<RecoveryScreen> {
 }
 
 // 사용자 화면 '내 정보' 카드(ProfileDetailsCard)는 profile_cards.dart 로 옮겼다 (2026-10-09)
-
-/// 경로가 위험 구역을 다 피하지 못했을 때 지도 위에 바로 띄우는 경고 (범례·작은 글씨에만 두지 않는다, 2026-10-09)
-class RouteHazardBanner extends StatelessWidget {
-  const RouteHazardBanner({super.key, required this.route});
-  final SafetyRoute route;
-  @override
-  Widget build(BuildContext context) => Semantics(
-        liveRegion: true,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0xffd93232), width: 2),
-              boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)]),
-          child: Row(children: [
-            const Icon(Icons.warning_amber_rounded, color: Color(0xffd93232)),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                [
-                  if (route.stillInside.isNotEmpty) '다른 길이 없어 위험 구역을 지나는 경로입니다: ${route.stillInside.join(', ')}',
-                  if (!route.hazardsOk) '위험 정보를 확인하지 못해 위험 구역을 피하지 않고 계산한 경로입니다',
-                ].join('\n'),
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xff8a1c17)),
-              ),
-            ),
-          ]),
-        ),
-      );
-}
 
 /// 지도 범례 (2026-10-07, 2026-10-09 간소화): 기본은 지도를 읽는 데 꼭 필요한 것만 — 위험 단계·재난 구분·주요 표식·경로.
 /// 긴 설명과 기술 세부(수위계·침수 격자·숫자 원·채움/테두리·판단 근거·출처·칠하지 않는 특보)는 접힌 '범례 자세히' 안.

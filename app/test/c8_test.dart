@@ -424,7 +424,7 @@ void main() {
     ];
     final sent = <Map>[];
     Map<String, dynamic> plan(List<String> ids) => {
-          'order': [for (var i = 0; i < ids.length; i++) {'id': ids[i], 'seq': i + 1, 'tier': 4, 'leg_distance_m': 300, 'leg_duration_s': 240}],
+          'order': [for (var i = 0; i < ids.length; i++) {'id': ids[i], 'seq': i + 1, 'tier': 4, 'leg_distance_m': 300, 'leg_duration_s': 240, 'geometry': '_p~iF~ps|U_ulLnnqC'}],
           'distance_m': 1200, 'duration_s': 900, 'geometry': '_p~iF~ps|U_ulLnnqC', 'still_inside': <String>[],
         };
     final s = FakeServer({
@@ -478,6 +478,33 @@ void main() {
     await t.tap(find.text('우선순위 경로'));
     await _settle(t);
     expect(y('[시연] 김○○ 댁'), lessThan(y('[시연] 박○○ 댁')));   // 우선순위: t-1 → t-2
+
+    // 한 구간씩 보기 (2026-10-12): 처음엔 전체 보기, ▶ 로 구간을 넘기고 '전체 보기'로 돌아온다
+    expect(find.textContaining('전체 보기 · 구간 2개'), findsOneWidget);
+    expect(find.byTooltip('앞 구간'), findsOneWidget);
+    await t.ensureVisible(find.byTooltip('다음 구간'));
+    await t.tap(find.byTooltip('다음 구간'));
+    await _settle(t);
+    expect(find.text('1 / 2 구간 · 300m · 4분'), findsOneWidget);
+    expect(find.textContaining('출발(내 위치) → [시연] 김○○ 댁'), findsOneWidget);   // 우선순위 경로의 첫 구간
+    await t.tap(find.byTooltip('다음 구간'));
+    await _settle(t);
+    expect(find.text('2 / 2 구간 · 300m · 4분'), findsOneWidget);
+    expect(find.textContaining('[시연] 김○○ 댁 → [시연] 박○○ 댁'), findsOneWidget);
+    // 목록 줄을 눌러도 그 구간으로 (첫 줄 = 1구간)
+    await t.tap(find.descendant(of: find.byType(ListTile), matching: find.text('[시연] 김○○ 댁')).first);
+    await _settle(t);
+    expect(find.text('1 / 2 구간 · 300m · 4분'), findsOneWidget);
+    await t.tap(find.widgetWithText(TextButton, '전체 보기'));
+    await _settle(t);
+    expect(find.textContaining('전체 보기 · 구간 2개'), findsOneWidget);
+    // 다른 경로(최단)를 보면 전체 보기부터
+    await t.tap(find.byTooltip('다음 구간'));
+    await _settle(t);
+    await t.ensureVisible(find.text('최단 경로'));
+    await t.tap(find.text('최단 경로'));
+    await _settle(t);
+    expect(find.textContaining('전체 보기 · 구간 2개'), findsOneWidget);
 
     // 하나를 빼면 1곳으로 자동 재계산
     final remove = find.byTooltip('경로에서 빼기').at(1);
@@ -701,6 +728,67 @@ void main() {
     expect(body['consent_by'], '본인 또는 보호자');
     expect(body.containsKey('note'), isFalse);
     await t.pumpWidget(const SizedBox.shrink());
+  });
+
+  test('방문 경로를 구간별로 그리기 (2026-10-12): 전체 보기는 구간마다 색·굵기가 다르고, 구간 보기는 고른 구간만 진하게', () {
+    const g = '_p~iF~ps|U_ulLnnqC';   // 두 점짜리 선
+    Map<String, dynamic> plan(int n, {bool legs = true}) => {
+          'geometry': g,
+          'order': [for (var i = 0; i < n; i++) {'id': 'h$i', 'seq': i + 1, if (legs) 'geometry': g}],
+        };
+    // 전체 보기: 흰 테두리 3 + 구간 3, 구간 색이 서로 다르고 굵은 선이 아래(먼저)
+    final all = visitLegLines(plan(3));
+    expect(all, hasLength(6));
+    final colored = all.sublist(3);
+    expect({for (final l in colored) l.color}, hasLength(3));
+    expect([for (final l in colored) l.strokeWidth], [9.0, 6.0, 3.5]);
+    expect(colored.first.color, visitLegColor(1));
+    // 구간 보기: 고른 구간만 남색 굵게(맨 위), 나머지는 옅은 회색
+    final focus = visitLegLines(plan(3), focus: 1);
+    expect([for (final l in focus) l.color], [visitLegDim, visitLegDim, Colors.white, visitLegColor(1)]);
+    expect(focus.last.strokeWidth, greaterThan(focus.first.strokeWidth));
+    // 구간 선이 없는 예전 서버: 전체 선 하나 (흰 테두리 + 남색)
+    expect(visitLegPoints(plan(3, legs: false)), isEmpty);
+    expect(visitLegLines(plan(3, legs: false)), hasLength(2));
+    // 구간 색은 5색을 돌려 쓴다
+    expect(visitLegColor(6), visitLegColor(1));
+  });
+
+  test('방문 경로 방향 화살표 (2026-10-12): 짧은 구간에도 1개, 방향은 진행 방향', () {
+    // 정북으로 60m
+    final north = visitLegArrowSpots(const [LatLng(35.9900, 129.5500), LatLng(35.99054, 129.5500)]);
+    expect(north, hasLength(1));
+    expect(north.single.$2, closeTo(0, 1));
+    expect(north.single.$1.latitude, closeTo(35.99027, 1e-4));   // 구간 가운데
+    // 정동으로 약 450m → 150m마다 3개, 방향 90°
+    final east = visitLegArrowSpots(const [LatLng(35.9900, 129.5500), LatLng(35.9900, 129.5550)]);
+    expect(east, hasLength(3));
+    expect([for (final e in east) e.$2], everyElement(closeTo(90, 1)));
+    // 꺾이는 길: 북 → 서, 화살표가 각 구간 방향을 따른다
+    final turn = visitLegArrowSpots(const [LatLng(35.9900, 129.5500), LatLng(35.9927, 129.5500), LatLng(35.9927, 129.5467)]);
+    expect(turn.first.$2, closeTo(0, 1));
+    expect(turn.last.$2, closeTo(270, 1));
+    expect(visitLegArrowSpots(const [LatLng(35.99, 129.55)]), isEmpty);
+    expect(visitLegArrows(const [LatLng(35.9900, 129.5500), LatLng(35.9900, 129.5550)], visitLegColor(2)), hasLength(3));
+  });
+
+  test('시연 가구 배치 (2026-10-11): 최단 방문 순서와 우선순위 방문 순서가 달라지게 — 먼 집이 도움 요청, 가까운 집은 응답 없음', () async {
+    DemoLiveApi.resetDemoIncident();
+    DemoLiveApi.myAlertActive = false;
+    final targets = (await DemoLiveApi().incident(DemoLiveApi.incidentId))['targets'] as List;
+    Map<String, dynamic> h(int n) =>
+        Map<String, dynamic>.from(targets.firstWhere((t) => t['household_id'] == 'demo-household-0$n') as Map);
+    double lat(int n) => ((h(n)['location'] as Map)['lat'] as num).toDouble();
+    // 도움 요청 = 1번·2번, 응답 없음 = 3번·4번 — 모두 대피 경보 지역 안
+    expect([for (final n in [1, 2, 3, 4]) h(n)['status']], ['need_help', 'need_help', 'no_response', 'no_response']);
+    expect([for (final n in [1, 2, 3, 4]) h(n)['in_area']], everyElement(isTrue));
+    expect([for (final n in [1, 2, 3, 4]) h(n)['priority_tier']], [1, 1, 3, 3]);
+    // 한 줄로 늘어서지 않게 동(3번)·남(1번)·서(2번)·북서(4번)로 벌려 놓았다 — 한 줄이면 두 경로가 같은 길로 그려진다
+    double lng(int n) => ((h(n)['location'] as Map)['lng'] as num).toDouble();
+    expect(lng(3) > lng(1) && lng(1) > lng(2) && lng(2) > lng(4), isTrue);
+    expect(lat(1) < lat(3) && lat(3) < lat(2) && lat(2) < lat(4), isTrue);
+    // 우선 확인 번호: 도움 요청 두 곳이 1·2번
+    expect([for (final t in priorityTargets(targets.cast<Map<String, dynamic>>()).take(2)) t['status']], ['need_help', 'need_help']);
   });
 }
 

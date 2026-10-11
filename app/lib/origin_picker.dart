@@ -61,6 +61,21 @@ Future<String?> _useGps(WidgetRef ref) async {
   }
 }
 
+/// 지도 '주소 입력' (2026-10-11 사용자 요청): 도로명 주소를 넣으면 그곳이 앱의 현재 위치가 된다
+/// (위험도·경로·AI 기준, GPS 대신). 되돌리기는 지도 '현위치' 버튼(GPS 다시 읽기). 바꿨으면 그 위치, 취소·실패면 null
+Future<LatLng?> setLocationByAddress(BuildContext c, WidgetRef ref) async {
+  final r = await showDialog<GeocodedAddress>(context: c, builder: (_) => const AddressDialog(title: '주소로 현위치 설정'));
+  if (r == null || !c.mounted) return null;
+  void toast(String msg) => ScaffoldMessenger.of(c).showSnackBar(SnackBar(content: Text(msg)));
+  if (!inServiceArea(r.position)) {
+    toast('구룡포 서비스 지역 밖 주소라 현위치로 쓸 수 없어요.');
+    return null;
+  }
+  await _choose(ref, r.position, r.address, address: r.address);
+  if (c.mounted) toast("현위치: ${r.address} · GPS로 돌아가려면 '현위치'를 누르세요");
+  return r.position;
+}
+
 /// 앱 대시보드 출발지 선택(집·현위치·내 장소)에서 쓰는 공개 함수
 Future<void> chooseOrigin(WidgetRef ref, LatLng p, String label, {String address = ''}) =>
     _choose(ref, p, label, address: address);
@@ -210,7 +225,8 @@ class MapPickDialogState extends State<MapPickDialog> {
 
 /// 도로명 주소로 찾기 → GeocodedAddress (서버 /api/v1/user/geocode, 카카오)
 class AddressDialog extends StatefulWidget {
-  const AddressDialog();
+  const AddressDialog({this.title = '주소로 출발 위치 찾기'});
+  final String title;
   @override
   State<AddressDialog> createState() => AddressDialogState();
 }
@@ -245,7 +261,7 @@ class AddressDialogState extends State<AddressDialog> {
 
   @override
   Widget build(BuildContext c) => AlertDialog(
-        title: const Text('주소로 출발 위치 찾기'),
+        title: Text(widget.title),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           TextField(
               controller: address,

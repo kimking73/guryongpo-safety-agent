@@ -8,6 +8,7 @@ import 'package:guryongpo_safety/main.dart';
 import 'package:guryongpo_safety/models/domain_models.dart';
 import 'package:guryongpo_safety/repositories/mock_repository.dart';
 import 'package:guryongpo_safety/ui/map_menu.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 Finder _has(String s) => find.textContaining(s, findRichText: true);
@@ -29,6 +30,49 @@ Future<void> _openLegend(WidgetTester t, {bool routeMode = false, bool hasRoute 
 }
 
 void main() {
+  testWidgets('경로 안내 지도 (2026-10-11): 재난 지도에서 무엇을 켰든 침수(주의 이상 모두)·산사태 위험 지역을 늘 그린다', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    tester.view.physicalSize = const Size(1280, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final onError = FlutterError.onError;
+    FlutterError.onError = (d) {
+      if (d.library != 'image resource service') onError?.call(d);
+    };
+    addTearDown(() => FlutterError.onError = onError);
+    List<List<LatLng>> box(double lat, double lon) =>
+        [[LatLng(lat, lon), LatLng(lat + .001, lon), LatLng(lat + .001, lon + .001), LatLng(lat, lon + .001)]];
+    final areas = [
+      RiskArea(level: '심각', label: '침수 경보', polygons: box(35.990, 129.556)),
+      RiskArea(level: '주의', label: '침수 주의', polygons: box(35.987, 129.549)),
+      RiskArea(level: '경계', label: '산사태 경고', polygons: box(35.984, 129.552), hazard: 'landslide'),
+    ];
+    await tester.pumpWidget(ProviderScope(
+        overrides: [repo.overrideWithValue(MockSafetyRepository())],
+        child: MaterialApp(home: Scaffold(body: DisasterDashboard(demo: false, riskAreas: areas)))));
+    await tester.pump(const Duration(milliseconds: 100));
+    int drawn() => tester
+        .widgetList<PolygonLayer>(find.byType(PolygonLayer))
+        .fold(0, (n, l) => n + l.polygons.length);
+    // 재난 지도 처음 상태('위험 재난 표시'): 침수는 심각만 + 산사태
+    expect(drawn(), 2);
+    await tester.tap(find.widgetWithText(MapMenuButton, '경로 안내'));
+    await tester.pump(const Duration(milliseconds: 300));
+    // 경로 안내: 침수 주의까지 모두 + 산사태
+    expect(drawn(), 3);
+    // 재난 지도에서 침수·산사태를 모두 끈 뒤 경로 안내로 와도 그대로 그린다
+    await tester.tap(find.widgetWithText(MapMenuButton, '재난 지도'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.widgetWithText(MapMenuButton, '강풍'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(drawn(), 0);
+    await tester.tap(find.widgetWithText(MapMenuButton, '경로 안내'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(drawn(), 3);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 300));
+  });
+
   testWidgets('지도 범례 (2026-10-10): 단계 색은 이름 없이 주의·경계·심각, 산사태는 취약 지역 한 색, 파란 테두리 없음', (t) async {
     await _openLegend(t);
     for (final s in ['주의', '경계', '심각', '산사태 취약 지역', '현위치', '범례 자세히']) {
@@ -112,14 +156,18 @@ void main() {
     expect(find.byIcon(Icons.water_drop),
         findsNothing); // Grid cells are filled by server risk stage, not depth icons.
     // 범례는 지도 왼쪽 위 하나뿐 (2026-10-10): 침수 범례·침수 위험 단계 상자 없음, 수치 없음.
-    // 처음에는 펼쳐져 있고 제목 줄 '범례'를 누르면 접고 편다 (2026-10-11 사용자 요청)
+    // 처음에는 접혀 있고 제목 줄 '범례'를 누르면 펴고 접는다 (2026-10-11 사용자 요청)
     expect(find.byType(MapLegendCard), findsOneWidget);
     expect(find.text('범례'), findsOneWidget);
+    expect(find.byTooltip('범례 열기'), findsOneWidget);
+    expect(_has('산사태 취약 지역'), findsNothing);
+    await tester.tap(find.text('범례'));
+    await tester.pump();
     expect(find.byTooltip('범례 닫기'), findsOneWidget);
+    expect(_has('산사태 취약 지역'), findsOneWidget);
     await tester.tap(find.text('범례'));
     await tester.pump();
     expect(_has('산사태 취약 지역'), findsNothing);
-    expect(find.byTooltip('범례 열기'), findsOneWidget);
     await tester.tap(find.text('범례'));
     await tester.pump();
     expect(find.text('침수 위험 단계'), findsNothing);

@@ -198,11 +198,11 @@ final routeBriefProvider = FutureProvider.family<RouteBrief?, String>((ref, id) 
   }
 });
 
-/// 지도 오른쪽 위에 겹쳐 놓는 칸. 접을 수 있고, 좁은 화면은 접힌 채로 시작한다.
+/// 지도 오른쪽 위에 겹쳐 놓는 칸 (휴대폰 폭은 지도 아래). 처음에는 접혀 있고 제목 줄을 누르면 펴진다 (2026-10-11 사용자 요청).
 /// 지도에 그리는 경로 모두에 쓴다 (2026-10-11 사용자 요청): [body] 가 없으면 대시보드에서 고른 경로(routeFacilityId),
 /// 있으면 그 요청 값의 경로(해상 경로 seaBriefBody, 방재단 방문 경로 visitBriefBody)
 class RouteBriefCard extends ConsumerStatefulWidget {
-  const RouteBriefCard({super.key, required this.maxWidth, this.startCollapsed = false, this.body});
+  const RouteBriefCard({super.key, required this.maxWidth, this.startCollapsed = true, this.body});
   final double maxWidth;
   final bool startCollapsed;
   final Map<String, dynamic>? body;
