@@ -2938,7 +2938,6 @@ class AiScreen extends ConsumerStatefulWidget {
 class _AiScreenState extends ConsumerState<AiScreen> {
   final input = TextEditingController();
   final scroll = ScrollController();
-  bool hasJob = false;
 
   /// 답을 기다리는 중 (앱 전체 상태 — 다른 메뉴에 갔다 와도 이어짐)
   bool get loading => ref.watch(chatLoading);
@@ -2961,16 +2960,6 @@ class _AiScreenState extends ConsumerState<AiScreen> {
         )
       ];
     });
-    _loadProfile();
-  }
-
-  Future<void> _loadProfile() async {
-    final o = await AccountService().optionalProfile();
-    if (mounted) {
-      setState(() {
-        hasJob = (o['jobs'] ?? '').isNotEmpty || (o['직업'] ?? '').isNotEmpty;
-      });
-    }
   }
 
   void _scrollToEnd() => WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -3000,12 +2989,13 @@ class _AiScreenState extends ConsumerState<AiScreen> {
         .showSnackBar(const SnackBar(content: Text('마이크 권한이 필요합니다. 브라우저·기기 설정에서 허용해 주세요.')));
   }
 
-  // 침수 위험·도보 안전·대피 요령 질문은 뺐다 (2026-10-11 사용자 요청, 휴대폰 추천 질문과 같게)
-  List<String> get suggestions => [
+  // 추천 질문 (2026-10-12 사용자 요청으로 다시 짰다): 서비스의 큰 기능 하나씩 — 지금 위험 · 대피소와 길 · 할 일 체크리스트 · 지원·보험.
+  // 보험 질문과 지원·복구 질문은 답이 같아(지원·복구 agent 하나) 하나로 합쳤다. 문구는 AI가 매끄럽게 답하는지 확인한 것만 넣는다
+  List<String> get suggestions => const [
+        '지금 여기 재난 위험 있어?',
         '가까운 대피소는 어디야?',
-        if (hasJob) '재난 후 내가 받을 수 있는 보험이 있는지 알려줘',
-        // 대시보드 '재난 후 지원 · 복구' 카드를 대신한다 (김다인 2026-10-11)
-        '내가 받을 수 있는 재난 지원 혹은 복구 사항 알려줘',
+        '지금 할 일 체크리스트 만들어줘',
+        '내가 받을 수 있는 재난 지원·보험 알려줘',
       ];
 
   Widget _avatar() => Container(
