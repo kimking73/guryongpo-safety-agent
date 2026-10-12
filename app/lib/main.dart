@@ -1077,10 +1077,14 @@ final appRouter = GoRouter(
       return null;
     },
     routes: [
-  GoRoute(path: '/boot', builder: (_, s) => BootScreen(from: s.uri.queryParameters['from'])),
-  // 첫 화면(동의·로그인·내 정보)은 웹·앱 공통 — web-prototype 온보딩과 같은 구성
-  GoRoute(path: '/login', builder: (_, s) => m.MLoginScreen(from: s.uri.queryParameters['from'])),
-  GoRoute(path: '/setup', builder: (_, s) => m.SetupScreen(from: s.uri.queryParameters['from'])),
+  // 시작·로그인·내 정보도 메뉴처럼 짧게 떠오르게 (2026-10-13) — 기기 기본 전환(안드로이드 확대·아이폰 밀기)은
+  // 시작 화면과 로그인 화면이 반쯤 겹친 채 몇 초씩 멈춰 보였다
+  ..._menuRoutes([
+    GoRoute(path: '/boot', builder: (_, s) => BootScreen(from: s.uri.queryParameters['from'])),
+    // 첫 화면(동의·로그인·내 정보)은 웹·앱 공통 — web-prototype 온보딩과 같은 구성
+    GoRoute(path: '/login', builder: (_, s) => m.MLoginScreen(from: s.uri.queryParameters['from'])),
+    GoRoute(path: '/setup', builder: (_, s) => m.SetupScreen(from: s.uri.queryParameters['from'])),
+  ]),
   GoRoute(path: '/location', builder: (_, __) => const InitialSetupScreen()),
   ShellRoute(builder: (_, __, child) => Shell(child: child), routes: _menuRoutes([
     GoRoute(path: '/', builder: (_, __) => const Dashboard()),

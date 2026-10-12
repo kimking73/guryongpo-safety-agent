@@ -41,6 +41,29 @@
     For more details:
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
+  <!--
+    Firebase JS 를 앱보다 먼저 직접 불러 둔다 (2026-10-13). FlutterFire(firebase_core_web 2.24.1)는 Trusted Types 로
+    불러오기 스크립트를 끼워 넣는데, iOS 26·사파리 26(WebKit)에서는 그 스크립트가 실행되지 않아 Firebase 가 준비되지 않고
+    시작 화면 '로그인 확인 완료'에서 멈췄다 (아이폰 크롬·구글 앱·맥 사파리). window.firebase_core 가 이미 있으면 FlutterFire 는
+    끼워 넣기를 건너뛴다. 버전은 firebase_core_web 의 supportedFirebaseJsSdkVersion 과 같게 — 패키지를 올리면 같이 올린다.
+    불러오기가 실패하면 아무것도 달지 않아 FlutterFire 가 예전처럼 직접 불러온다
+  -->
+  <script>
+    window.firebaseJsReady = new Promise((resolve) => { window.firebaseJsDone = resolve; });
+  </script>
+  <script type="module">
+    const version = '11.9.1';
+    try {
+      const [core, auth, messaging] = await Promise.all(['app', 'auth', 'messaging'].map(
+        (s) => import(`https://www.gstatic.com/firebasejs/${version}/firebase-${s}.js`)));
+      window.firebase_core = core;
+      window.firebase_auth = auth;
+      window.firebase_messaging = messaging;
+    } catch (e) {
+      console.error('Firebase JS 불러오기 실패', e);
+    }
+    window.firebaseJsDone();
+  </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
