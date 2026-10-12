@@ -21,7 +21,7 @@
   새 화면은 박힌 색 대신 이 둘을 쓴다. 지도 위 색(대피소 청록 등)은 범례와 맞춰 그대로 둔다.
 - 글꼴: Pretendard (SIL OFL, `assets/fonts/Pretendard-OFL.txt`) — 한국어 2,350자 + 영문·기호만 남긴 것.
   드문 글자는 기기 글꼴로 나온다. 버튼에 `textStyle`을 직접 줄 때는 `fontFamily: GK.font`를 넣는다 (빼면 한글이 □로 나옴).
-- AI 캐릭터 '모리' 얼굴: `assets/mori-face.png` (web-prototype/public).
+- AI 캐릭터 '모리' 얼굴: `assets/mori-face-v2.png` (웹 프로토타입은 web-prototype/public/mori-face.png). 이미지를 바꿀 땐 파일 이름도 바꿀 것 — 서버가 이미지 캐시를 막지 않아 같은 이름이면 브라우저에 옛 그림이 남는다.
 
 ## 실행
 

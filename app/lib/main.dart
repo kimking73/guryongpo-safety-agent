@@ -3378,7 +3378,7 @@ class _AiScreenState extends ConsumerState<AiScreen> {
         decoration: BoxDecoration(
             shape: BoxShape.circle, color: Colors.white, border: Border.all(color: GK.navy, width: 3)),
         clipBehavior: Clip.antiAlias,
-        child: Image.asset('assets/mori-face.png',
+        child: Image.asset('assets/mori-face-v2.png',
             fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.smart_toy_rounded, color: GK.navy)),
       );
 
