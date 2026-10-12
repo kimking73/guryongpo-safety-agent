@@ -68,7 +68,8 @@ final demoRelayProvider = Provider.autoDispose<void>((ref) {
   if (code == null) return;
   final relay = DemoRelay(
     code: code,
-    role: ref.watch(demoRoleProvider),
+    // 방재단원 모드를 골랐어도 전용 코드로 로그인하기 전이면 사용자 쪽으로 (2026-10-12)
+    role: ref.watch(demoResponderViewProvider) ? DemoRole.responder : DemoRole.user,
     store: ref.read(prototypeSafetyProvider),
     status: (s) => ref.read(demoRoomStatusProvider.notifier).state = s,
   )..start();

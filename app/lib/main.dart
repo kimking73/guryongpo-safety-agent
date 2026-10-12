@@ -1399,8 +1399,9 @@ class _ShellState extends ConsumerState<Shell> {
     final wide = MediaQuery.sizeOf(c).width >= 840;
     final here = GoRouterState.of(c).uri.path;
     final found = nav.indexWhere((x) => x.$3 == here);
-    // 시연 사용자 모드에서 방재단 화면 주소로 오면 대시보드로
-    if (showDemo && !crew && here == '/responder') {
+    // 시연 사용자 모드(또는 코드 로그인 안 한 계정)에서 방재단 화면 주소로 오면 대시보드로.
+    // 계정 역할을 읽는 중엔 기다린다 — 새로고침 직후 방재단원이 대시보드로 튕기지 않게
+    if (showDemo && !crew && here == '/responder' && !ref.watch(meProvider).isLoading) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) GoRouter.of(context).go('/');
       });

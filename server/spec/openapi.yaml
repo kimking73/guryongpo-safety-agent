@@ -637,7 +637,7 @@ paths:
   /demo/evacuation/responses:
     get:
       tags: [dashboard]
-      summary: 최근 3시간 시연 대피 응답 전체 — 방재단원 모드 화면이 다른 계정의 응답을 읽는다 (시연 데이터라 로그인만, 역할 불필요) (2026-10-12)
+      summary: 최근 3시간 시연 대피 응답 전체 — 방재단원 모드 화면이 다른 계정의 응답을 읽는다 (방재단·관리자 역할만, 주민 위치 포함) (2026-10-12)
       operationId: listDemoEvacuations
       responses:
         '200':
@@ -648,12 +648,13 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/DemoEvacTarget' }
         '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
   /demo/evacuation/{target_id}/dispatch:
     parameters:
       - { name: target_id, in: path, required: true, description: "DemoEvacTarget.id ('demo-user-<uuid>')", schema: { type: string } }
     put:
       tags: [dashboard]
-      summary: 방재단 출동 기록 쓰기 — '실제 출발'·업무 단계(가는 중·방문 중·완료)와 도착 예정 시각을 그 주민에게 (2026-10-12)
+      summary: 방재단 출동 기록 쓰기 (방재단·관리자 역할만) — '실제 출발'·업무 단계(가는 중·방문 중·완료)와 도착 예정 시각을 그 주민에게 (2026-10-12)
       operationId: putDemoDispatch
       requestBody:
         required: true
@@ -663,6 +664,7 @@ paths:
       responses:
         '204': { description: 저장됨 }
         '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
         '422': { $ref: '#/components/responses/Error' }
     delete:
@@ -672,6 +674,7 @@ paths:
       responses:
         '204': { description: 지움 }
         '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
   /support-programs:
     get:
@@ -1164,6 +1167,40 @@ paths:
                   label: { type: [string, 'null'] }
                   max_uses: { type: [integer, 'null'] }
                   expires_at: { type: string, format: date-time }
+    get:
+      tags: [internal]
+      summary: 초대 코드 목록 — 원문은 없고 번호·역할·이름·사용 횟수·만료·회수만 (2026-10-12)
+      operationId: listInvites
+      responses:
+        '200':
+          description: 발급 순서대로
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [id, role, used_count]
+                  properties:
+                    id: { type: integer }
+                    role: { type: string }
+                    label: { type: [string, 'null'] }
+                    max_uses: { type: [integer, 'null'] }
+                    used_count: { type: integer }
+                    expires_at: { type: [string, 'null'], format: date-time }
+                    revoked_at: { type: [string, 'null'], format: date-time }
+                    created_at: { type: string, format: date-time }
+
+  /internal/invites/{invite_id}:
+    delete:
+      tags: [internal]
+      summary: 초대 코드 회수 — 이후 그 코드로 로그인 불가 (이미 받은 역할은 그대로)
+      operationId: revokeInvite
+      parameters:
+        - { name: invite_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '204': { description: 회수됨 }
+        '404': { description: 없는 번호 }
 
   /internal/ingest/{source}/{job}:
     post:

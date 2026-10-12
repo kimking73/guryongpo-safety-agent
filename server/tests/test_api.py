@@ -296,6 +296,19 @@ def test_internal_invite(client, fake_db):
     assert client.post("/api/v1/internal/invites", json={"role": "resident"}).status_code == 422
 
 
+
+def test_internal_invite_list_and_revoke(client, fake_db):
+    now = datetime.now(KST)
+    fake_db.rows["FROM care.invite_codes ORDER BY id"] = [
+        {"id": 1, "role": "responder", "label": "방재단", "max_uses": None, "used_count": 2,
+         "expires_at": now + timedelta(days=30), "revoked_at": None, "created_at": now}]
+    a, = client.get("/api/v1/internal/invites").json()
+    assert a["id"] == 1 and a["used_count"] == 2 and a["revoked_at"] is None and "code" not in a and "code_hash" not in a
+    fake_db.rows["UPDATE care.invite_codes SET revoked_at"] = [{"id": 1}]
+    assert client.delete("/api/v1/internal/invites/1").status_code == 204
+    fake_db.rows["UPDATE care.invite_codes SET revoked_at"] = []
+    assert client.delete("/api/v1/internal/invites/99").status_code == 404
+
 def test_admin_requires_staff_role(client, fake_db):
     r = client.get("/api/v1/admin/overview", headers=AUTH)            # dev:test-uid → DB 에 없음 → resident
     assert r.status_code == 403 and r.json()["code"] == "FORBIDDEN"

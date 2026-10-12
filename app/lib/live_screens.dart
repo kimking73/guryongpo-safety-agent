@@ -632,12 +632,21 @@ class DemoModeSwitch extends ConsumerWidget {
                 (DemoRole.user, '사용자 모드', FontAwesomeIcons.user),
                 (DemoRole.responder, '방재단원 모드', FontAwesomeIcons.shieldHalved),
               ],
-              value: ref.watch(demoRoleProvider),
-              onChanged: (r) => ref.read(demoRoleProvider.notifier).set(r),
+              // 코드로 로그인하기 전엔 방재단원 모드가 늘 꺼져 보인다 (2026-10-12: 방재단 화면은 전용 코드를 받은 사람만)
+              value: ref.watch(demoResponderViewProvider) ? DemoRole.responder : DemoRole.user,
+              onChanged: (r) {
+                if (r == DemoRole.responder && !ref.read(responderUnlockedProvider)) {
+                  ScaffoldMessenger.of(c).showSnackBar(
+                      const SnackBar(content: Text('방재단원 모드는 방재단 전용 코드로 로그인한 뒤 쓸 수 있어요 (안전 기능 → 방재단 로그인)')));
+                  return;
+                }
+                ref.read(demoRoleProvider.notifier).set(r);
+              },
             ),
           ),
           const SizedBox(height: 6),
-          Text('창마다 따로 정해요. 분할 화면이면 한쪽은 사용자, 다른 쪽은 방재단원으로 — 사용자 모드엔 방재단 현황이 없어요.',
+          Text('창마다 따로 정해요. 분할 화면이면 한쪽은 사용자, 다른 쪽은 방재단원으로 — 사용자 모드엔 방재단 현황이 없어요. '
+              '방재단원 모드는 방재단 전용 코드로 로그인한 계정만 쓸 수 있어요.',
               style: TextStyle(fontSize: 13, color: GK.muted, height: 1.4)),
           if (AppConfig.isRemote) ...[const SizedBox(height: 12), const DemoRoomField()],
         ],
