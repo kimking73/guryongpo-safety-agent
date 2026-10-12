@@ -62,3 +62,24 @@ def create_invite(body: InviteInput):
     from ..mocks import iso
     return {"code": code, "role": body.role, "label": body.label, "max_uses": body.max_uses,
             "expires_at": iso(row["expires_at"]) if row else None}
+
+
+@router.get("/invites", summary="초대 코드 목록 (원문 없음 — 번호·역할·이름·사용 횟수·만료·회수)")
+def list_invites():
+    from .. import db
+    from ..mocks import iso
+    rows = db.fetch_all("""
+        SELECT id, role::text AS role, label, max_uses, used_count, expires_at, revoked_at, created_at
+        FROM care.invite_codes ORDER BY id""")
+    return [{**r, **{k: iso(r[k]) for k in ("expires_at", "revoked_at", "created_at")}} for r in rows]
+
+
+@router.delete("/invites/{invite_id}", status_code=204, summary="초대 코드 회수 (이미 받은 역할은 그대로 — 필요하면 따로 내려놓기)")
+def revoke_invite(invite_id: int):
+    from fastapi import Response
+    from .. import db
+    row = db.fetch_one("UPDATE care.invite_codes SET revoked_at = coalesce(revoked_at, now()) WHERE id = %(id)s RETURNING id",
+                       {"id": invite_id})
+    if not row:
+        raise ApiError("NOT_FOUND", detail={"invite_id": invite_id})
+    return Response(status_code=204)

@@ -11,6 +11,7 @@ import 'profile_form.dart' show disabilitiesOf;
 import 'models/domain_models.dart';
 import 'patrol_screens.dart' show isPatrolRole, roleKo;
 import 'services/account_service.dart';
+import 'services/app_config.dart';
 import 'services/demo_mode.dart';
 import 'services/demo_role.dart';
 import 'services/evac_alarm.dart';
@@ -716,11 +717,11 @@ class _SafetyFeaturesCardState extends ConsumerState<SafetyFeaturesCard> {
   Widget build(BuildContext c) {
     final demo = ref.watch(showDemoProvider);
     final role = '${ref.watch(meProvider).valueOrNull?['role'] ?? ''}';
-    // 시연 모드는 방재단 화면이 시연 데이터로 바로 열린다 (실제 역할을 주지 않음). 실측은 방재단·관리자만
-    // 시연 모드는 창마다 사용자 모드·방재단원 모드 (2026-10-12) — 사용자 모드면 '방재단원 모드로' 버튼
+    // 방재단 화면은 실측·시연 모두 전용 코드로 로그인한 계정만 (2026-10-12 사용자 요청). 시연 모드는 창마다
+    // 사용자 모드·방재단원 모드 — 코드로 로그인한 계정이 사용자 모드면 '방재단원 모드로' 버튼, 아니면 '방재단 로그인'
     final crew = demo ? ref.watch(demoResponderViewProvider) : isPatrolRole(role);
     // '바다 위 대피 경로' 시연 버튼은 뺐다 (2026-10-11 사용자 요청) — 바다 위면 대시보드 경로 안내가 해상 경로를 준다
-    final team = demo && !crew
+    final team = demo && !crew && ref.watch(responderUnlockedProvider)
         ? _FeatureButton(
             icon: Icons.shield_rounded,
             label: '방재단원 모드로 바꾸기 (시연)',
@@ -754,7 +755,7 @@ class _SafetyFeaturesCardState extends ConsumerState<SafetyFeaturesCard> {
 }
 
 /// 방재단 로그인 상태 (2026-10-10 사용자 요청, 휴대폰 화면의 방재단 로그인 카드 모양): 방재단원으로 로그인했을 때만 보인다.
-/// 로그아웃 = 서버 역할 내려놓기 (DELETE /api/v1/user/role). 시연 모드는 역할 없이 방재단 화면을 여는 것이라 로그아웃이 없다
+/// 로그아웃 = 서버 역할 내려놓기 (DELETE /api/v1/user/role). 시연 모드도 전용 코드로 로그인한 계정만 (2026-10-12)
 class TeamStatusCard extends ConsumerStatefulWidget {
   const TeamStatusCard({super.key});
   @override
@@ -768,6 +769,7 @@ class _TeamStatusCardState extends ConsumerState<TeamStatusCard> {
     setState(() => busy = true);
     try {
       await ref.read(liveApiProvider).dropRole();
+      ref.read(demoRoleProvider.notifier).set(DemoRole.user);
       ref.invalidate(meProvider);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('방재단에서 로그아웃했어요.')));
     } catch (e) {
@@ -780,8 +782,9 @@ class _TeamStatusCardState extends ConsumerState<TeamStatusCard> {
   @override
   Widget build(BuildContext c) {
     final demo = ref.watch(showDemoProvider);
-    final real = !demo && isPatrolRole('${ref.watch(meProvider).valueOrNull?['role'] ?? ''}');
-    if (!demo && !real) return const SizedBox.shrink();
+    // 서버 계정이 방재단·관리자 역할인지 (시연 모드도 같다). 서버 없이 실행(mock)은 계정이 없어 로그아웃 없이 안내만
+    final real = AppConfig.isRemote && isPatrolRole('${ref.watch(meProvider).valueOrNull?['role'] ?? ''}');
+    if (!real && !(demo && ref.watch(demoResponderViewProvider))) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.only(top: 16),
       child: GkCard(
@@ -792,7 +795,7 @@ class _TeamStatusCardState extends ConsumerState<TeamStatusCard> {
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Text('방재단 로그인', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: GK.ink)),
-              Text(demo ? '시연 모드 · 방재단 화면을 예시 데이터로 봐요' : '방재단원으로 로그인했어요',
+              Text(demo ? '방재단원으로 로그인했어요 · 시연 모드는 예시 데이터로 봐요' : '방재단원으로 로그인했어요',
                   style: const TextStyle(fontSize: 15, color: GK.muted, height: 1.4)),
             ]),
           ),
@@ -908,6 +911,8 @@ class _TeamLoginFormState extends ConsumerState<TeamLoginForm> {
         return;
       }
       code.clear();
+      // 시연 모드면 이 창을 방재단원 모드로 (코드로 로그인한 계정만 방재단원 모드를 쓸 수 있다, 2026-10-12)
+      if (ref.read(showDemoProvider)) ref.read(demoRoleProvider.notifier).set(DemoRole.responder);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('방재단원으로 로그인했어요.')));
       context.push('/responder');
     } catch (e) {

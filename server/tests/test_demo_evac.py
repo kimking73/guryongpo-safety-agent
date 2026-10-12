@@ -6,7 +6,7 @@ from test_alerts import UID, assert_spec
 
 NOW = datetime(2026, 10, 12, 3, 0, tzinfo=timezone.utc)
 OTHER = "7b1d2c3e-4f50-4a6b-8c7d-9e0f1a2b3c4d"
-RESPONDER = {"Authorization": "Bearer dev:other-account"}
+RESPONDER = {"Authorization": "Bearer dev:responder-other-account"}   # dev uid 가 responder 로 시작 = 방재단 역할
 ROWS_KEY = "FROM care.demo_evac d JOIN users u"
 
 
@@ -76,6 +76,17 @@ def test_other_account_sees_responses_without_personal_fields(client, fake_db):
     assert b["is_me"] and b["label"].startswith("시연 주민 ")
     assert a["location"] != b["location"]              # 지도 표시가 겹치지 않게 다른 자리
     assert not {"address", "phone", "home"} & set(a)
+
+
+def test_responder_side_needs_patrol_role(client, fake_db):
+    """응답 목록(주민 위치 포함)과 출동 기록은 방재단·관리자만 — 코드를 받지 않은 계정은 403 (2026-10-12)"""
+    _me(fake_db)
+    fake_db.rows[ROWS_KEY] = [_row(UID, "need_help")]
+    assert client.get("/api/v1/demo/evacuation/responses", headers=AUTH).status_code == 403
+    body = {"departed_at": "2026-10-12T12:00:00+09:00", "eta": "2026-10-12T12:07:00+09:00", "stage": "en_route"}
+    assert client.put(f"/api/v1/demo/evacuation/demo-user-{UID}/dispatch", json=body, headers=AUTH).status_code == 403
+    assert client.delete(f"/api/v1/demo/evacuation/demo-user-{UID}/dispatch", headers=AUTH).status_code == 403
+    assert not _sql(fake_db, "UPDATE care.demo_evac SET dispatch")
 
 
 def test_me_returns_dispatch_or_null(client, fake_db):
