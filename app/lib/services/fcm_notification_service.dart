@@ -30,6 +30,15 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   }
 }
 
+/// 푸시 권한은 받았지만 이 기기의 FCM 토큰을 받지 못함 — 화면에 [message]를 그대로 보여 준다.
+/// iPhone: 앱에 푸시 권한(aps-environment)·Firebase APNs 키가 없으면 APNs 토큰이 오지 않아 FCM 토큰도 없다 (2026-10-12)
+class PushTokenUnavailable implements Exception {
+  const PushTokenUnavailable(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+
 class FcmNotificationService {
   FcmNotificationService._();
 
@@ -105,8 +114,12 @@ class FcmNotificationService {
     _initialized = true;
 
     if (await isEnabled) {
-      final token = await FirebaseMessaging.instance.getToken();
-      if (token != null) await _registerToken(token);
+      try {
+        await _registerToken(await _fcmToken());
+      } on PushTokenUnavailable {
+        // 예전에 켜 둔 값이 남아 있어도 토큰을 못 받으면 끈다 (앱을 열면 폴링으로 경고 확인)
+        await (await SharedPreferences.getInstance()).setBool(_enabledKey, false);
+      }
     }
     final initial = await FirebaseMessaging.instance.getInitialMessage();
     final id = initial?.data['alert_id'] as String?;
@@ -129,12 +142,37 @@ class FcmNotificationService {
       // 대피 경보가 잠금 화면 위에 뜨려면 '전체 화면 알림' 권한도 (Android 14부터 사용자가 켬)
       await EvacAlarm.requestPermissions();
       await AlertNotifications.ensureChannel();
+      // 토큰을 받은 뒤에만 '켜짐'으로 저장한다 — 못 받으면 PushTokenUnavailable (화면이 스위치를 되돌리고 안내)
+      final token = await _fcmToken();
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_enabledKey, true);
-      final token = await FirebaseMessaging.instance.getToken();
-      if (token != null) await _registerToken(token);
+      await _registerToken(token);
     }
     return settings.authorizationStatus;
+  }
+
+  static const _iosNotReady = 'iPhone 푸시 알림은 아직 준비 중이에요. 앱을 열면 경고를 확인해요.';
+
+  /// 이 기기의 FCM 토큰. iPhone 은 APNs 토큰이 먼저 있어야 한다 — 몇 초 기다려도 없으면 PushTokenUnavailable
+  Future<String> _fcmToken() async {
+    final messaging = FirebaseMessaging.instance;
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      String? apns;
+      for (var i = 0; i < 3 && apns == null; i++) {
+        apns = await messaging.getAPNSToken();
+        if (apns == null) await Future<void>.delayed(const Duration(seconds: 1));
+      }
+      if (apns == null) throw const PushTokenUnavailable(_iosNotReady);
+    }
+    try {
+      final token = await messaging.getToken();
+      if (token == null) throw const PushTokenUnavailable('이 기기의 푸시 등록 정보를 받지 못했어요. 잠시 후 다시 켜 주세요.');
+      return token;
+    } on FirebaseException catch (e) {
+      throw PushTokenUnavailable(e.code == 'apns-token-not-set'
+          ? _iosNotReady
+          : '푸시 알림을 켜지 못했어요 (${e.code}). 앱을 열면 경고를 확인해요.');
+    }
   }
 
   Future<void> disablePush() async {

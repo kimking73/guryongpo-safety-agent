@@ -69,6 +69,8 @@ Future<void> scheduleEvacAlarmDemo(WidgetRef ref, {Duration delay = const Durati
   await EvacAlarm.requestPermissions();
   await ref.read(prototypeSafetyProvider).startDemoAlert(prototypeEvacuationAlertId);
   evacAlarmShownIds.remove(prototypeEvacuationAlertId);
+  // iPhone: 앱이 멈춰도 울리게 OS 에 예약 (Dart 타이머는 화면이 꺼지면 멈춘다)
+  await EvacAlarm.scheduleIos(demoEvacuationAlert, delay);
   Timer(delay, () {
     unawaited(EvacAlarm.show(demoEvacuationAlert));
     // 앱을 보고 있으면 전체 화면 알림 대신 위쪽 알림만 나오므로 경보 화면을 바로 띄운다

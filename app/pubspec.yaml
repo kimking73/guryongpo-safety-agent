@@ -23,6 +23,8 @@ dependencies:
   record: ^7.1.1
   audioplayers: ^6.8.1
   flutter_local_notifications: ^19.5.0
+  # iPhone 잠금 화면 경보 시연: 알림을 OS 에 예약 (lib/services/evac_alarm.dart scheduleIos)
+  timezone: ^0.10.1
   flutter_tts: ^4.2.5
   font_awesome_flutter: 11.0.0
   flutter_svg: ^2.3.0
@@ -39,7 +41,7 @@ flutter:
   uses-material-design: true
   # 디자인 = web-prototype (2026-10-08). AI 대화 캐릭터 '모리'
   assets:
-    - assets/mori-face.png
+    - assets/mori-face-v2.png
     # 휴대폰 앱 디자인(lib/mobile/)의 AI 캐릭터
     - assets/images/mascot.png
   # Pretendard (SIL OFL 1.1, assets/fonts/Pretendard-OFL.txt) — 한국어 2,350자 + 영문·기호로 줄인 것 (굵기당 약 420KB)
