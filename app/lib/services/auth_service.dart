@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart' show ValueNotifier, kIsWeb;
 import '../firebase_options.dart';
 import 'account_sync.dart';
 import 'app_config.dart';
+import 'demo_live_api.dart';
+import 'prototype_safety_store.dart';
 
 class AuthStateInfo {
   const AuthStateInfo({required this.isMock, this.userId, this.token});
@@ -163,6 +165,9 @@ class AuthService {
   Future<void> signOut() => _run(() async {
         await AccountSync.instance.push(); // 못 올린 변경을 계정에 남기고
         await AccountSync.instance.clearLocal(); // 이 기기에서는 지운다
+        // 시연 대피 상황(경보·응답·방재단 출발 기록·배정)도 처음부터 — 다시 로그인하면 지난 출발 기록이 남지 않게 (2026-10-12)
+        await PrototypeSafetyController.clearDemoSession();
+        DemoLiveApi.resetDemoIncident();
         await FirebaseAuth.instance.signOut();
       });
 

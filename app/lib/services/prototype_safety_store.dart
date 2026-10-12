@@ -373,6 +373,39 @@ class PrototypeSafetyController extends ChangeNotifier {
   /// 방재단이 이 시연 주민에게 출발했는지·도착 예정 시각 (2026-10-12 사용자 요청: 방재단 → 시민 쌍방향). 없으면 null
   DemoDispatch? get demoDispatch => _dispatch;
 
+  /// 시연 방(다른 계정·기기, services/demo_relay.dart)에서 받은 시연 주민의 장애 유형 (vision·hearing·mobility_limited).
+  /// null = 시연 방을 안 씀 → 이 기기의 '내 정보'를 쓴다
+  List<String>? get residentNeeds => _residentNeeds;
+  List<String>? _residentNeeds;
+
+  /// 새 시연 경보·로그아웃마다 1씩 — 시연 방에 '지난 출동 기록 지우기'를 보낼 때를 안다
+  int get demoAlertSeq => _demoAlertSeq;
+  int _demoAlertSeq = 0;
+
+  /// 시연 방에서 받은 주민 쪽 상태 (방재단원 모드 창). 이 창 메모리에만 — 기기 기록은 그대로
+  void applyRemoteResident({required bool alertActive, EvacuationResponseStatus? response, required List<String> needs}) {
+    final same = _demoAlertActive == alertActive &&
+        _responses[prototypeAlertKey] == response &&
+        _residentNeeds != null &&
+        _residentNeeds!.join(',') == needs.join(',');
+    if (same) return;
+    _demoAlertActive = alertActive;
+    _responses = {..._responses}..remove(prototypeAlertKey);
+    if (response != null) _responses[prototypeAlertKey] = response;
+    _residentNeeds = needs;
+    notifyListeners();
+  }
+
+  /// 시연 방에서 받은 출동 기록 (사용자 모드 창). 이 창 메모리에만
+  void applyRemoteDispatch(DemoDispatch? d) {
+    if (_dispatch?.toJson().toString() == d?.toJson().toString()) return;
+    _dispatch = d;
+    notifyListeners();
+  }
+
+  /// 시연 경보 id (prototype_safety_screens.dart prototypeEvacuationAlertId 와 같은 값 — 서로 import 하지 않으려고 여기 둔다)
+  static const prototypeAlertKey = 'demo-flood-evacuation';
+
   static DemoDispatch? _readDispatch(SharedPreferences prefs) {
     final raw = prefs.getString(_dispatchKey);
     if (raw == null) return null;
@@ -395,6 +428,23 @@ class PrototypeSafetyController extends ChangeNotifier {
     }
     for (final c in [..._instances]) {
       c._dispatch = d;
+      c.notifyListeners();
+    }
+  }
+
+  /// 시연 대피 상황을 처음부터 (로그아웃할 때, 2026-10-12 사용자 요청: 다시 로그인해도 방재단 출발 기록이 남았다).
+  /// 시연 경보·시연 응답·출동 기록을 지운다 — 같은 브라우저의 다른 창도 storage 이벤트로 함께 비워진다
+  static Future<void> clearDemoSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_dispatchKey);
+    await prefs.remove(_demoAlertKey);
+    await prefs.remove(_responsesKey);
+    for (final c in [..._instances]) {
+      c._dispatch = null;
+      c._demoAlertActive = false;
+      c._responses = {};
+      c._residentNeeds = null;
+      c._demoAlertSeq++;
       c.notifyListeners();
     }
   }
@@ -496,6 +546,7 @@ class PrototypeSafetyController extends ChangeNotifier {
     _responses = {..._responses}..remove(alertId);
     _demoAlertActive = true;
     _dispatch = null;   // 지난 경보의 방재단 도착 시간이 새 경보에 남지 않게
+    _demoAlertSeq++;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_demoAlertKey, true);

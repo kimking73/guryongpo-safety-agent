@@ -75,6 +75,8 @@ class DemoLiveApi extends LiveApi {
   /// 시연 경보(대피 경보 팝업)가 진행 중인지·내 시연 응답 — DemoPatrolScope 가 기기 시연 기록에서 넣는다
   static bool myAlertActive = false;
   static String? myResponse;
+  /// 시연 방(다른 계정, demo_relay.dart)에서 받은 시연 주민 장애 유형. null 이면 이 기기의 '내 정보'
+  static List<String>? remoteNeeds;
   static const meTargetId = 'demo-me';
   /// 프로필 장애 유형 → 가구 needs (대리 등록과 같은 이름)
   static const _profileNeeds = demoProfileNeeds;
@@ -252,7 +254,7 @@ class DemoLiveApi extends LiveApi {
           null => {'lat': 35.9893, 'lng': 129.5541},
         },
         'phone': null,
-        'needs': [for (final d in disabilitiesOf(profile)) if (_profileNeeds[d] case final n?) n],
+        'needs': remoteNeeds ?? [for (final d in disabilitiesOf(profile)) if (_profileNeeds[d] case final n?) n],
         'has_app': true,
         'status': st['status'],
         'minutes_since_alert': 0,

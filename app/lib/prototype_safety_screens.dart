@@ -9,7 +9,7 @@ import 'package:latlong2/latlong.dart';
 import 'services/demo_speech.dart';
 import 'services/prototype_safety_store.dart';
 
-const prototypeEvacuationAlertId = 'demo-flood-evacuation';
+const prototypeEvacuationAlertId = PrototypeSafetyController.prototypeAlertKey;
 const evacuationFlashTransitionInterval = Duration(milliseconds: 500);
 const evacuationFlashDuration = Duration(seconds: 30);
 const _evacuationFlashTransitionLimit = 60;

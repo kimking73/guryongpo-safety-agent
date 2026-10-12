@@ -12,15 +12,16 @@ import os
 from contextlib import asynccontextmanager
 from functools import lru_cache
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, Header
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Path, UploadFile, Header
 from fastapi.responses import Response
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import state as S
 from .auth import signed_in_uid
+from .demo_room import CODE_PATTERN, DemoRoom, DemoRoomPatch, DemoRooms
 from .route_brief import RouteBriefRequest, RouteBriefResponse, RouteBriefService
 from .service import ChatRequest, ChatResponse, ChatService
 from .voice import END_REPLY, MAX_BYTES, BadAudio, GoogleVoice, NoSpeech, VoiceUnavailable, is_end_phrase, to_pcm16k
@@ -68,6 +69,27 @@ def health() -> dict:
 def route_brief(req: RouteBriefRequest, service: RouteBriefService = Depends(get_route_brief)) -> RouteBriefResponse:
     """지도에 그린 경로의 주의할 점·위험 요소 (대시보드 'AI 경로 설명' 칸, 2026-10-11). 대화 그래프를 거치지 않는다."""
     return service.brief(req)
+
+
+@lru_cache
+def get_demo_rooms() -> DemoRooms:
+    """시연 방 (demo_room.py) — 서버 전체에서 하나. 테스트는 dependency_overrides로 바꾼다."""
+    return DemoRooms()
+
+
+DemoCode = Annotated[str, Path(pattern=CODE_PATTERN)]
+
+
+@app.get("/api/ai/demo-room/{code}", response_model=DemoRoom)
+def demo_room_get(code: DemoCode, rooms: DemoRooms = Depends(get_demo_rooms)) -> DemoRoom:
+    """시연 방 읽기 (2026-10-12): 다른 계정·기기의 사용자 모드 ↔ 방재단원 모드 창이 2초마다 읽는다. 없는 방은 빈 상태"""
+    return rooms.get(code)
+
+
+@app.put("/api/ai/demo-room/{code}", response_model=DemoRoom)
+def demo_room_put(code: DemoCode, patch: DemoRoomPatch, rooms: DemoRooms = Depends(get_demo_rooms)) -> DemoRoom:
+    """시연 방 쓰기 — 보낸 칸만 바꾼다 (사용자 모드: 경보·응답·장애 유형 / 방재단원 모드: 출동 기록)"""
+    return rooms.patch(code, patch)
 
 
 @app.get("/api/ai/usage")

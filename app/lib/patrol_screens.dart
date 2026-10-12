@@ -1275,7 +1275,8 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
     final id = incidentId;
     if (id == null) return;
     final now = DateTime.now();
-    final stops = [for (final (o, after) in visitCumulative(plan)) ('${o['id']}', now.add(after))];
+    final mine = {for (final t in _targets) if (!assignedToOther(t)) '${t['id']}'};   // 다른 방재단원 담당은 맡지 않는다
+    final stops = [for (final (o, after) in visitCumulative(plan)) if (mine.contains('${o['id']}')) ('${o['id']}', now.add(after))];
     setState(() => dispatching = true);
     try {
       await ref.read(liveApiProvider).dispatch(id, stops);
@@ -1351,7 +1352,11 @@ class _PatrolDashboardState extends ConsumerState<_PatrolDashboard> {
                               ]),
                             ),
                             const SizedBox(width: 8),
-                            visitStops.contains('${t['id']}')
+                            // 다른 방재단원이 맡은 곳은 내 경로에 넣지 않는다 (2026-10-12 사용자 요청)
+                            assignedToOther(t)
+                                ? Text('${(t['assigned_to'] as Map)['nickname'] ?? '다른 방재단원'}\n담당',
+                                    textAlign: TextAlign.center, style: dsText(12, weight: FontWeight.w700, color: Ds.muted))
+                                : visitStops.contains('${t['id']}')
                                 ? PillButton('추가됨', expand: false, height: 36, fontSize: 13, icon: FontAwesomeIcons.check, onPressed: () {
                                     _toggleRoute(t);
                                     setDialog(() {});
@@ -1965,6 +1970,12 @@ int workStep(WorkStatus w) => switch (w) {
     };
 const workSteps = ['출발', '방문', '대피 동행', '완료'];
 
+/// 다른 방재단원이 이미 맡은 대상인지 — 내가 다시 맡거나 단계를 바꿀 수 없다 (2026-10-12 사용자 요청: 예시 방재단원 A·B·C 배정은 그대로)
+bool assignedToOther(Map<String, dynamic> t) {
+  final a = t['assigned_to'] as Map?;
+  return a != null && a['is_me'] != true;
+}
+
 String assigneeText(Map<String, dynamic> t) {
   final a = t['assigned_to'] as Map?;
   if (a == null) return '미배정';
@@ -2360,8 +2371,15 @@ class _AssignCard extends StatelessWidget {
             if (w == WorkStatus.enRoute && DateTime.tryParse('${t['eta']}') != null)
               Text('도착 예정 ${clockHm(DateTime.parse('${t['eta']}').toLocal())}',
                   style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: GK.navy)),
-            // 업무 단계 바꾸기는 모든 카드에 — 미배정이면 고른 단계로 내가 맡는다 (2026-10-12 사용자 요청: 메뉴가 안 보여 단계를 못 바꿨다)
-            if (!closed && supportsWork) ...[
+            // 업무 단계 바꾸기: 미배정·내 담당 카드에만 — 미배정이면 고른 단계로 내가 맡는다 (2026-10-12 사용자 요청).
+            // 다른 방재단원이 맡은 카드는 바꿀 수 없다 (같은 날 사용자 요청)
+            if (!closed && supportsWork && assignedToOther(t))
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text('${(t['assigned_to'] as Map)['nickname'] ?? '다른 방재단원'} 담당 — 내가 맡을 수 없어요',
+                    style: const TextStyle(fontSize: 13, color: GK.muted)),
+              ),
+            if (!closed && supportsWork && !assignedToOther(t)) ...[
                 Wrap(spacing: 6, runSpacing: 0, children: [
                     PopupMenuButton<WorkStatus>(
                       tooltip: '업무 단계 바꾸기',
@@ -2659,7 +2677,8 @@ const seaColor = Color(0xff1565c0), landColor = Color(0xff2e7d32), portColor = C
 /// 대시보드 '경로 안내' (2026-10-10 사용자 요청): 지금 위치(GPS 또는 직접 지정한 출발지)가 바다 위면 화면을 따로 열지 않고
 /// 그 위치에서 바로 해상 경로(바다 → 가까운 항구 → 대피소)를 받아 대시보드 지도에 그린다. 바다가 아니면 null
 /// 육지 출발지(집·내 장소 등)를 골랐거나 X로 끝냈으면 null. 도착은 경로 안내 '도착:'에서 고른 곳(없으면 가까운 대피소)
-final seaRoutePlanProvider = FutureProvider<SeaRoutePlan?>((ref) async {
+final seaRoutePlanProvider = FutureProvider<SeaRoutePlan?>(seaRoutePlan);
+Future<SeaRoutePlan?> seaRoutePlan(FutureProviderRef<SeaRoutePlan?> ref) async {
   if (ref.watch(seaRouteOff) || ref.watch(routeOriginPoint) != null) return null;
   final where = await ref.watch(whereNowProvider.future);
   if (where.kind != WhereKind.sea) return null;
@@ -2667,7 +2686,7 @@ final seaRoutePlanProvider = FutureProvider<SeaRoutePlan?>((ref) async {
   final to = ref.watch(seaDestPoint)?.at;
   final r = await ref.watch(liveApiProvider).seaRoute(p.latitude, p.longitude, toLat: to?.latitude, toLon: to?.longitude);
   return SeaRoutePlan(r, p);
-});
+}
 
 /// 대시보드 지도에 겹쳐 그릴 해상 경로: 바닷길(파란 점선) + 항구에서 대피소까지 육상 경로(초록)
 List<Polyline> seaRoutePolylines(SeaRoutePlan p) => [
