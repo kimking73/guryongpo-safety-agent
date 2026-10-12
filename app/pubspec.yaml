@@ -23,6 +23,8 @@ dependencies:
   record: ^7.1.1
   audioplayers: ^6.8.1
   flutter_local_notifications: ^19.5.0
+  # iPhone 잠금 화면 경보 시연: 알림을 OS 에 예약 (lib/services/evac_alarm.dart scheduleIos)
+  timezone: ^0.10.1
   flutter_tts: ^4.2.5
   font_awesome_flutter: 11.0.0
   flutter_svg: ^2.3.0

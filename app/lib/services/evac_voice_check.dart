@@ -64,6 +64,18 @@ class EvacVoiceCheck {
 
   /// 경보 화면이 대피 음성 확인을 쓸 사용자인지 — 내 정보에서 '시각장애'를 고른 사람
   /// (prototype_safety_store.dart AccessibilitySettings.visionSupport). FCM 백그라운드 isolate 에서도 읽는다
+  /// 사용자 화면 '음성 안내 자동 재생' 저장 키 (main.dart autoVoiceAlerts 가 읽고 쓴다)
+  static const autoVoiceKey = 'auto_voice_alerts_v1';
+
+  /// '음성 안내 자동 재생'을 켰는지 — 알림으로 앱이 새로 열려 화면 값이 아직 안 읽혔을 때도 맞게 저장값을 본다
+  static Future<bool> autoVoiceSaved() async {
+    try {
+      return (await SharedPreferences.getInstance()).getBool(autoVoiceKey) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   static Future<bool> visionSupportSaved() async {
     try {
       final raw = (await SharedPreferences.getInstance()).getString('prototype_accessibility_v1');

@@ -9,6 +9,8 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart' show Dio, BaseOptions;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_messaging/firebase_messaging.dart' show AuthorizationStatus;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -737,6 +739,7 @@ class _NotificationBootstrapState extends ConsumerState<_NotificationBootstrap>
     });
     WidgetsBinding.instance.addObserver(this);
     _startNetCheck();
+    _restoreAutoVoice();
     _wireEvacAlarm();
     // 시연: 방재단원 모드(다른 창·계정)가 출발하면 시각장애인에게 도착 예정 시간을 음성으로 — 실서버 responder_assigned 푸시와 같은 흐름
     // (화면이 꺼져 있으면 배정 안내 알림으로 화면을 켜고 앱을 연 뒤 읽는다, 2026-10-12 사용자 요청)
@@ -832,6 +835,16 @@ class _NotificationBootstrapState extends ConsumerState<_NotificationBootstrap>
 
   /// 로그인 준비가 끝났는지 — 꺼진 앱을 알림 버튼으로 열었을 때 응답은 이것을 기다렸다가 보낸다
   final _authReady = Completer<void>();
+
+  /// '음성 안내 자동 재생'을 기기에 저장하고 앱을 열 때 되살린다 (2026-10-12: 알림으로 앱이 새로 열려도 켜진 채로)
+  void _restoreAutoVoice() {
+    unawaited(EvacVoiceCheck.autoVoiceSaved().then((on) {
+      if (on && mounted) ref.read(autoVoiceAlerts.notifier).state = true;
+    }));
+    ref.listenManual<bool>(autoVoiceAlerts, (_, on) {
+      unawaited(SharedPreferences.getInstance().then((p) => p.setBool(EvacVoiceCheck.autoVoiceKey, on)));
+    });
+  }
 
   /// 대피 경보 사이렌 알림(services/evac_alarm.dart) → 경보 화면 / 알림 버튼 응답 (2026-10-11)
   void _wireEvacAlarm() {
@@ -1461,6 +1474,7 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
   // 시각장애인 대피 음성 확인 (B12, 2026-10-12): gpt-realtime 이 묻고 대답을 via=voice 로 저장 (evac_voice_check.dart)
   late final EvacVoiceCheck _check;
   bool _voiceCheck = false;
+  bool _realtimeVoice = false; // 이 경보 화면이 gpt-realtime 음성 확인을 쓰는지
   String? _voiceNotice;
 
   void _close() => widget.onClose != null ? widget.onClose!() : Navigator.of(context).pop();
@@ -1494,10 +1508,20 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
           unawaited(EvacAlarm.torch(_flashOn));   // 손전등도 같은 박자로 (2026-10-11 사용자 요청, Android 앱)
         });
       }
-      if (a.visionSupport) {
-        // 시각장애인: 화면이 꺼진 채 울려도 만질 때까지 기다리지 않고 바로 음성으로 묻는다 (기기 TTS·Google 음성 안 씀)
+      // 시각장애인, 또는 '음성 안내 자동 재생'을 켠 사람의 경보 화면(잠금 화면 알림으로 열림, 2026-10-12):
+      // 만질 때까지 기다리지 않고 바로 gpt-realtime 이 묻는다 (사이렌은 멈춤, 기기 TTS·Google 음성 안 씀)
+      _realtimeVoice = a.visionSupport || (widget.alarm && ref.read(autoVoiceAlerts));
+      if (_realtimeVoice) {
         unawaited(_startVoiceCheck());
-      } else {
+      } else if (widget.alarm) {
+        // 알림으로 앱이 새로 열리면 화면 값(autoVoiceAlerts)이 아직 안 읽혔을 수 있다 → 저장값으로 한 번 더 본다
+        unawaited(EvacVoiceCheck.autoVoiceSaved().then((on) {
+          if (!on || !mounted || _realtimeVoice) return;
+          setState(() => _realtimeVoice = true);
+          unawaited(_startVoiceCheck());
+        }));
+      }
+      if (!_realtimeVoice) {
         // 음성은 '음성 안내 자동 재생' 스위치만 본다 (시각 지원 스위치는 2026-10-11 뺐다)
         _voice = ref.read(autoVoiceAlerts);
         // 경보 화면이면 사이렌과 겹치지 않게 처음 만질 때까지 미룬다
@@ -1618,7 +1642,7 @@ class _EvacuationAlertDialogState extends ConsumerState<EvacuationAlertDialog> {
   /// 켜진 알림 방식 안내 줄 (사용자 화면 '알림' 스위치)
   Widget _effectsLine() {
     final a = ref.watch(prototypeSafetyProvider).accessibility;
-    if (a.visionSupport) {
+    if (_realtimeVoice) {
       return Row(mainAxisAlignment: MainAxisAlignment.center, children: [
         Flexible(
           child: Text(
@@ -3605,7 +3629,21 @@ class _FcmPushSettingsCardState extends ConsumerState<FcmPushSettingsCard> {
   Future<void> _toggle(bool value) async {
     setState(() => loading = true);
     if (value) {
-      final status = await FcmNotificationService.instance.enablePush();
+      final AuthorizationStatus status;
+      try {
+        status = await FcmNotificationService.instance.enablePush();
+      } catch (e) {
+        // 권한은 받았지만 토큰을 못 받음 (iPhone: APNs 설정 전) — 스위치를 되돌리고 이유를 보여 준다
+        if (mounted) {
+          setState(() {
+            enabled = false;
+            loading = false;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(e is PushTokenUnavailable ? e.message : '푸시 알림을 켜지 못했어요. 앱을 열면 경고를 확인해요.')));
+        }
+        return;
+      }
       final granted =
           status.name == 'authorized' || status.name == 'provisional';
       if (mounted) {

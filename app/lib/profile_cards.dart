@@ -677,17 +677,22 @@ class ProfileAlertsCard extends ConsumerWidget {
         // '음성 언어'·'접근성 자세히' 버튼은 위 스위치와 겹쳐 뺐다 (2026-10-09)
         const FcmPushSettingsCard(),
         // 재난문자처럼 (2026-10-11): 누르고 화면을 끄거나 무음으로 바꾸면 10초 뒤 사이렌 + 잠금 화면 위 경보 (Android 앱, 기기에만 기록)
-        if (EvacAlarm.supported) ...[
+        // iPhone 은 잠금 화면 알림 → 누르면 경보 화면 + 바로 음성 안내 (2026-10-12)
+        if (EvacAlarm.demoSupported) ...[
           const SizedBox(height: 8),
           OutlinedButton.icon(
             style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
             onPressed: () async {
               await scheduleEvacAlarmDemo(ref);
-              showResponseMessage('10초 뒤 대피 경보가 울려요 — 화면을 끄거나 무음으로 바꿔 보세요');
+              showResponseMessage(EvacAlarm.supported
+                  ? '10초 뒤 대피 경보가 울려요 — 화면을 끄거나 무음으로 바꿔 보세요'
+                  : '10초 뒤 대피 경보 알림이 와요 — 화면을 끄고 기다렸다가 알림을 눌러 보세요');
             },
             icon: const Icon(Icons.campaign_rounded),
             label: const Text('잠금 화면 경보 시연 (10초 뒤)'),
           ),
+        ],
+        if (EvacAlarm.supported) ...[
           // 주의보·경보 같은 일반 재난 알림도 잠금 화면에 (2026-10-11, 기기에서만)
           const SizedBox(height: 8),
           OutlinedButton.icon(

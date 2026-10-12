@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:timezone/timezone.dart' as tz;
 
 import '../models/domain_models.dart';
 
@@ -33,6 +34,43 @@ class EvacAlarm {
 
   /// 사이렌 + 전체 화면 경보를 쓸 수 있는 기기 (지금은 Android 만)
   static bool get supported => !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  /// iPhone (2026-10-12): 꺼진 화면을 켜거나 앱을 스스로 깨울 수 없어서, 잠금 화면 알림을 띄우고
+  /// 알림을 누르면 경보 화면이 열리며 바로 음성 안내가 시작된다 (EvacuationAlertDialog)
+  static bool get _ios => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+
+  /// '잠금 화면 경보 시연' 버튼을 보일 기기 — Android(사이렌·전체 화면) + iPhone(잠금 화면 알림)
+  static bool get demoSupported => supported || _ios;
+
+  /// iPhone 시연: [delay] 뒤 잠금 화면 대피 경보 알림을 OS 에 예약한다 (화면이 꺼져 앱이 멈춰도 울린다)
+  static Future<void> scheduleIos(AlertItem alert, Duration delay) async {
+    if (!_ios) return;
+    await FlutterLocalNotificationsPlugin().zonedSchedule(
+      notificationId,
+      alert.title,
+      alert.summary,
+      tz.TZDateTime.now(tz.UTC).add(delay),
+      const NotificationDetails(
+        iOS: DarwinNotificationDetails(
+          presentAlert: true,
+          presentBanner: true,
+          presentList: true,
+          presentSound: true,
+          interruptionLevel: InterruptionLevel.active,
+        ),
+      ),
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      payload: _payload(alert),
+    );
+  }
+
+  static String _payload(AlertItem alert) => jsonEncode({
+        'kind': _kind,
+        'alertId': alert.id,
+        'title': alert.title,
+        'summary': alert.summary,
+        'guide': alert.guide,
+      });
 
   /// 3버튼 (DemoNotifications 와 같은 id — 서버 응답값)
   static const actions = <(String, String)>[
@@ -143,13 +181,7 @@ class EvacAlarm {
           ],
         ),
       ),
-      payload: jsonEncode({
-        'kind': _kind,
-        'alertId': alert.id,
-        'title': alert.title,
-        'summary': alert.summary,
-        'guide': alert.guide,
-      }),
+      payload: _payload(alert),
     );
   }
 
@@ -217,7 +249,7 @@ class EvacAlarm {
 
   /// 사이렌만 멈춘다 (경보 화면을 처음 만졌을 때). 점멸·진동은 응답할 때까지
   static Future<void> silence() async {
-    if (!supported) return;
+    if (!supported && !_ios) return;
     try {
       await FlutterLocalNotificationsPlugin().cancel(notificationId);
     } catch (_) {}
@@ -235,6 +267,14 @@ class EvacAlarm {
 
   /// 알림 권한 + Android 14부터 사용자가 켜야 하는 '전체 화면 알림' 권한을 묻는다
   static Future<void> requestPermissions() async {
+    if (_ios) {
+      try {
+        await FlutterLocalNotificationsPlugin()
+            .resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>()
+            ?.requestPermissions(alert: true, sound: true);
+      } catch (_) {}
+      return;
+    }
     if (!supported) return;
     final android = FlutterLocalNotificationsPlugin()
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
