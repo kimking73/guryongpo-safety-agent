@@ -214,11 +214,13 @@ def decide(state: GuardianState, fetch: Fetch | None = None, use_data: bool = Tr
         # 이 줄이 없으면 내용 검사가 둘을 같은 곳으로 보고 맞는 답을 막았다 (2026-10-12 local, 6번 중 5번)
         d.notes.append(Evidence(source="rule", key="위치 구분", value=(
             f"위험 단계·위험 영역 근거의 '기준 위치'는 사용자가 물은 장소({name})다. 사용자는 지금 그곳이 아니라 "
-            f"{location.label or '현재 위치'}에 있다. '사용자 위치'와 대피소 경로는 {location.label or '현재 위치'} 기준이다.")))
+            f"{location.label or '현재 위치'}에 있다. '사용자 위치'는 {location.label or '현재 위치'} 기준이고, "
+            f"대피소 경로는 {route_origin_label(state)}에서 출발한다.")))
     elif use_data and known and (state.get("reference_is_here") or state.get("pinned_origin")):
         # 사용자가 있다고 말한 곳·정한 출발지: '기준 위치'와 '사용자 위치'가 같은 곳임을 밝힌다 (검사가 둘을 다른 곳으로 봤다)
         d.notes.append(Evidence(source="rule", key="위치 구분", value=(
-            f"사용자는 지금 {location.label}에 있다. '기준 위치'·'사용자 위치'·대피소 경로 모두 {location.label} 기준이다.")))
+            f"사용자는 지금 {location.label}에 있다. '기준 위치'·'사용자 위치'는 {location.label} 기준이고, "
+            f"대피소 경로는 {route_origin_label(state)}에서 출발한다.")))
     if use_data:
         hz = T.hazards_at(location.lat, location.lon, fetch=fetch)
         in_danger = (not hz.get("available")) or bool(hz.get("labels"))   # 판정 불가 → 위험 지역 (규칙)
@@ -256,13 +258,33 @@ def decide(state: GuardianState, fetch: Fetch | None = None, use_data: bool = Tr
     return d
 
 
+def _from_current(state: GuardianState) -> GuardianState:
+    """행동 권고의 대피 경로는 항상 현재 위치에서 낸다 (2026-10-12 사용자 결정) — 말한 장소·정한 출발지를 뺀 상태.
+    앱 지도도 AI 경로를 현재 위치에서 그린다. 현재 위치를 모르면 집 → 읍 중심 (flood.pick_location)."""
+    return {**state, "reference_location": None, "reference_query": None, "reference_is_here": False,
+            "pinned_origin": None, "destination_query": None}
+
+
+def route_origin_label(state: GuardianState) -> str:
+    """대피 경로 출발점 이름. 현재 위치를 알면 늘 '현재 위치', 모르면 실제로 쓴 곳(집·읍 중심)을 밝힌다."""
+    if state.get("current_location"):
+        return "현재 위치"
+    return pick_user_location(_from_current(state))[0].label or "현재 위치"
+
+
+def origin_note(state: GuardianState) -> str:
+    return f"{route_origin_label(state)}에서 이동 경로입니다."
+
+
 def _route_evidence(state: GuardianState, results: list[SpecialistResult], fetch: Fetch | None):
-    """대피소 경로: 위치·경로 agent가 이미 냈으면 그것, 아니면 여기서 가장 가까운 안전한 대피소로 계산."""
+    """대피소 경로: 위치·경로 agent가 현재 위치에서 이미 냈으면 그것, 아니면 여기서 현재 위치 → 가장 가까운 안전한 대피소로 계산.
+    위치·경로 agent가 말한 장소·정한 출발지에서 낸 경로는 쓰지 않는다 (출발점이 현재 위치가 아니다)."""
+    elsewhere = bool(state.get("pinned_origin") or (state.get("reference_is_here") and state.get("reference_location")))
     done = next((r for r in results if r.agent == Specialist.LOCATION_ROUTE and r.route), None)
-    if done is not None:
+    if done is not None and not elsewhere:
         return done.route, []
     from . import location as L
-    data = L.collect({**state, "destination_query": None}, fetch=fetch)
+    data = L.collect(_from_current(state), fetch=fetch)
     return L.route_info(data), [e for e in data.evidence if e.key != "기준 위치"]
 
 
@@ -294,6 +316,15 @@ def with_route_first(steps: list[str], route: dict[str, Any] | None) -> list[str
     return [*rest[:at], steps[has], *rest[at:]]
 
 
+def with_origin_note(steps: list[str], route: dict[str, Any] | None, note: str) -> list[str]:
+    """대피소 경로를 말하는 할 일 앞에 출발점("현재 위치에서 이동 경로입니다.")을 코드가 밝힌다 (2026-10-12 사용자 결정, 작성 AI에 맡기지 않음)."""
+    name = ((route or {}).get("destination") or {}).get("name")
+    if not name or any("이동 경로입니다" in s for s in steps):
+        return steps
+    at = next((i for i, s in enumerate(steps) if name in s), None)
+    return steps if at is None else [f"{note} {s}" if i == at else s for i, s in enumerate(steps)]
+
+
 def with_passing_zones(steps: list[str], route: dict[str, Any] | None) -> list[str]:
     """대피 경로가 위험 영역을 지나는데 '지금 할 일'이 알리지 않으면 경로 안내 문장 뒤에 코드가 붙인다.
 
@@ -310,6 +341,7 @@ def with_passing_zones(steps: list[str], route: dict[str, Any] | None) -> list[s
 
 def situation_text(state: GuardianState, decision: Decision, main: SpecialistResult | None,
                    route: dict[str, Any] | None) -> str:
+    # 대피소 경로의 출발점 문장("○○에서 이동 경로입니다.")은 코드가 붙인다 (with_origin_note) — 작성기에 출발점을 주면 같은 말을 두 번 썼다
     user = state.get("user")
     lines = [f"- 도달한 분기: {' > '.join(decision.path)}"]
     if user is not None:
@@ -421,6 +453,8 @@ def make_action_advisor(writer: ActionWriter | None = None, fetch: Fetch | None 
         level = main.risk_level if main is not None else RiskLevel.NORMAL
         evidence = ([Evidence(source="action_guides", key=f"행동요령: {g['title']}", value=g["content"]) for g in guides]
                     + decision.notes + route_ev + forecast_ev)
+        if route:
+            evidence.append(Evidence(source="rule", key="대피소 경로 출발점", value=route_origin_label(state)))
 
         # 위치·경로 agent가 낸 경로면 '위험 영역을 지남'은 그 agent 문단이 이미 알린다 → 여기서 직접 구한 경로일 때만 할 일에 붙인다
         own_route = route if route_ev else None
@@ -441,6 +475,7 @@ def make_action_advisor(writer: ActionWriter | None = None, fetch: Fetch | None 
             if not steps:
                 steps, how = template_steps(decision, guides, route), "원문"
             steps = with_route_first(steps, route if decision.need_route else None)
+            steps = with_origin_note(steps, route if decision.need_route else None, origin_note(state))
             steps = with_passing_zones(steps, own_route)
         path = " > ".join(decision.path)
         logger.info("행동 권고 [%s] 분기=%s 재난=%s 원문=%s 경로=%s 질문=%s", how, path,
