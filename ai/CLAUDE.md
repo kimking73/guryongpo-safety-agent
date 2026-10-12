@@ -4,7 +4,7 @@
 1. Read `.claude/docs/timeline.md` → status table, "다음 세션 시작점", "이월 항목", work log.
 2. From `코드/`: `git pull` (teammates push to `main`), then `docker compose up -d` and `docker compose ps`
    (db, api, ai all healthy). If `.env` changed since the ai container started: `docker compose up -d --force-recreate ai`.
-3. Baseline tests: `.venv/bin/python -m pytest -q` → **244 passed** (2026-10-12). `-m "db and not live"` needs local db + `AI_DB_*`
+3. Baseline tests: `.venv/bin/python -m pytest -q` → **263 passed** (2026-10-12). `-m "db and not live"` needs local db + `AI_DB_*`
    in `.env` (plain `-m db` also runs paid live tests). `-m live` calls real OpenAI (routing, B3 injection, extractor; a few 원).
    If `docker compose ps` hangs, restart the OrbStack app (happened 2026-10-08); VM checks still work.
    Other lanes' baselines: server 223 passed·8 skipped, route 77, app 7 known failures as of 10-09 (not fully rerun since) (see timeline "다음 세션 시작점";
@@ -57,6 +57,9 @@
   user said they are there or typed coordinates). `action.decide` adds evidence `물은 장소(○○)` + `위치 구분` so writer/checker don't mix the two;
   `action.with_route_first` guarantees the shelter-route step in the danger branch. `about_property` → '질문 초점' line for the action writer
   (property-protection sentences from action_guides first; none → "공식 행동요령에 없어 안내하지 못합니다" — no shop flood-proofing text in the data).
+  Advisor route origin (2026-10-12, user decision): the '지금 할 일' shelter route always starts at the current location
+  (`action._from_current` drops the said place / pinned origin; a location-agent route from another origin is not reused) and code prefixes
+  that step with "현재 위치에서 이동 경로입니다." (`action.with_origin_note`; evidence `대피소 경로 출발점`). The danger-zone decision still uses `pick_user_location`.
   Flood evidence now states "기준 위치는 ○○ 위험 영역 밖" when outside; `flood.ACTION_TOPICS` strips "…여기서 안내하지 않습니다" sentences.
 - Realtime voice (2026-10-11, `guardian_ai/realtime.py`): `POST /api/voice/session` mints a 10-min OpenAI client secret for `gpt-realtime-2`
   (`OPENAI_REALTIME_MODEL`/`_VOICE`); the web app connects by WebRTC and the model only calls tools (`tool_choice=required`: `ask_guardian` →

@@ -386,8 +386,43 @@ def test_can_move_branch_uses_location_route_and_asks_when_unknown():
         {**tree_state(Phase.DURING, age=80, walking_impaired=True),
          "specialist_results": [result(Specialist.RAIN_FLOOD, RiskLevel.WARNING, "침수 경보"),
                                 result(Specialist.LOCATION_ROUTE, RiskLevel.NORMAL, "경로", route=route)]})
-    assert "충혼탑 앞(으)로 대피하세요. 902m, 도보 약 11분" in out["draft"]
+    assert "현재 위치에서 이동 경로입니다. 충혼탑 앞(으)로 대피하세요. 902m, 도보 약 11분" in out["draft"]
     assert out["draft"].endswith("확인할게요: " + A.QUESTIONS["can_move"])
+    assert ("대피소 경로 출발점", "현재 위치") in [(e.key, e.value) for e in out["action_plan"].evidence]
+
+
+def test_advisor_route_always_starts_from_the_current_location(monkeypatch):
+    """말한 장소에 있다고 했거나 좌표로 출발지를 정했어도 '지금 할 일'의 대피 경로는 현재 위치에서 (2026-10-12 사용자 결정)."""
+    from guardian_ai import location as L
+    route = {"destination": {"name": "충혼탑 앞", "lat": 35.99, "lon": 129.56, "kind": "shelter"}, "distance_m": 902,
+             "duration_s": 650, "still_inside": [], "geometry": "abc", "profile": "adult"}
+    other = {**route, "destination": {**route["destination"], "name": "가게 옆 대피소"}}
+    seen = []
+
+    def collect(state, fetch=None):
+        seen.append(state)
+        return L.LocationData(location=HERE, location_known=True, shelters={})
+    monkeypatch.setattr(L, "collect", collect)
+    monkeypatch.setattr(L, "route_info", lambda d: route)
+    for extra in ({"reference_location": SHOP, "reference_query": "가게", "reference_is_here": True}, {"pinned_origin": SHOP}):
+        out = A.make_action_advisor(fetch=FakeDB(hazard_labels="침수 경보"))(
+            {**tree_state(Phase.DURING, age=30), **extra,
+             "specialist_results": [result(Specialist.RAIN_FLOOD, RiskLevel.WARNING, "침수 경보"),
+                                    result(Specialist.LOCATION_ROUTE, RiskLevel.NORMAL, "경로", route=other)]})
+        assert "현재 위치에서 이동 경로입니다. 충혼탑 앞(으)로 대피하세요." in out["draft"] and "가게 옆 대피소(으)로" not in out["draft"]
+        assert seen[-1]["reference_location"] is None and seen[-1]["pinned_origin"] is None
+        assert A.pick_user_location(seen[-1])[0].label == "현재 위치"
+    assert len(seen) == 2
+
+
+def test_origin_note_names_the_place_used_when_the_current_location_is_unknown():
+    route = {"destination": {"name": "충혼탑 앞"}}
+    assert A.with_origin_note(["충혼탑 앞(으)로 대피하세요.", "외출을 삼가세요."], route, "현재 위치에서 이동 경로입니다.") == [
+        "현재 위치에서 이동 경로입니다. 충혼탑 앞(으)로 대피하세요.", "외출을 삼가세요."]
+    said = ["현재 위치에서 이동 경로입니다. 충혼탑 앞(으)로 가세요."]
+    assert A.with_origin_note(said, route, "현재 위치에서 이동 경로입니다.") == said          # 이미 있으면 한 번만
+    assert A.with_origin_note(["외출을 삼가세요."], None, "x") == ["외출을 삼가세요."]
+    assert A.origin_note({**state(), "current_location": None}) != "현재 위치에서 이동 경로입니다."   # 모르면 실제로 쓴 곳
 
 
 def test_chat_response_exposes_path_follow_up_and_emergency():
