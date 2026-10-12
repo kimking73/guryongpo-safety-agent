@@ -23,31 +23,6 @@ import 'ui/gk_widgets.dart';
 /// 사용자 화면(웹) 카드 모음 (2026-10-09 사용자 요청: 간결한 요약 카드 · 알림 목록 · 안전 기능 2개 · 방재단 로그인).
 /// 보행 능력·보호가 필요한 동반자·출발 위치는 어디서도 묻거나 보여 주지 않는다.
 
-// ------------------------------------------------------------------ 접근성 지원 (시각·청각)
-
-/// 프로필의 시각·청각 지원 값 (선택 정보 '시각 지원'·'청각 지원', 서버 vision_impaired·hearing_impaired와 같은 칸).
-/// 빈 값 = 아직 정하지 않음, '필요 없음' = 꺼 둠, 그 밖(지원 필요·저시력 …) = 켬
-const _supportKeys = {'시각 지원': ['시각 지원', '시각'], '청각 지원': ['청각 지원', '청각']};
-
-String _support(Map<String, String> p, String key) {
-  for (final k in _supportKeys[key]!) {
-    final v = (p[k] ?? '').trim();
-    if (v.isNotEmpty) return v;
-  }
-  return '';
-}
-
-bool _supportOn(String v) => v.isNotEmpty && v != '필요 없음' && v != 'false';
-
-/// 요약 카드 '접근성 지원' 값: 켠 것 이름 / 둘 다 정하지 않음 → '설정 안 함' / 정했지만 켠 것 없음 → '사용 안 함'
-String accessibilitySummary(Map<String, String> p) {
-  final vision = _support(p, '시각 지원'), hearing = _support(p, '청각 지원');
-  final on = [if (_supportOn(vision)) '시각', if (_supportOn(hearing)) '청각'];
-  if (on.isNotEmpty) return on.join(' · ');
-  if (vision.isEmpty && hearing.isEmpty) return '설정 안 함';
-  return '사용 안 함';
-}
-
 // ------------------------------------------------------------------ 내 정보 (요약 카드 ↔ 수정)
 
 class ProfileDetailsCard extends ConsumerStatefulWidget {
@@ -192,7 +167,6 @@ class _ProfileDetailsCardState extends ConsumerState<ProfileDetailsCard> {
   Widget _summary(List<SavedPlace> places) {
     final age = fields['age']!.text.trim();
     final jobList = _jobList();
-    final a11y = accessibilitySummary(saved);
     // 집 = 프로필 집 주소. 비었으면 '집'으로 등록한 장소 하나를 집으로 보여 준다. 나머지는 모두 '내 장소'
     var home = _placeText('home', '집');
     final homeFromList = home.isEmpty ? places.where((p) => p.type == '집').firstOrNull : null;
@@ -210,11 +184,7 @@ class _ProfileDetailsCardState extends ConsumerState<ProfileDetailsCard> {
           label: '장애 유형',
           value: disabilityText(dis),
           empty: dis.isEmpty || dis.contains('none')),
-      GkInfoRow(
-          icon: Icons.accessibility_new_rounded,
-          label: '접근성 지원',
-          value: a11y,
-          empty: a11y == '설정 안 함' || a11y == '사용 안 함'),
+      // '접근성 지원' 줄은 뺐다 — 장애 유형과 겹친다 (2026-10-12 사용자 요청)
       GkInfoRow(
           icon: Icons.directions_walk_rounded,
           label: '이동 수단',

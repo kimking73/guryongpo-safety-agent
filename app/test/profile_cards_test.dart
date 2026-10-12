@@ -1,4 +1,4 @@
-// 사용자 화면 간결화 (2026-10-09 사용자 요청): 내 정보 요약·수정, 접근성 지원 요약, 알림 6개, 안전 기능 2개,
+// 사용자 화면 간결화 (2026-10-09 사용자 요청): 내 정보 요약·수정, 알림 6개, 안전 기능 2개,
 // 방재단 전용 코드 로그인(서버 인증을 거쳐야만 방재단 화면), 지운 항목이 다시 나오지 않는지, 좁은 화면 배치
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -7,7 +7,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:guryongpo_safety/live_screens.dart';
 import 'package:guryongpo_safety/main.dart';
-import 'package:guryongpo_safety/profile_cards.dart';
 import 'package:guryongpo_safety/profile_refresh.dart';
 import 'package:guryongpo_safety/services/account_sync.dart';
 import 'package:guryongpo_safety/services/demo_mode.dart';
@@ -57,15 +56,6 @@ Future<void> setSize(WidgetTester t, double w, [double h = 3200]) async {
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  test('접근성 지원 요약: 정하지 않음 / 꺼 둠 / 켠 것', () {
-    expect(accessibilitySummary({}), '설정 안 함');
-    expect(accessibilitySummary({'시각 지원': '필요 없음'}), '사용 안 함');
-    expect(accessibilitySummary({'시각 지원': '필요 없음', '청각 지원': '필요 없음'}), '사용 안 함');
-    expect(accessibilitySummary({'시각 지원': '저시력', '청각 지원': '필요 없음'}), '시각');
-    expect(accessibilitySummary({'시각 지원': '지원 필요', '청각 지원': '난청'}), '시각 · 청각');
-    expect(accessibilitySummary({'청각': '지원 필요'}), '청각'); // 예전 키
-  });
-
   test('AI 수집 기록: 보행·동반자는 화면에 보이지 않는다', () {
     expect(shownProfileUpdate(const ProfileUpdate(id: 1, field: 'walking_impaired', label: '보행', value: '보행 불편')), isFalse);
     expect(shownProfileUpdate(const ProfileUpdate(id: 2, field: 'has_dependents', label: '보호가 필요한 동반자', value: '있음')),
@@ -78,10 +68,10 @@ void main() {
     await setSize(t, 1280);
     await t.pumpWidget(app());
     await t.pumpAndSettle();
-    final labels = ['나이', '장애 유형', '접근성 지원', '이동 수단', '직업', '집', '내 장소'];
+    final labels = ['나이', '장애 유형', '이동 수단', '직업', '집', '내 장소'];
     final ys = [for (final l in labels) t.getTopLeft(find.text(l).first).dy];
-    expect(ys, [...ys]..sort(), reason: '나이 → 장애 유형 → 접근성 지원 → 이동 수단 → 직업 → 집 → 내 장소 순서');
-    expect(find.text('설정 안 함'), findsOneWidget);
+    expect(ys, [...ys]..sort(), reason: '나이 → 장애 유형 → 이동 수단 → 직업 → 집 → 내 장소 순서');
+    expect(find.text('접근성 지원'), findsNothing); // 장애 유형과 겹쳐 뺐다 (2026-10-12)
     expect(find.text('내 장소 추가하기'), findsOneWidget);
     for (final s in ['음성 안내 자동 재생', '화면 점멸', '재난 푸시 알림']) {
       expect(find.widgetWithText(GkSwitchRow, s), findsOneWidget, reason: s);
