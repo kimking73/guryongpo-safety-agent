@@ -40,7 +40,6 @@ import 'custom_route.dart';
 import 'login_screen.dart';
 import 'services/demo_mode.dart';
 import 'services/demo_role.dart';
-import 'services/demo_relay.dart';
 import 'profile_form.dart' show disabilitiesOf;
 import 'prototype_safety_screens.dart';
 import 'services/demo_notifications.dart';
@@ -1402,7 +1401,6 @@ class _ShellState extends ConsumerState<Shell> {
     final showDemo = ref.watch(showDemoProvider);
     final crew = showDemo ? ref.watch(demoResponderViewProvider) : isPatrolRole(role);
     _listenDemoResponses();
-    ref.watch(demoRelayProvider); // 다른 계정·기기의 시연 창과 시연 방으로 주고받기 (시연 코드가 있을 때, 2026-10-12)
     final serverDemoCrew = crew && ref.watch(serverDemoProvider);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _syncDemoServerPoll(serverDemoCrew);

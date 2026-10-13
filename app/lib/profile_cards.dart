@@ -726,8 +726,8 @@ class _SafetyFeaturesCardState extends ConsumerState<SafetyFeaturesCard> {
   Widget build(BuildContext c) {
     final demo = ref.watch(showDemoProvider);
     final role = '${ref.watch(meProvider).valueOrNull?['role'] ?? ''}';
-    // 방재단 화면은 실측·시연 모두 전용 코드로 로그인한 계정만 (2026-10-12 사용자 요청). 시연 모드는 창마다
-    // 사용자 모드·방재단원 모드 — 코드로 로그인한 계정이 사용자 모드면 '방재단원 모드로' 버튼, 아니면 '방재단 로그인'
+    // 실측 방재단 화면은 전용 코드로 로그인한 계정만. 시연 모드는 코드 없이 창마다 사용자 모드·방재단원 모드
+    // (2026-10-13 사용자 요청) — 사용자 모드면 '방재단원 모드로' 버튼
     final crew = demo ? ref.watch(demoResponderViewProvider) : isPatrolRole(role);
     // '바다 위 대피 경로' 시연 버튼은 뺐다 (2026-10-11 사용자 요청) — 바다 위면 대시보드 경로 안내가 해상 경로를 준다
     final team = demo && !crew && ref.watch(responderUnlockedProvider)
@@ -895,6 +895,10 @@ class _TeamLoginFormState extends ConsumerState<TeamLoginForm> {
       final status = e.response?.statusCode;
       final data = e.response?.data;
       final serverCode = data is Map ? '${data['code'] ?? ''}' : '';
+      // 코드 하나 = 계정 하나 (2026-10-13): 다른 계정이 이미 쓴 코드
+      if (serverCode == 'INVITE_IN_USE' || status == 409) {
+        return '이 코드는 이미 다른 계정에서 쓰고 있어요. 본인에게 발급된 코드인지 확인해 주세요.';
+      }
       if (serverCode == 'INVALID_INVITE' || status == 400 || status == 404 || status == 422) {
         return '코드가 맞지 않거나 만료됐어요. 받은 전용 코드를 다시 확인해 주세요.';
       }
@@ -920,7 +924,7 @@ class _TeamLoginFormState extends ConsumerState<TeamLoginForm> {
         return;
       }
       code.clear();
-      // 시연 모드면 이 창을 방재단원 모드로 (코드로 로그인한 계정만 방재단원 모드를 쓸 수 있다, 2026-10-12)
+      // 시연 모드면 이 창을 방재단원 모드로
       if (ref.read(showDemoProvider)) ref.read(demoRoleProvider.notifier).set(DemoRole.responder);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('방재단원으로 로그인했어요.')));
       context.push('/responder');
