@@ -94,9 +94,10 @@ void main() {
     expect(find.textContaining('음성 언어'), findsNothing);
     expect(find.textContaining('접근성 자세히'), findsNothing);
     expect(find.text('바다 위 대피 경로'), findsNothing); // 사용자 화면 시연 버튼은 뺐다 (2026-10-11)
-    // 시연 모드 사용자 모드(기본)는 방재단 현황 대신 '방재단원 모드로 바꾸기' (2026-10-12 분할 화면 시연)
+    // 시연 모드 사용자 모드(기본): 방재단원 모드는 시연 카드에만, 안전 기능엔 전용 코드 '방재단 로그인' (2026-10-13)
     expect(find.text('방재단 현황 (시연)'), findsNothing);
-    expect(find.text('방재단원 모드로 바꾸기 (시연)'), findsOneWidget);
+    expect(find.text('방재단원 모드로 바꾸기 (시연)'), findsNothing);
+    expect(find.text('방재단 로그인'), findsOneWidget);
     expect(find.text('사용자 모드'), findsOneWidget);
     expect(find.text('방재단원 모드'), findsOneWidget);
     // 시연 코드(다른 계정과 연결) 입력은 뺐다 (2026-10-13)
@@ -108,7 +109,10 @@ void main() {
     await setSize(t, 1280);
     await t.pumpWidget(app());
     await t.pumpAndSettle();
-    await t.tap(find.text('방재단원 모드로 바꾸기 (시연)'));
+    await t.tap(find.text('방재단원 모드'));
+    await t.pumpAndSettle();
+    expect(find.text('방재단 현황 (시연)'), findsOneWidget);
+    await t.tap(find.text('방재단 현황 (시연)'));
     await t.pumpAndSettle();
     expect(find.text('방재단 화면'), findsOneWidget);
   });

@@ -726,20 +726,11 @@ class _SafetyFeaturesCardState extends ConsumerState<SafetyFeaturesCard> {
   Widget build(BuildContext c) {
     final demo = ref.watch(showDemoProvider);
     final role = '${ref.watch(meProvider).valueOrNull?['role'] ?? ''}';
-    // 실측 방재단 화면은 전용 코드로 로그인한 계정만. 시연 모드는 코드 없이 창마다 사용자 모드·방재단원 모드
-    // (2026-10-13 사용자 요청) — 사용자 모드면 '방재단원 모드로' 버튼
+    // 실측 방재단 화면은 전용 코드로 로그인한 계정만. 시연 모드는 위 '시연 모드' 카드의 방재단원 모드로 코드 없이 들어간다
+    // (2026-10-13 사용자 요청) — 여기엔 중복 버튼('방재단원 모드로 바꾸기') 대신 늘 전용 코드 '방재단 로그인'
     final crew = demo ? ref.watch(demoResponderViewProvider) : isPatrolRole(role);
     // '바다 위 대피 경로' 시연 버튼은 뺐다 (2026-10-11 사용자 요청) — 바다 위면 대시보드 경로 안내가 해상 경로를 준다
-    final team = demo && !crew && ref.watch(responderUnlockedProvider)
-        ? _FeatureButton(
-            icon: Icons.shield_rounded,
-            label: '방재단원 모드로 바꾸기 (시연)',
-            filled: true,
-            onTap: () {
-              ref.read(demoRoleProvider.notifier).set(DemoRole.responder);
-              c.push('/responder');
-            })
-        : _FeatureButton(
+    final team = _FeatureButton(
         icon: crew ? Icons.shield_rounded : Icons.badge_rounded,
         label: crew ? (demo ? '방재단 현황 (시연)' : '방재단 현황 · ${roleKo[role] ?? role}') : '방재단 로그인',
         filled: !crew,
