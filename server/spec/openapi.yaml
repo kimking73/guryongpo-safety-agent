@@ -323,6 +323,8 @@ paths:
       description: |
         읍사무소가 발급한 초대 코드를 입력하면 역할이 바뀐다. 코드는 서버에 해시로만 저장된다 (`care.invite_codes`).
         목업(AUTH_MODE=dev): `DEMO-RESPONDER` · `DEMO-CAREGIVER` · `DEMO-ADMIN` 이 각 역할, 그 외는 400 INVALID_INVITE.
+        코드 하나 = 계정 하나 (2026-10-13): 처음 넣은 계정에 묶이고 그 계정만 다시 넣을 수 있다 (휴대폰·웹 같은 계정 OK).
+        다른 계정이 이미 쓴 코드면 409 INVITE_IN_USE.
       operationId: claimRole
       requestBody:
         required: true
@@ -340,6 +342,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/RoleGrant' }
         '400': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
     delete:
       tags: [user]
       summary: 역할 내려놓기 (주민으로 돌아감)
@@ -637,7 +640,7 @@ paths:
   /demo/evacuation/responses:
     get:
       tags: [dashboard]
-      summary: 최근 3시간 시연 대피 응답 전체 — 방재단원 모드 화면이 다른 계정의 응답을 읽는다 (방재단·관리자 역할만, 주민 위치 포함) (2026-10-12)
+      summary: 최근 3시간 시연 대피 응답 전체 — 방재단원 모드 화면이 다른 계정의 응답을 읽는다 (로그인만 — 시연 모드는 전용 코드 없이 방재단원 모드, 2026-10-13; 시연 응답 위치 포함) (2026-10-12)
       operationId: listDemoEvacuations
       responses:
         '200':
@@ -648,13 +651,12 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/DemoEvacTarget' }
         '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
   /demo/evacuation/{target_id}/dispatch:
     parameters:
       - { name: target_id, in: path, required: true, description: "DemoEvacTarget.id ('demo-user-<uuid>')", schema: { type: string } }
     put:
       tags: [dashboard]
-      summary: 방재단 출동 기록 쓰기 (방재단·관리자 역할만) — '실제 출발'·업무 단계(가는 중·방문 중·완료)와 도착 예정 시각을 그 주민에게 (2026-10-12)
+      summary: 방재단 출동 기록 쓰기 (로그인만, 2026-10-13) — '실제 출발'·업무 단계(가는 중·방문 중·완료)와 도착 예정 시각을 그 주민에게 (2026-10-12)
       operationId: putDemoDispatch
       requestBody:
         required: true
@@ -664,7 +666,6 @@ paths:
       responses:
         '204': { description: 저장됨 }
         '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
         '422': { $ref: '#/components/responses/Error' }
     delete:
@@ -674,7 +675,6 @@ paths:
       responses:
         '204': { description: 지움 }
         '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
   /support-programs:
     get:
@@ -1426,10 +1426,10 @@ components:
       properties:
         code:
           type: string
-          enum: [UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, INVALID_INVITE, VALIDATION_ERROR, STT_FAILED, AGENT_TIMEOUT, UPSTREAM_UNAVAILABLE, INTERNAL]
+          enum: [UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, INVALID_INVITE, INVITE_IN_USE, VALIDATION_ERROR, STT_FAILED, AGENT_TIMEOUT, UPSTREAM_UNAVAILABLE, INTERNAL]
           description: |
             401 UNAUTHORIZED / 403 FORBIDDEN 역할 없음 / 404 NOT_FOUND / 409 CONFLICT 이미 종료된 대피 상황 등 /
-            400 INVALID_INVITE 초대 코드 틀림·만료 / 422 VALIDATION_ERROR, STT_FAILED / 504 AGENT_TIMEOUT / 503 UPSTREAM_UNAVAILABLE / 500 INTERNAL
+            400 INVALID_INVITE 초대 코드 틀림·만료 / 409 INVITE_IN_USE 다른 계정이 쓴 초대 코드 / 422 VALIDATION_ERROR, STT_FAILED / 504 AGENT_TIMEOUT / 503 UPSTREAM_UNAVAILABLE / 500 INTERNAL
         message: { type: string, description: 사용자에게 그대로 보여줘도 되는 한국어 문장 }
         detail: {}
     LatLng:

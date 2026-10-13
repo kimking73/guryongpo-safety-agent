@@ -14,7 +14,7 @@ import 'package:guryongpo_safety/services/live_api.dart';
 import 'package:guryongpo_safety/ui/gk_widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// 서버 대신: 'GRP-OK'만 방재단, 'CARE-1'은 돌봄 담당, 나머지는 서버처럼 400 INVALID_INVITE
+/// 서버 대신: 'GRP-OK'만 방재단, 'CARE-1'은 돌봄 담당, 'GRP-USED'는 409 INVITE_IN_USE, 나머지는 서버처럼 400 INVALID_INVITE
 class FakeTeamApi extends LiveApi {
   final codes = <String>[];
   @override
@@ -26,6 +26,13 @@ class FakeTeamApi extends LiveApi {
     if (code.trim() == 'GRP-OK') return {'role': 'responder', 'label': '구룡포 방재단'};
     if (code.trim() == 'CARE-1') return {'role': 'caregiver', 'label': '돌봄'};
     final req = RequestOptions(path: '/api/v1/user/role');
+    if (code.trim() == 'GRP-USED') {
+      // 다른 계정이 이미 쓴 코드 (2026-10-13: 코드 하나 = 계정 하나)
+      throw DioException(
+          requestOptions: req,
+          response: Response(
+              requestOptions: req, statusCode: 409, data: {'code': 'INVITE_IN_USE', 'message': '이미 다른 계정에서 쓰고 있습니다.'}));
+    }
     throw DioException(
         requestOptions: req,
         response: Response(
@@ -92,6 +99,18 @@ void main() {
     expect(find.text('방재단원 모드로 바꾸기 (시연)'), findsOneWidget);
     expect(find.text('사용자 모드'), findsOneWidget);
     expect(find.text('방재단원 모드'), findsOneWidget);
+    // 시연 코드(다른 계정과 연결) 입력은 뺐다 (2026-10-13)
+    expect(find.textContaining('시연 코드'), findsNothing);
+    expect(find.text('새 코드 만들기'), findsNothing);
+  });
+
+  testWidgets('시연 모드: 전용 코드 없는 계정도 방재단원 모드로 바꿔 방재단 현황에 간다 (2026-10-13)', (t) async {
+    await setSize(t, 1280);
+    await t.pumpWidget(app());
+    await t.pumpAndSettle();
+    await t.tap(find.text('방재단원 모드로 바꾸기 (시연)'));
+    await t.pumpAndSettle();
+    expect(find.text('방재단 화면'), findsOneWidget);
   });
 
   testWidgets('수정 → 나이·이동 수단·직업 기타 입력 → 저장하면 요약에 보인다', (t) async {
@@ -168,6 +187,12 @@ void main() {
     await t.pumpAndSettle();
     expect(api.codes, ['WRONG']);
     expect(find.textContaining('코드가 맞지 않거나 만료됐어요'), findsOneWidget);
+    expect(find.text('방재단 화면'), findsNothing);
+
+    await t.enterText(find.byType(TextField).last, 'GRP-USED');
+    await t.tap(find.widgetWithText(FilledButton, '로그인'));
+    await t.pumpAndSettle();
+    expect(find.textContaining('이미 다른 계정에서 쓰고 있어요'), findsOneWidget);
     expect(find.text('방재단 화면'), findsNothing);
 
     await t.enterText(find.byType(TextField).last, 'CARE-1');

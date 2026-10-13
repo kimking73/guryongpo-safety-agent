@@ -287,6 +287,15 @@ def test_role_claim_real_code(client, fake_db):
     assert code_hash(" gry-ab12-cd34 ") == code_hash("GRY-AB12-CD34")      # 앞뒤 공백·대소문자 무시
 
 
+def test_role_claim_code_bound_to_one_account(client, fake_db):
+    """코드 하나 = 계정 하나 (2026-10-13): 처음 넣은 계정에 묶고, 다른 계정이 넣으면 409 INVITE_IN_USE"""
+    from app.routers.user import CLAIM_SQL
+    assert "claimed_by = COALESCE(claimed_by, %(uid)s)" in CLAIM_SQL and "claimed_by = %(uid)s OR" in CLAIM_SQL
+    fake_db.rows["claimed_by <> %(uid)s"] = [{"taken": 1}]       # UPDATE 는 0행 (다른 계정에 묶임)
+    r = client.post("/api/v1/user/role", headers=AUTH, json={"invite_code": "GRP-AB12"})
+    assert r.status_code == 409 and r.json()["code"] == "INVITE_IN_USE"
+
+
 def test_internal_invite(client, fake_db):
     fake_db.rows["INSERT INTO care.invite_codes"] = [{"expires_at": datetime.now(KST) + timedelta(days=60)}]
     r = client.post("/api/v1/internal/invites", json={"role": "responder", "label": "방재단"})

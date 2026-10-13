@@ -20,6 +20,7 @@ DEFAULT_MESSAGES = {
     "NOT_FOUND": "요청한 정보를 찾을 수 없습니다.",
     "CONFLICT": "이미 끝난 대피 상황입니다.",
     "INVALID_INVITE": "초대 코드가 올바르지 않거나 만료되었습니다.",
+    "INVITE_IN_USE": "이 초대 코드는 이미 다른 계정에서 쓰고 있습니다.",
     "VALIDATION_ERROR": "입력값을 확인해 주세요.",
     "STT_FAILED": "음성을 알아듣지 못했습니다. 다시 말씀해 주세요.",
     "AGENT_TIMEOUT": "답변이 늦어지고 있습니다. 잠시 후 다시 시도해 주세요.",
@@ -27,7 +28,7 @@ DEFAULT_MESSAGES = {
     "INTERNAL": "서버 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
 }
 STATUS_CODES = {"UNAUTHORIZED": 401, "FORBIDDEN": 403, "NOT_FOUND": 404, "CONFLICT": 409, "INVALID_INVITE": 400,
-                "VALIDATION_ERROR": 422, "STT_FAILED": 422,
+                "INVITE_IN_USE": 409, "VALIDATION_ERROR": 422, "STT_FAILED": 422,
                 "AGENT_TIMEOUT": 504, "UPSTREAM_UNAVAILABLE": 503, "INTERNAL": 500}
 
 

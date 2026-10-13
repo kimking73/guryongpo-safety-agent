@@ -229,12 +229,16 @@ def delete_device_token(token: str, u: AuthUser = Depends(current_user)):
 # ------------------------------------------------------------------ 역할 (v0.3, 초대 코드)
 DEMO_CODES = {"DEMO-RESPONDER": "responder", "DEMO-CAREGIVER": "caregiver", "DEMO-ADMIN": "admin"}
 
-# 코드 사용 횟수 증가와 역할 부여를 한 문장(한 트랜잭션)으로 — 만료·회수·횟수 초과 코드는 0행
+# 코드 사용 횟수 증가와 역할 부여를 한 문장(한 트랜잭션)으로 — 만료·회수·횟수 초과 코드는 0행.
+# 코드 하나 = 계정 하나 (2026-10-13 사용자 요청): 처음 넣은 계정에 묶고(claimed_by), 그 계정만 다시 넣을 수 있다.
+# 두 계정이 동시에 넣어도 행 잠금 뒤 WHERE 를 다시 보므로 한 계정만 묶인다
 CLAIM_SQL = """
 WITH c AS (
-  UPDATE care.invite_codes SET used_count = used_count + 1
+  UPDATE care.invite_codes
+  SET used_count = used_count + CASE WHEN claimed_by IS NULL THEN 1 ELSE 0 END,
+      claimed_by = COALESCE(claimed_by, %(uid)s), claimed_at = COALESCE(claimed_at, now())
   WHERE code_hash = %(h)s AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())
-    AND (max_uses IS NULL OR used_count < max_uses)
+    AND (claimed_by = %(uid)s OR (claimed_by IS NULL AND (max_uses IS NULL OR used_count < max_uses)))
   RETURNING role, label
 ), u AS (
   INSERT INTO users (firebase_uid, is_anonymous, role, role_granted_at)
@@ -243,6 +247,11 @@ WITH c AS (
   RETURNING role, role_granted_at
 )
 SELECT u.role::text AS role, c.label, u.role_granted_at AS granted_at FROM u, c
+"""
+
+
+CLAIMED_BY_OTHER_SQL = """
+SELECT 1 AS taken FROM care.invite_codes WHERE code_hash = %(h)s AND claimed_by IS NOT NULL AND claimed_by <> %(uid)s
 """
 
 
@@ -269,8 +278,11 @@ def claim_role(body: RoleClaim, u: AuthUser = Depends(current_user)):
         d = mocks.load("role.json")
         d.update(role=row["role"], granted_at=mocks.iso(row["granted_at"]))
         return mocks.respond(d)
-    row = db.fetch_one(CLAIM_SQL, {"h": code_hash(code), "uid": u.uid, "anon": u.is_anonymous})
+    h = code_hash(code)
+    row = db.fetch_one(CLAIM_SQL, {"h": h, "uid": u.uid, "anon": u.is_anonymous})
     if not row:
+        if db.fetch_one(CLAIMED_BY_OTHER_SQL, {"h": h, "uid": u.uid}):
+            raise ApiError("INVITE_IN_USE")
         raise ApiError("INVALID_INVITE")
     return {"role": row["role"], "label": row["label"], "granted_at": mocks.iso(row["granted_at"])}
 

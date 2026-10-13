@@ -78,15 +78,15 @@ def test_other_account_sees_responses_without_personal_fields(client, fake_db):
     assert not {"address", "phone", "home"} & set(a)
 
 
-def test_responder_side_needs_patrol_role(client, fake_db):
-    """응답 목록(주민 위치 포함)과 출동 기록은 방재단·관리자만 — 코드를 받지 않은 계정은 403 (2026-10-12)"""
+def test_responder_side_open_without_role(client, fake_db):
+    """시연 모드는 방재단 전용 코드 없이 방재단원 모드 — 응답 목록·출동 기록은 로그인만 있으면 된다 (2026-10-13)"""
     _me(fake_db)
     fake_db.rows[ROWS_KEY] = [_row(UID, "need_help")]
-    assert client.get("/api/v1/demo/evacuation/responses", headers=AUTH).status_code == 403
+    assert client.get("/api/v1/demo/evacuation/responses", headers=AUTH).status_code == 200
     body = {"departed_at": "2026-10-12T12:00:00+09:00", "eta": "2026-10-12T12:07:00+09:00", "stage": "en_route"}
-    assert client.put(f"/api/v1/demo/evacuation/demo-user-{UID}/dispatch", json=body, headers=AUTH).status_code == 403
-    assert client.delete(f"/api/v1/demo/evacuation/demo-user-{UID}/dispatch", headers=AUTH).status_code == 403
-    assert not _sql(fake_db, "UPDATE care.demo_evac SET dispatch")
+    assert client.put(f"/api/v1/demo/evacuation/demo-user-{UID}/dispatch", json=body, headers=AUTH).status_code == 204
+    assert _sql(fake_db, "UPDATE care.demo_evac SET dispatch")
+    assert client.delete(f"/api/v1/demo/evacuation/demo-user-{UID}/dispatch", headers=AUTH).status_code == 204
 
 
 def test_me_returns_dispatch_or_null(client, fake_db):

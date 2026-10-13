@@ -28,16 +28,18 @@ class DemoRoleNotifier extends StateNotifier<DemoRole> {
 
 final demoRoleProvider = StateNotifierProvider<DemoRoleNotifier, DemoRole>((_) => DemoRoleNotifier());
 
-/// 방재단원 모드를 쓸 수 있는 계정인지 (2026-10-12 사용자 요청: 방재단 화면은 전용 코드를 받은 사람만, 시연 모드도).
-/// 서버 연결이면 서버 계정 역할이 방재단·관리자여야 한다 = '방재단 로그인'에서 전용 코드(초대 코드)를 넣은 계정.
+/// 방재단원 모드를 쓸 수 있는지. 시연 모드는 전용 코드 없이 누구나 (2026-10-13 사용자 요청: 시연에 코드 15개가 없어도 되게).
+/// 실측(시연 모드 아님)은 서버 계정 역할이 방재단·관리자여야 한다 = '방재단 로그인'에서 전용 코드(초대 코드)를 넣은 계정.
 /// 서버 없이 실행(APP_MODE=mock, 개발용)은 확인할 곳이 없어 그대로 연다
-final responderUnlockedProvider = Provider<bool>(
-    (ref) => !AppConfig.isRemote || isPatrolRole('${ref.watch(meProvider).valueOrNull?['role'] ?? ''}'));
+final responderUnlockedProvider = Provider<bool>((ref) =>
+    !AppConfig.isRemote ||
+    ref.watch(showDemoProvider) ||
+    isPatrolRole('${ref.watch(meProvider).valueOrNull?['role'] ?? ''}'));
 
-/// 이 창이 시연 방재단원 화면인지 (시연 모드 + 방재단원 모드 + 코드로 로그인한 계정)
+/// 이 창이 시연 방재단원 화면인지 (시연 모드 + 방재단원 모드)
 final demoResponderViewProvider = Provider<bool>((ref) =>
     ref.watch(showDemoProvider) && ref.watch(demoRoleProvider) == DemoRole.responder && ref.watch(responderUnlockedProvider));
 
-/// 이 창이 시연 사용자(주민) 화면인지 (시연 모드 + 방재단원 화면이 아님 — 방재단원 모드를 골랐어도 코드 로그인 전이면 사용자)
+/// 이 창이 시연 사용자(주민) 화면인지 (시연 모드 + 방재단원 화면이 아님)
 final demoUserViewProvider =
     Provider<bool>((ref) => ref.watch(showDemoProvider) && !ref.watch(demoResponderViewProvider));

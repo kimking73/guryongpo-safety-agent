@@ -10,4 +10,6 @@ if ('serviceWorker' in navigator) {
 if (window.caches) {
   caches.keys().then((ks) => ks.forEach((k) => caches.delete(k)));
 }
-_flutter.loader.load();
+// Firebase JS 를 index.html 에서 먼저 불러 둔 뒤 앱을 시작한다 (2026-10-13, 이유는 index.html). 10초가 지나면 그냥 시작
+Promise.race([window.firebaseJsReady || Promise.resolve(), new Promise((r) => setTimeout(r, 10000))])
+  .then(() => _flutter.loader.load());

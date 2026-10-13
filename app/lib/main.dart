@@ -40,7 +40,6 @@ import 'custom_route.dart';
 import 'login_screen.dart';
 import 'services/demo_mode.dart';
 import 'services/demo_role.dart';
-import 'services/demo_relay.dart';
 import 'profile_form.dart' show disabilitiesOf;
 import 'prototype_safety_screens.dart';
 import 'services/demo_notifications.dart';
@@ -1077,10 +1076,14 @@ final appRouter = GoRouter(
       return null;
     },
     routes: [
-  GoRoute(path: '/boot', builder: (_, s) => BootScreen(from: s.uri.queryParameters['from'])),
-  // 첫 화면(동의·로그인·내 정보)은 웹·앱 공통 — web-prototype 온보딩과 같은 구성
-  GoRoute(path: '/login', builder: (_, s) => m.MLoginScreen(from: s.uri.queryParameters['from'])),
-  GoRoute(path: '/setup', builder: (_, s) => m.SetupScreen(from: s.uri.queryParameters['from'])),
+  // 시작·로그인·내 정보도 메뉴처럼 짧게 떠오르게 (2026-10-13) — 기기 기본 전환(안드로이드 확대·아이폰 밀기)은
+  // 시작 화면과 로그인 화면이 반쯤 겹친 채 몇 초씩 멈춰 보였다
+  ..._menuRoutes([
+    GoRoute(path: '/boot', builder: (_, s) => BootScreen(from: s.uri.queryParameters['from'])),
+    // 첫 화면(동의·로그인·내 정보)은 웹·앱 공통 — web-prototype 온보딩과 같은 구성
+    GoRoute(path: '/login', builder: (_, s) => m.MLoginScreen(from: s.uri.queryParameters['from'])),
+    GoRoute(path: '/setup', builder: (_, s) => m.SetupScreen(from: s.uri.queryParameters['from'])),
+  ]),
   GoRoute(path: '/location', builder: (_, __) => const InitialSetupScreen()),
   ShellRoute(builder: (_, __, child) => Shell(child: child), routes: _menuRoutes([
     GoRoute(path: '/', builder: (_, __) => const Dashboard()),
@@ -1398,7 +1401,6 @@ class _ShellState extends ConsumerState<Shell> {
     final showDemo = ref.watch(showDemoProvider);
     final crew = showDemo ? ref.watch(demoResponderViewProvider) : isPatrolRole(role);
     _listenDemoResponses();
-    ref.watch(demoRelayProvider); // 다른 계정·기기의 시연 창과 시연 방으로 주고받기 (시연 코드가 있을 때, 2026-10-12)
     final serverDemoCrew = crew && ref.watch(serverDemoProvider);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _syncDemoServerPoll(serverDemoCrew);

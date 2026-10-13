@@ -105,13 +105,8 @@ def get_demo_households():
 
 # ------------------------------------------------------------------ 시연 대피 응답 (2026-10-12, app/demo_evac.py)
 # 시연 모드의 대피 경보 응답을 서버에 저장 → 다른 계정의 방재단원 모드 화면이 읽고, 방재단 출동 기록은 주민 화면이 받는다.
-# 실제 대피 상황·FCM 과는 분리. 주민 쪽(시작·응답·위치·내 기록)은 로그인만, 방재단 쪽(응답 목록·출동 기록)은
-# 방재단·관리자 역할만 (2026-10-12 사용자 요청: 방재단 화면은 전용 코드를 받은 사람만 — 목록에 주민 위치가 들어 있다)
-def _require_patrol(u: AuthUser) -> None:
-    from ..auth import user_role
-    role = user_role(u)
-    if role not in ("responder", "admin"):
-        raise ApiError("FORBIDDEN", detail={"role": role})
+# 실제 대피 상황·FCM 과는 분리. 주민 쪽·방재단 쪽 모두 로그인만 — 시연 모드는 방재단 전용 코드 없이 방재단원 모드를
+# 쓸 수 있다 (2026-10-13 사용자 요청). 목록엔 시연 응답(별명·응답·장애 유형·시연 중 위치)만 있고 실제 가구는 없다
 
 
 @router.post("/demo/evacuation/start", summary="시연 대피 경보 시작 — 내 시연 응답을 '응답 없음'으로 새로 (출동 기록도 지움)")
@@ -154,14 +149,12 @@ def get_demo_evac_me(u: AuthUser = Depends(current_user)):
 
 @router.get("/demo/evacuation/responses", summary="최근 시연 대피 응답 전체 (방재단원 모드 화면용, 최근 3시간)")
 def get_demo_evac_responses(u: AuthUser = Depends(current_user)):
-    _require_patrol(u)
     from .. import demo_evac, users
     return demo_evac.responses(users.find_user_id(u))
 
 
 @router.put("/demo/evacuation/{target_id}/dispatch", status_code=204, summary="방재단 출동 기록 쓰기 (출발·도착 예정·업무 단계)")
 def put_demo_evac_dispatch(target_id: str, body: DemoDispatchInput, u: AuthUser = Depends(current_user)):
-    _require_patrol(u)
     from .. import demo_evac, users
     uid, _ = users.ensure_user(u)
     demo_evac.dispatch(target_id, body.model_dump(), uid)
@@ -170,7 +163,6 @@ def put_demo_evac_dispatch(target_id: str, body: DemoDispatchInput, u: AuthUser 
 
 @router.delete("/demo/evacuation/{target_id}/dispatch", status_code=204, summary="방재단 출동 기록 지우기 (배정 해제)")
 def delete_demo_evac_dispatch(target_id: str, u: AuthUser = Depends(current_user)):
-    _require_patrol(u)
     from .. import demo_evac, users
     uid, _ = users.ensure_user(u)
     demo_evac.dispatch(target_id, None, uid)
