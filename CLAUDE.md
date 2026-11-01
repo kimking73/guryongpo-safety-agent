@@ -39,7 +39,7 @@ Lanes: **A** server/DB/data collection/risk engine (`server/`, `db/`) · **B** A
 | `deploy/` | B10: `Caddyfile` (HTTPS for `DEPLOY_DOMAIN`; /api/chat·voice·tts·ai → ai, /api/route → route, other /api → api, / → Flutter web; blocks /api/ai/memory·/api/ai/usage·/api/v1/internal), `deploy.sh` (run on VM: backup → pull → loader → rebuild → health), `push_web.sh` (run on Mac: build web in an ASCII temp dir → rsync to VM `deploy/web/`, gitignored); Firebase web config in `deploy/web-defines.json` (gitignored) |
 | `secrets/` | Credential files, gitignored except `.gitkeep` (e.g. `firebase-admin.json`) |
 | `.env.example` | Every env key with local defaults; rules in its header (.env.example:2-8) |
-| `README.md` / `README.en.md` | GitHub front page, Korean / English (intro → features → architecture → quick start); keep both in sync |
+| `README.md` | GitHub front page, bilingual: each section English first, Korean below (intro → features → architecture → quick start); keep both languages in sync |
 | `docs/team-guide.md` | Team-facing setup (Mac/Windows), common commands, env and service rules, deploy server (moved from README 2026-11-01) |
 
 ## Commands
@@ -89,7 +89,7 @@ Check these when relevant:
 - `ai/.claude/docs/architectural_patterns.md` — LangGraph node/reducer/routing/override/LLM-fallback patterns
 - `ai/docs/agent-design.md` — agent graph, node I/O, decision tree, tool contract with lane A, chat API (§8)
 - `ai/docs/code_check_list.md` — known defects with repro and target task; check before debugging/testing
-- `docs/team-guide.md` — what teammates see; keep it in sync when setup or rules change. `README.md`/`README.en.md` — public front page
+- `docs/team-guide.md` — what teammates see; keep it in sync when setup or rules change. `README.md` — public front page (English above, Korean below)
 - `docs/demo-scenario.md` — demo-mode scenario (sensor values in `server/risk/demo.py` `DEMO_DT`), 5 scenes with coordinates, AI questions; guarded by `server/tests/test_demo_scenario.py`
 - Service proposal (requirements source): `[구룡가디언]구룡포 재난 지킴이-구룡포는구룡_최종 복사본.docx` (gitignored;
   contains personal data — never commit). Read with `textutil -convert txt -stdout <file>`
