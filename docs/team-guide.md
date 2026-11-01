@@ -1,6 +1,6 @@
 # 구룡가디언 팀 개발 안내
 
-팀원용 설정·운영 안내. 프로젝트 소개(영문·한글)는 [README.md](../README.md).
+팀원용 설정·운영 안내. 프로젝트 소개는 [README.md](../README.md) (English), [README.ko.md](../README.ko.md) (한국어).
 
 ## 저장소 구조
 
