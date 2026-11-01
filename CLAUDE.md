@@ -23,7 +23,7 @@ Lanes: **A** server/DB/data collection/risk engine (`server/`, `db/`) · **B** A
 - Client: Flutter (web deployed via `deploy/push_web.sh`; iOS simulator without CocoaPods = SPM copy in an ASCII path); Firebase auth (anonymous + Google + email, app ID `kr.guryong.guardian`) + FCM
 - Infra: Docker Compose (OrbStack on Mac, Docker Desktop + WSL2 on Windows); GCP project
   `guryong-guardian-0924` (asia-northeast3); deploy VM (another GCP project, static IP 34.64.177.195) + Caddy at
-  https://34-64-177-195.nip.io (B10, see README "배포 서버")
+  https://34-64-177-195.nip.io (B10, see `docs/team-guide.md` "배포 서버")
 
 ## Key directories
 | Path | Purpose |
@@ -39,7 +39,8 @@ Lanes: **A** server/DB/data collection/risk engine (`server/`, `db/`) · **B** A
 | `deploy/` | B10: `Caddyfile` (HTTPS for `DEPLOY_DOMAIN`; /api/chat·voice·tts·ai → ai, /api/route → route, other /api → api, / → Flutter web; blocks /api/ai/memory·/api/ai/usage·/api/v1/internal), `deploy.sh` (run on VM: backup → pull → loader → rebuild → health), `push_web.sh` (run on Mac: build web in an ASCII temp dir → rsync to VM `deploy/web/`, gitignored); Firebase web config in `deploy/web-defines.json` (gitignored) |
 | `secrets/` | Credential files, gitignored except `.gitkeep` (e.g. `firebase-admin.json`) |
 | `.env.example` | Every env key with local defaults; rules in its header (.env.example:2-8) |
-| `README.md` | Team-facing setup (Mac/Windows), common commands, env and service rules |
+| `README.md` / `README.en.md` | GitHub front page, Korean / English (intro → features → architecture → quick start); keep both in sync |
+| `docs/team-guide.md` | Team-facing setup (Mac/Windows), common commands, env and service rules, deploy server (moved from README 2026-11-01) |
 
 ## Commands
 Run from this directory (`코드/`).
@@ -88,7 +89,7 @@ Check these when relevant:
 - `ai/.claude/docs/architectural_patterns.md` — LangGraph node/reducer/routing/override/LLM-fallback patterns
 - `ai/docs/agent-design.md` — agent graph, node I/O, decision tree, tool contract with lane A, chat API (§8)
 - `ai/docs/code_check_list.md` — known defects with repro and target task; check before debugging/testing
-- `README.md` — what teammates see; keep it in sync when setup or rules change
+- `docs/team-guide.md` — what teammates see; keep it in sync when setup or rules change. `README.md`/`README.en.md` — public front page
 - `docs/demo-scenario.md` — demo-mode scenario (sensor values in `server/risk/demo.py` `DEMO_DT`), 5 scenes with coordinates, AI questions; guarded by `server/tests/test_demo_scenario.py`
 - Service proposal (requirements source): `[구룡가디언]구룡포 재난 지킴이-구룡포는구룡_최종 복사본.docx` (gitignored;
   contains personal data — never commit). Read with `textutil -convert txt -stdout <file>`

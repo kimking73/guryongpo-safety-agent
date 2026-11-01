@@ -1,0 +1,167 @@
+# 구룡가디언 팀 개발 안내
+
+팀원용 설정·운영 안내. 프로젝트 소개는 [README.md](../README.md) (English: [README.en.md](../README.en.md)).
+
+## 저장소 구조
+
+| 폴더 | 내용 | 담당 |
+| --- | --- | --- |
+| `server/` | FastAPI 서버 (`/api/v1/...`), 데이터 수집기(`collector/`), 위험 판정(`risk/`), API 명세·목업(`spec/`, `mock/`) — `server/README.md` | A |
+| `ai/` | LangGraph multi-agent (`ai/CLAUDE.md`, `ai/docs/agent-design.md`) | B |
+| `route/` | 경로 안내 서버 (`/api/route`, GraphHopper 앞단) | B |
+| `graphhopper/` | GraphHopper 경로 엔진 설정, 구룡포 OSM 도로망 받기 스크립트 | B |
+| `app/` | Flutter 앱·웹 | C |
+| `db/init/` | DB 최초 생성 시 실행되는 SQL: PostGIS 확장, 스키마(01), 판단 기준·관측소·맨홀(02), 산사태 취약지역(03), 행동요령(04), 대피소(05), 응급의료(06), AI 읽기 전용 계정(07, B). 이후 바뀐 시드는 `docker compose run --rm loader`로 다시 적재 | A (07은 B) |
+| `secrets/` | 서비스 계정 키 등 비밀 파일 (커밋 안 됨) | - |
+
+## 처음 설정
+
+### 1. 도구 설치
+
+**Mac**
+1. [OrbStack](https://orbstack.dev) 설치 (`brew install --cask orbstack`) → 앱을 한 번 실행해 설정 완료
+   - Docker Desktop을 이미 쓰고 있다면 그대로 써도 된다.
+2. git: `git --version`으로 확인 (없으면 `xcode-select --install`)
+
+**Windows**
+1. WSL2 설치: 관리자 PowerShell에서 `wsl --install` → 재부팅 → Ubuntu 사용자 만들기
+2. [Docker Desktop](https://www.docker.com/products/docker-desktop/) 설치 → Settings → Resources → WSL Integration에서 Ubuntu 켜기
+3. **이후 모든 명령은 Ubuntu(WSL) 터미널에서 실행한다.**
+4. **저장소는 WSL 안(`~/`)에 clone한다.** `C:\Users\...`(`/mnt/c/...`)에 두면 매우 느리고 파일 감시(자동 재시작)가 동작하지 않는다.
+
+### 2. 저장소 받기
+
+```bash
+git clone https://github.com/kimking73/guryongpo-safety-agent.git
+cd guryongpo-safety-agent
+```
+
+### 3. 환경 변수
+
+```bash
+cp .env.example .env
+```
+- 로컬 DB는 기본값 그대로 동작한다.
+- API 키와 `secrets/firebase-admin.json`은 **팀 비공개 채널**로 받아서 넣는다.
+
+### 4. 도로망 (저장소에 포함)
+
+- 구룡포 일대 도로망 `graphhopper/data/guryongpo.osm.pbf`(약 300KB, 2026-09-26 기준)가 저장소에 들어 있어 **따로 받을 필요 없다**.
+  범위는 경도 129.48~129.60, 위도 35.92~36.04. 데이터 © OpenStreetMap contributors, ODbL 라이선스 — 화면·발표에 쓸 때 출처를 표기한다.
+- 도로망을 최신으로 바꿀 때만 `./graphhopper/fetch_osm.sh` — 한국 전체 OSM(약 290MB)을 받아 같은 범위로 잘라 이 파일을 덮어쓴다(몇 분, curl·docker 필요,
+  Windows는 WSL 터미널). 바뀐 파일을 커밋하면 팀원 모두 같은 도로망을 쓴다. 이 파일이 없으면 graphhopper 컨테이너가 시작되지 않는다.
+- 고도(오르막 계산)는 처음 실행 때 SRTM(90m)을 자동으로 받는다. 더 정확한 **국토지리정보원 DEM**을 쓰려면 (선택):
+  1. 국토정보플랫폼(https://map.ngii.go.kr)에서 구룡포 일대 수치표고모델 파일(.img 등)을 받아 `graphhopper/dem/ngii/`에 넣는다.
+  2. `./graphhopper/build_dem.sh` → `docker compose restart graphhopper` (그래프를 새 고도로 다시 만든다).
+  - 파일은 용량이 커서 커밋하지 않는다. 팀원끼리 공유하거나 각자 받는다.
+
+### 5. 실행
+
+```bash
+docker compose up -d --build
+```
+
+확인:
+```bash
+docker compose ps                        # db, api, collector, ai, graphhopper, route 모두 (healthy)
+curl localhost:8000/api/health           # {"status":"ok","db":"ok", ... 수집 상태 components}
+curl "localhost:8000/api/v1/risk?lat=35.99069&lng=129.556057"     # 이 지점의 현재 위험도 (침수 등)
+curl localhost:8001/api/ai/health        # {"status":"ok"}
+curl -X POST localhost:8001/api/chat -H 'Content-Type: application/json' \
+     -d '{"user_id":"me","question":"비 오는데 걸어서 가도 돼요?"}'
+curl localhost:8002/api/route/health     # {"status":"ok","graphhopper":"ok"}
+curl -X POST localhost:8002/api/route -H 'Content-Type: application/json' \
+     -d '{"origin":{"lat":35.9905,"lon":129.5560},"destination":{"lat":35.9868,"lon":129.5480}}'
+```
+- API 문서: http://localhost:8000/api/v1/docs (서버, 명세 원본은 `server/spec/openapi.yaml`), http://localhost:8001/docs (AI), http://localhost:8002/docs (경로)
+- 경로는 위험 판정 엔진이 지금 낸 **침수·산사태 영역(주의 이상)**을 피한다 (앱 지도에 칠해지는 영역과 같음, 호우 영역·맨홀은 회피에 쓰지 않음).
+  응답의 `avoided`는 피한 구역, `still_inside`는 다른 길이 없어 지나는 구역(출발·도착 지점이 영역 안이거나 바로 옆일 때), `hazards_ok: false`면 위험 영역을 못 읽어 회피 없이 계산한 경로다.
+- 요청의 `profile`: `adult`(가장 빠른 길, 경사 무시), `elderly`(급경사 도로를 피하고 느린 걸음, 같은 경사면 비탈길보다 계단을 선호).
+  응답에 `ascend_m`·`descend_m`(오르막·내리막 합계), `max_slope_pct`(가장 급한 경사)가 온다. 규칙은 `route/guardian_route/profiles.py`.
+- 이동 중: `POST /api/route/check`에 현재 위치·목적지·지금 경로(`geometry`)를 보내면 재계산이 필요한지(`reroute`)와 새 경로를 준다.
+  경로에서 30m 넘게 벗어났거나, 남은 경로에 새 위험 구역이 생겼을 때 재계산한다. 도착지 20m 안이면 `arrived: true`.
+  지금 피하는 구역 목록: http://localhost:8002/api/route/hazards . 고정 구역으로 시연·테스트하려면 `.env`의 `ROUTE_HAZARDS_FILE=/app/data/hazards.sample.geojson`.
+- 위험 구역 회피 시연: `cd route && uv pip install -p .venv -e ".[demo]" && .venv/bin/python scripts/avoid_demo.py` — 가상 침수 구역을 무작위로 켜고 끄며 16회 경로 계산·판정, 그림·GIF·결과 표를 `route/out/avoid_demo/`에 만든다 (graphhopper가 떠 있어야 함)
+- GraphHopper 지도 화면(로컬 확인용): http://localhost:8989/maps/ (끝의 `/` 필수. 없으면 빈 화면)
+- 경로 응답의 `geometry`는 인코딩된 polyline(Google 형식, 정밀도 1e5)이다. 앱에서 풀어서 지도에 그린다.
+- AI가 OpenAI(`gpt-6-luna`)를 쓰려면 `.env`의 `OPENAI_API_KEY`가 필요하다. 없으면 키워드 분류로 동작한다.
+- AI의 목적지 찾기("구룡포항까지 어떻게 가?")는 `.env`의 `KAKAO_REST_KEY`(카카오 로컬 REST 키)로 장소를 검색한다. 없으면 등록 장소(집·직장)와 대피소·의료시설 이름만 찾는다. 키를 넣은 뒤 `docker compose up -d --force-recreate ai`.
+- DB 접속: `localhost:5433`, 사용자·비밀번호·DB 이름은 `.env`의 `DB_*`
+- AI는 DB를 **읽기 전용 계정**(`.env`의 `AI_DB_USER`·`AI_DB_PASSWORD`)으로 직접 읽는다. 이 계정은 SELECT만 할 수 있다.
+  (5432는 로컬에 설치된 PostgreSQL과 겹칠 수 있어 5433을 쓴다)
+
+## 자주 쓰는 명령
+
+```bash
+docker compose up -d --build     # 시작 (코드 의존성이 바뀌면 --build)
+docker compose logs -f api       # API 로그 보기
+docker compose down              # 중지 (DB 데이터는 유지)
+docker compose down -v           # 중지 + DB 데이터 삭제 (db/init SQL을 다시 실행하고 싶을 때)
+docker compose exec db psql -U guardian -d guardian   # DB 셸
+docker compose logs -f collector                      # 수집·위험 판정 로그 (10분마다)
+docker compose exec api python -m collector --once    # 수집 전체 1회 즉시 실행 (결과 표)
+docker compose run --rm loader                        # 정적 데이터(대피소·위험지역·행동요령·판단 기준) 다시 적재, 관측값은 유지
+```
+- **AI 읽기 전용 계정 만들기 (2026-10-01 이전에 만든 DB 한 번만)**: `.env`에 `.env.example`의 `AI_DB_USER`·`AI_DB_PASSWORD` 두 줄을 넣고
+  `docker compose up -d db` → `docker compose exec db sh /docker-entrypoint-initdb.d/07_ai_readonly.sh`. 새로 만드는 DB는 자동.
+- **사용자 정보는 서버 프로필 하나 (2026-10-08)**: AI가 대화에서 들은 나이·보행·직업·집 등은 사용자 본인 로그인으로 서버 프로필
+  (`user_profiles`·`user_places`)에 바로 반영되고, 앱 프로필 화면도 같은 곳을 읽는다. 예전 AI 기억(`ai_memory` 스키마)은 쓰지 않는다
+  (데이터만 남김, `AI_MEM_DB_*` 계정도 그대로). 대화 기억(진행 중인 대화)은 AI 서버 메모리에만 있어 마지막 문답 후 1시간 또는 재시작 때 사라진다.
+- **음성(질문 녹음 → 답 음성) 켜기 (B5, Google Cloud)**: GCP 콘솔에서 Speech-to-Text API·Text-to-Speech API를 사용 설정하고,
+  서비스 계정을 만들어 키(JSON)를 `secrets/gcp-voice.json`으로 저장 → `docker compose up -d --force-recreate ai`.
+  키가 없으면 채팅은 그대로 되고 `/api/voice`·`/api/tts`만 503(앱은 "음성 기능을 지금 쓸 수 없습니다"). 키 파일은 커밋하지 않는다.
+  서비스 계정 키를 만들 수 없으면(조직 정책) API 키를 `.env`의 `GCP_VOICE_API_KEY`에 넣어도 된다.
+- **음성 대화 (2026-10-11)**: 앱의 마이크를 한 번 누르면 손대지 않고 묻고 듣는다. 방식은 둘이고 앱이 알아서 고른다 (`app/lib/services/realtime_voice.dart` `VoiceHub`).
+  - **실시간 음성 (웹, 먼저 시도)**: OpenAI Realtime(`OPENAI_REALTIME_MODEL`, 기본 `gpt-realtime-2`)이 듣고 말한다. **답 내용은 그대로 LangGraph**가 만든다 —
+    모델은 말을 들을 때마다 도구 `ask_guardian`만 부르고(세션 `tool_choice=required`), 앱이 `/api/chat` 답의 음성 문장을 "그대로 읽어라"로 돌려준다.
+    앱은 `POST /api/voice/session`으로 10분짜리 임시 키만 받아 OpenAI와 WebRTC로 직접 연결한다 (`ai/guardian_ai/realtime.py`, 진짜 키는 서버에만).
+    Google 키가 없어도 된다. Realtime 사용료는 `GET /api/ai/usage` 예상 비용에 잡히지 않는다 — OpenAI 대시보드에서 확인.
+  - **녹음 올리기 (휴대폰 앱·실시간이 안 될 때)**: 듣기 → 말이 끝나면(약 1.2초 조용) 자동 전송 `/api/voice`(Google 받아쓰기·음성 합성) → 답 음성 → 다시 듣기
+    (`voice_conversation.dart`, 말 끝 감지 `voice_service.dart` `SpeechEndDetector`). Google 키가 있어야 한다.
+  - 끝내기는 중지 버튼, "그만"·"대화 종료" 같은 말, 한동안 말 없음.
+- **`db/init`의 시드(02~)가 바뀌었으면** `docker compose run --rm loader` (DB 데이터 유지). **스키마(01)가 바뀌었으면** loader가 알려 주고 멈추므로 `docker compose down -v` 후 다시 `up`.
+- 서버 API 대부분은 아직 목업(응답 헤더 `X-Mock: true`)이다. 실데이터: `/api/health`, `/api/v1/risk*`, 지도 레이어 `stations`·`landslide_zones`·`risk_areas`·`shelters`·`medical`·`manholes`. 자세한 건 `server/README.md`.
+- `server/app/`·`server/collector/`·`server/risk/`(api), `ai/guardian_ai/`, `route/guardian_route/` 코드를 고치면 해당 서버가 자동으로 재시작된다 (재빌드 불필요).
+- 배포 시 Caddy가 `/api/chat`·`/api/voice`·`/api/tts`·`/api/ai`는 ai(8001)로, `/api/route`는 route(8002)로, 나머지 `/api`는 서버(8000)로, 그 외는 웹앱으로 넘긴다 (B10, `deploy/Caddyfile`). 아래 "배포 서버" 참고.
+- `graphhopper/config.yml`을 바꾸면 `rm -rf graphhopper/data/graph-cache` 후 `docker compose up -d --build graphhopper` (설정이 이미지에 들어가므로 재빌드, 그래프도 다시 만든다).
+
+## 환경 변수 규칙
+
+- `.env`는 절대 커밋하지 않는다. `.env.example`은 항상 모든 키를 담는다.
+- 새 키를 추가하면 **같은 커밋에서** `.env.example`에도 추가한다 (값은 비우거나 로컬 기본값).
+- 이름은 대문자 스네이크 + 영역 접두사: `DB_`, `API_`, `GCP_`, `FIREBASE_`, `OPENAI_`, `ROUTE_`, `GRAPHHOPPER_`, `KMA_`, `POHANG_TWIN_`, `SAFETY24_`
+- 파일로 된 비밀은 `secrets/`에 두고 `.env`에는 경로만 쓴다.
+- 주석은 반드시 별도 줄에 쓴다. `KEY=  # 설명`처럼 값 뒤에 붙이면 docker가 주석까지 값으로 읽는다.
+- 실제 키 값은 팀 비공개 채널로만 공유한다. 저장소·이슈·PR·공개 채팅에 붙이지 않는다.
+
+## 서비스 추가 규칙
+
+- 새 서비스(loader)는 담당 작업에서 `docker-compose.yml`에 추가한다. collector(수집+위험 판정)는 추가됨.
+- 모든 서비스에 `restart: unless-stopped`와 `healthcheck`를 둔다.
+- 로컬에서만 필요한 설정(포트 노출, 코드 마운트)은 `docker-compose.override.yml`에 둔다.
+  서버에서는 `docker compose -f docker-compose.yml up -d`로 override 없이 실행한다.
+
+## 클라우드
+
+| 항목 | 값 |
+| --- | --- |
+| GCP 프로젝트 | `guryong-guardian-0924` (리전 `asia-northeast3` 서울) |
+| Firebase | 같은 프로젝트, 익명 인증·FCM 활성화 |
+| 예산 알림 | 0원 기준 (크레딧 차감 후 실제 청구가 생기면 메일) |
+
+- GCP 콘솔: https://console.cloud.google.com/home/dashboard?project=guryong-guardian-0924
+- Firebase 콘솔: https://console.firebase.google.com/project/guryong-guardian-0924/overview
+
+## 배포 서버 (B10)
+
+- 주소: **https://34-64-177-195.nip.io** — `/`는 웹앱, `/api/...`는 서버들. 상태: `curl https://34-64-177-195.nip.io/api/health`
+- VM: `guryongpo-safety-agent` (e2-medium, 서울 b), 고정 IP `34.64.177.195`(`guryongpo-ip`). 접속 `ssh jongyeonkim@34.64.177.195`
+  — 관리자(sudo) 계정: `jongyeonkim`, `harin`(조하린, 2026-10-12). 계정 추가는 VM 프로젝트 메타데이터 `ssh-keys`에 `이름:공개키` 한 줄
+- 서버 업데이트 (main에 올라간 코드 반영): VM에서 `cd ~/guryongpo-safety-agent && ./deploy/deploy.sh`
+  — DB 백업(`~/backups/`, 최근 10개) → `git pull` → loader(시드·스키마 추가분) → 재빌드 → 상태 확인
+- 웹앱 업데이트: 맥에서 `./deploy/push_web.sh` — 배포 주소로 Flutter 웹을 빌드해 VM에 올린다(재시작 불필요).
+  Firebase 웹 설정값은 `deploy/web-defines.json`(커밋 안 함, `{"FIREBASE_API_KEY": "...", "FIREBASE_APP_ID": "...", "FIREBASE_PROJECT_ID": "...", "FIREBASE_MESSAGING_SENDER_ID": "..."}`)
+- VM `.env`는 맥 `.env`와 다르다 (DB 비밀번호들·`DEPLOY_DOMAIN`·`COMPOSE_PROFILES=deploy`·`CORS_ORIGINS`). **맥 `.env`를 통째로 복사하지 말고** 바뀐 키만 넣는다
+- 밖에서 막힌 경로(404): `/api/ai/memory`, `/api/ai/usage`, `/api/v1/internal`. 8000–8002·DB 포트는 외부에 안 열림
+
+김다인바보

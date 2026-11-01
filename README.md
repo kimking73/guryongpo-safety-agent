@@ -1,167 +1,217 @@
 # 구룡가디언 (구룡포 재난 지킴이)
 
-2026 디지털 트윈 구룡포 AI 해커톤 — 팀 구룡포는구룡.
-재난 정보를 한 대시보드에 모으고, 사용자 맞춤형 AI agent가 선제 경고·안전 경로·행동 요령을 안내하는 서비스.
+**한국어** · [English](README.en.md)
 
-## 저장소 구조
+**포항 구룡포를 위한 재난 대응 서비스** — 흩어진 재난 정보를 지도 하나에 모으고, 사용자 맞춤형 AI agent가 먼저 경고하고,
+무엇을 해야 하는지 알려 주고, 침수·산사태 위험 지역을 피하는 길로 안내합니다.
 
-| 폴더 | 내용 | 담당 |
-| --- | --- | --- |
-| `server/` | FastAPI 서버 (`/api/v1/...`), 데이터 수집기(`collector/`), 위험 판정(`risk/`), API 명세·목업(`spec/`, `mock/`) — `server/README.md` | A |
-| `ai/` | LangGraph multi-agent (`ai/CLAUDE.md`, `ai/docs/agent-design.md`) | B |
-| `route/` | 경로 안내 서버 (`/api/route`, GraphHopper 앞단) | B |
-| `graphhopper/` | GraphHopper 경로 엔진 설정, 구룡포 OSM 도로망 받기 스크립트 | B |
-| `app/` | Flutter 앱·웹 | C |
-| `db/init/` | DB 최초 생성 시 실행되는 SQL: PostGIS 확장, 스키마(01), 판단 기준·관측소·맨홀(02), 산사태 취약지역(03), 행동요령(04), 대피소(05), 응급의료(06), AI 읽기 전용 계정(07, B). 이후 바뀐 시드는 `docker compose run --rm loader`로 다시 적재 | A (07은 B) |
-| `secrets/` | 서비스 계정 키 등 비밀 파일 (커밋 안 됨) | - |
+2026 디지털 트윈 구룡포 AI 해커톤, 팀 *구룡포는구룡* 출품작.
 
-## 처음 설정
+- 서비스 주소: https://34-64-177-195.nip.io
+- 팀원용 설정·운영 안내: [docs/team-guide.md](docs/team-guide.md)
 
-### 1. 도구 설치
+## 왜 만들었나
 
-**Mac**
-1. [OrbStack](https://orbstack.dev) 설치 (`brew install --cask orbstack`) → 앱을 한 번 실행해 설정 완료
-   - Docker Desktop을 이미 쓰고 있다면 그대로 써도 된다.
-2. git: `git --version`으로 확인 (없으면 `xcode-select --install`)
+구룡포는 바다와 가파른 산비탈 사이에 마을이 있어 호우·태풍 때 침수와 산사태가 함께 옵니다. 주민 중에는 어르신이 많고,
+재난 정보는 포항 디지털 트윈, 기상청, 재난안전24, 공공데이터포털, 생활안전지도에 흩어져 있습니다.
+"지금 우리 집 앞이 위험한가", "어느 길로 대피해야 하나"를 한 번에 알 수 있는 곳이 없었습니다.
 
-**Windows**
-1. WSL2 설치: 관리자 PowerShell에서 `wsl --install` → 재부팅 → Ubuntu 사용자 만들기
-2. [Docker Desktop](https://www.docker.com/products/docker-desktop/) 설치 → Settings → Resources → WSL Integration에서 Ubuntu 켜기
-3. **이후 모든 명령은 Ubuntu(WSL) 터미널에서 실행한다.**
-4. **저장소는 WSL 안(`~/`)에 clone한다.** `C:\Users\...`(`/mnt/c/...`)에 두면 매우 느리고 파일 감시(자동 재시작)가 동작하지 않는다.
+## 주요 기능
 
-### 2. 저장소 받기
+- **재난 정보 대시보드.** 수위·강우량·풍속, 기상 특보, 재난문자, 산사태 취약지역, 대피소, 응급의료시설을 모아 지도 하나에 보여 줍니다.
+- **위험 판정 엔진.** 관측값으로 침수·산사태 위험 영역을 정상·보통·주의·경보·위험 5단계로 판정해 10분마다 갱신합니다.
+- **맞춤형 AI agent.** "비 오는데 걸어서 집에 가도 돼요?"처럼 말이나 글로 물으면, 사용자의 위치·나이·직업·등록 장소(집·직장)를 고려해 답합니다.
+  위험 판정 엔진이 경보를 내면 같은 agent가 선제 경고문을 씁니다.
+- **안전 대피 경로.** 도보·차량 경로가 지금 위험 지역을 피합니다. 어르신 프로필은 급경사를 피하고, 이동 중 경로를 벗어나거나 새 위험 지역이
+  생기면 다시 계산합니다. 바다 위 선박은 가장 가까운 항구를 거쳐 육지 대피소로 안내합니다.
+- **지역 방재단 도구.** 누구를 먼저 찾아가야 하는지 가구 순위를 매기고(도움 요청·장애 여부·무응답 순), 여러 집을 도는 방문 경로를 만듭니다.
+- **시연 모드.** 실제 데이터를 건드리지 않고 같은 화면을 호우·강풍 시나리오로 보여 줍니다. 날씨가 맑은 날에도 시연할 수 있습니다.
+
+다루는 재난: 산사태, 호우·침수, 강풍·태풍, 미세먼지·자외선.
+
+## 구조
+
+```mermaid
+flowchart LR
+    SRC[공공 데이터<br/>포항 디지털 트윈 · 기상청 · 재난안전24 · 공공데이터포털] --> COL[collector<br/>수집 + 위험 판정]
+    COL --> DB[(PostgreSQL 17<br/>+ PostGIS 3.5)]
+    DB --> API[api<br/>FastAPI :8000]
+    DB -. 읽기 전용 계정 .-> AI[ai<br/>LangGraph agent :8001]
+    API --> ROUTE[route<br/>경로 서버 :8002]
+    ROUTE --> GH[GraphHopper 11<br/>OSM + 고도]
+    AI --> ROUTE
+    APP[Flutter 앱 / 웹] --> API
+    APP --> AI
+    APP --> ROUTE
+```
+
+| 서비스 | 역할 |
+| --- | --- |
+| `db` | PostgreSQL 17 + PostGIS 3.5. 스키마와 기초 데이터는 `db/init/` |
+| `api` | FastAPI 서버 (`/api/v1`): 위험도, 지도 레이어, 대시보드, 사용자, 알림, 관리자 |
+| `collector` | 데이터 출처에서 정해진 주기로 수집한 뒤 위험 판정 실행 |
+| `ai` | `POST /api/chat` 뒤의 LangGraph multi-agent, 음성 API |
+| `route` | GraphHopper 앞단 경로 서버: 위험 지역 회피, 재계산, 해상 경로, 방문 경로 |
+| `graphhopper` | 구룡포 도로망 위의 GraphHopper 11 (도보·차량) |
+| `caddy` | HTTPS 리버스 프록시 (배포 서버에서만) |
+
+### AI agent
+
+관리 agent가 질문을 읽고 필요한 전문 agent만 골라 동시에 실행합니다. 모든 답은 보내기 전에 환각 검사를 거칩니다.
+
+```mermaid
+flowchart TD
+    Q([사용자 질문 / 위험 경보]) --> M[관리 agent<br/>재난 단계 판단 · agent 선택]
+    M -.-> L[산사태] & R[호우 · 침수] & W[강풍 · 태풍] & S[생활 안전] & P[위치 · 경로] & RS[지원 · 복구]
+    M -. 고른 agent 없음 .-> D[바로 답하기]
+    L & R & W & S & P & RS --> A[행동 요령<br/>규칙 기반 결정 트리]
+    A --> PO[문장 다듬기] --> H[환각 검사]
+    H -- 통과 --> OUT([최종 답])
+    H -- 실패, 1회 재시도 --> M
+```
+
+재난 상황이라서 지킨 원칙:
+
+- **숫자는 모델이 아니라 데이터에서.** 관측값 수집과 근거 정리는 코드가 하고, LLM은 문장만 씁니다. 검사 단계가 답의 모든 숫자를 근거와 대조합니다.
+- **행동 요령은 규칙으로.** 다음에 할 일은 공식 행동요령 위의 결정 트리가 정합니다. LLM이 행동 요령을 지어내지 않습니다.
+- **LLM이 멈춰도 답한다.** 분류는 키워드 분류로, 문장 작성은 템플릿으로 대신합니다. DB를 읽지 못하면 "안전하다"가 아니라 "확인할 수 없다"고 답합니다.
+- **AI는 DB에 쓰지 못한다.** SELECT만 되는 계정으로 읽고, 사용자 프로필은 그 사용자의 로그인 토큰으로 API를 거쳐서만 고칩니다.
+
+자세한 설계: [`ai/docs/agent-design.md`](ai/docs/agent-design.md)
+
+### 경로 안내
+
+- 위험 판정 엔진이 지금 낸 침수·산사태 영역(주의 이상)을 피해 GraphHopper로 경로를 계산합니다. 피하지 못한 구역이 있으면 영역을 넓혀 다시 요청합니다.
+- 프로필별 규칙: `adult`는 가장 빠른 길, `elderly`는 급경사(1/18·1/12 기준)를 피하고 느린 걸음으로 계산합니다. 응답에 오르막·내리막 합계, 최대 경사, 계단 길이가 담깁니다.
+- 이동 중 `POST /api/route/check`: 경로에서 30m 넘게 벗어나거나 남은 길에 새 위험 구역이 생기면 새 경로를 줍니다.
+- 해상 경로 `POST /api/route/sea`: 해안선·방파제에서 15m 떨어진 격자 최단 경로로 가장 가까운 항구(12곳)까지, 그 뒤 육지 경로로 대피소까지.
+- 방재단 방문 경로 `POST /api/route/visits`: 1~10곳을 도는 순서를 Held-Karp 동적 계획법으로 정확히 풉니다. 최단 순서와 우선순위(위험도 높은 가구 먼저) 순서를 함께 돌려줍니다.
+
+## 기술 스택
+
+| 영역 | 스택 |
+| --- | --- |
+| 백엔드 | Python 3.12, FastAPI, uvicorn, APScheduler |
+| 데이터베이스 | PostgreSQL 17, PostGIS 3.5 |
+| AI | LangGraph, Pydantic v2, OpenAI Responses API, 음성은 WebRTC 위의 OpenAI Realtime (대체 경로 Google Cloud STT/TTS), LangSmith 추적(선택) |
+| 경로 | GraphHopper 11 (Java 21), OpenStreetMap, SRTM 또는 국토지리정보원 DEM 고도 |
+| 클라이언트 | Flutter (웹·Android·iOS 한 화면), Firebase Auth, Firebase Cloud Messaging |
+| 인프라 | Docker Compose, Caddy, Google Cloud |
+
+## 빠르게 실행하기
+
+Docker(OrbStack 또는 Docker Desktop. Windows는 WSL2 안에 clone)와 git이 필요합니다.
 
 ```bash
 git clone https://github.com/kimking73/guryongpo-safety-agent.git
 cd guryongpo-safety-agent
-```
-
-### 3. 환경 변수
-
-```bash
 cp .env.example .env
-```
-- 로컬 DB는 기본값 그대로 동작한다.
-- API 키와 `secrets/firebase-admin.json`은 **팀 비공개 채널**로 받아서 넣는다.
-
-### 4. 도로망 (저장소에 포함)
-
-- 구룡포 일대 도로망 `graphhopper/data/guryongpo.osm.pbf`(약 300KB, 2026-09-26 기준)가 저장소에 들어 있어 **따로 받을 필요 없다**.
-  범위는 경도 129.48~129.60, 위도 35.92~36.04. 데이터 © OpenStreetMap contributors, ODbL 라이선스 — 화면·발표에 쓸 때 출처를 표기한다.
-- 도로망을 최신으로 바꿀 때만 `./graphhopper/fetch_osm.sh` — 한국 전체 OSM(약 290MB)을 받아 같은 범위로 잘라 이 파일을 덮어쓴다(몇 분, curl·docker 필요,
-  Windows는 WSL 터미널). 바뀐 파일을 커밋하면 팀원 모두 같은 도로망을 쓴다. 이 파일이 없으면 graphhopper 컨테이너가 시작되지 않는다.
-- 고도(오르막 계산)는 처음 실행 때 SRTM(90m)을 자동으로 받는다. 더 정확한 **국토지리정보원 DEM**을 쓰려면 (선택):
-  1. 국토정보플랫폼(https://map.ngii.go.kr)에서 구룡포 일대 수치표고모델 파일(.img 등)을 받아 `graphhopper/dem/ngii/`에 넣는다.
-  2. `./graphhopper/build_dem.sh` → `docker compose restart graphhopper` (그래프를 새 고도로 다시 만든다).
-  - 파일은 용량이 커서 커밋하지 않는다. 팀원끼리 공유하거나 각자 받는다.
-
-### 5. 실행
-
-```bash
 docker compose up -d --build
 ```
 
-확인:
+`.env.example`의 로컬 기본값만으로 모든 서비스가 뜹니다. 구룡포 도로망 파일이 저장소에 들어 있어 따로 받을 것이 없습니다.
+
+상태 확인:
+
 ```bash
-docker compose ps                        # db, api, collector, ai, graphhopper, route 모두 (healthy)
-curl localhost:8000/api/health           # {"status":"ok","db":"ok", ... 수집 상태 components}
-curl "localhost:8000/api/v1/risk?lat=35.99069&lng=129.556057"     # 이 지점의 현재 위험도 (침수 등)
-curl localhost:8001/api/ai/health        # {"status":"ok"}
+docker compose ps                       # 모든 서비스가 (healthy)
+curl localhost:8000/api/health          # {"status":"ok","db":"ok", ...}
+curl localhost:8001/api/ai/health       # {"status":"ok"}
+curl localhost:8002/api/route/health    # {"status":"ok","graphhopper":"ok"}
+```
+
+써 보기:
+
+```bash
+# 한 지점의 현재 위험도
+curl "localhost:8000/api/v1/risk?lat=35.99069&lng=129.556057"
+
+# AI에게 묻기
 curl -X POST localhost:8001/api/chat -H 'Content-Type: application/json' \
      -d '{"user_id":"me","question":"비 오는데 걸어서 가도 돼요?"}'
-curl localhost:8002/api/route/health     # {"status":"ok","graphhopper":"ok"}
+
+# 지금 위험 지역을 피하는 도보 경로
 curl -X POST localhost:8002/api/route -H 'Content-Type: application/json' \
      -d '{"origin":{"lat":35.9905,"lon":129.5560},"destination":{"lat":35.9868,"lon":129.5480}}'
 ```
-- API 문서: http://localhost:8000/api/v1/docs (서버, 명세 원본은 `server/spec/openapi.yaml`), http://localhost:8001/docs (AI), http://localhost:8002/docs (경로)
-- 경로는 위험 판정 엔진이 지금 낸 **침수·산사태 영역(주의 이상)**을 피한다 (앱 지도에 칠해지는 영역과 같음, 호우 영역·맨홀은 회피에 쓰지 않음).
-  응답의 `avoided`는 피한 구역, `still_inside`는 다른 길이 없어 지나는 구역(출발·도착 지점이 영역 안이거나 바로 옆일 때), `hazards_ok: false`면 위험 영역을 못 읽어 회피 없이 계산한 경로다.
-- 요청의 `profile`: `adult`(가장 빠른 길, 경사 무시), `elderly`(급경사 도로를 피하고 느린 걸음, 같은 경사면 비탈길보다 계단을 선호).
-  응답에 `ascend_m`·`descend_m`(오르막·내리막 합계), `max_slope_pct`(가장 급한 경사)가 온다. 규칙은 `route/guardian_route/profiles.py`.
-- 이동 중: `POST /api/route/check`에 현재 위치·목적지·지금 경로(`geometry`)를 보내면 재계산이 필요한지(`reroute`)와 새 경로를 준다.
-  경로에서 30m 넘게 벗어났거나, 남은 경로에 새 위험 구역이 생겼을 때 재계산한다. 도착지 20m 안이면 `arrived: true`.
-  지금 피하는 구역 목록: http://localhost:8002/api/route/hazards . 고정 구역으로 시연·테스트하려면 `.env`의 `ROUTE_HAZARDS_FILE=/app/data/hazards.sample.geojson`.
-- 위험 구역 회피 시연: `cd route && uv pip install -p .venv -e ".[demo]" && .venv/bin/python scripts/avoid_demo.py` — 가상 침수 구역을 무작위로 켜고 끄며 16회 경로 계산·판정, 그림·GIF·결과 표를 `route/out/avoid_demo/`에 만든다 (graphhopper가 떠 있어야 함)
-- GraphHopper 지도 화면(로컬 확인용): http://localhost:8989/maps/ (끝의 `/` 필수. 없으면 빈 화면)
-- 경로 응답의 `geometry`는 인코딩된 polyline(Google 형식, 정밀도 1e5)이다. 앱에서 풀어서 지도에 그린다.
-- AI가 OpenAI(`gpt-6-luna`)를 쓰려면 `.env`의 `OPENAI_API_KEY`가 필요하다. 없으면 키워드 분류로 동작한다.
-- AI의 목적지 찾기("구룡포항까지 어떻게 가?")는 `.env`의 `KAKAO_REST_KEY`(카카오 로컬 REST 키)로 장소를 검색한다. 없으면 등록 장소(집·직장)와 대피소·의료시설 이름만 찾는다. 키를 넣은 뒤 `docker compose up -d --force-recreate ai`.
-- DB 접속: `localhost:5433`, 사용자·비밀번호·DB 이름은 `.env`의 `DB_*`
-- AI는 DB를 **읽기 전용 계정**(`.env`의 `AI_DB_USER`·`AI_DB_PASSWORD`)으로 직접 읽는다. 이 계정은 SELECT만 할 수 있다.
-  (5432는 로컬에 설치된 PostgreSQL과 겹칠 수 있어 5433을 쓴다)
 
-## 자주 쓰는 명령
+API 문서: http://localhost:8000/api/v1/docs (서버), http://localhost:8001/docs (AI), http://localhost:8002/docs (경로)
+
+### 선택 키
+
+키가 없어도 모두 실행되고, 일부 기능만 줄어듭니다.
+
+| `.env` 키 | 없으면 |
+| --- | --- |
+| `OPENAI_API_KEY` | AI가 키워드로 분류하고 템플릿으로 답함 |
+| `KAKAO_REST_KEY` | 목적지 검색이 등록 장소·대피소·의료시설 이름만 찾음 |
+| `KMA_API_KEY`, `POHANG_TWIN_API_KEY`, `SAFETY24_API_KEY`, `DATA_GO_KR_API_KEY` | 해당 출처의 실시간 수집 안 됨 |
+| `secrets/firebase-admin.json` | 로그인·푸시 알림 안 됨 |
+| `secrets/gcp-voice.json` 또는 `GCP_VOICE_API_KEY` | 녹음 업로드 음성 기능만 503. 채팅과 실시간 음성은 동작 |
+
+`.env`와 `secrets/` 안의 파일은 절대 커밋하지 않습니다.
+
+### 앱 실행
 
 ```bash
-docker compose up -d --build     # 시작 (코드 의존성이 바뀌면 --build)
-docker compose logs -f api       # API 로그 보기
-docker compose down              # 중지 (DB 데이터는 유지)
-docker compose down -v           # 중지 + DB 데이터 삭제 (db/init SQL을 다시 실행하고 싶을 때)
-docker compose exec db psql -U guardian -d guardian   # DB 셸
-docker compose logs -f collector                      # 수집·위험 판정 로그 (10분마다)
-docker compose exec api python -m collector --once    # 수집 전체 1회 즉시 실행 (결과 표)
-docker compose run --rm loader                        # 정적 데이터(대피소·위험지역·행동요령·판단 기준) 다시 적재, 관측값은 유지
+cd app
+flutter run -d chrome                                  # 목업 데이터
+flutter run -d chrome --dart-define=APP_MODE=remote    # 로컬 서버에 연결
 ```
-- **AI 읽기 전용 계정 만들기 (2026-10-01 이전에 만든 DB 한 번만)**: `.env`에 `.env.example`의 `AI_DB_USER`·`AI_DB_PASSWORD` 두 줄을 넣고
-  `docker compose up -d db` → `docker compose exec db sh /docker-entrypoint-initdb.d/07_ai_readonly.sh`. 새로 만드는 DB는 자동.
-- **사용자 정보는 서버 프로필 하나 (2026-10-08)**: AI가 대화에서 들은 나이·보행·직업·집 등은 사용자 본인 로그인으로 서버 프로필
-  (`user_profiles`·`user_places`)에 바로 반영되고, 앱 프로필 화면도 같은 곳을 읽는다. 예전 AI 기억(`ai_memory` 스키마)은 쓰지 않는다
-  (데이터만 남김, `AI_MEM_DB_*` 계정도 그대로). 대화 기억(진행 중인 대화)은 AI 서버 메모리에만 있어 마지막 문답 후 1시간 또는 재시작 때 사라진다.
-- **음성(질문 녹음 → 답 음성) 켜기 (B5, Google Cloud)**: GCP 콘솔에서 Speech-to-Text API·Text-to-Speech API를 사용 설정하고,
-  서비스 계정을 만들어 키(JSON)를 `secrets/gcp-voice.json`으로 저장 → `docker compose up -d --force-recreate ai`.
-  키가 없으면 채팅은 그대로 되고 `/api/voice`·`/api/tts`만 503(앱은 "음성 기능을 지금 쓸 수 없습니다"). 키 파일은 커밋하지 않는다.
-  서비스 계정 키를 만들 수 없으면(조직 정책) API 키를 `.env`의 `GCP_VOICE_API_KEY`에 넣어도 된다.
-- **음성 대화 (2026-10-11)**: 앱의 마이크를 한 번 누르면 손대지 않고 묻고 듣는다. 방식은 둘이고 앱이 알아서 고른다 (`app/lib/services/realtime_voice.dart` `VoiceHub`).
-  - **실시간 음성 (웹, 먼저 시도)**: OpenAI Realtime(`OPENAI_REALTIME_MODEL`, 기본 `gpt-realtime-2`)이 듣고 말한다. **답 내용은 그대로 LangGraph**가 만든다 —
-    모델은 말을 들을 때마다 도구 `ask_guardian`만 부르고(세션 `tool_choice=required`), 앱이 `/api/chat` 답의 음성 문장을 "그대로 읽어라"로 돌려준다.
-    앱은 `POST /api/voice/session`으로 10분짜리 임시 키만 받아 OpenAI와 WebRTC로 직접 연결한다 (`ai/guardian_ai/realtime.py`, 진짜 키는 서버에만).
-    Google 키가 없어도 된다. Realtime 사용료는 `GET /api/ai/usage` 예상 비용에 잡히지 않는다 — OpenAI 대시보드에서 확인.
-  - **녹음 올리기 (휴대폰 앱·실시간이 안 될 때)**: 듣기 → 말이 끝나면(약 1.2초 조용) 자동 전송 `/api/voice`(Google 받아쓰기·음성 합성) → 답 음성 → 다시 듣기
-    (`voice_conversation.dart`, 말 끝 감지 `voice_service.dart` `SpeechEndDetector`). Google 키가 있어야 한다.
-  - 끝내기는 중지 버튼, "그만"·"대화 종료" 같은 말, 한동안 말 없음.
-- **`db/init`의 시드(02~)가 바뀌었으면** `docker compose run --rm loader` (DB 데이터 유지). **스키마(01)가 바뀌었으면** loader가 알려 주고 멈추므로 `docker compose down -v` 후 다시 `up`.
-- 서버 API 대부분은 아직 목업(응답 헤더 `X-Mock: true`)이다. 실데이터: `/api/health`, `/api/v1/risk*`, 지도 레이어 `stations`·`landslide_zones`·`risk_areas`·`shelters`·`medical`·`manholes`. 자세한 건 `server/README.md`.
-- `server/app/`·`server/collector/`·`server/risk/`(api), `ai/guardian_ai/`, `route/guardian_route/` 코드를 고치면 해당 서버가 자동으로 재시작된다 (재빌드 불필요).
-- 배포 시 Caddy가 `/api/chat`·`/api/voice`·`/api/tts`·`/api/ai`는 ai(8001)로, `/api/route`는 route(8002)로, 나머지 `/api`는 서버(8000)로, 그 외는 웹앱으로 넘긴다 (B10, `deploy/Caddyfile`). 아래 "배포 서버" 참고.
-- `graphhopper/config.yml`을 바꾸면 `rm -rf graphhopper/data/graph-cache` 후 `docker compose up -d --build graphhopper` (설정이 이미지에 들어가므로 재빌드, 그래프도 다시 만든다).
 
-## 환경 변수 규칙
+Android·iOS·Firebase 설정은 [`app/README.md`](app/README.md)를 보세요.
 
-- `.env`는 절대 커밋하지 않는다. `.env.example`은 항상 모든 키를 담는다.
-- 새 키를 추가하면 **같은 커밋에서** `.env.example`에도 추가한다 (값은 비우거나 로컬 기본값).
-- 이름은 대문자 스네이크 + 영역 접두사: `DB_`, `API_`, `GCP_`, `FIREBASE_`, `OPENAI_`, `ROUTE_`, `GRAPHHOPPER_`, `KMA_`, `POHANG_TWIN_`, `SAFETY24_`
-- 파일로 된 비밀은 `secrets/`에 두고 `.env`에는 경로만 쓴다.
-- 주석은 반드시 별도 줄에 쓴다. `KEY=  # 설명`처럼 값 뒤에 붙이면 docker가 주석까지 값으로 읽는다.
-- 실제 키 값은 팀 비공개 채널로만 공유한다. 저장소·이슈·PR·공개 채팅에 붙이지 않는다.
+## 저장소 구조
 
-## 서비스 추가 규칙
-
-- 새 서비스(loader)는 담당 작업에서 `docker-compose.yml`에 추가한다. collector(수집+위험 판정)는 추가됨.
-- 모든 서비스에 `restart: unless-stopped`와 `healthcheck`를 둔다.
-- 로컬에서만 필요한 설정(포트 노출, 코드 마운트)은 `docker-compose.override.yml`에 둔다.
-  서버에서는 `docker compose -f docker-compose.yml up -d`로 override 없이 실행한다.
-
-## 클라우드
-
-| 항목 | 값 |
+| 경로 | 내용 |
 | --- | --- |
-| GCP 프로젝트 | `guryong-guardian-0924` (리전 `asia-northeast3` 서울) |
-| Firebase | 같은 프로젝트, 익명 인증·FCM 활성화 |
-| 예산 알림 | 0원 기준 (크레딧 차감 후 실제 청구가 생기면 메일) |
+| `server/` | FastAPI 서버, 데이터 수집기, 위험 판정 엔진, OpenAPI 명세(`server/spec/openapi.yaml`) |
+| `ai/` | LangGraph agent, 채팅·음성 API |
+| `route/` | 경로 서버: 위험 지역 회피, 경사 규칙, 해상 경로, 방문 경로 |
+| `graphhopper/` | GraphHopper 이미지·설정, OSM 도로망·고도 스크립트 |
+| `app/` | Flutter 앱·웹 |
+| `db/init/` | 빈 DB에서 한 번 실행되는 스키마·기초 데이터 |
+| `deploy/` | Caddy 설정, 배포 스크립트 |
+| `docs/` | 시연 시나리오, 팀원용 안내 |
 
-- GCP 콘솔: https://console.cloud.google.com/home/dashboard?project=guryong-guardian-0924
-- Firebase 콘솔: https://console.firebase.google.com/project/guryong-guardian-0924/overview
+## 테스트
 
-## 배포 서버 (B10)
+```bash
+cd ai && .venv/bin/python -m pytest -q       # 오프라인. `-m live`는 실제 OpenAI 호출
+cd route && .venv/bin/python -m pytest -q    # 가짜 GraphHopper 사용
+cd app && flutter test
+```
 
-- 주소: **https://34-64-177-195.nip.io** — `/`는 웹앱, `/api/...`는 서버들. 상태: `curl https://34-64-177-195.nip.io/api/health`
-- VM: `guryongpo-safety-agent` (e2-medium, 서울 b), 고정 IP `34.64.177.195`(`guryongpo-ip`). 접속 `ssh jongyeonkim@34.64.177.195`
-- 서버 업데이트 (main에 올라간 코드 반영): VM에서 `cd ~/guryongpo-safety-agent && ./deploy/deploy.sh`
-  — DB 백업(`~/backups/`, 최근 10개) → `git pull` → loader(시드·스키마 추가분) → 재빌드 → 상태 확인
-- 웹앱 업데이트: 맥에서 `./deploy/push_web.sh` — 배포 주소로 Flutter 웹을 빌드해 VM에 올린다(재시작 불필요).
-  Firebase 웹 설정값은 `deploy/web-defines.json`(커밋 안 함, `{"FIREBASE_API_KEY": "...", "FIREBASE_APP_ID": "...", "FIREBASE_PROJECT_ID": "...", "FIREBASE_MESSAGING_SENDER_ID": "..."}`)
-- VM `.env`는 맥 `.env`와 다르다 (DB 비밀번호들·`DEPLOY_DOMAIN`·`COMPOSE_PROFILES=deploy`·`CORS_ORIGINS`). **맥 `.env`를 통째로 복사하지 말고** 바뀐 키만 넣는다
-- 밖에서 막힌 경로(404): `/api/ai/memory`, `/api/ai/usage`, `/api/v1/internal`. 8000–8002·DB 포트는 외부에 안 열림
+Python 서비스는 각자 가상환경을 씁니다: `uv venv .venv && uv pip install -p .venv -e ".[dev]"`
 
-김다인바보
+## 배포
+
+Google Cloud VM 한 대에서 Docker Compose로 돌립니다. Caddy가 HTTPS를 맡고 `/api/chat`·`/api/voice`·`/api/tts`·`/api/ai`는 AI 서버로,
+`/api/route`는 경로 서버로, 나머지 `/api`는 API 서버로, 그 외는 Flutter 웹으로 보냅니다.
+
+```bash
+docker compose -f docker-compose.yml up -d    # 서버 모드: 로컬 설정 없이, DB 포트 비공개
+./deploy/deploy.sh                            # VM에서: DB 백업 → pull → 기초 데이터 재적재 → 재빌드 → 상태 확인
+./deploy/push_web.sh                          # 개발 PC에서: Flutter 웹 빌드 후 업로드
+```
+
+## 팀
+
+팀 *구룡포는구룡* — 개발자 3명이 세 영역을 나눠 맡았습니다.
+
+| 영역 | 담당 |
+| --- | --- |
+| A | 서버·DB·데이터 수집·위험 판정 (`server/`, `db/`) |
+| B | AI·경로·인프라 (`ai/`, `route/`, `graphhopper/`, 배포) |
+| C | Flutter 앱·웹 (`app/`) |
+
+## 데이터 출처와 저작권
+
+- 도로망: © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, ODbL
+- 고도: SRTM 또는 국토지리정보원 수치표고모델
+- 재난·기상 데이터: 포항 디지털 트윈, 기상청, 재난안전24, 공공데이터포털, 생활안전지도
+- 글꼴: Pretendard, SIL Open Font License
+
+## 알림
+
+해커톤 출품작이며 공식 재난 경보 시스템이 아닙니다. 위급할 때는 당국의 안내를 따르고 119에 신고하세요.
