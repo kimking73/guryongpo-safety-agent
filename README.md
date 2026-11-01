@@ -2,6 +2,8 @@
 
 **English** · [한국어](README.ko.md)
 
+🏆 2026 POSTECH Digital Twin AI Agent Hackathon — 2st Place (26.10.13.)
+
 **A disaster-response service for Guryongpo, Pohang, South Korea** — one map dashboard for scattered disaster data, plus a personalized AI agent that warns early, explains what to do, and guides people along routes that avoid flooded and landslide-prone areas.
 
 Built by team *구룡포는구룡* for the 2026 Digital Twin Guryongpo AI Hackathon.
