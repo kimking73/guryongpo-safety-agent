@@ -212,6 +212,10 @@ docker compose -f docker-compose.yml up -d    # 서버 모드: 로컬 설정 없
 - 재난·기상 데이터: 포항 디지털 트윈, 기상청, 재난안전24, 공공데이터포털, 생활안전지도
 - 글꼴: Pretendard, SIL Open Font License
 
+## 라이선스
+
+코드는 [MIT License](LICENSE)로 공개합니다. 저장소에 함께 들어 있는 데이터와 글꼴은 각자의 라이선스를 따릅니다: OpenStreetMap 도로망은 ODbL, Pretendard 글꼴은 SIL OFL, 공공데이터는 각 기관의 이용 조건.
+
 ## 알림
 
 해커톤 출품작이며 공식 재난 경보 시스템이 아닙니다. 위급할 때는 당국의 안내를 따르고 119에 신고하세요.

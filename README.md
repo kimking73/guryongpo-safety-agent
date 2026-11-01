@@ -206,6 +206,10 @@ Team *구룡포는구룡* — three developers, one lane each.
 - Disaster and weather data: Pohang Digital Twin, Korea Meteorological Administration, 재난안전24, 공공데이터포털, 생활안전지도
 - Font: Pretendard, SIL Open Font License
 
+## License
+
+The code is released under the [MIT License](LICENSE). Bundled data and fonts keep their own licenses: the OpenStreetMap road network is ODbL, Pretendard is SIL OFL, and public data follows each provider's terms of use.
+
 ## Disclaimer
 
 This is a hackathon project. It is not an official warning system. In an emergency, follow the instructions of the authorities and call 119.
